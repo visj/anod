@@ -39,14 +39,13 @@ export interface SignalArray<T> extends Enumerable<T> {
 	removeAt(index: number): void;
 	removeRange(index: number, count: number): void;
 	shift(): void;
-	sort(compareFunction?: (firstEl: T, secondEl: T) => number): Enumerable<T>;
 	unshift(item: T): void;
 }
 
 export const enum Flag {
 	OnChange = 1,
 	OnUpdate = 2,
-	OnModified = 4,
+	OnModify = 4,
 }
 
 export function array<T>(val: T[]): SignalArray<T>;

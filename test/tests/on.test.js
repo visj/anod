@@ -76,7 +76,7 @@ module.exports = function (t) {
 		t.test('suppresses initial run when run with OnChange', t => {
 			root(() => {
 				let a = data(1);
-				let c = on(a, () => a() * 2, 0, Flag.OnChanges);
+				let c = on(a, () => a() * 2, 0, Flag.OnChange);
 				t.equal(c(), 0);
 				a(2);
 				t.equal(c(), 4);

@@ -220,7 +220,6 @@ function Signal(val) {
  */
 Signal.prototype.get = function () {
 	if (Listener !== null) {
-		this._flag |= Flag.Logging;
 		logRead(this, Listener);
 	}
 	return this._val;
@@ -264,7 +263,6 @@ function Value(val, eq) {
  */
 Value.prototype.get = function () {
 	if (Listener !== null) {
-		this._flag |= Flag.Logging;
 		logRead(this, Listener);
 	}
 	return this._val;
@@ -369,7 +367,6 @@ Computation.prototype.get = function () {
 				this.update();
 			}
 		}
-		this._flag |= Flag.Logging;
 		logRead(this, Listener);
 	}
 	return this._val;
@@ -468,7 +465,7 @@ Enumerable.prototype.includes = function (valueToFind) {
  * @param {number=} fromIndex 
  * @returns {function(): number}
  */
-Enumerable.prototype.indexOf = function(searchElement, fromIndex) {
+Enumerable.prototype.indexOf = function (searchElement, fromIndex) {
 
 }
 
@@ -567,7 +564,7 @@ function SignalArray(val) {
 	var self = this;
 	Signal.call(self, val);
 	/**
-	 * 
+	 * @public
 	 * @param {T=} next 
 	 * @returns {Array<T>}
 	 */
@@ -576,16 +573,83 @@ function SignalArray(val) {
 			return logWrite(self, next);
 		} else {
 			if (Listener !== null) {
-				self._flag |= Flag.Logging;
 				logRead(self, Listener);
 			}
 			return self._val;
 		}
 	}
+	/**
+	 * @package
+	 * @type {ChangeSet|Array<ChangeSet>}
+	 */
+	this._mut = null;
+	/**
+	 * @package
+	 * @type {ChangeSet|Array<ChangeSet>}
+	 */
+	this._pmut = null;
 }
 
 SignalArray.prototype = new Enumerable();
 SignalArray.constructor = SignalArray;
+
+SignalArray.prototype.update = function () {
+	if (this._flag & Flag.Single) {
+		this._flag &= ~Flag.Single;
+		applyMutation(this, this._pmut);
+	} else {
+		var muts = this._pmut;
+		for (var i = 0, len = muts.length; i < len; i++) {
+			applyMutation(this, muts[i]);
+		}
+	}
+	this._mut = this._pmut;
+	this._pmut = null;
+}
+
+/**
+ * @template T
+ * @param {SignalArray<T>} node 
+ * @param {ChangeSet<T>} changeset
+ */
+function applyMutation(node, changeset) {
+	var i, len;
+	var array = node._val;
+	switch (changeset.type) {
+		case Mutation.InsertAt:
+
+			break;
+		case Mutation.InsertRange:
+			break;
+		case Mutation.Pop:
+			array._val.length--;
+			break;
+		case Mutation.Push:
+			array[array.length] = changeset.value;
+			break;
+		case Mutation.RemoveAt:
+			len = array.length;
+			if (len > 0) {
+				for (i = changeset.index; i < len; i++) {
+					arr[i] = arr[i + 1]; 
+				}
+				array.length--;
+			}
+			break;
+		case Mutation.RemoveRange:
+			break;
+		case Mutation.Shift:
+			array.shift();
+			break;
+		case Mutation.Unshift:
+			len = array.length;
+			for (len = array.length; len !== 0; len--) {
+				array[len] = arr[len - 1];
+			}
+			arr[0] = changeset.value;
+			break;
+	}
+}
 
 /**
  * 
@@ -594,7 +658,7 @@ SignalArray.constructor = SignalArray;
  * @returns {void}
  */
 SignalArray.prototype.insertAt = function (index, item) {
-
+	logMutate(this, { type: Mutation.InsertAt, index: index, value: item });
 }
 
 /**
@@ -604,23 +668,23 @@ SignalArray.prototype.insertAt = function (index, item) {
  * @returns {void}
  */
 SignalArray.prototype.insertRange = function (index, items) {
-
+	logMutate(this, { type: Mutation.InsertRange, index: index, value: items });
 }
 
 /**
  * @returns {void}
  */
 SignalArray.prototype.pop = function () {
-
+	logMutate(this, { type: Mutation.Pop });
 }
 
 /**
  * 
- * @param {T} val 
+ * @param {T} item 
  * @returns {void}
  */
-SignalArray.prototype.push = function (val) {
-
+SignalArray.prototype.push = function (item) {
+	logMutate(this, { type: Mutation.Push, value: item });
 }
 
 /**
@@ -629,7 +693,7 @@ SignalArray.prototype.push = function (val) {
  * @returns {void}
  */
 SignalArray.prototype.removeAt = function (index) {
-
+	logMutate(this, { type: Mutation.RemoveAt, index: index });
 }
 
 /**
@@ -639,32 +703,23 @@ SignalArray.prototype.removeAt = function (index) {
  * @returns {void}
  */
 SignalArray.prototype.removeRange = function (index, count) {
-
+	logMutate(this, { type: Mutation.RemoveRange, index: index, count: count });
 }
 
 /**
  * @returns {void}
  */
 SignalArray.prototype.shift = function () {
-
+	logMutate(this, { type: Mutation.Shift });
 }
 
 /**
  * 
- * @param {function(T,T): number=} compareFunction
+ * @param {T} item
  * @returns {void}
  */
-SignalArray.prototype.sort = function (compareFunction) {
-
-}
-
-/**
- * 
- * @param {T} val
- * @returns {void}
- */
-SignalArray.prototype.unshift = function (val) {
-
+SignalArray.prototype.unshift = function (item) {
+	logMutate(this, { type: Mutation.Unshift, value: item });
 }
 
 /**
@@ -698,15 +753,15 @@ SignalEnumerable.constructor = SignalEnumerable;
 var Flag = {
 	OnChange: 1,
 	OnUpdate: 2,
-	OnModified: 4,
+	OnModify: 4,
 	Stale: 8,
 	Running: 16,
 	Pending: 32,
 	Disposed: 64,
 	Static: 128,
-	Tracking: 256,
-	Logging: 512,
-	Orphan: 1024,
+	Track: 256,
+	Orphan: 512,
+	Single: 1024,
 };
 
 /**
@@ -721,9 +776,17 @@ var Mutation = {
 	RemoveAt: 5,
 	RemoveRange: 6,
 	Shift: 7,
-	Sort: 8,
-	Unshift: 9,
+	Unshift: 8,
 };
+
+/**
+ * @template T
+ * @typedef ChangeSet
+ * @property {number} type
+ * @property {number=} index
+ * @property {number=} count
+ * @property {T|Array<T>=} value
+ */
 
 /**
  * @const
@@ -847,7 +910,7 @@ function makeComputationNode(node, fn, seed, flags) {
 		Root.updates.reset();
 		try {
 			Running = Root;
-			seed = flags & Flag.OnChanges ? seed : fn(seed);
+			seed = flags & Flag.OnChange ? seed : fn(seed);
 		} finally {
 			Owner = Listener = Running = null;
 		}
@@ -977,7 +1040,7 @@ function logWrite(node, val) {
 			Running.changes.add(node);
 		}
 	} else {
-		if (node._flag & Flag.Logging) {
+		if (node._node1 !== null || node._nodes !== null) {
 			node._pending = val;
 			Root.changes.add(node);
 			execute();
@@ -988,6 +1051,32 @@ function logWrite(node, val) {
 	return val;
 }
 
+/**
+ * @template T
+ * @param {SignalArray<T>} node 
+ * @param {ChangeSet<T>} changeset 
+ */
+function logMutate(node, changeset) {
+	if (Running !== null) {
+		if (node._pmut === null) {
+			node._pmut = [changeset];
+			Running.changes.add(node);
+		} else {
+			node._pmut.push(changeset);
+		}
+	} else {
+		if (node._node1 !== null || node._nodes !== null) {
+			node._pmut = [changeset];
+			Root.changes.add(node);
+			execute();
+		} else {
+			node._flag |= Flag.Single;
+			node._mut = changeset;
+			node.update();
+		}
+	}
+}
+
 
 /**
  * 
@@ -995,7 +1084,7 @@ function logWrite(node, val) {
  */
 function applyChanges(data) {
 	data.update();
-	if (data._flag & Flag.Logging) {
+	if (data._node1 !== null || data._nodes !== null) {
 		markProceduresForUpdate(data, Running.time);
 	}
 }
@@ -1087,7 +1176,7 @@ function markProcedureForUpdate(node, time) {
 	if (node._owned !== null) {
 		markProceduresForDisposal(node._owned, time);
 	}
-	if (node._flag & Flag.Logging) {
+	if (node._node1 !== null || node._nodes !== null) {
 		markProceduresForUpdate(node, time);
 	}
 }
@@ -1128,7 +1217,6 @@ function cleanup(node, final) {
 		}
 	}
 	if (final || (node._flag & Flag.Static) === 0) {
-		node._flag &= ~Flag.Logging;
 		if (node._source1 !== null) {
 			cleanupSource(node._source1, node._source1slot);
 		}
