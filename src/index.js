@@ -392,6 +392,7 @@ function Enumerable() { }
  */
 Enumerable.prototype.val;
 
+
 Enumerable.prototype.every = function () {
 
 }
@@ -476,10 +477,10 @@ function SignalArray(val) {
 			return logWrite(self, next);
 		} else {
 			if (Listener !== null) {
-				this._flag |= Flag.Logging;
-				logRead(this, Listener);
+				self._flag |= Flag.Logging;
+				logRead(self, Listener);
 			}
-			return this._val;
+			return self._val;
 		}
 	}
 }
@@ -1004,9 +1005,6 @@ function cleanupSource(source, slot) {
 				last._sourceslots[lastslot] = slot;
 			}
 		}
-	}
-	if (source._node1 === null && (source._nodes === null || source._nodes.length === 0)) {
-		source._flag &= ~Flag.Logging;
 	}
 }
 
