@@ -12,8 +12,8 @@ export interface Enumerable<T> {
 
 	every(callback: (currentValue: T, index?: Procedure<number>) => boolean): Procedure<boolean>;
 	filter(callback: (currentValue: T, index?: Procedure<number>) => boolean): Enumerable<T>;
-	find(calback: (element: T, index?: Procedure<number>) => boolean): Procedure<T|undefined>;
-	findIndex(callback: (element: T, index?: Procedure<number>) => boolean): Procedure<number|undefined>;
+	find(calback: (element: T, index?: Procedure<number>) => boolean): Procedure<T>;
+	findIndex(callback: (element: T, index?: Procedure<number>) => boolean): Procedure<number>;
 	forEach(callback: (currentValue: T, index?: Procedure<number>) => boolean): void;
 	includes(valueToFind: T): Procedure<boolean>;
 	indexOf(searchElement: T, fromIndex?: number): Procedure<number>;
@@ -21,8 +21,8 @@ export interface Enumerable<T> {
 	lastIndexOf(searchElement: T, fromIndex?: number): Procedure<number>;
 	map<U>(fn: (currentValue: T, index?: Procedure<number>) => U): Enumerable<U>;
 	orderBy(compareFunction?: (firstEl: T, secondEl: T) => number): Enumerable<T>;
-	reduce<U>(fn: (accumulator: U, currentValue: T, index?: Procedure<number>) => U, initialValue?: U): Procedure<U>;
-	reduceRight<U>(fn: (accumulator: U, currentValue: T, index?: Procedure<number>) => U, initialValue?: U): Procedure<U>;
+	reduce<U>(callback: (accumulator: U, currentValue: T, index?: Procedure<number>) => U, initialValue?: U): Procedure<U>;
+	reduceRight<U>(callback: (accumulator: U, currentValue: T, index?: Procedure<number>) => U, initialValue?: U): Procedure<U>;
 	reverse(): Enumerable<T>;
 	slice(start?: number, end?: number): Enumerable<T>;
 	some(callback: (element: T, index?: Procedure<number>) => boolean): Procedure<boolean>;
@@ -44,8 +44,9 @@ export interface SignalArray<T> extends Enumerable<T> {
 }
 
 export const enum Flag {
-	OnChanges = 1,
-	OnModified = 2,
+	OnChange = 1,
+	OnUpdate = 2,
+	OnModified = 4,
 }
 
 export function array<T>(val: T[]): SignalArray<T>;

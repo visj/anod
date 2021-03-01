@@ -1,4 +1,5 @@
 /**
+ * @public
  * @template T
  * @param {Array<T>} val
  * @returns {SignalArray<T>}
@@ -8,6 +9,7 @@ function array(val) {
 }
 
 /**
+ * @public
  * @template T
  * @param {T} val
  * @returns {function(T=): T}
@@ -24,6 +26,7 @@ function data(val) {
 }
 
 /**
+ * @public
  * @template T
  * @param {T} val
  * @param {function(T,T): boolean=} eq
@@ -42,6 +45,7 @@ function value(val, eq) {
 
 
 /**
+ * @public
  * @param {function(): void} f
  */
 function cleanup(f) {
@@ -55,6 +59,7 @@ function cleanup(f) {
 }
 
 /**
+ * @public
  * @template T
  * @param {function(): T} f
  * @returns {T}
@@ -77,6 +82,7 @@ function freeze(f) {
 }
 
 /**
+ * @public
  * @template T
  * @param {function(T): T} f
  * @param {T=} seed
@@ -88,6 +94,8 @@ function fn(f, seed, flags) {
 }
 
 /**
+ * @public
+ * @template T
  * @param {Array<function(): *>|function(): *} src
  * @param {function(T): T} f
  * @param {T=} seed
@@ -113,6 +121,7 @@ function on(src, f, seed, flags) {
 }
 
 /**
+ * @public
  * @template T
  * @param {function(): void} f
  * @returns {T}
@@ -147,6 +156,7 @@ function root(f) {
 }
 
 /**
+ * @public
  * @template T
  * @param {function(): T} node
  * @returns {T}
@@ -205,6 +215,7 @@ function Signal(val) {
 }
 
 /**
+ * @package
  * @returns {T}
  */
 Signal.prototype.get = function () {
@@ -216,6 +227,7 @@ Signal.prototype.get = function () {
 }
 
 /**
+ * @package
  * @param {T} val
  * @returns {T}
  */
@@ -223,6 +235,9 @@ Signal.prototype.set = function (val) {
 	return logWrite(this, val);
 }
 
+/**
+ * @package
+ */
 Signal.prototype.update = function () {
 	this._val = this._pending;
 	this._pending = NotPending;
@@ -392,68 +407,152 @@ function Enumerable() { }
  */
 Enumerable.prototype.val;
 
-
-Enumerable.prototype.every = function () {
-
-}
-
-Enumerable.prototype.filter = function () {
-
-}
-
-Enumerable.prototype.find = function () {
+/**
+ * 
+ * @param {function(T,function(number): void=): boolean} callback 
+ * @returns {function(): boolean}
+ */
+Enumerable.prototype.every = function (callback) {
 
 }
 
-Enumerable.prototype.findIndex = function () {
+/**
+ * 
+ * @param {function(T,function(number): void=): boolean} callback 
+ * @returns {Enumerable<T>}
+ */
+Enumerable.prototype.filter = function (callback) {
 
 }
 
-Enumerable.prototype.forEach = function () {
+/**
+ * 
+ * @param {function(T,function(number): void=): boolean} callback
+ * @returns {function(): T} 
+ */
+Enumerable.prototype.find = function (callback) {
 
 }
 
-Enumerable.prototype.includes = function () {
+/**
+ * 
+ * @param {function(T,function(number): void=): boolean} callback 
+ * @param {number=} index 
+ * @returns {function(): number}
+ */
+Enumerable.prototype.findIndex = function (callback, index) {
 
 }
 
-Enumerable.prototype.indexOf = function () {
+/**
+ * 
+ * @param {function(T,function(number): void=): void} callback 
+ * @returns {void}
+ */
+Enumerable.prototype.forEach = function (callback) {
 
 }
 
-Enumerable.prototype.join = function () {
+/**
+ * 
+ * @param {T} valueToFind 
+ * @returns {function(): boolean}
+ */
+Enumerable.prototype.includes = function (valueToFind) {
 
 }
 
-Enumerable.prototype.lastIndexOf = function () {
+/**
+ * 
+ * @param {T} searchElement 
+ * @param {number=} fromIndex 
+ * @returns {function(): number}
+ */
+Enumerable.prototype.indexOf = function(searchElement, fromIndex) {
 
 }
 
-Enumerable.prototype.map = function () {
+/**
+ * 
+ * @param {string=} separator 
+ * @returns {function(): string}
+ */
+Enumerable.prototype.join = function (separator) {
 
 }
 
-Enumerable.prototype.orderBy = function () {
+/**
+ * 
+ * @param {T} searchElement 
+ * @param {number=} fromIndex
+ * @returns {function(): number}
+ */
+Enumerable.prototype.lastIndexOf = function (searchElement, fromIndex) {
 
 }
 
-Enumerable.prototype.reduce = function () {
+
+/**
+ * @template U
+ * @param {function(T,function(number): void=): U} callback
+ * @returns {Enumerable<U>} 
+ */
+Enumerable.prototype.map = function (callback) {
 
 }
 
-Enumerable.prototype.reduceRight = function () {
+/**
+ * 
+ * @param {function(T,T): number} compareFunction
+ * @returns {Enumerable<T>}
+ */
+Enumerable.prototype.orderBy = function (compareFunction) {
 
 }
 
+/**
+ * @template U
+ * @param {function(U,T,function(number): void=): U} callback 
+ * @param {U=} initialValue
+ * @returns {function(): U} 
+ */
+Enumerable.prototype.reduce = function (callback, initialValue) {
+
+}
+
+/**
+ * @template U
+ * @param {function(U,T,function(number): void=): U} callback 
+ * @param {U=} initialValue
+ * @returns {function(): U} 
+ */
+Enumerable.prototype.reduceRight = function (callback, initialValue) {
+
+}
+
+/**
+ * @returns {Enumerable<T>}
+ */
 Enumerable.prototype.reverse = function () {
 
 }
 
-Enumerable.prototype.slice = function () {
+/**
+ * 
+ * @param {number=} start 
+ * @param {number} end
+ * @returns {Enumerable<T>}
+ */
+Enumerable.prototype.slice = function (start, end) {
 
 }
 
-Enumerable.prototype.some = function () {
+/**
+ * 
+ * @param {function(T,function(number): void=): boolean} callback
+ * @returns {function(): boolean} 
+ */
+Enumerable.prototype.some = function (callback) {
 
 }
 
@@ -488,38 +587,82 @@ function SignalArray(val) {
 SignalArray.prototype = new Enumerable();
 SignalArray.constructor = SignalArray;
 
+/**
+ * 
+ * @param {number} index 
+ * @param {T} item 
+ * @returns {void}
+ */
 SignalArray.prototype.insertAt = function (index, item) {
 
 }
 
+/**
+ * 
+ * @param {number} index 
+ * @param {Array<T>} items 
+ * @returns {void}
+ */
 SignalArray.prototype.insertRange = function (index, items) {
 
 }
 
+/**
+ * @returns {void}
+ */
 SignalArray.prototype.pop = function () {
 
 }
 
+/**
+ * 
+ * @param {T} val 
+ * @returns {void}
+ */
 SignalArray.prototype.push = function (val) {
 
 }
 
+/**
+ * 
+ * @param {number} index 
+ * @returns {void}
+ */
 SignalArray.prototype.removeAt = function (index) {
 
 }
 
+/**
+ * 
+ * @param {number} index 
+ * @param {number} count 
+ * @returns {void}
+ */
 SignalArray.prototype.removeRange = function (index, count) {
 
 }
 
+/**
+ * @returns {void}
+ */
 SignalArray.prototype.shift = function () {
 
 }
 
+/**
+ * 
+ * @param {function(T,T): number=} compareFunction
+ * @returns {void}
+ */
 SignalArray.prototype.sort = function (compareFunction) {
 
 }
 
+/**
+ * 
+ * @param {T} val
+ * @returns {void}
+ */
 SignalArray.prototype.unshift = function (val) {
 
 }
@@ -553,16 +696,33 @@ SignalEnumerable.constructor = SignalEnumerable;
  * @enum {number}
  */
 var Flag = {
-	OnChanges: 1,
-	OnModified: 2,
-	Stale: 4,
-	Running: 8,
-	Pending: 16,
-	Disposed: 32,
-	Static: 64,
-	Tracking: 128,
-	Logging: 256,
-	Orphan: 512,
+	OnChange: 1,
+	OnUpdate: 2,
+	OnModified: 4,
+	Stale: 8,
+	Running: 16,
+	Pending: 32,
+	Disposed: 64,
+	Static: 128,
+	Tracking: 256,
+	Logging: 512,
+	Orphan: 1024,
+};
+
+/**
+ * @const
+ * @enum {number}
+ */
+var Mutation = {
+	InsertAt: 1,
+	InsertRange: 2,
+	Pop: 3,
+	Push: 4,
+	RemoveAt: 5,
+	RemoveRange: 6,
+	Shift: 7,
+	Sort: 8,
+	Unshift: 9,
 };
 
 /**

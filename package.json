@@ -1,17 +1,17 @@
 {
-  "name": "krets",
+  "name": "anod",
   "version": "0.1.0",
   "description": "",
-  "main": "dist/krets.cjs",
-  "module": "dist/krets.mjs",
+  "main": "dist/anod.cjs",
+  "module": "dist/anod.mjs",
   "types": "lib.d.ts",
   "scripts": {
     "test": "node test"
   },
   "files": [
 		"lib.d.ts",
-		"dist/krets.cjs",
-		"dist/krets.mjs"
+		"dist/anod.cjs",
+		"dist/anod.mjs"
 	],
   "keywords": [],
   "author": "Vilhelm Sjölund",
@@ -21,10 +21,10 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/visj/krets.git"
+    "url": "git+https://github.com/visj/anod.git"
   },
   "bugs": {
-    "url": "https://github.com/visj/krets/issues"
+    "url": "https://github.com/visj/anod/issues"
   },
-  "homepage": "https://github.com/visj/krets#readme"
+  "homepage": "https://github.com/visj/anod#readme"
 }

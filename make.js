@@ -14,5 +14,5 @@ const file = fs.readFileSync(path.join(src, 'index.js')).toString();
 const cjs = file;
 const mjs = file.replace('module.exports =', 'export');
 
-fs.writeFileSync(path.join(dist, 'krets.cjs'), cjs);
-fs.writeFileSync(path.join(dist, 'krets.mjs'), mjs);
+fs.writeFileSync(path.join(dist, 'anod.cjs'), cjs);
+fs.writeFileSync(path.join(dist, 'anod.mjs'), mjs);
