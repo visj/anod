@@ -1,0 +1,30 @@
+{
+  "name": "krets",
+  "version": "0.1.0",
+  "description": "",
+  "main": "dist/krets.cjs",
+  "module": "dist/krets.mjs",
+  "types": "lib.d.ts",
+  "scripts": {
+    "test": "node test"
+  },
+  "files": [
+		"lib.d.ts",
+		"dist/krets.cjs",
+		"dist/krets.mjs"
+	],
+  "keywords": [],
+  "author": "Vilhelm Sjölund",
+  "license": "MIT",
+  "dependencies": {
+    "boer": "^0.1.6"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/visj/krets.git"
+  },
+  "bugs": {
+    "url": "https://github.com/visj/krets/issues"
+  },
+  "homepage": "https://github.com/visj/krets#readme"
+}
