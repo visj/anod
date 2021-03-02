@@ -108,7 +108,7 @@ function on(src, f, seed, flags) {
 	try {
 		Listener = node;
 		if (src instanceof Array) {
-			for (var i = 0, len = src.length; i < len; i++) {
+			for (var i = 0, ln = src.length; i < ln; i++) {
 				src[i]();
 			}
 		} else {
@@ -186,7 +186,7 @@ function Signal(val) {
 	 * @package
 	 * @type {T|Object}
 	 */
-	this._pending = NotPending;
+	this._pval = NotPending;
 	/**
 	 * @package
 	 * @type {number}
@@ -238,8 +238,8 @@ Signal.prototype.set = function (val) {
  * @package
  */
 Signal.prototype.update = function () {
-	this._val = this._pending;
-	this._pending = NotPending;
+	this._val = this._pval;
+	this._pval = NotPending;
 }
 
 /**
@@ -278,8 +278,8 @@ Value.prototype.set = function (val) {
 }
 
 Value.prototype.update = function () {
-	this._val = this._pending;
-	this._pending = NotPending;
+	this._val = this._pval;
+	this._pval = NotPending;
 }
 
 /**
@@ -297,6 +297,10 @@ function Computation() {
 	 * @type {T}
 	 */
 	this._val = null;
+	/**
+	 * @type {number}
+	 */
+	this._flag = 0;
 	/**
 	 * @package
 	 * @type {Computation}
@@ -318,6 +322,10 @@ function Computation() {
 	 */
 	this._nodeslots = null;
 	/**
+	 * @type {number}
+	 */
+	this._age = -1;
+	/**
 	 * @package
 	 * @type {Data}
 	 */
@@ -337,14 +345,6 @@ function Computation() {
 	 * @type {Array<number>}
 	 */
 	this._sourceslots = null;
-	/**
-	 * @type {number}
-	 */
-	this._age = -1;
-	/**
-	 * @type {number}
-	 */
-	this._flag = 0;
 	/**
 	 * @type {Array<Computation}
 	 */
@@ -375,7 +375,7 @@ Computation.prototype.get = function () {
 Computation.prototype.update = function () {
 	var owner = Owner;
 	var listener = Listener;
-	cleanup(this, false);
+	cleanupNode(this, false);
 	Owner = Listener = this;
 	this._flag &= ~Flag.Stale;
 	this._flag |= Flag.Running;
@@ -389,7 +389,7 @@ Computation.prototype.dispose = function () {
 	this.fn = null;
 	this._node1 = null;
 	this._nodes = null;
-	cleanup(this, true);
+	cleanupNode(this, true);
 }
 
 /**
@@ -400,63 +400,115 @@ Computation.prototype.dispose = function () {
 function Enumerable() { }
 
 /**
- * @type {function(T=): T}
+ * @type {function(Array<T>=): Array<T>}
  */
 Enumerable.prototype.val;
 
 /**
  * 
- * @param {function(T,function(number): void=): boolean} callback 
+ * @param {function(T,number=): boolean} callback 
  * @returns {function(): boolean}
  */
 Enumerable.prototype.every = function (callback) {
-
+	var self = this;
+	var pure = callback.length === 1;
+	return fn(function (seed) {
+		var i, ln;
+		var items = self.val();
+		for (i = 0, ln = items.length; i < ln; i++) {
+			if (!callback(items[i], i)) {
+				return false;
+			}
+		}
+		return true;
+	});
 }
 
 /**
  * 
- * @param {function(T,function(number): void=): boolean} callback 
+ * @param {function(T,number=): boolean} callback 
  * @returns {Enumerable<T>}
  */
 Enumerable.prototype.filter = function (callback) {
-
+	return makeEnumerableNode(new SignalEnumerable(), this, filter, { callback: callback });
 }
 
 /**
  * 
- * @param {function(T,function(number): void=): boolean} callback
+ * @param {function(T,number=): boolean} callback
  * @returns {function(): T} 
  */
 Enumerable.prototype.find = function (callback) {
-
+	var index;
+	var self = this;
+	var pure = callback.length === 1;
+	return fn(function (seed) {
+		var i, len, item;
+		var items = self.val();
+		for (i = 0, ln = items.length; i < ln; i++) {
+			item = items[i];
+			if (callback(item, i)) {
+				return item;
+			}
+		}
+		return void 0;
+	});
 }
+
 
 /**
  * 
- * @param {function(T,function(number): void=): boolean} callback 
+ * @param {function(T,number=): boolean} callback 
  * @param {number=} index 
  * @returns {function(): number}
  */
 Enumerable.prototype.findIndex = function (callback, index) {
-
+	var index;
+	var self = this;
+	var pure = callback.length === 1;
+	return fn(function (seed) {
+		var i, len, item;
+		var items = self.val();
+		for (i = 0, ln = items.length; i < ln; i++) {
+			item = items[i];
+			if (callback(item, i)) {
+				return i;
+			}
+		}
+		return -1;
+	});
 }
 
 /**
  * 
- * @param {function(T,function(number): void=): void} callback 
+ * @param {function(T,number=): void} callback 
  * @returns {void}
  */
 Enumerable.prototype.forEach = function (callback) {
-
+	makeEnumerableNode(new SignalEnumerable(), this, forEach, { callback: callback });
 }
 
 /**
  * 
  * @param {T} valueToFind 
+ * @param {number=} fromIndex
  * @returns {function(): boolean}
  */
-Enumerable.prototype.includes = function (valueToFind) {
-
+Enumerable.prototype.includes = function (valueToFind, fromIndex) {
+	var index;
+	var self = this;
+	var pure = callback.length === 1;
+	return fn(function (seed) {
+		var i, len, item;
+		var items = self.val();
+		for (i = fromIndex === void 0 ? 0 : fromIndex, ln = items.length; i < ln; i++) {
+			item = items[i];
+			if (valueToFind === items[i]) {
+				return true;
+			}
+		}
+		return false;
+	});
 }
 
 /**
@@ -466,7 +518,20 @@ Enumerable.prototype.includes = function (valueToFind) {
  * @returns {function(): number}
  */
 Enumerable.prototype.indexOf = function (searchElement, fromIndex) {
-
+	var index;
+	var self = this;
+	var pure = callback.length === 1;
+	return fn(function (seed) {
+		var i, len, item;
+		var items = self.val();
+		for (i = fromIndex === void 0 ? 0 : fromIndex, ln = items.length; i < ln; i++) {
+			item = items[i];
+			if (searchElement === items[i]) {
+				return i;
+			}
+		}
+		return -1;
+	});
 }
 
 /**
@@ -475,7 +540,8 @@ Enumerable.prototype.indexOf = function (searchElement, fromIndex) {
  * @returns {function(): string}
  */
 Enumerable.prototype.join = function (separator) {
-
+	var self = this;
+	return on(self.val, function () { return self.val().join(separator); });
 }
 
 /**
@@ -485,72 +551,129 @@ Enumerable.prototype.join = function (separator) {
  * @returns {function(): number}
  */
 Enumerable.prototype.lastIndexOf = function (searchElement, fromIndex) {
-
+	var index;
+	var self = this;
+	var pure = callback.length === 1;
+	return fn(function (seed) {
+		var i, item;
+		var items = self.val();
+		for (i = fromIndex === void 0 ? items.length - 1 : fromIndex; i >= 0; i--) {
+			item = items[i];
+			if (searchElement === items[i]) {
+				return i;
+			}
+		}
+		return -1;
+	});
 }
 
 
 /**
  * @template U
- * @param {function(T,function(number): void=): U} callback
+ * @param {function(T,number=): U} callback
  * @returns {Enumerable<U>} 
  */
 Enumerable.prototype.map = function (callback) {
-
-}
-
-/**
- * 
- * @param {function(T,T): number} compareFunction
- * @returns {Enumerable<T>}
- */
-Enumerable.prototype.orderBy = function (compareFunction) {
-
+	return makeEnumerableNode(new SignalEnumerable(), this, map, { callback: callback, items: [], nodes: [] });
 }
 
 /**
  * @template U
- * @param {function(U,T,function(number): void=): U} callback 
+ * @param {function(U,T,number=): U} callback 
  * @param {U=} initialValue
  * @returns {function(): U} 
  */
 Enumerable.prototype.reduce = function (callback, initialValue) {
-
+	var self = this;
+	var pure = callback.length === 1;
+	var skip = arguments.length === 1;
+	return fn(function (seed) {
+		var i, ln;
+		var items = self.val();
+		if (skip) {
+			i = 1;
+			initialValue = items[0];
+		} else {
+			i = 0;
+		}
+		for (ln = items.length; i < ln; i++) {
+			initialValue = callback(initialValue, items[i], i);
+		}
+		return initialValue;
+	});
 }
 
 /**
  * @template U
- * @param {function(U,T,function(number): void=): U} callback 
+ * @param {function(U,T,number=): U} callback 
  * @param {U=} initialValue
  * @returns {function(): U} 
  */
 Enumerable.prototype.reduceRight = function (callback, initialValue) {
-
+	var self = this;
+	var pure = callback.length === 1;
+	var skip = arguments.length === 1;
+	return fn(function (seed) {
+		var i;
+		var items = self.val();
+		if (skip) {
+			i = items.length - 2;
+			initialValue = items[items.length - 1];
+		} else {
+			i = items.length - 1;
+		}
+		for (; i >= 0; i--) {
+			initialValue = callback(initialValue, items[i], i);
+		}
+		return initialValue;
+	});
 }
 
 /**
  * @returns {Enumerable<T>}
  */
 Enumerable.prototype.reverse = function () {
-
+	return makeEnumerableNode(new SignalEnumerable(), this, reverse, {});
 }
 
 /**
  * 
  * @param {number=} start 
- * @param {number} end
+ * @param {number=} end
  * @returns {Enumerable<T>}
  */
 Enumerable.prototype.slice = function (start, end) {
+	return makeEnumerableNode(new SignalEnumerable(), this, slice, { start: start, end: end });
 
 }
 
 /**
  * 
- * @param {function(T,function(number): void=): boolean} callback
+ * @param {function(T,number=): boolean} callback
  * @returns {function(): boolean} 
  */
 Enumerable.prototype.some = function (callback) {
+	var self = this;
+	var pure = callback.length === 1;
+	return fn(function (seed) {
+		var i, ln;
+		var items = self.val();
+		for (i = 0, ln = items.length; i < ln; i++) {
+			if (callback(items[i], i)) {
+				return true;
+			}
+		}
+		return false;
+	});
+}
 
+/**
+ * 
+ * @param {function(T,T): number=} compareFunction
+ * @returns {Enumerable<T>}
+ */
+Enumerable.prototype.sort = function (compareFunction) {
+	return makeEnumerableNode(new SignalEnumerable(), this, sort, { compareFunction: compareFunction });
 }
 
 /**
@@ -570,14 +693,22 @@ function SignalArray(val) {
 	 */
 	this.val = function (next) {
 		if (arguments.length > 0) {
-			return logWrite(self, next);
+			if (Running === null) {
+				self._mut = self._pmut = null;
+			}
+			logWrite(self, next);
 		} else {
 			if (Listener !== null) {
 				logRead(self, Listener);
 			}
-			return self._val;
 		}
+		return self._val;
 	}
+	/**
+	 * @package
+	 * @type {number}
+	 */
+	this._age = -1;
 	/**
 	 * @package
 	 * @type {ChangeSet|Array<ChangeSet>}
@@ -593,61 +724,27 @@ function SignalArray(val) {
 SignalArray.prototype = new Enumerable();
 SignalArray.constructor = SignalArray;
 
+/**
+ * @package
+ * @returns {void}
+ */
 SignalArray.prototype.update = function () {
-	if (this._flag & Flag.Single) {
-		this._flag &= ~Flag.Single;
+	if (this._pval !== NotPending) {
+		this._val = this._pval;
+		this._pval = NotPending;
+		this._mut = this._pmut = null;
+	} else if (this._flag & Flag.SingleSet) {
 		applyMutation(this, this._pmut);
 	} else {
-		var muts = this._pmut;
-		for (var i = 0, len = muts.length; i < len; i++) {
-			applyMutation(this, muts[i]);
+		for (var i = 0, ln = this._pmut.length; i < ln; i++) {
+			applyMutation(this, this._pmut[i]);
 		}
+		this._mut = this._pmut;
+		this._pmut = null;
+		this._age = Running.time;
 	}
-	this._mut = this._pmut;
-	this._pmut = null;
-}
-
-/**
- * @template T
- * @param {SignalArray<T>} node 
- * @param {ChangeSet<T>} changeset
- */
-function applyMutation(node, changeset) {
-	var i, len;
-	var array = node._val;
-	switch (changeset.type) {
-		case Mutation.InsertAt:
-
-			break;
-		case Mutation.InsertRange:
-			break;
-		case Mutation.Pop:
-			array._val.length--;
-			break;
-		case Mutation.Push:
-			array[array.length] = changeset.value;
-			break;
-		case Mutation.RemoveAt:
-			len = array.length;
-			if (len > 0) {
-				for (i = changeset.index; i < len; i++) {
-					arr[i] = arr[i + 1]; 
-				}
-				array.length--;
-			}
-			break;
-		case Mutation.RemoveRange:
-			break;
-		case Mutation.Shift:
-			array.shift();
-			break;
-		case Mutation.Unshift:
-			len = array.length;
-			for (len = array.length; len !== 0; len--) {
-				array[len] = arr[len - 1];
-			}
-			arr[0] = changeset.value;
-			break;
+	if (this._node1 !== null || this._nodes !== null) {
+		markProceduresForUpdate(this, Running.time);
 	}
 }
 
@@ -735,12 +832,66 @@ function SignalEnumerable() {
 	 * @returns {T}
 	 */
 	this.val = function () {
+		if (Listener !== null) {
+			if (self._age === Root.time) {
+				if (self._flag & Flag.Running) {
+					throw new Error('Circular dependency');
+				} else if (self._flag & Flag.Stale) {
+					self.update();
+				}
+			}
+			logRead(self, Listener);
+		}
 		return self._val;
 	}
+	/**
+	 * @package
+	 * @type {ChangeSet|Array<ChangeSet>}
+	 */
+	this._mut = null;
+	/**
+	 * @package
+	 * @type {ChangeSet|Array<ChangeSet>}
+	 */
+	this._pmut = null;
+	/**
+	 * @package
+	 * @type {SignalEnumerable}
+	 */
+	this._source = null;
+	/**
+	 * @package
+	 * @type {Object}
+	 */
+	this._params = null;
 }
 
 SignalEnumerable.prototype = new Enumerable();
 SignalEnumerable.constructor = SignalEnumerable;
+
+/**
+ * @package
+ * @returns {void}
+ */
+SignalEnumerable.prototype.update = function () {
+	var owner = Owner;
+	var listener = Listener;
+	cleanupNode(this, false);
+	Owner = Listener = this;
+	this._flag &= ~Flag.Stale;
+	this._flag |= Flag.Running;
+	this._val = this._fn(this._source, this._params, this._val);
+	this._flag &= ~Flag.Running;
+	Owner = owner;
+	Listener = listener;
+}
+
+SignalEnumerable.prototype.dispose = function () {
+	this._fn = null;
+	this._node1 = null;
+	this._nodes = null;
+	cleanupNode(this, true);
+}
 
 /*
  * Internal implementation
@@ -761,7 +912,7 @@ var Flag = {
 	Static: 128,
 	Track: 256,
 	Orphan: 512,
-	Single: 1024,
+	SingleSet: 1024,
 };
 
 /**
@@ -828,7 +979,7 @@ function Queue() {
 	/**
 	 * @type {number}
 	 */
-	this.len = 0;
+	this.ln = 0;
 	/**
 	 * @const
 	 * @type {Array<T>} 
@@ -837,20 +988,20 @@ function Queue() {
 }
 
 Queue.prototype.reset = function () {
-	this.len = 0;
+	this.ln = 0;
 }
 
 Queue.prototype.add = function (item) {
-	this.items[this.len++] = item;
+	this.items[this.ln++] = item;
 }
 
 Queue.prototype.run = function (fn) {
 	var items = this.items;
-	for (var i = 0; i < this.len; i++) {
+	for (var i = 0, ln = this.ln; i < ln; i++) {
 		fn(items[i]);
 		items[i] = null;
 	}
-	this.len = 0;
+	this.ln = 0;
 }
 
 /**
@@ -921,7 +1072,7 @@ function makeComputationNode(node, fn, seed, flags) {
 	Listener = listener;
 	var recycled = recycleOrClaimNode(node, fn, seed, flags);
 	if (toplevel) {
-		if (Root.changes.len > 0 || Root.updates.len > 0) {
+		if (Root.changes.ln > 0 || Root.updates.ln > 0) {
 			try {
 				run(Root);
 			} finally {
@@ -939,6 +1090,56 @@ function makeComputationNode(node, fn, seed, flags) {
 }
 
 /**
+ * @template T, U
+ * @param {SignalEnumerable<T>} node
+ * @param {SignalEnumerable} source
+ * @param {function(SignalEnumerable<T>, SignalEnumerable, Object): U} fn 
+ * @param {Object} params
+ * @returns {SignalEnumerable<U>}
+ */
+function makeEnumerableNode(node, source, fn, params) {
+	var owner = Owner;
+	var listener = Listener;
+	var toplevel = Running === null;
+	Owner = Listener = node;
+	if (toplevel) {
+		Root.changes.reset();
+		Root.updates.reset();
+		try {
+			Running = Root;
+			node._val = fn(source, params, []);
+		} finally {
+			Owner = Listener = Running = null;
+		}
+	} else {
+		node._val = fn(source, params, []);
+	}
+	Owner = owner;
+	Listener = listener;
+	node._fn = fn;
+	node._age = Root.time;
+	node._source = source;
+	node._params = params;
+	if (owner !== null) {
+		if (owner._owned === null) {
+			owner._owned = [node];
+		} else {
+			owner._owned.push(node);
+		}
+	}
+	if (toplevel) {
+		if (Root.changes.ln > 0 || Root.updates.ln > 0) {
+			try {
+				run(Root);
+			} finally {
+				Running = null;
+			}
+		}
+	}
+	return node;
+}
+
+/**
  * @template T
  * @param {Computation<T>} node 
  * @param {function(T): T} fn 
@@ -947,7 +1148,7 @@ function makeComputationNode(node, fn, seed, flags) {
  * @returns {boolean}
  */
 function recycleOrClaimNode(node, fn, val, flags) {
-	var i, len;
+	var i, ln;
 	var owner = flags & Flag.Orphan || Owner === null || Owner === Unowned ? null : Owner;
 	var recycle = node._source1 === null && (node._owned === null && node._cleanups === null || owner !== null);
 	if (recycle) {
@@ -957,7 +1158,7 @@ function recycleOrClaimNode(node, fn, val, flags) {
 				if (owner._owned === null) {
 					owner._owned = node._owned;
 				} else {
-					for (i = 0, len = node._owned.length; i < len; i++) {
+					for (i = 0, ln = node._owned.length; i < ln; i++) {
 						owner._owned.push(node._owned[i]);
 					}
 				}
@@ -967,7 +1168,7 @@ function recycleOrClaimNode(node, fn, val, flags) {
 				if (owner._cleanups === null) {
 					owner._cleanups = node._cleanups;
 				} else {
-					for (i = 0, len = node._cleanups.length; i < len; i++) {
+					for (i = 0, ln = node._cleanups.length; i < ln; i++) {
 						owner._cleanups.push(node._cleanups[i]);
 					}
 				}
@@ -1031,17 +1232,17 @@ function logRead(from, to) {
  */
 function logWrite(node, val) {
 	if (Running !== null) {
-		if (node._pending !== NotPending) {
-			if (val !== node._pending) {
+		if (node._pval !== NotPending) {
+			if (val !== node._pval) {
 				throw new Error('Conflicting changes');
 			}
 		} else {
-			node._pending = val;
+			node._pval = val;
 			Running.changes.add(node);
 		}
 	} else {
 		if (node._node1 !== null || node._nodes !== null) {
-			node._pending = val;
+			node._pval = val;
 			Root.changes.add(node);
 			execute();
 		} else {
@@ -1058,6 +1259,7 @@ function logWrite(node, val) {
  */
 function logMutate(node, changeset) {
 	if (Running !== null) {
+		node._flag &= ~Flag.SingleSet;
 		if (node._pmut === null) {
 			node._pmut = [changeset];
 			Running.changes.add(node);
@@ -1070,7 +1272,7 @@ function logMutate(node, changeset) {
 			Root.changes.add(node);
 			execute();
 		} else {
-			node._flag |= Flag.Single;
+			node._flag |= Flag.SingleSet;
 			node._mut = changeset;
 			node.update();
 		}
@@ -1138,7 +1340,7 @@ function run(clock) {
 		if (i++ > 1e5) {
 			throw new Error('Runaway clock detected');
 		}
-	} while (clock.changes.len !== 0 || clock.updates.len !== 0 || clock.disposes.len !== 0);
+	} while (clock.changes.ln !== 0 || clock.updates.ln !== 0 || clock.disposes.ln !== 0);
 	Running = running;
 }
 
@@ -1155,7 +1357,7 @@ function markProceduresForUpdate(data, time) {
 		}
 	}
 	if (nodes !== null) {
-		for (var i = 0, len = nodes.length; i < len; i++) {
+		for (var i = 0, ln = nodes.length; i < ln; i++) {
 			node = nodes[i];
 			if (node._age < time) {
 				markProcedureForUpdate(node, time);
@@ -1174,7 +1376,7 @@ function markProcedureForUpdate(node, time) {
 	node._flag |= Flag.Stale;
 	Running.updates.add(node);
 	if (node._owned !== null) {
-		markProceduresForDisposal(node._owned, time);
+		markProceduresForDispose(node._owned, time);
 	}
 	if (node._node1 !== null || node._nodes !== null) {
 		markProceduresForUpdate(node, time);
@@ -1185,14 +1387,14 @@ function markProcedureForUpdate(node, time) {
  * @param {Array<Computation>} nodes
  * @param {number} time
  */
-function markProceduresForDisposal(nodes, time) {
+function markProceduresForDispose(nodes, time) {
 	var node;
-	for (var i = 0; i < nodes.length; i++) {
+	for (var i = 0, ln = nodes.length; i < ln; i++) {
 		node = nodes[i];
 		node._age = time;
 		node._flag = Flag.Disposed;
 		if (node._owned !== null) {
-			markProceduresForDisposal(node._owned, time);
+			markProceduresForDispose(node._owned, time);
 		}
 	}
 }
@@ -1202,17 +1404,17 @@ function markProceduresForDisposal(nodes, time) {
  * @param {Computation} node 
  * @param {boolean} final 
  */
-function cleanup(node, final) {
-	var i, len;
+function cleanupNode(node, final) {
+	var i, ln;
+	var owned = node._owned;
 	var cleanups = node._cleanups;
 	if (cleanups !== null) {
-		for (i = 0, len = cleanups.length; i < len; i++) {
+		for (i = 0, ln = cleanups.length; i < ln; i++) {
 			cleanups[i](final);
 		}
 	}
-	var owned = node._owned;
 	if (owned !== null) {
-		for (i = 0, len = owned.length; i < len; i++) {
+		for (i = 0, ln = owned.length; i < ln; i++) {
 			owned[i].dispose();
 		}
 	}
@@ -1223,7 +1425,7 @@ function cleanup(node, final) {
 		var sources = node._sources;
 		var sourceslots = node._sourceslots;
 		if (sources !== null) {
-			for (i = 0, len = sources.length; i < len; i++) {
+			for (i = 0, ln = sources.length; i < ln; i++) {
 				cleanupSource(sources.pop(), sourceslots.pop());
 			}
 		}
@@ -1254,6 +1456,236 @@ function cleanupSource(source, slot) {
 			}
 		}
 	}
+}
+
+/**
+ * @template T
+ * @param {function(): T} f
+ * @returns {Computation<T>} 
+ */
+function persist(f) {
+	var node = getCandidateNode();
+	var owner = Owner;
+	var listener = Listener;
+	Owner = node;
+	Listener = null;
+	try {
+		node._val = f();
+	} finally {
+		Owner = owner;
+		Listener = listener;
+	}
+	return node;
+}
+
+/**
+ * @template T
+ * @param {SignalArray<T>} node 
+ * @param {ChangeSet<T>} changeset
+ */
+function applyMutation(node, changeset) {
+	var i, ln;
+	var array = node._val;
+	switch (changeset.type) {
+		case Mutation.InsertAt:
+			array.splice(changeset.index, 0, changeset.value);
+			break;
+		case Mutation.InsertRange:
+			changeset.value.unshift(0);
+			changeset.value.unshift(changeset.index);
+			Array.prototype.splice.apply(array, changeset.value);
+			break;
+		case Mutation.Pop:
+			array.length--;
+			break;
+		case Mutation.Push:
+			array[array.length] = changeset.value;
+			break;
+		case Mutation.RemoveAt:
+			ln = array.length;
+			if (ln > 0) {
+				for (i = changeset.index; i < ln; i++) {
+					array[i] = array[i + 1];
+				}
+				array.length--;
+			}
+			break;
+		case Mutation.RemoveRange:
+			array.splice(changeset.index, changeset.count);
+			break;
+		case Mutation.Shift:
+			array.shift();
+			break;
+		case Mutation.Unshift:
+			array.unshift(changeset.value);
+			break;
+	}
+}
+
+/**
+ * @template T
+ * @param {SignalEnumerable<T>} source
+ * @param {Object} params
+ * @param {function(T,number=): boolean} params.callback 
+ * @param {Array<T>} seed
+ */
+function filter(source, params, seed) {
+	var items = source.val();
+	var newItems = [];
+	for (var i = 0, ln = items.length; i < ln; i++) {
+		var item = items[i];
+		if (params.callback(item, i)) {
+			newItems.push(item);
+		}
+	}
+	return newItems;
+}
+
+
+/**
+ * @template T
+ * @param {SignalEnumerable<T>} source 
+ * @param {Object} params
+ * @param {function(T,number=): void} params.callback
+ * @param {Array<T>} seed
+ * @returns {void}
+ */
+function forEach(source, params, seed) {
+	var items = source.val();
+	for (var i = 0, ln = items.length; i < ln; i++) {
+		params.callback(items[i], i);
+	}
+}
+
+/**
+ * @template T,U
+ * @param {SignalEnumerable<T>} source 
+ * @param {Object} params
+ * @param {function(T,number=): U} params.callback
+ * @param {Array<U>} params.items
+ * @param {Array<Computation>} params.nodes
+ * @param {Array<U>} seed
+ * @returns {Array<U>}
+ */
+function map(source, params, seed) {
+	var i, j, ln, node;
+	var items = source.val();
+	var nodes = params.nodes;
+	var callback = params.callback;
+	var mapper = function () {
+		return callback(items[j], j);
+	}
+	if (items.length === 0) {
+		if (nodes.length !== 0) {
+			for (i = 0, ln = nodes.length; i < ln; i++) {
+				nodes[i].dispose();
+			}
+			diposers.length = 0;
+		}
+	} else if (seed.length === 0) {
+		for (j = 0, ln = items.length; j < ln; j++) {
+			node = persist(mapper);
+			nodes[j] = node;
+			seed[j] = node._val;
+		}
+	} else {
+		if (nodes.length !== 0) {
+			for (i = 0, ln = nodes.length; i < ln; i++) {
+				nodes[i].dispose();
+			}
+			nodes.length = 0;
+		}
+		for (j = 0, ln = items.length; j < ln; j++) {
+			node = persist(mapper);
+			nodes[j] = node;
+			seed[j] = node._val;
+		}
+	}
+	return seed;
+}
+
+/**
+ * @template T
+ * @param {SignalEnumerable<T>} source 
+ * @param {Object} params 
+ * @param {Array<T>} seed
+ * @returns {Array<T>} 
+ */
+function reverse(source, params, seed) {
+	var items = source.val();
+	var newItems = [];
+	for (var i = items.length - 1, j = 0; i >= 0; i--, j++) {
+		newItems[j] = items[i];
+	}
+	return newItems;
+}
+
+/**
+ * @template T
+ * @param {SignalEnumerable<T>} source 
+ * @param {Object} params 
+ * @param {number=} params.start
+ * @param {number=} params.end
+ * @param {Array<T>} seed
+ * @returns {Array<T>} 
+ */
+function slice(source, params, seed) {
+	var start, end;
+	var items = source.val();
+	var newItems = [];
+	if (params.start !== void 0) {
+		if (params.start < 0) {
+			if (-1 * params.start < items.length) {
+				start = items.length + params.start;
+			} else {
+				start = 0;
+			}
+		} else {
+			if (params.start < items.length) {
+				start = params.start;
+			} else {
+				start = 0;
+			}
+		}
+	} else {
+		start = 0;
+	}
+	if (params.end !== void 0) {
+		if (params.end < 0) {
+			if (-1 * params.end < items.length && items.length + params.end > start) {
+				end = items.length + params.end;
+			} else {
+				end = items.length - 1;
+			}
+		} else {
+			if (params.end > start && params.end < items.length) {
+				end = params.end;
+			} else {
+				end = items.length - 1;
+			}
+		}
+	} else {
+		end = items.length - 1;
+	}
+	for (var j = 0; start < end; j++, start++) {
+		newItems[j] = items[start];
+	}
+	return newItems;
+}
+
+/**
+ * @template T
+ * @param {SignalEnumerable<T>} source 
+ * @param {Object} params 
+ * @param {function(T,T): number=} params.compareFunction
+ * @param {Array<T>} seed
+ * @returns {Array<T>} 
+ */
+function sort(source, params, seed) {
+	var items = source.val();
+	var newItems = items.slice();
+	newItems.sort(params.compareFunction);
+	return newItems;
 }
 
 module.exports = {
