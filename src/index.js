@@ -2,10 +2,10 @@
  * @public
  * @template T
  * @param {Array<T>} val
- * @returns {SignalArray<T>}
+ * @returns {DataArray<T>}
  */
 function array(val) {
-	return new SignalArray(val);
+	return new DataArray(val);
 }
 
 /**
@@ -15,7 +15,7 @@ function array(val) {
  * @returns {function(T=): T}
  */
 function data(val) {
-	var node = new Signal(val);
+	var node = new Data(val);
 	/**
 	 * @param {T=} next
 	 * @returns {T}
@@ -172,11 +172,36 @@ function sample(node) {
 }
 
 /**
+ * @abstract
  * @template T
  * @constructor
+ */
+function Signal() { }
+
+Signal.prototype._flag;
+
+Signal.prototype._val;
+
+Signal.prototype._node1;
+
+Signal.prototype._slot1;
+
+Signal.prototype._nodes;
+
+Signal.prototype._slots;
+
+/**
+ * @template T
+ * @constructor
+ * @extends {Signal<T>}
  * @param {T} val
  */
-function Signal(val) {
+function Data(val) {
+	/**
+	 * @package
+	 * @type {number}
+	 */
+	this._flag = 0;
 	/**
 	 * @package
 	 * @type {T}
@@ -187,11 +212,6 @@ function Signal(val) {
 	 * @type {T|Object}
 	 */
 	this._pval = NotPending;
-	/**
-	 * @package
-	 * @type {number}
-	 */
-	this._flag = 0;
 	/**
 	 * @package
 	 * @type {Computation}
@@ -211,14 +231,14 @@ function Signal(val) {
 	 * @package 
 	 * @type {Array<number>}
 	 */
-	this._nodeslots = null;
+	this._slots = null;
 }
 
 /**
  * @package
  * @returns {T}
  */
-Signal.prototype.get = function () {
+Data.prototype.get = function () {
 	if (Listener !== null) {
 		logRead(this, Listener);
 	}
@@ -230,14 +250,14 @@ Signal.prototype.get = function () {
  * @param {T} val
  * @returns {T}
  */
-Signal.prototype.set = function (val) {
+Data.prototype.set = function (val) {
 	return logWrite(this, val);
 }
 
 /**
  * @package
  */
-Signal.prototype.update = function () {
+Data.prototype.update = function () {
 	this._val = this._pval;
 	this._pval = NotPending;
 }
@@ -250,7 +270,7 @@ Signal.prototype.update = function () {
  * @param {function(T,T): boolean)=} eq
  */
 function Value(val, eq) {
-	Signal.call(this, val);
+	Data.call(this, val);
 	/**
 	 * @const
 	 * @type {function(T,T): boolean}
@@ -285,22 +305,18 @@ Value.prototype.update = function () {
 /**
  * @template T
  * @constructor
+ * @extends {Signal<T>}
  */
 function Computation() {
 	/**
-	 * @package
-	 * @type {null|function(T): T}
+	 * @type {number}
 	 */
-	this._fn = null;
+	this._flag = 0;
 	/**
 	 * @package
 	 * @type {T}
 	 */
 	this._val = null;
-	/**
-	 * @type {number}
-	 */
-	this._flag = 0;
 	/**
 	 * @package
 	 * @type {Computation}
@@ -320,7 +336,12 @@ function Computation() {
 	 * @package
 	 * @type {Array<Computation>}
 	 */
-	this._nodeslots = null;
+	this._slots = null;
+	/**
+	 * @package
+	 * @type {null|function(T): T}
+	 */
+	this._fn = null;
 	/**
 	 * @type {number}
 	 */
@@ -683,9 +704,9 @@ Enumerable.prototype.sort = function (compareFunction) {
  * @extends {Enumerable<T>}
  * @param {Array<T>} val
  */
-function SignalArray(val) {
+function DataArray(val) {
 	var self = this;
-	Signal.call(self, val);
+	Data.call(self, val);
 	/**
 	 * @public
 	 * @param {T=} next 
@@ -721,19 +742,19 @@ function SignalArray(val) {
 	this._pmut = null;
 }
 
-SignalArray.prototype = new Enumerable();
-SignalArray.constructor = SignalArray;
+DataArray.prototype = new Enumerable();
+DataArray.constructor = DataArray;
 
 /**
  * @package
  * @returns {void}
  */
-SignalArray.prototype.update = function () {
+DataArray.prototype.update = function () {
 	if (this._pval !== NotPending) {
 		this._val = this._pval;
 		this._pval = NotPending;
 		this._mut = this._pmut = null;
-	} else if (this._flag & Flag.SingleSet) {
+	} else if (this._flag & Flag.Single) {
 		applyMutation(this, this._pmut);
 	} else {
 		for (var i = 0, ln = this._pmut.length; i < ln; i++) {
@@ -754,7 +775,7 @@ SignalArray.prototype.update = function () {
  * @param {T} item 
  * @returns {void}
  */
-SignalArray.prototype.insertAt = function (index, item) {
+DataArray.prototype.insertAt = function (index, item) {
 	logMutate(this, { type: Mutation.InsertAt, index: index, value: item });
 }
 
@@ -764,14 +785,14 @@ SignalArray.prototype.insertAt = function (index, item) {
  * @param {Array<T>} items 
  * @returns {void}
  */
-SignalArray.prototype.insertRange = function (index, items) {
+DataArray.prototype.insertRange = function (index, items) {
 	logMutate(this, { type: Mutation.InsertRange, index: index, value: items });
 }
 
 /**
  * @returns {void}
  */
-SignalArray.prototype.pop = function () {
+DataArray.prototype.pop = function () {
 	logMutate(this, { type: Mutation.Pop });
 }
 
@@ -780,7 +801,7 @@ SignalArray.prototype.pop = function () {
  * @param {T} item 
  * @returns {void}
  */
-SignalArray.prototype.push = function (item) {
+DataArray.prototype.push = function (item) {
 	logMutate(this, { type: Mutation.Push, value: item });
 }
 
@@ -789,7 +810,7 @@ SignalArray.prototype.push = function (item) {
  * @param {number} index 
  * @returns {void}
  */
-SignalArray.prototype.removeAt = function (index) {
+DataArray.prototype.removeAt = function (index) {
 	logMutate(this, { type: Mutation.RemoveAt, index: index });
 }
 
@@ -799,14 +820,14 @@ SignalArray.prototype.removeAt = function (index) {
  * @param {number} count 
  * @returns {void}
  */
-SignalArray.prototype.removeRange = function (index, count) {
+DataArray.prototype.removeRange = function (index, count) {
 	logMutate(this, { type: Mutation.RemoveRange, index: index, count: count });
 }
 
 /**
  * @returns {void}
  */
-SignalArray.prototype.shift = function () {
+DataArray.prototype.shift = function () {
 	logMutate(this, { type: Mutation.Shift });
 }
 
@@ -815,7 +836,7 @@ SignalArray.prototype.shift = function () {
  * @param {T} item
  * @returns {void}
  */
-SignalArray.prototype.unshift = function (item) {
+DataArray.prototype.unshift = function (item) {
 	logMutate(this, { type: Mutation.Unshift, value: item });
 }
 
@@ -912,7 +933,7 @@ var Flag = {
 	Static: 128,
 	Track: 256,
 	Orphan: 512,
-	SingleSet: 1024,
+	Single: 1024,
 };
 
 /**
@@ -1205,12 +1226,12 @@ function logRead(from, to) {
 		fromslot = -1;
 	} else if (from._nodes === null) {
 		from._nodes = [to];
-		from._nodeslots = [toslot];
+		from._slots = [toslot];
 		fromslot = 0;
 	} else {
 		fromslot = from._nodes.length;
 		from._nodes.push(to);
-		from._nodeslots.push(toslot);
+		from._slots.push(toslot);
 	}
 	if (to._source1 === null) {
 		to._source1 = from;
@@ -1254,12 +1275,12 @@ function logWrite(node, val) {
 
 /**
  * @template T
- * @param {SignalArray<T>} node 
+ * @param {DataArray<T>} node 
  * @param {ChangeSet<T>} changeset 
  */
 function logMutate(node, changeset) {
 	if (Running !== null) {
-		node._flag &= ~Flag.SingleSet;
+		node._flag &= ~Flag.Single;
 		if (node._pmut === null) {
 			node._pmut = [changeset];
 			Running.changes.add(node);
@@ -1272,7 +1293,7 @@ function logMutate(node, changeset) {
 			Root.changes.add(node);
 			execute();
 		} else {
-			node._flag |= Flag.SingleSet;
+			node._flag |= Flag.Single;
 			node._mut = changeset;
 			node.update();
 		}
@@ -1443,7 +1464,7 @@ function cleanupSource(source, slot) {
 		source._node1 = null;
 	} else {
 		var nodes = source._nodes;
-		var nodeslots = source._nodeslots;
+		var nodeslots = source._slots;
 		last = nodes.pop();
 		lastslot = nodeslots.pop();
 		if (slot !== nodes.length) {
@@ -1480,7 +1501,7 @@ function persist(f) {
 
 /**
  * @template T
- * @param {SignalArray<T>} node 
+ * @param {DataArray<T>} node 
  * @param {ChangeSet<T>} changeset
  */
 function applyMutation(node, changeset) {
@@ -1693,10 +1714,18 @@ module.exports = {
 	data: data,
 	value: value,
 	Flag: Flag,
+	/* @strip */
+	Mutation: Mutation,
+	/* @strip */
 	cleanup: cleanup,
 	freeze: freeze,
 	fn: fn,
 	on: on,
 	root: root,
 	sample: sample,
+	Signal: Data,
+	Value: Value,
+	DataArray: DataArray,
+	Computation: Computation,
+	Enumerable: Enumerable,
 };
