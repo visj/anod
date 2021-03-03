@@ -10,44 +10,45 @@ if (!fs.existsSync(dist)) {
 const src = path.join(__dirname, 'src');
 const file = path.join(src, 'index.js');
 
-let srcFile = fs.readFileSync(file).toString().split('/* @strip */').filter((_,i) => i % 2 === 0).join('');
+let srcFile = fs.readFileSync(file).toString().split('/* @strip */').filter((_, i) => i % 2 === 0).join('');
 
 const anod = require(file);
 const Flag = anod.Flag;
 
 for (const key in Flag) {
 	const val = Flag[key];
-	srcFile = srcFile.replace(new RegExp('Flag.' + key, 'g'), function() {
+	srcFile = srcFile.replace(new RegExp('Flag.' + key, 'g'), function () {
 		return val;
 	});
 }
 const Mutation = anod.Mutation;
 for (const key in Mutation) {
 	const val = Mutation[key];
-	srcFile = srcFile.replace(new RegExp('Mutation.' + key, 'g'), function() {
+	srcFile = srcFile.replace(new RegExp('Mutation.' + key, 'g'), function () {
 		return val;
 	});
 }
 
 const ExportRegexp = /module\.exports\s+=\s+{\s+([\w\:\s\,]+)\s+\}\;/g;
 
-const js = '(function(exports) {\n\t' + srcFile.replace(ExportRegexp, function() {
-	return arguments[1]
-		.split(',')
-		.filter(part => part !== '')
-		.map(part => {
-			const name = part.split(':')[0].trim();
-			return 'exports.' + name + ' = ' + name + ';';
-		}).join('\n')
+const js = '(function(exports) {\n\t' + srcFile.replace(ExportRegexp, function () {
+	return 'exports.anod = {};\n' +
+		arguments[1]
+			.split(',')
+			.filter(part => part !== '')
+			.map(part => {
+				const name = part.split(':')[0].trim();
+				return 'exports.anod.' + name + ' = ' + name + ';';
+			}).join('\n')
 }).split('\n').join('\n\t') + '\n})(window);'
 const cjs = srcFile;
-const mjs = srcFile.replace(ExportRegexp, function() {
+const mjs = srcFile.replace(ExportRegexp, function () {
 	return (
-		'export {\n' + 
+		'export {\n' +
 		(arguments[1]
-				.split(',')
-				.filter(part => part !== '')
-				.map(part => '  ' + part.split(':')[0].trim() + ',').join('\n')) + 
+			.split(',')
+			.filter(part => part !== '')
+			.map(part => '  ' + part.split(':')[0].trim() + ',').join('\n')) +
 		'\n}'
 	);
 });

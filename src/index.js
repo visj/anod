@@ -30,7 +30,7 @@ function data(val) {
  * @template T
  * @param {T} val
  * @param {function(T,T): boolean=} eq
- * @returns {Signal<T>}
+ * @returns {SignalProto<T>}
  */
 function value(val, eq) {
 	var node = new Value(val, eq);
@@ -172,28 +172,57 @@ function sample(node) {
 }
 
 /**
+ * @template T
+ * @typedef {function(): T} Procedure
+ */
+
+/**
+ * @template T
+ * @typedef {function(T=): T} Signal
+ */
+
+/**
  * @abstract
  * @template T
  * @constructor
  */
-function Signal() { }
-
-Signal.prototype._flag;
-
-Signal.prototype._val;
-
-Signal.prototype._node1;
-
-Signal.prototype._slot1;
-
-Signal.prototype._nodes;
-
-Signal.prototype._slots;
+function SignalProto() {
+	/**
+	 * @package
+	 * @type {number}
+	 */
+	this._flag;
+	/**
+	 * @package
+	 * @type {T}
+	 */
+	this._val;
+	/**
+	 * @package
+	 * @type {Computation}
+	 */
+	this._node1;
+	/**
+	 * @package
+	 * @type {number}
+	 */
+	this._slot1;
+	/**
+	 * @package
+	 * @type {Array<Computation>}
+	 */
+	this._nodes;
+	/**
+	 * @package
+	 * @type {Array<number>}
+	 */
+	this._slots;
+}
 
 /**
  * @template T
  * @constructor
- * @extends {Signal<T>}
+ * @extends {SignalProto<T>}
  * @param {T} val
  */
 function Data(val) {
@@ -207,11 +236,6 @@ function Data(val) {
 	 * @type {T}
 	 */
 	this._val = val;
-	/**
-	 * @package
-	 * @type {T|Object}
-	 */
-	this._pval = NotPending;
 	/**
 	 * @package
 	 * @type {Computation}
@@ -232,6 +256,11 @@ function Data(val) {
 	 * @type {Array<number>}
 	 */
 	this._slots = null;
+	/**
+	 * @package
+	 * @type {T|Object}
+	 */
+	this._pval = NotPending;
 }
 
 /**
@@ -265,7 +294,7 @@ Data.prototype.update = function () {
 /**
  * @template T
  * @constructor
- * @extends {Signal<T>}
+ * @extends {SignalProto<T>}
  * @param {T} val
  * @param {function(T,T): boolean)=} eq
  */
@@ -273,6 +302,7 @@ function Value(val, eq) {
 	Data.call(this, val);
 	/**
 	 * @const
+	 * @package
 	 * @type {function(T,T): boolean}
 	 */
 	this._eq = eq;
@@ -305,7 +335,7 @@ Value.prototype.update = function () {
 /**
  * @template T
  * @constructor
- * @extends {Signal<T>}
+ * @extends {SignalProto<T>}
  */
 function Computation() {
 	/**
@@ -418,13 +448,14 @@ Computation.prototype.dispose = function () {
  * @template T
  * @constructor
  */
-function Enumerable() { }
-
-/**
- * @type {function(Array<T>=): Array<T>}
- */
-Enumerable.prototype.val;
-
+function Enumerable() {
+	/**
+	 * @const
+	 * @public
+	 * @type {function(Array<T>=): Array<T>}
+	 */
+	this.val;
+}
 /**
  * 
  * @param {function(T,number=): boolean} callback 
@@ -935,7 +966,7 @@ var Flag = {
 	Orphan: 512,
 	Single: 1024,
 };
-
+/* @strip */
 /**
  * @const
  * @enum {number}
@@ -950,7 +981,7 @@ var Mutation = {
 	Shift: 7,
 	Unshift: 8,
 };
-
+/* @strip */
 /**
  * @template T
  * @typedef ChangeSet
@@ -1247,7 +1278,7 @@ function logRead(from, to) {
 
 /**
  * @template T
- * @param {Signal<T>} node
+ * @param {SignalProto<T>} node
  * @param {T} val
  * @returns {T}
  */

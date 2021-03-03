@@ -71,65 +71,65 @@ export interface ChangeSet<T> {
 	readonly value: T | T[];
 }
 
-export interface SignalPrototype<T> {
+export interface SignalProto<T> {
 	readonly _flag: number;
 	readonly _val: T;
-	readonly _node1: ComputationPrototype<unknown>;
+	readonly _node1: ComputationProto<unknown>;
 	readonly _slot1: number;
-	readonly _nodes: ComputationPrototype<unknown>[];
+	readonly _nodes: ComputationProto<unknown>[];
 	readonly _slots: number[];
 }
 
-export interface ComputationPrototype<T> extends SignalPrototype<T> {
+export interface ComputationProto<T> extends SignalProto<T> {
 	readonly _fn: (seed: T) => T;
 	readonly _age: number;
-	readonly _source1: SignalPrototype<unknown>;
+	readonly _source1: SignalProto<unknown>;
 	readonly _source1slot: number;
-	readonly _sources: SignalPrototype<unknown>[];
+	readonly _sources: SignalProto<unknown>[];
 	readonly _sourceslots: number[];
 }
 
 export interface ComputationConstructor {
-	new<T>(): ComputationPrototype<T>;
-	readonly prototype: ComputationPrototype<unknown>;
+	new<T>(): ComputationProto<T>;
+	readonly prototype: ComputationProto<unknown>;
 }
 
-export interface DataPrototype<T> extends SignalPrototype<T> {
+export interface DataProto<T> extends SignalProto<T> {
 	readonly _pval: Object | T;
 
 }
 
 export interface DataConstructor {
-	new<T>(): DataPrototype<T>;
-	readonly prototype: DataPrototype<unknown>;
+	new<T>(): DataProto<T>;
+	readonly prototype: DataProto<unknown>;
 }
 
-export interface ValuePrototype<T> extends DataPrototype<T> {
+export interface ValueProto<T> extends DataProto<T> {
 	readonly _eq?: (a: T, b: T) => boolean;
 }
 
 export interface ValueConstructor {
-	new<T>(): ValuePrototype<T>;
-	readonly prototype: ValuePrototype<unknown>;
+	new<T>(): ValueProto<T>;
+	readonly prototype: ValueProto<unknown>;
 }
 
-export interface EnumerablePrototype<T> extends Enumerable<T> {
+export interface EnumerableProto<T> extends Enumerable<T> {
 	
 }
 
 export interface EnumerableConstructor {
-	readonly prototype: EnumerablePrototype<unknown>;
+	readonly prototype: EnumerableProto<unknown>;
 }
 
-export interface DataArrayPrototype<T> extends SignalArray<T> {
+export interface DataArrayProto<T> extends SignalArray<T> {
 	readonly _age: number;
 	readonly _mut: ChangeSet<T> | ChangeSet<T>[];
 	readonly _pmut: ChangeSet<T> | ChangeSet<T>[];
 }
 
 export interface DataArrayConstructor {
-	new<T>(): DataArrayPrototype<T>;
-	readonly prototype: DataArrayPrototype<unknown>;
+	new<T>(): DataArrayProto<T>;
+	readonly prototype: DataArrayProto<unknown>;
 }
 
 export const Computation: ComputationConstructor;
