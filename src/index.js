@@ -90,7 +90,7 @@ function freeze(f) {
  * @returns {function(): T}
  */
 function fn(f, seed, flags) {
-	return makeComputationNode(getCandidateNode(), f, seed, 0 | flags);
+	return makeComputationNode(getCandidateNode(), f, seed, Flag.Dynamic | flags);
 }
 
 /**
@@ -899,11 +899,11 @@ SignalEnumerable.prototype.dispose = function () {
 var Flag = {
 	OnChange: 1,
 	OnUpdate: 2,
-	OnModify: 4,
-	Stale: 8,
-	Running: 16,
-	Pending: 32,
-	Disposed: 64,
+	Stale: 4,
+	Running: 8,
+	Pending: 16,
+	Disposed: 32,
+	Dynamic: 64,
 	Static: 128,
 	Track: 256,
 	Orphan: 512,
@@ -1054,7 +1054,7 @@ function makeComputationNode(node, fn, seed, flags) {
 	var listener = Listener;
 	var toplevel = Running === null;
 	Owner = node;
-	Listener = flags & Flag.Static ? null : node;
+	Listener = (flags & (Flag.Dynamic | Flag.Static)) === Flag.Static ? null : node;
 	if (toplevel) {
 		Root.changes.reset();
 		Root.updates.reset();
