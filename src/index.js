@@ -387,7 +387,8 @@ Computation.prototype.update = function () {
 	var owner = Owner;
 	var listener = Listener;
 	cleanupNode(this, false);
-	Owner = Listener = this;
+	Owner = this;
+	Listener = this._flag & Flag.Static ? null : this;
 	this._flag &= ~Flag.Stale;
 	this._flag |= Flag.Running;
 	this._val = this._fn(this._val);
