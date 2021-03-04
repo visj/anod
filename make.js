@@ -31,14 +31,14 @@ for (const key in Mutation) {
 
 const ExportRegexp = /module\.exports\s+=\s+{\s+([\w\:\s\,]+)\s+\}\;/g;
 
-const js = '(function(exports) {\n\t' + srcFile.replace(ExportRegexp, function () {
-	return 'exports.anod = {};\n' +
+const js = '(function(w) {\n\t' + srcFile.replace(ExportRegexp, function () {
+	return 'w.anod = {};\n' +
 		arguments[1]
 			.split(',')
 			.filter(part => part !== '')
 			.map(part => {
 				const name = part.split(':')[0].trim();
-				return 'exports.anod.' + name + ' = ' + name + ';';
+				return 'w.anod.' + name + ' = ' + name + ';';
 			}).join('\n')
 }).split('\n').join('\n\t') + '\n})(window);'
 const cjs = srcFile;

@@ -908,6 +908,10 @@ var Flag = {
 	Track: 256,
 	Orphan: 512,
 	Single: 1024,
+	Data: 2048,
+	Value: 4096,
+	DataArray: 8192,
+	Enumerable: 16384,
 };
 /* @strip */
 /**

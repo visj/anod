@@ -6,11 +6,11 @@ export interface Signal<T> extends Procedure<T>{
 	(next: T): T;
 }
 
-export interface Enumerable<T> {
+export interface SignalEnumerable<T> {
 	val(): T[];
 
 	every(callback: (currentValue: T, index?: number) => boolean): Procedure<boolean>;
-	filter(callback: (currentValue: T, index?: number) => boolean): Enumerable<T>;
+	filter(callback: (currentValue: T, index?: number) => boolean): SignalEnumerable<T>;
 	find(calback: (element: T, index?: number) => boolean): Procedure<T>;
 	findIndex(callback: (element: T, index?: number) => boolean): Procedure<number>;
 	forEach(callback: (currentValue: T, index?: number) => boolean): void;
@@ -18,16 +18,16 @@ export interface Enumerable<T> {
 	indexOf(searchElement: T, fromIndex?: number): Procedure<number>;
 	join(separator?: string): Procedure<string>;
 	lastIndexOf(searchElement: T, fromIndex?: number): Procedure<number>;
-	map<U>(fn: (currentValue: T, index?: number) => U): Enumerable<U>;
+	map<U>(fn: (currentValue: T, index?: number) => U): SignalEnumerable<U>;
 	reduce<U>(callback: (accumulator: U, currentValue: T, index?: number) => U, initialValue?: U): Procedure<U>;
 	reduceRight<U>(callback: (accumulator: U, currentValue: T, index?: number) => U, initialValue?: U): Procedure<U>;
-	reverse(): Enumerable<T>;
-	slice(start?: number, end?: number): Enumerable<T>;
+	reverse(): SignalEnumerable<T>;
+	slice(start?: number, end?: number): SignalEnumerable<T>;
 	some(callback: (element: T, index?: number) => boolean): Procedure<boolean>;
-	sort(compareFunction?: (firstEl: T, secondEl: T) => number): Enumerable<T>;
+	sort(compareFunction?: (firstEl: T, secondEl: T) => number): SignalEnumerable<T>;
 }
 
-export interface SignalArray<T> extends Enumerable<T> {
+export interface SignalArray<T> extends SignalEnumerable<T> {
 	val(): T[];
 	val(next: T[]): T[];
 
@@ -114,6 +114,8 @@ export interface ValueConstructor {
 	new<T>(): Value<T>;
 	readonly prototype: Value<unknown>;
 }
+
+export interface Enumerable<T> extends Computation<T>, SignalEnumerable<T> { }
 
 export interface EnumerableConstructor {
 	readonly prototype: Enumerable<unknown>;
