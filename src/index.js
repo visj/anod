@@ -30,7 +30,7 @@ function data(val) {
  * @template T
  * @param {T} val
  * @param {function(T,T): boolean=} eq
- * @returns {SignalProto<T>}
+ * @returns {function(T=): T}
  */
 function value(val, eq) {
 	var node = new Value(val, eq);
@@ -182,47 +182,8 @@ function sample(node) {
  */
 
 /**
- * @abstract
  * @template T
  * @constructor
- */
-function SignalProto() {
-	/**
-	 * @package
-	 * @type {number}
-	 */
-	this._flag;
-	/**
-	 * @package
-	 * @type {T}
-	 */
-	this._val;
-	/**
-	 * @package
-	 * @type {Computation}
-	 */
-	this._node1;
-	/**
-	 * @package
-	 * @type {number}
-	 */
-	this._slot1;
-	/**
-	 * @package
-	 * @type {Array<Computation>}
-	 */
-	this._nodes;
-	/**
-	 * @package
-	 * @type {Array<number>}
-	 */
-	this._slots;
-}
-
-/**
- * @template T
- * @constructor
- * @extends {SignalProto<T>}
  * @param {T} val
  */
 function Data(val) {
@@ -294,7 +255,7 @@ Data.prototype.update = function () {
 /**
  * @template T
  * @constructor
- * @extends {SignalProto<T>}
+ * @extends {Data<T>}
  * @param {T} val
  * @param {function(T,T): boolean)=} eq
  */
@@ -335,7 +296,6 @@ Value.prototype.update = function () {
 /**
  * @template T
  * @constructor
- * @extends {SignalProto<T>}
  */
 function Computation() {
 	/**
@@ -463,8 +423,7 @@ function Enumerable() {
  */
 Enumerable.prototype.every = function (callback) {
 	var self = this;
-	var pure = callback.length === 1;
-	return fn(function (seed) {
+	return on(self.val, function () {
 		var i, ln;
 		var items = self.val();
 		for (i = 0, ln = items.length; i < ln; i++) {
@@ -491,11 +450,9 @@ Enumerable.prototype.filter = function (callback) {
  * @returns {function(): T} 
  */
 Enumerable.prototype.find = function (callback) {
-	var index;
 	var self = this;
-	var pure = callback.length === 1;
-	return fn(function (seed) {
-		var i, len, item;
+	return on(self.val, function () {
+		var i, ln, item;
 		var items = self.val();
 		for (i = 0, ln = items.length; i < ln; i++) {
 			item = items[i];
@@ -515,11 +472,9 @@ Enumerable.prototype.find = function (callback) {
  * @returns {function(): number}
  */
 Enumerable.prototype.findIndex = function (callback, index) {
-	var index;
 	var self = this;
-	var pure = callback.length === 1;
-	return fn(function (seed) {
-		var i, len, item;
+	return on(self.val, function () {
+		var i, ln, item;
 		var items = self.val();
 		for (i = 0, ln = items.length; i < ln; i++) {
 			item = items[i];
@@ -547,11 +502,9 @@ Enumerable.prototype.forEach = function (callback) {
  * @returns {function(): boolean}
  */
 Enumerable.prototype.includes = function (valueToFind, fromIndex) {
-	var index;
 	var self = this;
-	var pure = callback.length === 1;
-	return fn(function (seed) {
-		var i, len, item;
+	return on(self.val, function () {
+		var i, ln, item;
 		var items = self.val();
 		for (i = fromIndex === void 0 ? 0 : fromIndex, ln = items.length; i < ln; i++) {
 			item = items[i];
@@ -570,11 +523,9 @@ Enumerable.prototype.includes = function (valueToFind, fromIndex) {
  * @returns {function(): number}
  */
 Enumerable.prototype.indexOf = function (searchElement, fromIndex) {
-	var index;
 	var self = this;
-	var pure = callback.length === 1;
-	return fn(function (seed) {
-		var i, len, item;
+	return on(self.val, function (seed) {
+		var i, ln, item;
 		var items = self.val();
 		for (i = fromIndex === void 0 ? 0 : fromIndex, ln = items.length; i < ln; i++) {
 			item = items[i];
@@ -603,10 +554,8 @@ Enumerable.prototype.join = function (separator) {
  * @returns {function(): number}
  */
 Enumerable.prototype.lastIndexOf = function (searchElement, fromIndex) {
-	var index;
 	var self = this;
-	var pure = callback.length === 1;
-	return fn(function (seed) {
+	return on(self.val, function (seed) {
 		var i, item;
 		var items = self.val();
 		for (i = fromIndex === void 0 ? items.length - 1 : fromIndex; i >= 0; i--) {
@@ -637,9 +586,8 @@ Enumerable.prototype.map = function (callback) {
  */
 Enumerable.prototype.reduce = function (callback, initialValue) {
 	var self = this;
-	var pure = callback.length === 1;
 	var skip = arguments.length === 1;
-	return fn(function (seed) {
+	return on(self.val, function (seed) {
 		var i, ln;
 		var items = self.val();
 		if (skip) {
@@ -663,9 +611,8 @@ Enumerable.prototype.reduce = function (callback, initialValue) {
  */
 Enumerable.prototype.reduceRight = function (callback, initialValue) {
 	var self = this;
-	var pure = callback.length === 1;
 	var skip = arguments.length === 1;
-	return fn(function (seed) {
+	return on(self.val, function (seed) {
 		var i;
 		var items = self.val();
 		if (skip) {
@@ -706,8 +653,7 @@ Enumerable.prototype.slice = function (start, end) {
  */
 Enumerable.prototype.some = function (callback) {
 	var self = this;
-	var pure = callback.length === 1;
-	return fn(function (seed) {
+	return on(self.val, function (seed) {
 		var i, ln;
 		var items = self.val();
 		for (i = 0, ln = items.length; i < ln; i++) {
@@ -745,9 +691,6 @@ function DataArray(val) {
 	 */
 	this.val = function (next) {
 		if (arguments.length > 0) {
-			if (Running === null) {
-				self._mut = self._pmut = null;
-			}
 			logWrite(self, next);
 		} else {
 			if (Listener !== null) {
@@ -1278,7 +1221,7 @@ function logRead(from, to) {
 
 /**
  * @template T
- * @param {SignalProto<T>} node
+ * @param {Data<T>|Computation<T>} node
  * @param {T} val
  * @returns {T}
  */
@@ -1311,20 +1254,25 @@ function logWrite(node, val) {
  */
 function logMutate(node, changeset) {
 	if (Running !== null) {
-		node._flag &= ~Flag.Single;
 		if (node._pmut === null) {
-			node._pmut = [changeset];
+			node._flag |= Flag.Single;
+			node._pmut = changeset;
 			Running.changes.add(node);
 		} else {
-			node._pmut.push(changeset);
+			if (node._flag & Flag.Single) {
+				node._flag &= ~Flag.Single;
+				node._pmut = [node._pmut, changeset];
+			} else {
+				node._pmut.push(changeset);
+			}
 		}
 	} else {
+		node._flag |= Flag.Single;
 		if (node._node1 !== null || node._nodes !== null) {
-			node._pmut = [changeset];
+			node._pmut = changeset;
 			Root.changes.add(node);
 			execute();
 		} else {
-			node._flag |= Flag.Single;
 			node._mut = changeset;
 			node.update();
 		}
@@ -1443,10 +1391,12 @@ function markProceduresForDispose(nodes, time) {
 	var node;
 	for (var i = 0, ln = nodes.length; i < ln; i++) {
 		node = nodes[i];
-		node._age = time;
-		node._flag = Flag.Disposed;
-		if (node._owned !== null) {
-			markProceduresForDispose(node._owned, time);
+		if (node._age < time) {
+			node._age = time;
+			node._flag = Flag.Disposed;
+			if (node._owned !== null) {
+				markProceduresForDispose(node._owned, time);
+			}
 		}
 	}
 }
