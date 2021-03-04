@@ -1708,7 +1708,7 @@ module.exports = {
 	on: on,
 	root: root,
 	sample: sample,
-	Signal: Data,
+	Data: Data,
 	Value: Value,
 	DataArray: DataArray,
 	Computation: Computation,
