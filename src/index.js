@@ -1260,8 +1260,8 @@ function logWrite(node, val) {
 function logMutate(node, changeset) {
 	if (Running !== null) {
 		if (node._pmut === null) {
-			node._flag |= Flag.Single;
 			node._pmut = changeset;
+			node._flag |= Flag.Single;
 			Running.changes.add(node);
 		} else {
 			if (node._flag & Flag.Single) {
@@ -1278,7 +1278,7 @@ function logMutate(node, changeset) {
 			Root.changes.add(node);
 			execute();
 		} else {
-			node._mut = changeset;
+			node._pmut = changeset;
 			node.update();
 		}
 	}
@@ -1493,25 +1493,40 @@ function persist(f) {
 function applyMutation(node, changeset) {
 	var i, ln;
 	var array = node._val;
+	var value = changeset.value;
 	switch (changeset.type) {
 		case Mutation.InsertAt:
-			array.splice(changeset.index, 0, changeset.value);
+			array.splice(changeset.index, 0, value);
 			break;
 		case Mutation.InsertRange:
-			changeset.value.unshift(0);
-			changeset.value.unshift(changeset.index);
-			Array.prototype.splice.apply(array, changeset.value);
+			value.unshift(0);
+			value.unshift(changeset.index);
+			Array.prototype.splice.apply(array, value);
 			break;
 		case Mutation.Pop:
-			array.length--;
+			if (array.length !== 0) {
+				array.length--;
+			}
 			break;
 		case Mutation.Push:
-			array[array.length] = changeset.value;
+			array[array.length] = value;
 			break;
 		case Mutation.RemoveAt:
 			ln = array.length;
 			if (ln > 0) {
-				for (i = changeset.index; i < ln; i++) {
+				i = changeset.index;
+				if (i < 0) {
+					i = ln - 1 + i;
+					if (i < 0) {
+						i = 0;
+					}
+				} else {
+					if (i >= ln) {
+						array.length--;
+						break;
+					}
+				}
+				for (; i < ln; i++) {
 					array[i] = array[i + 1];
 				}
 				array.length--;
@@ -1524,7 +1539,7 @@ function applyMutation(node, changeset) {
 			array.shift();
 			break;
 		case Mutation.Unshift:
-			array.unshift(changeset.value);
+			array.unshift(value);
 			break;
 	}
 }

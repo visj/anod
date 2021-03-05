@@ -10,16 +10,16 @@
     "test": "node test"
   },
   "files": [
-		"lib.d.ts",
+    "lib.d.ts",
     "dist/anod.js",
-		"dist/anod.cjs",
-		"dist/anod.mjs"
-	],
+    "dist/anod.cjs",
+    "dist/anod.mjs"
+  ],
   "keywords": [],
   "author": "Vilhelm Sjölund",
   "license": "MIT",
   "dependencies": {
-    "boer": "^0.1.6"
+    "boer": "^0.1.8"
   },
   "repository": {
     "type": "git",
