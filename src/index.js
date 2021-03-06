@@ -16,10 +16,6 @@ function array(val) {
  */
 function data(val) {
 	var node = new Data(val);
-	/**
-	 * @param {T=} next
-	 * @returns {T}
-	 */
 	return function (next) {
 		return arguments.length > 0 ? node.set(next) : node.get();
 	}
@@ -34,10 +30,6 @@ function data(val) {
  */
 function value(val, eq) {
 	var node = new Value(val, eq);
-	/**
-	 * @param {T=} next
-	 * @returns {T}
-	 */
 	return function (next) {
 		return arguments.length > 0 ? node.set(next) : node.get();
 	}
@@ -129,11 +121,12 @@ function on(src, f, seed, flags) {
 function root(f) {
 	var val;
 	var node;
-	var disposer = f.length === 0 ? null : function () {
+	var unending = f.length === 0;
+	var disposer = unending ? null : function () {
 		if (node !== null) {
 			if (Running !== null) {
 				node._flag = Flag.Disposed;
-				Running.disposes.add(node);
+				Root.disposes.add(node);
 			} else {
 				node.dispose();
 			}
@@ -141,15 +134,15 @@ function root(f) {
 	};
 	var owner = Owner;
 	var listener = Listener;
-	Owner = node = disposer === null ? Unowned : getCandidateNode();
+	Owner = node = unending ? Unowned : getCandidateNode();
 	Listener = null;
 	try {
-		val = disposer === null ? f() : f(disposer);
+		val = unending ? f() : f(disposer);
 	} finally {
 		Owner = owner;
 		Listener = listener;
 	}
-	if (disposer === null || recycleOrClaimNode(node, null, void 0, Flag.Orphan)) {
+	if (unending || recycleOrClaimNode(node, null, void 0, Flag.Orphan)) {
 		node = null;
 	}
 	return val;
@@ -288,6 +281,10 @@ Value.prototype.set = function (val) {
 	return (this._eq ? this._eq(this._val, val) : this._val === val) ? val : logWrite(this, val);
 }
 
+/**
+ * @package
+ * @returns {void}
+ */
 Value.prototype.update = function () {
 	this._val = this._pval;
 	this._pval = NotPending;
@@ -409,14 +406,8 @@ Computation.prototype.dispose = function () {
  * @template T
  * @constructor
  */
-function Enumerable() {
-	/**
-	 * @const
-	 * @public
-	 * @type {function(Array<T>=): Array<T>}
-	 */
-	this.val;
-}
+function Enumerable() { }
+
 /**
  * 
  * @param {function(T,number=): boolean} callback 
@@ -737,10 +728,10 @@ DataArray.prototype.update = function () {
 		}
 		this._mut = this._pmut;
 		this._pmut = null;
-		this._age = Running.time;
+		this._age = Root.time;
 	}
 	if (this._node1 !== null || this._nodes !== null) {
-		markProceduresForUpdate(this, Running.time);
+		markProceduresForUpdate(this, Root.time);
 	}
 }
 
@@ -1193,7 +1184,7 @@ function recycleOrClaimNode(node, fn, val, flags) {
 
 /**
  * 
- * @param {Signal|Computation} from 
+ * @param {Data|Computation} from 
  * @param {Computation} to
  */
 function logRead(from, to) {
@@ -1238,7 +1229,7 @@ function logWrite(node, val) {
 			}
 		} else {
 			node._pval = val;
-			Running.changes.add(node);
+			Root.changes.add(node);
 		}
 	} else {
 		if (node._node1 !== null || node._nodes !== null) {
@@ -1379,7 +1370,7 @@ function markProceduresForUpdate(data, time) {
 function markProcedureForUpdate(node, time) {
 	node._age = time;
 	node._flag |= Flag.Stale;
-	Running.updates.add(node);
+	Root.updates.add(node);
 	if (node._owned !== null) {
 		markProceduresForDispose(node._owned, time);
 	}
