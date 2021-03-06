@@ -442,7 +442,7 @@ Enumerable.prototype.every = function (callback) {
  * @returns {Enumerable<T>}
  */
 Enumerable.prototype.filter = function (callback) {
-	return makeEnumerableNode(new SignalEnumerable(), this, filter, { callback: callback });
+	return makeEnumerableNode(new DataEnumerable(), this, filter, { callback: callback });
 }
 
 /**
@@ -493,7 +493,7 @@ Enumerable.prototype.findIndex = function (callback, index) {
  * @returns {void}
  */
 Enumerable.prototype.forEach = function (callback) {
-	makeEnumerableNode(new SignalEnumerable(), this, forEach, { callback: callback });
+	makeEnumerableNode(new DataEnumerable(), this, forEach, { callback: callback });
 }
 
 /**
@@ -576,7 +576,7 @@ Enumerable.prototype.lastIndexOf = function (searchElement, fromIndex) {
  * @returns {Enumerable<U>} 
  */
 Enumerable.prototype.map = function (callback) {
-	return makeEnumerableNode(new SignalEnumerable(), this, map, { callback: callback, items: [], nodes: [] });
+	return makeEnumerableNode(new DataEnumerable(), this, map, { callback: callback, items: [], nodes: [] });
 }
 
 /**
@@ -633,7 +633,7 @@ Enumerable.prototype.reduceRight = function (callback, initialValue) {
  * @returns {Enumerable<T>}
  */
 Enumerable.prototype.reverse = function () {
-	return makeEnumerableNode(new SignalEnumerable(), this, reverse, {});
+	return makeEnumerableNode(new DataEnumerable(), this, reverse, {});
 }
 
 /**
@@ -643,7 +643,7 @@ Enumerable.prototype.reverse = function () {
  * @returns {Enumerable<T>}
  */
 Enumerable.prototype.slice = function (start, end) {
-	return makeEnumerableNode(new SignalEnumerable(), this, slice, { start: start, end: end });
+	return makeEnumerableNode(new DataEnumerable(), this, slice, { start: start, end: end });
 
 }
 
@@ -672,7 +672,7 @@ Enumerable.prototype.some = function (callback) {
  * @returns {Enumerable<T>}
  */
 Enumerable.prototype.sort = function (compareFunction) {
-	return makeEnumerableNode(new SignalEnumerable(), this, sort, { compareFunction: compareFunction });
+	return makeEnumerableNode(new DataEnumerable(), this, sort, { compareFunction: compareFunction });
 }
 
 /**
@@ -821,7 +821,7 @@ DataArray.prototype.unshift = function (item) {
  * @extends {Enumerable}
  * @extends {Computation}
  */
-function SignalEnumerable() {
+function DataEnumerable() {
 	var self = this;
 	Computation.call(self);
 	/**
@@ -852,7 +852,7 @@ function SignalEnumerable() {
 	this._pmut = null;
 	/**
 	 * @package
-	 * @type {SignalEnumerable}
+	 * @type {DataEnumerable}
 	 */
 	this._source = null;
 	/**
@@ -862,14 +862,14 @@ function SignalEnumerable() {
 	this._params = null;
 }
 
-SignalEnumerable.prototype = new Enumerable();
-SignalEnumerable.constructor = SignalEnumerable;
+DataEnumerable.prototype = new Enumerable();
+DataEnumerable.constructor = DataEnumerable;
 
 /**
  * @package
  * @returns {void}
  */
-SignalEnumerable.prototype.update = function () {
+DataEnumerable.prototype.update = function () {
 	var owner = Owner;
 	var listener = Listener;
 	cleanupNode(this, false);
@@ -882,7 +882,7 @@ SignalEnumerable.prototype.update = function () {
 	Listener = listener;
 }
 
-SignalEnumerable.prototype.dispose = function () {
+DataEnumerable.prototype.dispose = function () {
 	this._fn = null;
 	this._node1 = null;
 	this._nodes = null;
@@ -1091,11 +1091,11 @@ function makeComputationNode(node, fn, seed, flags) {
 
 /**
  * @template T, U
- * @param {SignalEnumerable<T>} node
- * @param {SignalEnumerable} source
- * @param {function(SignalEnumerable<T>, SignalEnumerable, Object): U} fn 
+ * @param {DataEnumerable<T>} node
+ * @param {DataEnumerable} source
+ * @param {function(DataEnumerable<T>, Object, Array<T>): U} fn 
  * @param {Object} params
- * @returns {SignalEnumerable<U>}
+ * @returns {DataEnumerable<U>}
  */
 function makeEnumerableNode(node, source, fn, params) {
 	var owner = Owner;
@@ -1546,7 +1546,7 @@ function applyMutation(node, changeset) {
 
 /**
  * @template T
- * @param {SignalEnumerable<T>} source
+ * @param {DataEnumerable<T>} source
  * @param {Object} params
  * @param {function(T,number=): boolean} params.callback 
  * @param {Array<T>} seed
@@ -1566,7 +1566,7 @@ function filter(source, params, seed) {
 
 /**
  * @template T
- * @param {SignalEnumerable<T>} source 
+ * @param {DataEnumerable<T>} source 
  * @param {Object} params
  * @param {function(T,number=): void} params.callback
  * @param {Array<T>} seed
@@ -1581,7 +1581,7 @@ function forEach(source, params, seed) {
 
 /**
  * @template T,U
- * @param {SignalEnumerable<T>} source 
+ * @param {DataEnumerable<T>} source 
  * @param {Object} params
  * @param {function(T,number=): U} params.callback
  * @param {Array<U>} params.items
@@ -1628,7 +1628,7 @@ function map(source, params, seed) {
 
 /**
  * @template T
- * @param {SignalEnumerable<T>} source 
+ * @param {DataEnumerable<T>} source 
  * @param {Object} params 
  * @param {Array<T>} seed
  * @returns {Array<T>} 
@@ -1644,7 +1644,7 @@ function reverse(source, params, seed) {
 
 /**
  * @template T
- * @param {SignalEnumerable<T>} source 
+ * @param {DataEnumerable<T>} source 
  * @param {Object} params 
  * @param {number=} params.start
  * @param {number=} params.end
@@ -1697,7 +1697,7 @@ function slice(source, params, seed) {
 
 /**
  * @template T
- * @param {SignalEnumerable<T>} source 
+ * @param {DataEnumerable<T>} source 
  * @param {Object} params 
  * @param {function(T,T): number=} params.compareFunction
  * @param {Array<T>} seed
@@ -1726,7 +1726,7 @@ module.exports = {
 	sample: sample,
 	Data: Data,
 	Value: Value,
-	DataArray: DataArray,
 	Computation: Computation,
-	Enumerable: Enumerable,
+	DataArray: DataArray,
+	DataEnumerable: DataEnumerable,
 };
