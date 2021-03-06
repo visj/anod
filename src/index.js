@@ -399,7 +399,7 @@ Computation.prototype.update = function () {
 	this._val = this._fn(val);
 	if (this._flag & Flag.Trace) {
 		if (val !== this._val) {
-			markComputationsForUpdate(this, Root.time - 1);
+			markComputationsForUpdate(this, Root.time);
 		}
 	}
 	this._flag &= ~Flag.Running;
@@ -1209,13 +1209,13 @@ function recycleOrClaimNode(node, fn, val, flags) {
 		node._age = Root.time;
 		node._flag |= flags;
 		if (owner !== null) {
-			if (owner._flag & (Flag.Trace | Flag.Watch)) {
-				node._owner = owner;
-			}
 			if (owner._owned === null) {
 				owner._owned = [node];
 			} else {
 				owner._owned.push(node);
+			}
+			if (owner._flag & (Flag.Trace | Flag.Watch)) {
+				logTracingOwner(owner);
 			}
 		}
 	}
@@ -1478,10 +1478,11 @@ function logTracingOwner(owner) {
 		for (var i = 0, ln = owned.length; i < ln; i++) {
 			node = owned[i];
 			node._owner = owner;
+			node._flag |= Flag.Watch;
 			logTracingOwner(node);
 		}
 	}
-	
+
 }
 
 /**
@@ -1492,7 +1493,7 @@ function markComputationsDisposed(nodes, time) {
 	var node;
 	for (var i = 0, ln = nodes.length; i < ln; i++) {
 		node = nodes[i];
-		if (node._age < time) {
+		if (!(node._flag & Flag.Disposed)) {
 			node._age = time;
 			node._flag &= ~Flag.Stale;
 			node._flag |= Flag.Disposed;
