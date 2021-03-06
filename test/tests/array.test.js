@@ -1,5 +1,5 @@
 const { Test } = require('boer');
-const { array, cleanup, data, fn, on, freeze, root, value } = require('../../src');
+const { array, freeze } = require('../../src');
 
 /**
  * 

@@ -898,21 +898,21 @@ SignalEnumerable.prototype.dispose = function () {
  * @enum {number}
  */
 var Flag = {
-	OnChange: 1,
-	OnUpdate: 2,
-	Stale: 4,
-	Running: 8,
-	Pending: 16,
-	Disposed: 32,
-	Dynamic: 64,
-	Static: 128,
-	Track: 256,
-	Orphan: 512,
-	Single: 1024,
-	Data: 2048,
-	Value: 4096,
-	DataArray: 8192,
-	Enumerable: 16384,
+	Wait: 1,
+	Trace: 2,
+	Dynamic: 4,
+	Static: 8,
+	Data: 16,
+	Value: 32,
+	Computation: 64,
+	DataArray: 128,
+	Enumerable: 256,
+	Stale: 512,
+	Running: 1024,
+	Pending: 2048,
+	Disposed: 4096,
+	Orphan: 8192,
+	Single: 16384,
 };
 /* @strip */
 /**
@@ -1061,7 +1061,7 @@ function makeComputationNode(node, fn, seed, flags) {
 		Root.updates.reset();
 		try {
 			Running = Root;
-			seed = flags & Flag.OnChange ? seed : fn(seed);
+			seed = flags & Flag.Wait ? seed : fn(seed);
 		} finally {
 			Owner = Listener = Running = null;
 		}

@@ -1,5 +1,5 @@
 const { Test } = require('boer');
-const { data, Flag, fn, on, freeze, root } = require('../../src');
+const { data, Flag, on, root } = require('../../src');
 
 /**
  * @param {Test} t
@@ -76,7 +76,7 @@ module.exports = function (t) {
 		t.test('suppresses initial run when run with OnChange', t => {
 			root(() => {
 				let a = data(1);
-				let c = on(a, () => a() * 2, 0, Flag.OnChange);
+				let c = on(a, () => a() * 2, 0, Flag.Wait);
 				t.equal(c(), 0);
 				a(2);
 				t.equal(c(), 4);

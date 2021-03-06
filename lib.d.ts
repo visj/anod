@@ -42,8 +42,15 @@ export interface SignalArray<T> extends SignalEnumerable<T> {
 }
 
 export enum Flag {
-	OnChange = 1,
-	OnUpdate = 2,
+	Wait = 1,
+	Trace = 2,
+	Dynamic = 4,
+	Static = 8,
+	Data = 16,
+	Value = 32,
+	Computation = 64,
+	DataArray = 128,
+	Enumerable = 256,
 }
 
 export function array<T>(val: T[]): SignalArray<T>;
@@ -115,10 +122,10 @@ export interface ValueConstructor {
 	readonly prototype: Value<unknown>;
 }
 
-export interface Enumerable<T> extends Computation<T>, SignalEnumerable<T> { }
+export interface DataEnumerable<T> extends Computation<T>, SignalEnumerable<T> { }
 
 export interface EnumerableConstructor {
-	readonly prototype: Enumerable<unknown>;
+	readonly prototype: DataEnumerable<unknown>;
 }
 
 export interface DataArray<T> extends SignalArray<T> {
