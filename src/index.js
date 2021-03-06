@@ -566,10 +566,9 @@ Enumerable.prototype.forEach = function (callback) {
 Enumerable.prototype.includes = function (valueToFind, fromIndex) {
 	var self = this;
 	return on(self.val, function () {
-		var i, ln, item;
+		var i, ln;
 		var items = self.val();
 		for (i = fromIndex === void 0 ? 0 : fromIndex, ln = items.length; i < ln; i++) {
-			item = items[i];
 			if (valueToFind === items[i]) {
 				return true;
 			}
@@ -606,7 +605,9 @@ Enumerable.prototype.indexOf = function (searchElement, fromIndex) {
  */
 Enumerable.prototype.join = function (separator) {
 	var self = this;
-	return on(self.val, function () { return self.val().join(separator); });
+	return on(self.val, function () { 
+		return self.val().join(separator); 
+	});
 }
 
 /**
@@ -699,8 +700,8 @@ Enumerable.prototype.reduceRight = function (callback, initialValue) {
  */
 Enumerable.prototype.reverse = function () {
 	var self = this;
-	return makeEnumerableNode(new DataEnumerable(), this, function() {
-		return reverse(self, {}, null);
+	return makeEnumerableNode(new DataEnumerable(), self, function() {
+		return reverse(self);
 	});
 }
 
@@ -713,7 +714,7 @@ Enumerable.prototype.reverse = function () {
 Enumerable.prototype.slice = function (start, end) {
 	var self = this;
 	var params =  { start: start, end: end };
-	return makeEnumerableNode(new DataEnumerable(), this, function(seed) {
+	return makeEnumerableNode(new DataEnumerable(), self, function(seed) {
 		return slice(self, params, seed);
 	});
 
@@ -753,19 +754,18 @@ Enumerable.prototype.sort = function (compareFunction) {
 /**
  * @template T
  * @constructor
- * @extends {Data<Array<T>>}
+ * @extends {Enumerable<T>}
  * @param {Array<T>} val
  */
 function DataArray(val) {
-	/** @type {DataArray<T>} */
-	var self = this;
+	var self = /** @type {?} */(this);
 	Data.call(self, val);
 	/**
 	 * @type {function(Array<T>=): Array<T>}
 	 */
 	this.val = function (next) {
 		if (arguments.length > 0) {
-			logWrite(/** @type {Data} */(self), next);
+			logWrite(self, next);
 		} else {
 			if (Listener !== null) {
 				logRead(self, Listener);
@@ -1907,11 +1907,9 @@ function map(source, params, seed) {
 /**
  * @template T
  * @param {Enumerable<T>} source 
- * @param {Object} params 
- * @param {Array<T>} seed
  * @returns {Array<T>} 
  */
-function reverse(source, params, seed) {
+function reverse(source) {
 	var items = source.val();
 	var newItems = [];
 	for (var i = items.length - 1, j = 0; i >= 0; i--, j++) {
