@@ -58,16 +58,16 @@ function cleanup(f) {
  */
 function freeze(f) {
 	var val;
-	if (Running !== null) {
+	if (State !== System.Idle) {
 		val = f();
 	} else {
 		Root.changes.reset();
-		Running = Root;
+		State = System.Compute;
 		try {
 			val = f();
 			execute();
 		} finally {
-			Running = null;
+			State = System.Idle;
 		}
 	}
 	return val;
@@ -124,7 +124,7 @@ function root(f) {
 	var unending = f.length === 0;
 	var disposer = unending ? null : function () {
 		if (node !== null) {
-			if (Running !== null) {
+			if (State !== System.Idle) {
 				node._flag = Flag.Disposed;
 				Root.disposes.add(node);
 			} else {
@@ -910,6 +910,19 @@ var Flag = {
  * @const
  * @enum {number}
  */
+var System = {
+	Idle: 0,
+	Compute: 1,
+	Change: 2,
+	Trace: 3,
+	Update: 4,
+	Dispose: 5,
+};
+
+/**
+ * @const
+ * @enum {number}
+ */
 var Mutation = {
 	InsertAt: 1,
 	InsertRange: 2,
@@ -936,9 +949,9 @@ var Mutation = {
  */
 var Root = new Clock();
 /**
- * @type {Clock}
+ * @type {number}
  */
-var Running = null;
+var State = System.Idle;
 /**
  * @type {Computation}
  */
@@ -1044,17 +1057,18 @@ function getCandidateNode() {
 function makeComputationNode(node, fn, seed, flags) {
 	var owner = Owner;
 	var listener = Listener;
-	var toplevel = Running === null;
+	var toplevel = State === System.Idle;
 	Owner = node;
 	Listener = (flags & (Flag.Dynamic | Flag.Static)) === Flag.Static ? null : node;
 	if (toplevel) {
 		Root.changes.reset();
 		Root.updates.reset();
 		try {
-			Running = Root;
+			State = System.Compute;
 			seed = flags & Flag.Wait ? seed : fn(seed);
 		} finally {
-			Owner = Listener = Running = null;
+			State = System.Idle;
+			Owner = Listener = null;
 		}
 	} else {
 		seed = fn(seed);
@@ -1067,7 +1081,7 @@ function makeComputationNode(node, fn, seed, flags) {
 			try {
 				run(Root);
 			} finally {
-				Running = null;
+				State = System.Idle;
 			}
 		}
 	}
@@ -1091,16 +1105,17 @@ function makeComputationNode(node, fn, seed, flags) {
 function makeEnumerableNode(node, source, fn, params) {
 	var owner = Owner;
 	var listener = Listener;
-	var toplevel = Running === null;
+	var toplevel = State === System.Idle;
 	Owner = Listener = node;
 	if (toplevel) {
 		Root.changes.reset();
 		Root.updates.reset();
 		try {
-			Running = Root;
+			State = System.Compute;
 			node._val = fn(source, params, []);
 		} finally {
-			Owner = Listener = Running = null;
+			State = System.Idle;
+			Owner = Listener = null;
 		}
 	} else {
 		node._val = fn(source, params, []);
@@ -1123,7 +1138,7 @@ function makeEnumerableNode(node, source, fn, params) {
 			try {
 				run(Root);
 			} finally {
-				Running = null;
+				State = System.Idle;
 			}
 		}
 	}
@@ -1222,7 +1237,7 @@ function logRead(from, to) {
  * @returns {T}
  */
 function logWrite(node, val) {
-	if (Running !== null) {
+	if (State !== System.Idle) {
 		if (node._pval !== NotPending) {
 			if (val !== node._pval) {
 				throw new Error('Conflicting changes');
@@ -1249,11 +1264,11 @@ function logWrite(node, val) {
  * @param {ChangeSet<T>} changeset 
  */
 function logMutate(node, changeset) {
-	if (Running !== null) {
+	if (State !== System.Idle) {
 		if (node._pmut === null) {
 			node._pmut = changeset;
 			node._flag |= Flag.Single;
-			Running.changes.add(node);
+			Root.changes.add(node);
 		} else {
 			if (node._flag & Flag.Single) {
 				node._flag &= ~Flag.Single;
@@ -1283,7 +1298,7 @@ function logMutate(node, changeset) {
 function applyChanges(data) {
 	data.update();
 	if (data._node1 !== null || data._nodes !== null) {
-		markProceduresForUpdate(data, Running.time);
+		markProceduresForUpdate(data, Root.time);
 	}
 }
 
@@ -1315,7 +1330,8 @@ function execute() {
 		run(Root);
 	} finally {
 		Owner = owner;
-		Running = Listener = null;
+		Listener = null;
+		State = System.Idle;
 	}
 }
 
@@ -1325,19 +1341,20 @@ function execute() {
  */
 function run(clock) {
 	var i = 0;
-	var running = Running;
-	Running = clock;
 	clock.disposes.reset();
 	do {
 		clock.time++;
+		State = System.Change;
 		clock.changes.run(applyChanges);
+		State = System.Update;
 		clock.updates.run(applyUpdates);
+		State = System.Dispose;
 		clock.disposes.run(applyDisposes);
 		if (i++ > 1e5) {
 			throw new Error('Runaway clock detected');
 		}
 	} while (clock.changes.ln !== 0 || clock.updates.ln !== 0 || clock.disposes.ln !== 0);
-	Running = running;
+	State = System.Idle;
 }
 
 /**
@@ -1707,6 +1724,7 @@ module.exports = {
 	value: value,
 	Flag: Flag,
 	/* @strip */
+	System: System,
 	Mutation: Mutation,
 	/* @strip */
 	cleanup: cleanup,

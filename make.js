@@ -29,6 +29,14 @@ for (const key in Mutation) {
 	});
 }
 
+const System = anod.System;
+for (const key in System) {
+	const val = System[key];
+	srcFile = srcFile.replace(new RegExp('System.' + key, 'g'), function () {
+		return val;
+	});
+}
+
 const ExportRegexp = /module\.exports\s+=\s+{\s+([\w\:\s\,]+)\s+\}\;/g;
 
 const js = '(function(w) {\n\t' + srcFile.replace(ExportRegexp, function () {
