@@ -125,8 +125,11 @@ function root(f) {
 	var disposer = unending ? null : function () {
 		if (node !== null) {
 			if (State !== System.Idle) {
-				node._flag = Flag.Disposed;
-				Root.disposes.add(node);
+				if (State === System.Dispose) {
+					node.dispose();
+				} else {
+					Root.disposes.add(node);
+				}
 			} else {
 				node.dispose();
 			}
@@ -300,32 +303,26 @@ function Computation() {
 	 */
 	this._flag = 0;
 	/**
-	 * @package
 	 * @type {T}
 	 */
 	this._val = null;
 	/**
-	 * @package
 	 * @type {Computation}
 	 */
 	this._node1 = null;
 	/**
-	 * @package
 	 * @type {number}
 	 */
-	this._slot1 = null;
+	this._slot1 = -1;
 	/**
-	 * @package
 	 * @type {Array<Computation>}
 	 */
 	this._nodes = null;
 	/**
-	 * @package
 	 * @type {Array<Computation>}
 	 */
 	this._slots = null;
 	/**
-	 * @package
 	 * @type {null|function(T): T}
 	 */
 	this._fn = null;
@@ -334,25 +331,29 @@ function Computation() {
 	 */
 	this._age = -1;
 	/**
-	 * @package
-	 * @type {Data}
+	 * @type {Data|Computation}
 	 */
 	this._source1 = null;
 	/**
-	 * @package
 	 * @type {number}
 	 */
 	this._source1slot = -1;
 	/**
-	 * @package
-	 * @type {Array<Data>}
+	 * @type {Array<Data|Computation>}
 	 */
 	this._sources = null;
 	/**
-	 * @package
 	 * @type {Array<number>}
 	 */
 	this._sourceslots = null;
+	/**
+	 * @type {Computation}
+	 */
+	this._owner = null;
+	/**
+	 * @type {Array<number>}
+	 */
+	this._traces = null;
 	/**
 	 * @type {Array<Computation}
 	 */
@@ -368,10 +369,16 @@ function Computation() {
  */
 Computation.prototype.get = function () {
 	if (Listener !== null) {
+		var flag = this._flag;
+		if (flag & Flag.Watch) {
+			if (State === System.Trace) {
+				applyUpstreamUpdates(this);
+			}
+		}
 		if (this._age === Root.time) {
-			if (this._flag & Flag.Running) {
+			if (flag & Flag.Running) {
 				throw new Error('Circular dependency');
-			} else if (this._flag & Flag.Stale) {
+			} else if (flag & Flag.Stale) {
 				this.update();
 			}
 		}
@@ -388,7 +395,13 @@ Computation.prototype.update = function () {
 	Listener = this._flag & Flag.Static ? null : this;
 	this._flag &= ~Flag.Stale;
 	this._flag |= Flag.Running;
-	this._val = this._fn(this._val);
+	var val = this._val;
+	this._val = this._fn(val);
+	if (this._flag & Flag.Trace) {
+		if (val !== this._val) {
+			markComputationsForUpdate(this, Root.time);
+		}
+	}
 	this._flag &= ~Flag.Running;
 	Owner = owner;
 	Listener = listener;
@@ -731,7 +744,7 @@ DataArray.prototype.update = function () {
 		this._age = Root.time;
 	}
 	if (this._node1 !== null || this._nodes !== null) {
-		markProceduresForUpdate(this, Root.time);
+		markComputationsForUpdate(this, Root.time);
 	}
 }
 
@@ -902,8 +915,9 @@ var Flag = {
 	Running: 1024,
 	Pending: 2048,
 	Disposed: 4096,
-	Orphan: 8192,
+	Watch: 8192,
 	Single: 16384,
+	Orphan: 32768,
 };
 /* @strip */
 /**
@@ -1018,17 +1032,22 @@ function Clock() {
 	this.time = 0;
 	/**
 	 * @const
-	 * @type {Queue<Signal>}
+	 * @type {Queue<Data>}
 	 */
 	this.changes = new Queue();
 	/**
 	 * @const
-	 * @type {Queue<Procedure>}
+	 * @type {Queue<Computation>}
+	 */
+	this.traces = new Queue();
+	/**
+	 * @const
+	 * @type {Queue<Computation>}
 	 */
 	this.updates = new Queue();
 	/**
 	 * @const
-	 * @type {Queue<Procedure>}
+	 * @type {Queue<Computation>}
 	 */
 	this.disposes = new Queue();
 }
@@ -1127,6 +1146,9 @@ function makeEnumerableNode(node, source, fn, params) {
 	node._source = source;
 	node._params = params;
 	if (owner !== null) {
+		if (owner._flag & (Flag.Trace | Flag.Watch)) {
+			node._owner = owner;
+		}
 		if (owner._owned === null) {
 			owner._owned = [node];
 		} else {
@@ -1185,8 +1207,11 @@ function recycleOrClaimNode(node, fn, val, flags) {
 		node._fn = fn;
 		node._val = val;
 		node._age = Root.time;
-		node._flag = flags;
+		node._flag |= flags;
 		if (owner !== null) {
+			if (owner._flag & (Flag.Trace | Flag.Watch)) {
+				node._owner = owner;
+			}
 			if (owner._owned === null) {
 				owner._owned = [node];
 			} else {
@@ -1227,6 +1252,17 @@ function logRead(from, to) {
 	} else {
 		to._sources.push(from);
 		to._sourceslots.push(fromslot);
+	}
+	if (from._flag & (Flag.Trace | Flag.Watch)) {
+		if (to._flag & Flag.Watch) {
+			if (to._traces === null) {
+				to._traces = [toslot];
+			} else {
+				to._traces.push(toslot);
+			}
+		} else {
+			logTracingSource(to, toslot);
+		}
 	}
 }
 
@@ -1298,7 +1334,7 @@ function logMutate(node, changeset) {
 function applyChanges(data) {
 	data.update();
 	if (data._node1 !== null || data._nodes !== null) {
-		markProceduresForUpdate(data, Root.time);
+		markComputationsForUpdate(data, Root.time);
 	}
 }
 
@@ -1346,6 +1382,8 @@ function run(clock) {
 		clock.time++;
 		State = System.Change;
 		clock.changes.run(applyChanges);
+		State = System.Trace;
+		clock.traces.run(applyUpdates);
 		State = System.Update;
 		clock.updates.run(applyUpdates);
 		State = System.Dispose;
@@ -1361,19 +1399,19 @@ function run(clock) {
  * @param {Signal|Computation} data
  * @param {number} time
  */
-function markProceduresForUpdate(data, time) {
+function markComputationsForUpdate(data, time) {
 	var node = data._node1;
 	var nodes = data._nodes;
 	if (node !== null) {
 		if (node._age < time) {
-			markProcedureForUpdate(node, time);
+			markComputationForUpdate(node, time);
 		}
 	}
 	if (nodes !== null) {
 		for (var i = 0, ln = nodes.length; i < ln; i++) {
 			node = nodes[i];
 			if (node._age < time) {
-				markProcedureForUpdate(node, time);
+				markComputationForUpdate(node, time);
 			}
 		}
 	}
@@ -1384,33 +1422,113 @@ function markProceduresForUpdate(data, time) {
  * @param {Computation} node 
  * @param {number} time
  */
-function markProcedureForUpdate(node, time) {
+function markComputationForUpdate(node, time) {
 	node._age = time;
 	node._flag |= Flag.Stale;
-	Root.updates.add(node);
+	if (node._flag & Flag.Trace) {
+		Root.traces.add(node);
+	} else {
+		Root.updates.add(node);
+	}
 	if (node._owned !== null) {
-		markProceduresForDispose(node._owned, time);
+		markComputationsDisposed(node._owned, time);
 	}
-	if (node._node1 !== null || node._nodes !== null) {
-		markProceduresForUpdate(node, time);
+	if (!(node._flag & Flag.Trace)) {
+		if (node._node1 !== null || node._nodes !== null) {
+			markComputationsForUpdate(node, time);
+		}
 	}
+}
+
+/**
+ * 
+ * @param {Computation} to
+ * @param {number} slot
+ */
+function logTracingSource(to, slot) {
+	var i, ln;
+	to._flag |= Flag.Watch;
+	if (to._traces === null) {
+		to._traces = [slot];
+	} else {
+		to._traces.push(slot);
+	}
+	var node1 = to._node1;
+	var nodes = to._nodes;
+	if (node1 !== null) {
+		logTracingSource(node1, -1);
+	}
+	if (nodes !== null) {
+		for (i = 0, ln = nodes.length; i < ln; i++) {
+			node1 = nodes[i];
+			logTracingSource(nodes[i], i);
+		}
+	}
+	logTracingOwner(to);
+}
+
+/**
+ * 
+ * @param {Computation} owner 
+ */
+function logTracingOwner(owner) {
+	var node;
+	var owned = owner._owned;
+	if (owned !== null) {
+		for (var i = 0, ln = owned.length; i < ln; i++) {
+			node = owned[i];
+			node._owner = owner;
+			logTracingOwner(node);
+		}
+	}
+	
 }
 
 /**
  * @param {Array<Computation>} nodes
  * @param {number} time
  */
-function markProceduresForDispose(nodes, time) {
+function markComputationsDisposed(nodes, time) {
 	var node;
 	for (var i = 0, ln = nodes.length; i < ln; i++) {
 		node = nodes[i];
 		if (node._age < time) {
 			node._age = time;
-			node._flag = Flag.Disposed;
+			node._flag &= ~Flag.Stale;
+			node._flag |= Flag.Disposed;
 			if (node._owned !== null) {
-				markProceduresForDispose(node._owned, time);
+				markComputationsDisposed(node._owned, time);
 			}
 		}
+	}
+}
+
+/**
+ * 
+ * @param {Computation} node 
+ */
+function applyUpstreamUpdates(node) {
+	var slot;
+	var source;
+	var sources;
+	var owner = node._owner;
+	var traces = node._traces;
+	if (owner !== null) {
+		applyUpstreamUpdates(owner);
+	}
+	if (!(node._flag & Flag.Disposed)) {
+		if (traces !== null) {
+			sources = node._sources;
+			for (var i = 0, ln = traces.length; i < ln; i++) {
+				slot = traces[i];
+				source = slot === -1 ? node._source1 : sources[slot];
+				if (source._flag & Flag.Watch) {
+					applyUpstreamUpdates(source);
+				}
+				applyUpdates(source);
+			}
+		}
+		applyUpdates(node);
 	}
 }
 
@@ -1444,11 +1562,13 @@ function cleanupNode(node, final) {
 				cleanupSource(sources.pop(), sourceslots.pop());
 			}
 		}
+		node._trace1 = -1;
+		node._traces = null;
 	}
 }
 
 /**
- * @param {Signal} source
+ * @param {Data|Computation} source
  * @param {number} slot
  */
 function cleanupSource(source, slot) {
