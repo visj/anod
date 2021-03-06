@@ -63,6 +63,10 @@ export function cleanup(f: () => void): void;
 
 export function freeze<T>(f: () => T): T;
 
+export function bind<T>(src: Procedure<unknown> | Procedure<unknown>[], f: (seed: T) => T, seed?: T, flags?: number): void;
+
+export function run<T>(f: (seed: T) => T, seed?: T, flags?: number): void;
+
 export function fn<T>(f: (seed: T) => T, seed?: T, flags?: number): Procedure<T>;
 
 export function on<T>(src: Procedure<unknown> | Procedure<unknown>[], f: (seed: T) => T, seed?: T, flags?: number): Procedure<T>;

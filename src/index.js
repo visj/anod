@@ -73,6 +73,45 @@ function freeze(f) {
 	return val;
 }
 
+
+/**
+ * @public
+ * @template T
+ * @param {Array<function(): *>|function(): *} src
+ * @param {function(T): T} f
+ * @param {T=} seed
+ * @param {number=} flags
+ * @returns {void}
+ */
+function bind(src, f, seed, flags) {
+	var node = getCandidateNode();
+	var listener = Listener;
+	try {
+		Listener = node;
+		if (src instanceof Array) {
+			for (var i = 0, ln = src.length; i < ln; i++) {
+				src[i]();
+			}
+		} else {
+			src();
+		}
+	} finally {
+		Listener = listener;
+	}
+	makeComputationNode(node, f, seed, Flag.Static | flags);
+}
+
+/**
+ * @template T
+ * @param {function(T): T} f
+ * @param {T=} seed
+ * @param {number=} flags
+ * @returns {void}
+ */
+function run(f, seed, flags) {
+	makeComputationNode(node, f, seed, Flag.Dynamic | flags);
+}
+
 /**
  * @public
  * @template T
@@ -82,7 +121,7 @@ function freeze(f) {
  * @returns {function(): T}
  */
 function fn(f, seed, flags) {
-	return makeComputationNode(getCandidateNode(), f, seed, Flag.Dynamic | flags);
+	return makeProcedureNode(getCandidateNode(), f, seed, Flag.Dynamic | flags);
 }
 
 /**
@@ -109,7 +148,7 @@ function on(src, f, seed, flags) {
 	} finally {
 		Listener = listener;
 	}
-	return makeComputationNode(node, f, seed, Flag.Static | flags);
+	return makeProcedureNode(node, f, seed, Flag.Static | flags);
 }
 
 /**
@@ -1065,6 +1104,7 @@ function getCandidateNode() {
 	}
 }
 
+
 /**
  * @template T
  * @param {Computation<T>} node 
@@ -1094,15 +1134,44 @@ function makeComputationNode(node, fn, seed, flags) {
 	}
 	Owner = owner;
 	Listener = listener;
+	recycleOrClaimNode(node, fn, seed, flags);
+	if (toplevel) {
+		finishToplevelExecution();
+	}
+}
+
+/**
+ * @template T
+ * @param {Computation<T>} node 
+ * @param {function(T): T} fn 
+ * @param {T} seed 
+ * @param {number} flags 
+ * @returns {function(): T}
+ */
+function makeProcedureNode(node, fn, seed, flags) {
+	var owner = Owner;
+	var listener = Listener;
+	var toplevel = State === System.Idle;
+	Owner = node;
+	Listener = (flags & (Flag.Dynamic | Flag.Static)) === Flag.Static ? null : node;
+	if (toplevel) {
+		Root.changes.reset();
+		Root.updates.reset();
+		try {
+			State = System.Compute;
+			seed = flags & Flag.Wait ? seed : fn(seed);
+		} finally {
+			State = System.Idle;
+			Owner = Listener = null;
+		}
+	} else {
+		seed = fn(seed);
+	}
+	Owner = owner;
+	Listener = listener;
 	var recycled = recycleOrClaimNode(node, fn, seed, flags);
 	if (toplevel) {
-		if (Root.changes.ln > 0 || Root.updates.ln > 0) {
-			try {
-				run(Root);
-			} finally {
-				State = System.Idle;
-			}
-		}
+		finishToplevelExecution();
 	}
 	if (recycled) {
 		return function () { return seed; }
@@ -1125,7 +1194,9 @@ function makeEnumerableNode(node, source, fn, params) {
 	var owner = Owner;
 	var listener = Listener;
 	var toplevel = State === System.Idle;
-	Owner = Listener = node;
+	logRead(source, node);
+	Owner = node;
+	Listener = null;
 	if (toplevel) {
 		Root.changes.reset();
 		Root.updates.reset();
@@ -1156,15 +1227,19 @@ function makeEnumerableNode(node, source, fn, params) {
 		}
 	}
 	if (toplevel) {
-		if (Root.changes.ln > 0 || Root.updates.ln > 0) {
-			try {
-				run(Root);
-			} finally {
-				State = System.Idle;
-			}
-		}
+		finishToplevelExecution();
 	}
 	return node;
+}
+
+function finishToplevelExecution() {
+	if (Root.changes.ln > 0 || Root.updates.ln > 0) {
+		try {
+			run(Root);
+		} finally {
+			State = System.Idle;
+		}
+	}
 }
 
 /**
@@ -1850,6 +1925,8 @@ module.exports = {
 	/* @strip */
 	cleanup: cleanup,
 	freeze: freeze,
+	bind: bind,
+	run: run,
 	fn: fn,
 	on: on,
 	root: root,
