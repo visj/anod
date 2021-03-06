@@ -399,7 +399,7 @@ Computation.prototype.update = function () {
 	this._val = this._fn(val);
 	if (this._flag & Flag.Trace) {
 		if (val !== this._val) {
-			markComputationsForUpdate(this, Root.time);
+			markComputationsForUpdate(this, Root.time - 1);
 		}
 	}
 	this._flag &= ~Flag.Running;
