@@ -6,11 +6,11 @@ export interface Signal<T> extends Procedure<T>{
 	(next: T): T;
 }
 
-export interface SignalEnumerable<T> {
+export interface Enumerable<T> {
 	val(): T[];
 
 	every(callback: (currentValue: T, index?: number) => boolean): Procedure<boolean>;
-	filter(callback: (currentValue: T, index?: number) => boolean): SignalEnumerable<T>;
+	filter(callback: (currentValue: T, index?: number) => boolean): Enumerable<T>;
 	find(calback: (element: T, index?: number) => boolean): Procedure<T>;
 	findIndex(callback: (element: T, index?: number) => boolean): Procedure<number>;
 	forEach(callback: (currentValue: T, index?: number) => boolean): void;
@@ -18,16 +18,16 @@ export interface SignalEnumerable<T> {
 	indexOf(searchElement: T, fromIndex?: number): Procedure<number>;
 	join(separator?: string): Procedure<string>;
 	lastIndexOf(searchElement: T, fromIndex?: number): Procedure<number>;
-	map<U>(fn: (currentValue: T, index?: number) => U): SignalEnumerable<U>;
+	map<U>(fn: (currentValue: T, index?: number) => U): Enumerable<U>;
 	reduce<U>(callback: (accumulator: U, currentValue: T, index?: number) => U, initialValue?: U): Procedure<U>;
 	reduceRight<U>(callback: (accumulator: U, currentValue: T, index?: number) => U, initialValue?: U): Procedure<U>;
-	reverse(): SignalEnumerable<T>;
-	slice(start?: number, end?: number): SignalEnumerable<T>;
+	reverse(): Enumerable<T>;
+	slice(start?: number, end?: number): Enumerable<T>;
 	some(callback: (element: T, index?: number) => boolean): Procedure<boolean>;
-	sort(compareFunction?: (firstEl: T, secondEl: T) => number): SignalEnumerable<T>;
+	sort(compareFunction?: (firstEl: T, secondEl: T) => number): Enumerable<T>;
 }
 
-export interface SignalArray<T> extends SignalEnumerable<T> {
+export interface DataArray<T> extends Enumerable<T> {
 	val(): T[];
 	val(next: T[]): T[];
 
@@ -53,7 +53,7 @@ export enum Flag {
 	Enumerable = 256,
 }
 
-export function array<T>(val: T[]): SignalArray<T>;
+export function array<T>(val: T[]): DataArray<T>;
 
 export function data<T>(val: T): Signal<T>;
 
@@ -82,7 +82,7 @@ export interface ChangeSet<T> {
 	readonly value: T | T[];
 }
 
-export interface Computation<T> {
+export interface ComputationProto<T> {
 	readonly _flag: number;
 	readonly _val: T;
 	readonly _node1: ComputationProto<unknown>;
@@ -91,18 +91,18 @@ export interface Computation<T> {
 	readonly _slots: number[];
 	readonly _fn: (seed: T) => T;
 	readonly _age: number;
-	readonly _source1: SignalProto<unknown>;
+	readonly _source1: DataProto<unknown>;
 	readonly _source1slot: number;
-	readonly _sources: SignalProto<unknown>[];
+	readonly _sources: DataProto<unknown>[];
 	readonly _sourceslots: number[];
 }
 
 export interface ComputationConstructor {
-	new<T>(): Computation<T>;
-	readonly prototype: Computation<unknown>;
+	new<T>(): ComputationProto<T>;
+	readonly prototype: ComputationProto<unknown>;
 }
 
-export interface Data<T> {
+export interface DataProto<T> {
 	readonly _flag: number;
 	readonly _val: T;
 	readonly _node1: ComputationProto<unknown>;
@@ -113,39 +113,40 @@ export interface Data<T> {
 }
 
 export interface DataConstructor {
-	new<T>(): Data<T>;
-	readonly prototype: Data<unknown>;
+	new<T>(): DataProto<T>;
+	readonly prototype: DataProto<unknown>;
 }
 
-export interface Value<T> extends Data<T> {
+export interface ValueProto<T> extends DataProto<T> {
 	readonly _eq?: (a: T, b: T) => boolean;
 }
 
 export interface ValueConstructor {
-	new<T>(): Value<T>;
-	readonly prototype: Value<unknown>;
+	new<T>(): ValueProto<T>;
+	readonly prototype: ValueProto<unknown>;
 }
 
-export interface DataEnumerable<T> extends Computation<T>, SignalEnumerable<T> { }
+export interface DataEnumerableProto<T> extends Computation<T>, Enumerable<T> { }
 
-export interface EnumerableConstructor {
-	readonly prototype: DataEnumerable<unknown>;
+export interface DataEnumerableConstructor {
+	new<T>(): DataEnumerableProto<T>;
+	readonly prototype: DataEnumerableProto<unknown>;
 }
 
-export interface DataArray<T> extends SignalArray<T> {
+export interface DataArrayProto<T> extends DataArray<T> {
 	readonly _age: number;
 	readonly _mut: ChangeSet<T> | ChangeSet<T>[];
 	readonly _pmut: ChangeSet<T> | ChangeSet<T>[];
 }
 
 export interface DataArrayConstructor {
-	new<T>(): DataArray<T>;
-	readonly prototype: DataArray<unknown>;
+	new<T>(): DataArrayProto<T>;
+	readonly prototype: DataArrayProto<unknown>;
 }
 
-export const Computation: ComputationConstructor;
 export const Data: DataConstructor;
 export const Value: ValueConstructor;
-export const Enumerable: EnumerableConstructor;
+export const Computation: ComputationConstructor;
+export const DataEnumerable: DataEnumerableConstructor;
 export const DataArray: DataArrayConstructor;
 
