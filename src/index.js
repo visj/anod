@@ -228,21 +228,9 @@ function Data(val) {
 	 */
 	this._val = val;
 	/**
-	 * @type {Computation}
+	 * @type {Log<Computation>}
 	 */
-	this._node1 = null;
-	/**
-	 * @type {number}
-	 */
-	this._slot1 = -1;
-	/**
-	 * @type {Array<Computation>}
-	 */
-	this._nodes = null;
-	/**
-	 * @type {Array<number>}
-	 */
-	this._slots = null;
+	this._log = null;
 	/**
 	 * @type {T|Object}
 	 */
@@ -273,8 +261,8 @@ Data.prototype.set = function (val) {
 Data.prototype.update = function () {
 	this._val = this._pval;
 	this._pval = NotPending;
-	if (this._node1 !== null || this._nodes !== null) {
-		markComputationsForUpdate(this, Root.time);
+	if (this._log !== null) {
+		markComputationsForUpdate(this._log, Root.time);
 	}
 }
 
@@ -319,8 +307,8 @@ Value.prototype.set = function (val) {
 Value.prototype.update = function () {
 	this._val = this._pval;
 	this._pval = NotPending;
-	if (this._node1 !== null || this._nodes !== null) {
-		markComputationsForUpdate(this, Root.time);
+	if (this._log !== null) {
+		markComputationsForUpdate(this._log, Root.time);
 	}
 }
 
@@ -338,21 +326,9 @@ function Computation() {
 	 */
 	this._val = null;
 	/**
-	 * @type {Computation}
+	 * @type {Log<Computation>}
 	 */
-	this._node1 = null;
-	/**
-	 * @type {number}
-	 */
-	this._slot1 = -1;
-	/**
-	 * @type {Array<Computation>}
-	 */
-	this._nodes = null;
-	/**
-	 * @type {Array<Computation>}
-	 */
-	this._slots = null;
+	this._log = null;
 	/**
 	 * @type {null|function(T): T}
 	 */
@@ -362,21 +338,9 @@ function Computation() {
 	 */
 	this._age = -1;
 	/**
-	 * @type {Data|Computation}
+	 * @type {Log<Data|Computation>}
 	 */
-	this._source1 = null;
-	/**
-	 * @type {number}
-	 */
-	this._source1slot = -1;
-	/**
-	 * @type {Array<Data|Computation>}
-	 */
-	this._sources = null;
-	/**
-	 * @type {Array<number>}
-	 */
-	this._sourceslots = null;
+	this._src = null;
 	/**
 	 * @type {Computation}
 	 */
@@ -447,8 +411,7 @@ Computation.prototype.update = function () {
 
 Computation.prototype.dispose = function () {
 	this.fn = null;
-	this._node1 = null;
-	this._nodes = null;
+	this._log = null;
 	cleanupNode(this, true);
 }
 
@@ -832,8 +795,8 @@ DataArray.prototype.update = function () {
 		this._pmut = null;
 		this._age = Root.time;
 	}
-	if (this._node1 !== null || this._nodes !== null) {
-		markComputationsForUpdate(this, Root.time);
+	if (this._log !== null) {
+		markComputationsForUpdate(this._log, Root.time);
 	}
 }
 
@@ -972,8 +935,7 @@ DataEnumerable.prototype.update = function () {
 
 DataEnumerable.prototype.dispose = function () {
 	this._fn = null;
-	this._node1 = null;
-	this._nodes = null;
+	this._log = null;
 	cleanupNode(this, true);
 }
 
@@ -1363,7 +1325,7 @@ function finishToplevelExecution() {
 function recycleOrClaimNode(node, fn, val, flags) {
 	var i, ln;
 	var owner = flags & Flag.Orphan || Owner === null || Owner === Unowned ? null : Owner;
-	var recycle = node._source1 === null && (node._owned === null && node._cleanups === null || owner !== null);
+	var recycle = node._src === null && (node._owned === null && node._cleanups === null || owner !== null);
 	if (recycle) {
 		Recycled = node;
 		if (owner !== null) {
@@ -1413,30 +1375,46 @@ function recycleOrClaimNode(node, fn, val, flags) {
  * @param {Computation} to
  */
 function logRead(from, to) {
+	/** @type {Log<Computation>} */
+	var log;
+	/** @type {Log<Data|Computation>} */
+	var src;
+	/** @type {number} */
 	var fromslot;
-	var toslot = to._source1 === null ? -1 : to._sources === null ? 0 : to._sources.length;
-	if (from._node1 === null) {
-		from._node1 = to;
-		from._slot1 = toslot;
+	if (from._log === null) {
+		log = from._log = new Log();
+	} else {
+		log = from._log;
+	}
+	if (to._src === null) {
+		src = to._src = new Log();
+	} else {
+		src = to._src;
+	}
+	/** @type {number} */
+	var toslot = src._node1 === null ? -1 : src._nodes === null ? 0 : src._nodes.length;
+	if (log._node1 === null) {
+		log._node1 = to;
+		log._slot1 = toslot;
 		fromslot = -1;
-	} else if (from._nodes === null) {
-		from._nodes = [to];
-		from._slots = [toslot];
+	} else if (log._nodes === null) {
+		log._nodes = [to];
+		log._slots = [toslot];
 		fromslot = 0;
 	} else {
-		fromslot = from._nodes.length;
-		from._nodes.push(to);
-		from._slots.push(toslot);
+		fromslot = log._nodes.length;
+		log._nodes.push(to);
+		log._slots.push(toslot);
 	}
-	if (to._source1 === null) {
-		to._source1 = from;
-		to._source1slot = fromslot;
-	} else if (to._sources === null) {
-		to._sources = [from];
-		to._sourceslots = [fromslot];
+	if (src._node1 === null) {
+		src._node1 = from;
+		src._slot1 = fromslot;
+	} else if (src._nodes === null) {
+		src._nodes = [from];
+		src._slots = [fromslot];
 	} else {
-		to._sources.push(from);
-		to._sourceslots.push(fromslot);
+		src._nodes.push(from);
+		src._slots.push(fromslot);
 	}
 	if (from._flag & (Flag.Trace | Flag.Watch)) {
 		if (to._flag & Flag.Watch) {
@@ -1453,7 +1431,7 @@ function logRead(from, to) {
 
 /**
  * @template T
- * @param {Data<T>|Computation<T>} node
+ * @param {Data<T>} node
  * @param {T} val
  * @returns {T}
  */
@@ -1468,7 +1446,7 @@ function logWrite(node, val) {
 			Root.changes.add(node);
 		}
 	} else {
-		if (node._node1 !== null || node._nodes !== null) {
+		if (node._log !== null) {
 			node._pval = val;
 			Root.changes.add(node);
 			execute();
@@ -1500,7 +1478,7 @@ function logMutate(node, changeset) {
 		}
 	} else {
 		node._flag |= Flag.Single;
-		if (node._node1 !== null || node._nodes !== null) {
+		if (node._log !== null) {
 			node._pmut = changeset;
 			Root.changes.add(node);
 			execute();
@@ -1525,18 +1503,23 @@ function logPendingSource(to, slot) {
 	} else {
 		to._traces.push(slot);
 	}
-	var node1 = to._node1;
-	var nodes = to._nodes;
-	if (node1 !== null) {
-		logPendingSource(node1, -1);
-	}
-	if (nodes !== null) {
-		for (i = 0, ln = nodes.length; i < ln; i++) {
-			node1 = nodes[i];
-			logPendingSource(nodes[i], i);
+	var log = to._log;
+	if (log !== null) {
+		var node1 = log._node1;
+		var nodes = log._nodes;
+		if (node1 !== null) {
+			logPendingSource(node1, -1);
+		}
+		if (nodes !== null) {
+			for (i = 0, ln = nodes.length; i < ln; i++) {
+				node1 = nodes[i];
+				logPendingSource(nodes[i], i);
+			}
 		}
 	}
-	logPendingOwner(to);
+	if (to._owned !== null) {
+		logPendingOwner(to);
+	}
 }
 
 /**
@@ -1624,12 +1607,12 @@ function tick(clock) {
 }
 
 /**
- * @param {Data|Computation} data
+ * @param {Log<Computation>} log
  * @param {number} time
  */
-function markComputationsForUpdate(data, time) {
-	var node = data._node1;
-	var nodes = data._nodes;
+function markComputationsForUpdate(log, time) {
+	var node = log._node1;
+	var nodes = log._nodes;
 	if (node !== null) {
 		if (node._age < time) {
 			markComputationForUpdate(node, time);
@@ -1662,8 +1645,8 @@ function markComputationForUpdate(node, time) {
 		markComputationsDisposed(node._owned, time);
 	}
 	if (!(node._flag & Flag.Trace)) {
-		if (node._node1 !== null || node._nodes !== null) {
-			markComputationsForUpdate(node, time);
+		if (node._log !== null) {
+			markComputationsForUpdate(node._log, time);
 		}
 	}
 }
@@ -1678,7 +1661,9 @@ function markPendingComputations(node, val) {
 	} else if (node._val === val) {
 		return;
 	}
-	markComputationsForUpdate(node, Root.time);
+	if (node._log !== null) {
+		markComputationsForUpdate(node._log, Root.time);
+	}
 }
 
 
@@ -1709,6 +1694,8 @@ function markComputationsDisposed(nodes, time) {
 function applyUpstreamUpdates(node) {
 	/** @type {number} */
 	var slot;
+	/** @type {Log<Data|Computation>} */
+	var src = node._src;
 	/** @type {Computation} */
 	var source;
 	/** @type {Array<Data|Computation>} */
@@ -1722,10 +1709,10 @@ function applyUpstreamUpdates(node) {
 	}
 	if (!(node._flag & Flag.Disposed)) {
 		if (traces !== null) {
-			sources = node._sources;
+			sources = src._nodes;
 			for (var i = 0, ln = traces.length; i < ln; i++) {
 				slot = traces[i];
-				source = /** @type {Computation} */(slot === -1 ? node._source1 : sources[slot]);
+				source = /** @type {Computation} */(slot === -1 ? src._node1 : sources[slot]);
 				if (source._flag & Flag.Watch) {
 					applyUpstreamUpdates(source);
 				}
@@ -1746,6 +1733,8 @@ function cleanupNode(node, final) {
 	var i;
 	/** @type {number} */
 	var ln;
+	/** @type {number} */
+	var flag = node._flag;
 	/** @type {Array<Computation>} */
 	var owned = node._owned;
 	/** @type {Array<function(boolean): void>} */
@@ -1760,8 +1749,6 @@ function cleanupNode(node, final) {
 			owned[i].dispose();
 		}
 	}
-	/** @type {number} */
-	var flag = node._flag;
 	if (final) {
 		cleanupSources(node);
 	} else if (flag & (Flag.Static | Flag.Dynamic)) {
@@ -1771,6 +1758,7 @@ function cleanupNode(node, final) {
 	} else if (flag & Flag.Unbound) {
 		cleanupSources(node);
 	}
+
 }
 
 /**
@@ -1778,19 +1766,22 @@ function cleanupNode(node, final) {
  * @param {Computation} node 
  */
 function cleanupSources(node) {
-	if (node._source1 !== null) {
-		cleanupSource(node._source1, node._source1slot);
-	}
-	/** @type {Array<Data|Computation>} */
-	var sources = node._sources;
-	if (sources !== null) {
-		/** @type {Array<number>} */
-		var sourceslots = node._sourceslots;
-		for (var i = 0, ln = sources.length; i < ln; i++) {
-			cleanupSource(sources.pop(), sourceslots.pop());
+	/** @type {Log<Data|Computation>} */
+	var src = node._src;
+	if (src !== null) {
+		if (src._node1 !== null) {
+			cleanupSource(src._node1, src._slot1);
+		}
+		/** @type {Array<Data|Computation>} */
+		var sources = src._nodes;
+		if (sources !== null) {
+			/** @type {Array<number>} */
+			var sourceslots = src._slots;
+			for (var i = 0, ln = sources.length; i < ln; i++) {
+				cleanupSource(sources.pop(), sourceslots.pop());
+			}
 		}
 	}
-	node._trace1 = -1;
 	node._traces = null;
 }
 
@@ -1799,26 +1790,30 @@ function cleanupSources(node) {
  * @param {number} slot
  */
 function cleanupSource(source, slot) {
+	var src;
+	/** @type {Log<Computation>} */
+	var log = source._log;
 	/** @type {Computation} */
 	var last;
 	/** @type {number} */
 	var lastslot;
 	if (slot === -1) {
-		source._node1 = null;
+		log._node1 = null;
 	} else {
 		/** @type {Array<Computation>} */
-		var nodes = source._nodes;
+		var nodes = log._nodes;
 		/** @type {Array<number>} */
-		var nodeslots = source._slots;
+		var nodeslots = log._slots;
 		last = nodes.pop();
 		lastslot = nodeslots.pop();
 		if (slot !== nodes.length) {
+			src = last._src;
 			nodes[slot] = last;
 			nodeslots[slot] = lastslot;
 			if (lastslot === -1) {
-				last._source1slot = slot;
+				src._slot1 = slot;
 			} else {
-				last._sourceslots[lastslot] = slot;
+				src._slots[lastslot] = slot;
 			}
 		}
 	}
