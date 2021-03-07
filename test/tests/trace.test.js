@@ -30,33 +30,6 @@ module.exports = function (t) {
 			});
 		});
 
-		t.test('applies updates to changed dependees as fn', t => {
-			root(() => {
-				let s1 = data(0);
-				let order = '';
-				let t1 = fn(() => {
-					order += 't1';
-					return s1() === 0;
-				}, null, Flag.Trace);
-				fn(() => {
-					order += 'c1';
-					return s1();
-				});
-				fn(() => {
-					order += 'c2';
-					return t1();
-				});
-
-				t.equal(order, 't1c1c2');
-				order = '';
-				s1(1);
-				t.equal(order, 't1c1c2');
-				order = '';
-				s1(1);
-				t.equal(order, 't1c1');
-			});
-		});
-
 		t.test('updates downstream pending nodes', t => {
 			root(() => {
         let s1 = data(0);

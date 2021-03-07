@@ -1,5 +1,5 @@
 const { Test } = require('boer');
-const { array, freeze } = require('../../src');
+const { array, fn, freeze } = require('../../src');
 
 /**
  * 
@@ -173,6 +173,23 @@ module.exports = function(t) {
 				t.equal(d.val(), [1,2,5,6]);
 				d.removeRange(8, 2);
 				t.equal(d.val(), [1,2,5,6]);
+			});
+		});
+
+		t.test('reactivity', t => {
+			t.test('can be listened to by nodes', t => {
+				let d = array([1,2,3]);
+				let c1 = fn(() => d.val());
+				t.equal(c1(), [1,2,3]);
+			});
+
+			t.test('updates node on change', t => {
+				let d = array([1,2,3]);
+				let c1 = fn(() => d.val());
+				let c2 = fn(() => d.val());
+				d.val([4,5,6]);
+				t.equal(c1(), [4,5,6]);
+				t.equal(c2(), [4,5,6]);
 			});
 		});
 	});
