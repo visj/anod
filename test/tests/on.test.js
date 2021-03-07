@@ -1,5 +1,5 @@
 const { Test } = require('boer');
-const { data, Flag, on, root } = require('../../src');
+const { data, Flag, on, root } = require('../..');
 
 /**
  * @param {Test} t

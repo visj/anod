@@ -435,150 +435,30 @@ Computation.prototype.dispose = function () {
 	cleanupNode(this, true);
 }
 
-/* @module */
-
 /**
  * @interface
- * @template T
  */
 function IEnumerable() { }
 
 /**
- * @returns {Array<T>}
- */
-IEnumerable.prototype.val = function () { }
-
-/**
- * 
  * @param {function(T,number=): boolean} callback 
  * @returns {function(): boolean}
  */
-IEnumerable.prototype.every = function (callback) { }
+IEnumerable.prototype.every = function(callback) { }
 
 /**
  * 
  * @param {function(T,number=): boolean} callback 
- * @returns {IEnumerable<T>}
+ * @returns {Enumerable<T>}
  */
-IEnumerable.prototype.filter = function (callback) { }
-
-/**
- * 
- * @param {function(T,number=): boolean} callback
- * @returns {function(): T} 
- */
-IEnumerable.prototype.find = function (callback) { }
-
-/**
- * 
- * @param {function(T,number=): boolean} callback 
- * @param {number=} index 
- * @returns {function(): number}
- */
-IEnumerable.prototype.findIndex = function (callback, index) { }
-
-/**
- * 
- * @param {function(T,number=): void} callback 
- * @returns {void}
- */
-IEnumerable.prototype.forEach = function (callback) { }
-
-/**
- * 
- * @param {T} valueToFind 
- * @param {number=} fromIndex
- * @returns {function(): boolean}
- */
-IEnumerable.prototype.includes = function (valueToFind, fromIndex) { }
-
-/**
- * 
- * @param {T} searchElement 
- * @param {number=} fromIndex 
- * @returns {function(): number}
- */
-IEnumerable.prototype.indexOf = function (searchElement, fromIndex) { }
-
-/**
- * 
- * @param {string=} separator 
- * @returns {function(): string}
- */
-IEnumerable.prototype.join = function (separator) { }
-
-/**
- * 
- * @param {T} searchElement 
- * @param {number=} fromIndex
- * @returns {function(): number}
- */
-IEnumerable.prototype.lastIndexOf = function (searchElement, fromIndex) { }
-
-/**
- * @template U
- * @param {function(T,number=): U} callback
- * @returns {IEnumerable<U>} 
- */
-IEnumerable.prototype.map = function (callback) { }
-
-/**
- * @template U
- * @param {function(U,T,number=): U} callback 
- * @param {U=} initialValue
- * @returns {function(): U} 
- */
-IEnumerable.prototype.reduce = function (callback, initialValue) { }
-
-/**
- * @template U
- * @param {function(U,T,number=): U} callback 
- * @param {U=} initialValue
- * @returns {function(): U} 
- */
-IEnumerable.prototype.reduceRight = function (callback, initialValue) { }
-
-/**
- * @returns {IEnumerable<T>}
- */
-IEnumerable.prototype.reverse = function () { }
-
-/**
- * 
- * @param {number=} start 
- * @param {number=} end
- * @returns {IEnumerable<T>}
- */
-IEnumerable.prototype.slice = function (start, end) { }
-
-/**
- * 
- * @param {function(T,number=): boolean} callback
- * @returns {function(): boolean} 
- */
-IEnumerable.prototype.some = function (callback) { }
-
-/**
- * 
- * @param {function(T,T): number=} compareFunction
- * @returns {IEnumerable<T>}
- */
-IEnumerable.prototype.sort = function (compareFunction) { }
-
-/* @module */
+IEnumerable.prototype.filter = function(callback) { }
 
 /**
  * @template T
  * @constructor
  * @implements {IEnumerable<T>}
- * @extends {Computation<Array<T>>}
  */
-function Enumerable() {
-	/** @type {function(): Array<T>} */
-	this.val;
-	/** @type {function(): (ChangeSet|Array<ChangeSet>)} */
-	this.mut;
-}
+function Enumerable() { }
 
 /**
  * @param {function(T,number=): boolean} callback 
@@ -586,29 +466,22 @@ function Enumerable() {
  */
 Enumerable.prototype.every = function (callback) {
 	var self = this;
-	/** @const @type {boolean} */
 	var pure = callback.length === 1;
 	return on(self.val, function (seed) {
-		/** @type {number} */
-		var i;
-		/** @type {number} */
-		var ln;
-		/** @const @type {Array<?>} */
+		var i, ln;
 		var items = self.val();
 		if (seed !== void 0 && pure) {
-			/** @const @type {ChangeSet|Array<ChangeSet>} */
 			var mut = self.mut();
 			if (mut !== null) {
-				/** @type {boolean|void} */
 				var result;
 				if (self._flag & 1024) {
-					result = applyEveryMutation(/** @type {ChangeSet} */(mut), callback, seed);
+					result = applyEveryMutation(mut, callback, seed);
 					if (result !== void 0) {
 						return result;
 					}
 				} else {
-					for (i = 0, ln = /** @type {Array<ChangeSet>} */(mut).length; i < ln; i++) {
-						result = applyEveryMutation(/** @type {Array<ChangeSet>} */(mut)[i], callback, seed);
+					for (i = 0, ln = mut.length; i < ln; i++) {
+						result = applyEveryMutation(mut[i], callback, seed);
 						if (result === void 0) {
 							break;
 						}
@@ -642,21 +515,13 @@ Enumerable.prototype.every = function (callback) {
  * @returns {IEnumerable<T>}
  */
 Enumerable.prototype.filter = function (callback) {
-	/** @const @type {IEnumerable<T>} */
 	var self = this;
-	/** @const @type {boolean} */
 	var pure = callback.length === 1;
-	return makeEnumerableNode(new DataEnumerable(), /** @type {?} */(self), function (seed) {
-		/** @type {number} */
-		var i;
-		/** @type {number} */
-		var ln;
-		/** @type {Array} */
+	return makeEnumerableNode(new DataEnumerable(), self, function (seed) {
+		var i, ln;
 		var items = self.val();
-		/** @type {Array} */
 		var newItems = [];
 		for (i = 0, ln = items.length; i < ln; i++) {
-			/** @type {?} */
 			var item = items[i];
 			if (callback(item, i)) {
 				newItems.push(item);
@@ -672,29 +537,20 @@ Enumerable.prototype.filter = function (callback) {
  * @returns {function(): T} 
  */
 Enumerable.prototype.find = function (callback) {
-	/** @type {IEnumerable<T>} */
 	var self = this;
-	/** @type {number} */
 	var index = -1;
-	/** @const @type {boolean} */
 	var pure = callback.length === 1;
 	return on(self.val, function (seed) {
-		/** @type {number} */
 		var i;
-		/** @type {number} */
 		var ln;
-		/** @type {?} */
 		var item;
-		/** @type {Array} */
 		var items = self.val();
 		if (seed !== Void && pure) {
-			/** @type {ChangeSet|Array<ChangeSet>} */
 			var mut = self.mut();
 			if (mut !== null) {
-				/** @type {?} */
 				var result;
 				if (self._flag & 1024) {
-					var type = /** @type {ChangeSet} */(mut).type;
+					var type = mut.type;
 					if (seed === void 0) {
 						if (type & 32) {
 							if (type & 16) {
@@ -744,7 +600,7 @@ Enumerable.prototype.find = function (callback) {
 		}
 		index = -1;
 		return void 0;
-	}, /** @type {?} */(Void), 2);
+	}, Void, 2);
 }
 
 
@@ -755,7 +611,6 @@ Enumerable.prototype.find = function (callback) {
  * @returns {function(): number}
  */
 Enumerable.prototype.findIndex = function (callback, index) {
-	/** @const @type {IEnumerable<T>} */
 	var self = this;
 	return on(self.val, function () {
 		var i, ln, item;
@@ -767,7 +622,7 @@ Enumerable.prototype.findIndex = function (callback, index) {
 			}
 		}
 		return -1;
-	}, /** @type {?} */(void 0), 2);
+	}, void 0, 2);
 }
 
 /**
@@ -776,9 +631,8 @@ Enumerable.prototype.findIndex = function (callback, index) {
  * @returns {void}
  */
 Enumerable.prototype.forEach = function (callback) {
-	/** @const @type {IEnumerable<T>} */
 	var self = this;
-	makeEnumerableNode(new DataEnumerable(), /** @type {?} */(self), function (seed) {
+	makeEnumerableNode(new DataEnumerable(), self, function (seed) {
 		var items = self.val();
 		for (var i = 0, ln = items.length; i < ln; i++) {
 			callback(items[i], i);
@@ -793,7 +647,6 @@ Enumerable.prototype.forEach = function (callback) {
  * @returns {function(): boolean}
  */
 Enumerable.prototype.includes = function (valueToFind, fromIndex) {
-	/** @const @type {IEnumerable<T>} */
 	var self = this;
 	return on(self.val, function () {
 		var i, ln;
@@ -804,7 +657,7 @@ Enumerable.prototype.includes = function (valueToFind, fromIndex) {
 			}
 		}
 		return false;
-	}, /** @type {?} */(void 0), 2);
+	}, void 0, 2);
 }
 
 /**
@@ -814,7 +667,6 @@ Enumerable.prototype.includes = function (valueToFind, fromIndex) {
  * @returns {function(): number}
  */
 Enumerable.prototype.indexOf = function (searchElement, fromIndex) {
-	/** @const @type {IEnumerable<T>} */
 	var self = this;
 	return on(self.val, function (seed) {
 		var i, ln, item;
@@ -826,7 +678,7 @@ Enumerable.prototype.indexOf = function (searchElement, fromIndex) {
 			}
 		}
 		return -1;
-	}, /** @type {?} */(void 0), 2);
+	}, void 0, 2);
 }
 
 /**
@@ -835,11 +687,10 @@ Enumerable.prototype.indexOf = function (searchElement, fromIndex) {
  * @returns {function(): string}
  */
 Enumerable.prototype.join = function (separator) {
-	/** @const @type {IEnumerable<T>} */
 	var self = this;
 	return on(self.val, function () {
 		return self.val().join(separator);
-	}, /** @type {?} */(void 0), 2);
+	}, void 0, 2);
 }
 
 /**
@@ -849,7 +700,6 @@ Enumerable.prototype.join = function (separator) {
  * @returns {function(): number}
  */
 Enumerable.prototype.lastIndexOf = function (searchElement, fromIndex) {
-	/** @const @type {IEnumerable<T>} */
 	var self = this;
 	return on(self.val, function (seed) {
 		var i, item;
@@ -861,34 +711,21 @@ Enumerable.prototype.lastIndexOf = function (searchElement, fromIndex) {
 			}
 		}
 		return -1;
-	}, /** @type {?} */(void 0), 2);
+	}, void 0, 2);
 }
 
 
 /**
  * @template U
  * @param {function(T,number=): U} callback
- * @returns {IEnumerable<U>} 
+ * @returns {Enumerable<U>} 
  */
 Enumerable.prototype.map = function (callback) {
-	/** @const @type {IEnumerable<T>} */
 	var self = this;
-	/** @type {Array<Computation>} */
 	var nodes = [];
-	return makeEnumerableNode(new DataEnumerable(), /** @type {?} */(self), function (seed) {
-		/** @type {number} */
-		var i;
-		/** @type {number} */
-		var j;
-		/** @type {number} */
-		var ln;
-		/** @type {Computation} */
-		var node;
-		/** @type {Array} */
+	return makeEnumerableNode(new DataEnumerable(), self, function (seed) {
+		var i, j, ln, node;
 		var items = self.val();
-		/**
-		 * @type {function(): ?}
-		 */
 		var mapper = function () {
 			return callback(items[j], j);
 		}
@@ -928,23 +765,11 @@ Enumerable.prototype.map = function (callback) {
  * @returns {function(): U} 
  */
 Enumerable.prototype.reduce = function (callback, initialValue) {
-	/** @const @type {IEnumerable<T>} */
 	var self = this;
-	/** @const @type {string} */
 	var type = typeof initialValue;
-	/**
-	 * @const
-	 * @type {boolean}
-	 */
 	var skip = arguments.length === 1;
 	return on(self.val, function () {
-		/** @type {number} */
-		var i;
-		/** @type {number} */
-		var ln;
-		/** @type {U} */
-		var result;
-		/** @type {Array<?>} */
+		var i, ln, result;
 		var items = self.val();
 		if (skip) {
 			i = 1;
@@ -957,7 +782,7 @@ Enumerable.prototype.reduce = function (callback, initialValue) {
 			result = callback(result, items[i], i);
 		}
 		return result;
-	}, /** @type {?} */(void 0), 2);
+	}, void 0, 2);
 }
 
 /**
@@ -967,11 +792,8 @@ Enumerable.prototype.reduce = function (callback, initialValue) {
  * @returns {function(): U} 
  */
 Enumerable.prototype.reduceRight = function (callback, initialValue) {
-	/** @const @type {IEnumerable<T>} */
 	var self = this;
-	/** @const @type {string} */
 	var type = typeof initialValue;
-	/** @const @type {boolean} */
 	var skip = arguments.length === 1;
 	return on(self.val, function (seed) {
 		var i;
@@ -988,16 +810,15 @@ Enumerable.prototype.reduceRight = function (callback, initialValue) {
 			result = callback(result, items[i], i);
 		}
 		return result;
-	}, /** @type {?} */(void 0), 2);
+	}, void 0, 2);
 }
 
 /**
- * @returns {IEnumerable<T>}
+ * @returns {Enumerable<T>}
  */
 Enumerable.prototype.reverse = function () {
-	/** @const @type {IEnumerable<T>} */
 	var self = this;
-	return makeEnumerableNode(new DataEnumerable(), /** @type {?} */(self), function () {
+	return makeEnumerableNode(new DataEnumerable(), self, function () {
 		var items = self.val();
 		var newItems = [];
 		for (var i = items.length - 1, j = 0; i >= 0; i--, j++) {
@@ -1011,15 +832,12 @@ Enumerable.prototype.reverse = function () {
  * 
  * @param {number=} start 
  * @param {number=} end
- * @returns {IEnumerable<T>}
+ * @returns {Enumerable<T>}
  */
 Enumerable.prototype.slice = function (start, end) {
-	/** @const @type {IEnumerable<T>} */
 	var self = this;
-	return makeEnumerableNode(new DataEnumerable(), /** @type {?} */(self), function (seed) {
-		/** @type {Array} */
+	return makeEnumerableNode(new DataEnumerable(), self, function (seed) {
 		var items = self.val();
-		/** @type {Array} */
 		var newItems = [];
 		if (start !== void 0) {
 			if (start < 0) {
@@ -1069,7 +887,6 @@ Enumerable.prototype.slice = function (start, end) {
  * @returns {function(): boolean} 
  */
 Enumerable.prototype.some = function (callback) {
-	/** @const @type {IEnumerable<T>} */
 	var self = this;
 	return on(self.val, function (seed) {
 		var i, ln;
@@ -1086,10 +903,9 @@ Enumerable.prototype.some = function (callback) {
 /**
  * 
  * @param {function(T,T): number=} compareFunction
- * @returns {IEnumerable<T>}
+ * @returns {Enumerable<T>}
  */
 Enumerable.prototype.sort = function (compareFunction) {
-	/** @const @type {IEnumerable<T>} */
 	var self = this;
 	return makeEnumerableNode(new DataEnumerable(), this, function (seed) {
 		var items = self.val();
@@ -1103,14 +919,16 @@ Enumerable.prototype.sort = function (compareFunction) {
  * @template T
  * @constructor
  * @extends {Data<Array<T>>}
- * @implements {IEnumerable<T>}
+ * @extends {Enumerable<T>}
  * @param {Array<T>} val
  */
 function DataArray(val) {
-	var self = /** @type {?} */(this);
+	var self = this;
 	Data.call(self, val);
 	/**
-	 * @type {function(Array<T>=): Array<T>}
+	 * 
+	 * @param {T=} next 
+	 * @returns {Array<T>}
 	 */
 	this.val = function (next) {
 		if (arguments.length > 0) {
@@ -1151,16 +969,16 @@ DataArray.prototype.update = function () {
 		this._pval = Void;
 		this._mut = null;
 	} else {
-		if (this._flag & 1024) {
-			applyMutation(this, /** @type {ChangeSet} */(this._pmut));
-		}
-		else {
-			for (var i = 0, ln = this._pmut.length; i < ln; i++) {
-				applyMutation(this, this._pmut[i]);
-			}
-		}
 		this._mut = this._pmut;
 		this._pmut = null;
+		if (this._flag & 1024) {
+			applyMutation(this, this._mut);
+		}
+		else {
+			for (var i = 0, ln = this._mut.length; i < ln; i++) {
+				applyMutation(this, this._mut[i]);
+			}
+		}
 	}
 	if (this._log !== null) {
 		markComputationsForUpdate(this._log, Root.time);
@@ -1241,14 +1059,14 @@ DataArray.prototype.unshift = function (item) {
 /**
  * @template T
  * @constructor
+ * @extends {Enumerable<T>}
  * @extends {Computation<Array<T>>}
- * @implements {IEnumerable<T>}
  */
 function DataEnumerable() {
 	var self = this;
 	Computation.call(this);
 	/**
-	 * @type {function(): Array<T>}
+	 * @returns {Array<T>}
 	 */
 	this.val = function () {
 		if (Listener !== null) {
@@ -1321,30 +1139,13 @@ DataEnumerable.prototype.dispose = function () {
  */
 
 /**
- * @record
  * @template T
+ * @typedef ChangeSet
+ * @property {number} type
+ * @property {number=} index
+ * @property {number=} count
+ * @property {T|Array<T>=} value
  */
-function ChangeSet() { }
-
-/**
- * @type {number}
- */
-ChangeSet.prototype.type;
-
-/**
- * @type {number|undefined}
- */
-ChangeSet.prototype.index;
-
-/**
- * @type {number|undefined}
- */
-ChangeSet.prototype.count;
-
-/**
- * @type {T|Array<T>|undefined}
- */
-ChangeSet.prototype.value;
 
 /**
  * @const
@@ -1484,7 +1285,6 @@ function getCandidateNode() {
  * @param {Array<function(): ?>|(function(): ?)} src 
  */
 function bindSource(node, src) {
-	/** @type {Computation} */
 	var listener = Listener;
 	try {
 		Listener = node;
@@ -1509,14 +1309,15 @@ function bindSource(node, src) {
  * @returns {void}
  */
 function makeComputationNode(node, fn, seed, flags) {
+	var clock = Root;
 	var owner = Owner;
 	var listener = Listener;
 	var toplevel = State === 0;
 	Owner = node;
 	Listener = flags & 16 ? null : node;
 	if (toplevel) {
-		Root.changes.reset();
-		Root.updates.reset();
+		clock.changes.reset();
+		clock.updates.reset();
 		try {
 			State = 1;
 			seed = flags & 1 ? seed : fn(seed);
@@ -1531,7 +1332,7 @@ function makeComputationNode(node, fn, seed, flags) {
 	Listener = listener;
 	recycleOrClaimNode(node, fn, seed, flags);
 	if (toplevel) {
-		finishToplevelExecution();
+		finishToplevelExecution(clock);
 	}
 }
 
@@ -1544,14 +1345,15 @@ function makeComputationNode(node, fn, seed, flags) {
  * @returns {function(): T}
  */
 function makeProcedureNode(node, fn, seed, flags) {
+	var clock = Root;
 	var owner = Owner;
 	var listener = Listener;
 	var toplevel = State === 0;
 	Owner = node;
 	Listener = flags & 16 ? null : node;
 	if (toplevel) {
-		Root.changes.reset();
-		Root.updates.reset();
+		clock.changes.reset();
+		clock.updates.reset();
 		try {
 			State = 1;
 			seed = flags & 1 ? seed : fn(seed);
@@ -1566,7 +1368,7 @@ function makeProcedureNode(node, fn, seed, flags) {
 	Listener = listener;
 	var recycled = recycleOrClaimNode(node, fn, seed, flags);
 	if (toplevel) {
-		finishToplevelExecution();
+		finishToplevelExecution(clock);
 	}
 	if (recycled) {
 		return function () { return seed; }
@@ -1583,9 +1385,10 @@ function makeProcedureNode(node, fn, seed, flags) {
  * @param {Computation<T>} source
  * @param {function(Array<U>): U} fn 
  * @param {number=} flags
- * @returns {IEnumerable<U>}
+ * @returns {Enumerable<U>}
  */
 function makeEnumerableNode(node, source, fn, flags) {
+	var clock = Root;
 	var owner = Owner;
 	var listener = Listener;
 	var toplevel = State === 0;
@@ -1593,8 +1396,8 @@ function makeEnumerableNode(node, source, fn, flags) {
 	Owner = node;
 	Listener = null;
 	if (toplevel) {
-		Root.changes.reset();
-		Root.updates.reset();
+		clock.changes.reset();
+		clock.updates.reset();
 		try {
 			State = 1;
 			node._val = fn([]);
@@ -1608,7 +1411,7 @@ function makeEnumerableNode(node, source, fn, flags) {
 	Owner = owner;
 	Listener = listener;
 	node._fn = fn;
-	node._age = Root.time;
+	node._age = clock.time;
 	node._flag |= flags;
 	if (owner !== null) {
 		if (owner._owned === null) {
@@ -1621,15 +1424,15 @@ function makeEnumerableNode(node, source, fn, flags) {
 		}
 	}
 	if (toplevel) {
-		finishToplevelExecution();
+		finishToplevelExecution(clock);
 	}
 	return node;
 }
 
-function finishToplevelExecution() {
-	if (Root.changes.ln > 0 || Root.updates.ln > 0) {
+function finishToplevelExecution(clock) {
+	if (clock.changes.ln > 0 || clock.updates.ln > 0) {
 		try {
-			tick(Root);
+			tick(clock);
 		} finally {
 			State = 0;
 		}
@@ -1697,12 +1500,7 @@ function recycleOrClaimNode(node, fn, val, flags) {
  * @param {Computation} to
  */
 function logRead(from, to) {
-	/** @type {Log<Computation>} */
-	var log;
-	/** @type {Log<Data|Computation>} */
-	var src;
-	/** @type {number} */
-	var fromslot;
+	var log, src, fromslot;
 	if (from._log === null) {
 		log = from._log = new Log();
 	} else {
@@ -1713,7 +1511,6 @@ function logRead(from, to) {
 	} else {
 		src = to._src;
 	}
-	/** @type {number} */
 	var toslot = src._node1 === null ? -1 : src._nodes === null ? 0 : src._nodes.length;
 	if (log._node1 === null) {
 		log._node1 = to;
@@ -1895,7 +1692,6 @@ function applyDisposes(node) {
  * 
  */
 function execute() {
-	/** @type {Computation} */
 	var owner = Owner;
 	Root.updates.reset();
 	try {
@@ -1997,7 +1793,6 @@ function markPendingComputations(node, val) {
  * @param {number} time
  */
 function markComputationsDisposed(nodes, time) {
-	/** @type {Computation} */
 	var node;
 	for (var i = 0, ln = nodes.length; i < ln; i++) {
 		node = nodes[i];
@@ -2017,17 +1812,9 @@ function markComputationsDisposed(nodes, time) {
  * @param {Computation} node 
  */
 function applyUpstreamUpdates(node) {
-	/** @type {number} */
-	var slot;
-	/** @type {Log<Data|Computation>} */
+	var slot, source, sources;
 	var src = node._src;
-	/** @type {Computation} */
-	var source;
-	/** @type {Array<Data|Computation>} */
-	var sources;
-	/** @type {Computation} */
 	var owner = node._owner;
-	/** @type {Array<number>} */
 	var traces = node._traces;
 	if (owner !== null) {
 		applyUpstreamUpdates(owner);
@@ -2037,7 +1824,7 @@ function applyUpstreamUpdates(node) {
 			sources = src._nodes;
 			for (var i = 0, ln = traces.length; i < ln; i++) {
 				slot = traces[i];
-				source = /** @type {Computation} */(slot === -1 ? src._node1 : sources[slot]);
+				source = slot === -1 ? src._node1 : sources[slot];
 				if (source._flag & (2 | 512)) {
 					applyUpstreamUpdates(source);
 				}
@@ -2054,15 +1841,9 @@ function applyUpstreamUpdates(node) {
  * @param {boolean} final 
  */
 function cleanupNode(node, final) {
-	/** @type {number} */
-	var i;
-	/** @type {number} */
-	var ln;
-	/** @type {number} */
+	var i, ln;
 	var flag = node._flag;
-	/** @type {Array<Computation>} */
 	var owned = node._owned;
-	/** @type {Array<function(boolean): void>} */
 	var cleanups = node._cleanups;
 	if (cleanups !== null) {
 		for (i = 0, ln = cleanups.length; i < ln; i++) {
@@ -2091,16 +1872,13 @@ function cleanupNode(node, final) {
  * @param {Computation} node 
  */
 function cleanupSources(node) {
-	/** @type {Log<Data|Computation>} */
 	var src = node._src;
 	if (src !== null) {
 		if (src._node1 !== null) {
 			cleanupSource(src._node1, src._slot1);
 		}
-		/** @type {Array<Data|Computation>} */
 		var sources = src._nodes;
 		if (sources !== null) {
-			/** @type {Array<number>} */
 			var sourceslots = src._slots;
 			for (var i = 0, ln = sources.length; i < ln; i++) {
 				cleanupSource(sources.pop(), sourceslots.pop());
@@ -2115,19 +1893,12 @@ function cleanupSources(node) {
  * @param {number} slot
  */
 function cleanupSource(source, slot) {
-	var src;
-	/** @type {Log<Computation>} */
+	var src, last, lastslot;
 	var log = source._log;
-	/** @type {Computation} */
-	var last;
-	/** @type {number} */
-	var lastslot;
 	if (slot === -1) {
 		log._node1 = null;
 	} else {
-		/** @type {Array<Computation>} */
 		var nodes = log._nodes;
-		/** @type {Array<number>} */
 		var nodeslots = log._slots;
 		last = nodes.pop();
 		lastslot = nodeslots.pop();
@@ -2170,13 +1941,8 @@ function persist(f) {
  * @param {ChangeSet<T>} changeset
  */
 function applyMutation(node, changeset) {
-	/** @type {number} */
-	var i;
-	/** @type {number} */
-	var ln;
-	/** @type {Array<T>} */
+	var i, ln;
 	var array = node._val;
-	/** @type {T|Array<T>} */
 	var value = changeset.value;
 	switch (changeset.type) {
 		case 33:
@@ -2200,7 +1966,7 @@ function applyMutation(node, changeset) {
 		case 69:
 			ln = array.length;
 			if (ln > 0) {
-				i = /** @type {number} */(changeset.index);
+				i = changeset.index;
 				if (i < 0) {
 					i = ln - 1 + i;
 					if (i < 0) {
@@ -2243,7 +2009,6 @@ function getInitialValue(object, type) {
 		} else if (object instanceof Array) {
 			return object.slice();
 		} else {
-			/** @type {Object} */
 			var result = {};
 			for (var key in object) {
 				result[key] = object[key];
@@ -2251,7 +2016,7 @@ function getInitialValue(object, type) {
 			return result;
 		}
 	} else if (type === 'function') {
-		return /** @type {Function} */(object)();
+		return object();
 	} else {
 		return object;
 	}
@@ -2294,17 +2059,18 @@ export {
   data,
   value,
   Flag,
-  cleanup,
-  freeze,
   bind,
   run,
   fn,
   on,
+  cleanup,
+  freeze,
   root,
   sample,
   Data,
   Value,
   Computation,
+  IEnumerable,
   Enumerable,
   DataArray,
   DataEnumerable,

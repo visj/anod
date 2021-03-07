@@ -1,5 +1,5 @@
 const { Test } = require('boer');
-const { array, data, Flag, freeze, fn, on, root, sample } = require('../../src');
+const { data, Flag, fn, root, sample } = require('../..');
 
 /**
  * 

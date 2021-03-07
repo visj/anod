@@ -1,5 +1,5 @@
 const { Test } = require('boer');
-const { array, cleanup, data, fn, Flag, on, freeze, root, value } = require('../../src');
+const { array, Flag, on, freeze } = require('../..');
 
 /*
 	forEach

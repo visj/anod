@@ -1,4 +1,4 @@
-(function(w) {
+(function() {
 	var Flag = {
 		Wait: 1,
 		Trace: 1 << 1,
@@ -235,29 +235,28 @@
 		this._log = null;
 		cleanupNode(this, true);
 	}
-	function Enumerable() {
-		this.val;
-		this.mut;
-	}
+	function IEnumerable() { }
+	IEnumerable.prototype.every = function(callback) { }
+	IEnumerable.prototype.filter = function(callback) { }
+	function Enumerable() { }
 	Enumerable.prototype.every = function (callback) {
 		var self = this;
 		var pure = callback.length === 1;
 		return on(self.val, function (seed) {
-			var i;
-			var ln;
+			var i, ln;
 			var items = self.val();
 			if (seed !== void 0 && pure) {
 				var mut = self.mut();
 				if (mut !== null) {
 					var result;
 					if (self._flag & 1024) {
-						result = applyEveryMutation((mut), callback, seed);
+						result = applyEveryMutation(mut, callback, seed);
 						if (result !== void 0) {
 							return result;
 						}
 					} else {
-						for (i = 0, ln = (mut).length; i < ln; i++) {
-							result = applyEveryMutation((mut)[i], callback, seed);
+						for (i = 0, ln = mut.length; i < ln; i++) {
+							result = applyEveryMutation(mut[i], callback, seed);
 							if (result === void 0) {
 								break;
 							}
@@ -286,9 +285,8 @@
 	Enumerable.prototype.filter = function (callback) {
 		var self = this;
 		var pure = callback.length === 1;
-		return makeEnumerableNode(new DataEnumerable(), (self), function (seed) {
-			var i;
-			var ln;
+		return makeEnumerableNode(new DataEnumerable(), self, function (seed) {
+			var i, ln;
 			var items = self.val();
 			var newItems = [];
 			for (i = 0, ln = items.length; i < ln; i++) {
@@ -314,7 +312,7 @@
 				if (mut !== null) {
 					var result;
 					if (self._flag & 1024) {
-						var type = (mut).type;
+						var type = mut.type;
 						if (seed === void 0) {
 							if (type & 32) {
 								if (type & 16) {
@@ -362,7 +360,7 @@
 			}
 			index = -1;
 			return void 0;
-		}, (Void), 2);
+		}, Void, 2);
 	}
 	Enumerable.prototype.findIndex = function (callback, index) {
 		var self = this;
@@ -376,11 +374,11 @@
 				}
 			}
 			return -1;
-		}, (void 0), 2);
+		}, void 0, 2);
 	}
 	Enumerable.prototype.forEach = function (callback) {
 		var self = this;
-		makeEnumerableNode(new DataEnumerable(), (self), function (seed) {
+		makeEnumerableNode(new DataEnumerable(), self, function (seed) {
 			var items = self.val();
 			for (var i = 0, ln = items.length; i < ln; i++) {
 				callback(items[i], i);
@@ -398,7 +396,7 @@
 				}
 			}
 			return false;
-		}, (void 0), 2);
+		}, void 0, 2);
 	}
 	Enumerable.prototype.indexOf = function (searchElement, fromIndex) {
 		var self = this;
@@ -412,13 +410,13 @@
 				}
 			}
 			return -1;
-		}, (void 0), 2);
+		}, void 0, 2);
 	}
 	Enumerable.prototype.join = function (separator) {
 		var self = this;
 		return on(self.val, function () {
 			return self.val().join(separator);
-		}, (void 0), 2);
+		}, void 0, 2);
 	}
 	Enumerable.prototype.lastIndexOf = function (searchElement, fromIndex) {
 		var self = this;
@@ -432,16 +430,13 @@
 				}
 			}
 			return -1;
-		}, (void 0), 2);
+		}, void 0, 2);
 	}
 	Enumerable.prototype.map = function (callback) {
 		var self = this;
 		var nodes = [];
-		return makeEnumerableNode(new DataEnumerable(), (self), function (seed) {
-			var i;
-			var j;
-			var ln;
-			var node;
+		return makeEnumerableNode(new DataEnumerable(), self, function (seed) {
+			var i, j, ln, node;
 			var items = self.val();
 			var mapper = function () {
 				return callback(items[j], j);
@@ -479,9 +474,7 @@
 		var type = typeof initialValue;
 		var skip = arguments.length === 1;
 		return on(self.val, function () {
-			var i;
-			var ln;
-			var result;
+			var i, ln, result;
 			var items = self.val();
 			if (skip) {
 				i = 1;
@@ -494,7 +487,7 @@
 				result = callback(result, items[i], i);
 			}
 			return result;
-		}, (void 0), 2);
+		}, void 0, 2);
 	}
 	Enumerable.prototype.reduceRight = function (callback, initialValue) {
 		var self = this;
@@ -515,11 +508,11 @@
 				result = callback(result, items[i], i);
 			}
 			return result;
-		}, (void 0), 2);
+		}, void 0, 2);
 	}
 	Enumerable.prototype.reverse = function () {
 		var self = this;
-		return makeEnumerableNode(new DataEnumerable(), (self), function () {
+		return makeEnumerableNode(new DataEnumerable(), self, function () {
 			var items = self.val();
 			var newItems = [];
 			for (var i = items.length - 1, j = 0; i >= 0; i--, j++) {
@@ -530,7 +523,7 @@
 	}
 	Enumerable.prototype.slice = function (start, end) {
 		var self = this;
-		return makeEnumerableNode(new DataEnumerable(), (self), function (seed) {
+		return makeEnumerableNode(new DataEnumerable(), self, function (seed) {
 			var items = self.val();
 			var newItems = [];
 			if (start !== void 0) {
@@ -596,7 +589,7 @@
 		});
 	}
 	function DataArray(val) {
-		var self = (this);
+		var self = this;
 		Data.call(self, val);
 		this.val = function (next) {
 			if (arguments.length > 0) {
@@ -622,16 +615,16 @@
 			this._pval = Void;
 			this._mut = null;
 		} else {
-			if (this._flag & 1024) {
-				applyMutation(this, (this._pmut));
-			}
-			else {
-				for (var i = 0, ln = this._pmut.length; i < ln; i++) {
-					applyMutation(this, this._pmut[i]);
-				}
-			}
 			this._mut = this._pmut;
 			this._pmut = null;
+			if (this._flag & 1024) {
+				applyMutation(this, this._mut);
+			}
+			else {
+				for (var i = 0, ln = this._mut.length; i < ln; i++) {
+					applyMutation(this, this._mut[i]);
+				}
+			}
 		}
 		if (this._log !== null) {
 			markComputationsForUpdate(this._log, Root.time);
@@ -713,11 +706,6 @@
 		this._log = null;
 		cleanupNode(this, true);
 	}
-	function ChangeSet() { }
-	ChangeSet.prototype.type;
-	ChangeSet.prototype.index;
-	ChangeSet.prototype.count;
-	ChangeSet.prototype.value;
 	var Void = {};
 	var Root = new Clock();
 	var State = 0;
@@ -781,14 +769,15 @@
 		}
 	}
 	function makeComputationNode(node, fn, seed, flags) {
+		var clock = Root;
 		var owner = Owner;
 		var listener = Listener;
 		var toplevel = State === 0;
 		Owner = node;
 		Listener = flags & 16 ? null : node;
 		if (toplevel) {
-			Root.changes.reset();
-			Root.updates.reset();
+			clock.changes.reset();
+			clock.updates.reset();
 			try {
 				State = 1;
 				seed = flags & 1 ? seed : fn(seed);
@@ -803,18 +792,19 @@
 		Listener = listener;
 		recycleOrClaimNode(node, fn, seed, flags);
 		if (toplevel) {
-			finishToplevelExecution();
+			finishToplevelExecution(clock);
 		}
 	}
 	function makeProcedureNode(node, fn, seed, flags) {
+		var clock = Root;
 		var owner = Owner;
 		var listener = Listener;
 		var toplevel = State === 0;
 		Owner = node;
 		Listener = flags & 16 ? null : node;
 		if (toplevel) {
-			Root.changes.reset();
-			Root.updates.reset();
+			clock.changes.reset();
+			clock.updates.reset();
 			try {
 				State = 1;
 				seed = flags & 1 ? seed : fn(seed);
@@ -829,7 +819,7 @@
 		Listener = listener;
 		var recycled = recycleOrClaimNode(node, fn, seed, flags);
 		if (toplevel) {
-			finishToplevelExecution();
+			finishToplevelExecution(clock);
 		}
 		if (recycled) {
 			return function () { return seed; }
@@ -840,6 +830,7 @@
 		}
 	}
 	function makeEnumerableNode(node, source, fn, flags) {
+		var clock = Root;
 		var owner = Owner;
 		var listener = Listener;
 		var toplevel = State === 0;
@@ -847,8 +838,8 @@
 		Owner = node;
 		Listener = null;
 		if (toplevel) {
-			Root.changes.reset();
-			Root.updates.reset();
+			clock.changes.reset();
+			clock.updates.reset();
 			try {
 				State = 1;
 				node._val = fn([]);
@@ -862,7 +853,7 @@
 		Owner = owner;
 		Listener = listener;
 		node._fn = fn;
-		node._age = Root.time;
+		node._age = clock.time;
 		node._flag |= flags;
 		if (owner !== null) {
 			if (owner._owned === null) {
@@ -875,14 +866,14 @@
 			}
 		}
 		if (toplevel) {
-			finishToplevelExecution();
+			finishToplevelExecution(clock);
 		}
 		return node;
 	}
-	function finishToplevelExecution() {
-		if (Root.changes.ln > 0 || Root.updates.ln > 0) {
+	function finishToplevelExecution(clock) {
+		if (clock.changes.ln > 0 || clock.updates.ln > 0) {
 			try {
-				tick(Root);
+				tick(clock);
 			} finally {
 				State = 0;
 			}
@@ -935,9 +926,7 @@
 		return recycle;
 	}
 	function logRead(from, to) {
-		var log;
-		var src;
-		var fromslot;
+		var log, src, fromslot;
 		if (from._log === null) {
 			log = from._log = new Log();
 		} else {
@@ -1172,10 +1161,8 @@
 		}
 	}
 	function applyUpstreamUpdates(node) {
-		var slot;
+		var slot, source, sources;
 		var src = node._src;
-		var source;
-		var sources;
 		var owner = node._owner;
 		var traces = node._traces;
 		if (owner !== null) {
@@ -1186,7 +1173,7 @@
 				sources = src._nodes;
 				for (var i = 0, ln = traces.length; i < ln; i++) {
 					slot = traces[i];
-					source = (slot === -1 ? src._node1 : sources[slot]);
+					source = slot === -1 ? src._node1 : sources[slot];
 					if (source._flag & (2 | 512)) {
 						applyUpstreamUpdates(source);
 					}
@@ -1197,8 +1184,7 @@
 		}
 	}
 	function cleanupNode(node, final) {
-		var i;
-		var ln;
+		var i, ln;
 		var flag = node._flag;
 		var owned = node._owned;
 		var cleanups = node._cleanups;
@@ -1239,10 +1225,8 @@
 		node._traces = null;
 	}
 	function cleanupSource(source, slot) {
-		var src;
+		var src, last, lastslot;
 		var log = source._log;
-		var last;
-		var lastslot;
 		if (slot === -1) {
 			log._node1 = null;
 		} else {
@@ -1277,8 +1261,7 @@
 		return node;
 	}
 	function applyMutation(node, changeset) {
-		var i;
-		var ln;
+		var i, ln;
 		var array = node._val;
 		var value = changeset.value;
 		switch (changeset.type) {
@@ -1303,7 +1286,7 @@
 			case 69:
 				ln = array.length;
 				if (ln > 0) {
-					i = (changeset.index);
+					i = changeset.index;
 					if (i < 0) {
 						i = ln - 1 + i;
 						if (i < 0) {
@@ -1346,7 +1329,7 @@
 				return result;
 			}
 		} else if (type === 'function') {
-			return (object)();
+			return object();
 		} else {
 			return object;
 		}
@@ -1375,23 +1358,25 @@
 			}
 		}
 	}
-	w.anod = {};
-	w.anod.array = array;
-	w.anod.data = data;
-	w.anod.value = value;
-	w.anod.Flag = Flag;
-	w.anod.cleanup = cleanup;
-	w.anod.freeze = freeze;
-	w.anod.bind = bind;
-	w.anod.run = run;
-	w.anod.fn = fn;
-	w.anod.on = on;
-	w.anod.root = root;
-	w.anod.sample = sample;
-	w.anod.Data = Data;
-	w.anod.Value = Value;
-	w.anod.Computation = Computation;
-	w.anod.Enumerable = Enumerable;
-	w.anod.DataArray = DataArray;
-	w.anod.DataEnumerable = DataEnumerable;
-})(window);
+	window.anod = {
+		array: array,
+		data: data,
+		value: value,
+		Flag: Flag,
+		bind: bind,
+		run: run,
+		fn: fn,
+		on: on,
+		cleanup: cleanup,
+		freeze: freeze,
+		root: root,
+		sample: sample,
+		Data: Data,
+		Value: Value,
+		Computation: Computation,
+		IEnumerable: IEnumerable,
+		Enumerable: Enumerable,
+		DataArray: DataArray,
+		DataEnumerable: DataEnumerable
+	};
+})();
