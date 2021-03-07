@@ -63,7 +63,7 @@ const mjs = srcFile.replace(ExportRegex, function () {
 			.map(part => '  ' + part.split(':')[0].trim() + ',').join('\n')) +
 		'\n}'
 	);
-});
+}).split('\n').filter(x => x.trim() !== '').join('\n');
 
 fs.writeFileSync(path.join(dist, 'anod.js'), js);
 fs.writeFileSync(path.join(dist, 'anod.cjs'), cjs);

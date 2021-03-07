@@ -66,6 +66,25 @@ module.exports = function(t) {
 			t.equal(c2(), undefined);
 		});
 
+		t.test('find does not recompute unless necessary', t => {
+			let d = array([1,2,3]);
+			let count1 = 0;
+			let count2 = 0;
+			let c1 = d.find(x => {
+				count1++;
+				return x === 1;
+			});
+			let c2 = d.find(x => {
+				count2++;
+				return x === 4;
+			});
+			count1 = 0;
+			count2 = 0;
+			d.push(5);
+			t.equal(count1, 0);
+			t.equal(count2, 1);
+		});
+
 		t.test('findIndex returns index or -1 when not found', t => {
 			let d = array([1,2,3]);
 			let c1 = d.findIndex(x => x === 2);

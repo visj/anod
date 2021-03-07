@@ -242,7 +242,7 @@
 			var i, ln;
 			var items = self.val();
 			if (seed !== void 0 && pure) {
-				var mut = self.mut();
+				var mut = self._mut;
 				if (mut !== null) {
 					var result;
 					if (self._flag & 1024) {
@@ -296,7 +296,7 @@
 	}
 	Enumerable.prototype.find = function (callback) {
 		var self = this;
-		var index = -1;
+		var index = { value: -1 };
 		var pure = callback.length === 1;
 		return on(self.val, function (seed) {
 			var i;
@@ -304,46 +304,16 @@
 			var item;
 			var items = self.val();
 			if (seed !== Void && pure) {
-				var mut = self.mut();
+				var mut = self._mut;
 				if (mut !== null) {
 					var result;
 					if (self._flag & 1024) {
-						var type = mut.type;
-						if (seed === void 0) {
-							if (type & 32) {
-								if (type & 16) {
-									var count = mut.count;
-									for (i = mut.index; count >= 0; count--) {
-										item = mut.value[i];
-										if (callback(item)) {
-											index = i;
-											return item;
-										}
-									}
-									return void 0;
-								} else {
-									if (callback(mut.value)) {
-										switch (type & 15) {
-											case 40:
-												index = 0;
-												break;
-											case 36:
-												index = items.length - 1;
-												break;
-											case 33:
-												index = mut.index;
-												break;
-										}
-										return mut.value;
-									}
-									return void 0;
-								}
-							} else {
-								return void 0;
-							}
-						} else {
+						result = applyFindMutation(mut, callback, seed, items.length, index);
+						if (result !== Void) {
+							return result;
 						}
 					} else {
+						// too complicated
 					}
 				}
 			}
@@ -602,9 +572,6 @@
 	}
 	DataArray.prototype = new Enumerable();
 	DataArray.constructor = DataArray;
-	DataArray.prototype.mut = function () {
-		return this._mut;
-	}
 	DataArray.prototype.update = function () {
 		if (this._pval !== Void) {
 			this._val = this._pval;
@@ -627,28 +594,28 @@
 		}
 	}
 	DataArray.prototype.insertAt = function (index, item) {
-		logMutate(this, { type: 33, index: index, value: item });
+		logMutate(this, { type: 513, index: index, value: item });
 	}
 	DataArray.prototype.insertRange = function (index, items) {
-		logMutate(this, { type: 50, index: index, value: items });
+		logMutate(this, { type: 770, index: index, value: items });
 	}
 	DataArray.prototype.pop = function () {
-		logMutate(this, { type: 67 });
+		logMutate(this, { type: 1028 });
 	}
 	DataArray.prototype.push = function (item) {
-		logMutate(this, { type: 36, value: item });
+		logMutate(this, { type: 520, value: item });
 	}
 	DataArray.prototype.removeAt = function (index) {
-		logMutate(this, { type: 69, index: index });
+		logMutate(this, { type: 1040, index: index });
 	}
 	DataArray.prototype.removeRange = function (index, count) {
-		logMutate(this, { type: 86, index: index, count: count });
+		logMutate(this, { type: 1312, index: index, count: count });
 	}
 	DataArray.prototype.shift = function () {
-		logMutate(this, { type: 71 });
+		logMutate(this, { type: 1088 });
 	}
 	DataArray.prototype.unshift = function (item) {
-		logMutate(this, { type: 40, value: item });
+		logMutate(this, { type: 640, value: item });
 	}
 	function DataEnumerable() {
 		var self = this;
@@ -677,9 +644,6 @@
 	}
 	DataEnumerable.prototype = new Enumerable();
 	DataEnumerable.constructor = DataEnumerable;
-	DataEnumerable.prototype.mut = function () {
-		return this._mut;
-	}
 	DataEnumerable.prototype.update = function () {
 		var owner = Owner;
 		var listener = Listener;
@@ -753,7 +717,7 @@
 		var listener = Listener;
 		try {
 			Listener = node;
-			if (src instanceof Array) {
+			if (isArray(src)) {
 				for (var i = 0, ln = src.length; i < ln; i++) {
 					src[i]();
 				}
@@ -766,55 +730,17 @@
 	}
 	function makeComputationNode(node, fn, seed, flags) {
 		var clock = Root;
-		var owner = Owner;
-		var listener = Listener;
-		var toplevel = State === 0;
-		Owner = node;
-		Listener = flags & 16 ? null : node;
-		if (toplevel) {
-			clock.changes.reset();
-			clock.updates.reset();
-			try {
-				State = 1;
-				seed = flags & 1 ? seed : fn(seed);
-			} finally {
-				State = 0;
-				Owner = Listener = null;
-			}
-		} else {
-			seed = fn(seed);
-		}
-		Owner = owner;
-		Listener = listener;
+		seed = initComputationNode(node, fn, seed, flags);
 		recycleOrClaimNode(node, fn, seed, flags);
-		if (toplevel) {
+		if (State === 0) {
 			finishToplevelExecution(clock);
 		}
 	}
 	function makeProcedureNode(node, fn, seed, flags) {
 		var clock = Root;
-		var owner = Owner;
-		var listener = Listener;
-		var toplevel = State === 0;
-		Owner = node;
-		Listener = flags & 16 ? null : node;
-		if (toplevel) {
-			clock.changes.reset();
-			clock.updates.reset();
-			try {
-				State = 1;
-				seed = flags & 1 ? seed : fn(seed);
-			} finally {
-				State = 0;
-				Owner = Listener = null;
-			}
-		} else {
-			seed = fn(seed);
-		}
-		Owner = owner;
-		Listener = listener;
+		seed = initComputationNode(node, fn, seed, flags);
 		var recycled = recycleOrClaimNode(node, fn, seed, flags);
-		if (toplevel) {
+		if (State === 0) {
 			finishToplevelExecution(clock);
 		}
 		if (recycled) {
@@ -828,29 +754,11 @@
 	function makeEnumerableNode(node, source, fn, flags) {
 		var clock = Root;
 		var owner = Owner;
-		var listener = Listener;
-		var toplevel = State === 0;
-		logRead(source, node);
-		Owner = node;
-		Listener = null;
-		if (toplevel) {
-			clock.changes.reset();
-			clock.updates.reset();
-			try {
-				State = 1;
-				node._val = fn([]);
-			} finally {
-				State = 0;
-				Owner = Listener = null;
-			}
-		} else {
-			node._val = fn([]);
-		}
-		Owner = owner;
-		Listener = listener;
 		node._fn = fn;
 		node._age = clock.time;
 		node._flag |= flags;
+		logRead(source, node);
+		node._val = initComputationNode(node, fn, [], 16 | flags);
 		if (owner !== null) {
 			if (owner._owned === null) {
 				owner._owned = [node];
@@ -861,10 +769,34 @@
 				logPendingOwner(owner);
 			}
 		}
-		if (toplevel) {
+		if (State === 0) {
 			finishToplevelExecution(clock);
 		}
 		return node;
+	}
+	function initComputationNode(node, fn, seed, flags) {
+		var clock = Root;
+		var owner = Owner;
+		var listener = Listener;
+		var toplevel = State === 0;
+		Owner = node;
+		Listener = flags & 16 ? null : node;
+		if (toplevel) {
+			clock.changes.reset();
+			clock.updates.reset();
+			try {
+				State = 1;
+				seed = flags & 1 ? seed : fn(seed);
+			} finally {
+				State = 0;
+				Owner = Listener = null;
+			}
+		} else {
+			seed = fn(seed);
+		}
+		Owner = owner;
+		Listener = listener;
+		return seed;
 	}
 	function finishToplevelExecution(clock) {
 		if (clock.changes.ln > 0 || clock.updates.ln > 0) {
@@ -1259,63 +1191,58 @@
 	function applyMutation(node, changeset) {
 		var i, ln;
 		var array = node._val;
+		var type = changeset.type & 255;
 		var value = changeset.value;
-		switch (changeset.type) {
-			case 33:
-				array.splice(changeset.index, 0, value);
-				break;
-			case 50:
-				var args = [changeset.index, 0];
-				for (i = 0, ln = value.length; i < ln; i++) {
-					args[i + 2] = value[i];
-				}
-				Array.prototype.splice.apply(array, args);
-				break;
-			case 67:
-				if (array.length !== 0) {
-					array.length--;
-				}
-				break;
-			case 36:
-				array[array.length] = value;
-				break;
-			case 69:
-				ln = array.length;
-				if (ln > 0) {
-					i = changeset.index;
+		if (type & 513) {
+			array.splice(changeset.index, 0, value);
+		} else if (type & 770) {
+			var args = [changeset.index, 0];
+			for (i = 0, ln = value.length; i < ln; i++) {
+				args[i + 2] = value[i];
+			}
+			Array.prototype.splice.apply(array, args);
+		} else if (type & 1028) {
+			if (array.length !== 0) {
+				array.length--;
+			}
+		} else if (type & 520) {
+			array[array.length] = value;
+		} else if (type & 1040) {
+			ln = array.length;
+			if (ln > 0) {
+				i = changeset.index;
+				if (i < 0) {
+					i = ln - 1 + i;
 					if (i < 0) {
-						i = ln - 1 + i;
-						if (i < 0) {
-							i = 0;
-						}
-					} else {
-						if (i >= ln) {
-							array.length--;
-							break;
-						}
+						i = 0;
 					}
-					for (; i < ln; i++) {
-						array[i] = array[i + 1];
+				} else {
+					if (i >= ln) {
+						array.length--;
+						return;
 					}
-					array.length--;
 				}
-				break;
-			case 86:
-				array.splice(changeset.index, changeset.count);
-				break;
-			case 71:
-				array.shift();
-				break;
-			case 40:
-				array.unshift(value);
-				break;
+				for (; i < ln; i++) {
+					array[i] = array[i + 1];
+				}
+				array.length--;
+			}
+		} else if (type & 1312) {
+			array.splice(changeset.index, changeset.count);
+		} else if (type & 1088) {
+			array.shift();
+		} else if (type & 640) {
+			array.unshift(value);
 		}
+	}
+	function isArray(obj) {
+		return Object.prototype.toString.call(obj) === '[object Array]';
 	}
 	function getInitialValue(object, type) {
 		if (type === 'object') {
 			if (object === null) {
 				return null;
-			} else if (object instanceof Array) {
+			} else if (isArray(object)) {
 				return object.slice();
 			} else {
 				var result = {};
@@ -1332,8 +1259,8 @@
 	}
 	function applyEveryMutation(cs, callback, seed) {
 		if (seed) {
-			if (cs.type & 32) {
-				if (cs.type & 16) {
+			if (cs.type & 512) {
+				if (cs.type & 256) {
 					for (var i = 0, ln = cs.value.length; i < ln; i++) {
 						if (!callback(cs.value[i])) {
 							return false;
@@ -1347,12 +1274,69 @@
 				return true;
 			}
 		} else {
-			if (cs.type & 64) {
+			if (cs.type & 1024) {
 				return void 0;
 			} else {
 				return false;
 			}
 		}
+	}
+	function applyFindMutation(cs, callback, seed, length, index) {
+		var type = cs.type;
+		if (seed === void 0) {
+			if (type & 512) {
+				if (type & 256) {
+					var count = cs.count;
+					for (i = cs.index; count >= 0; count--) {
+						item = cs.value[i];
+						if (callback(item)) {
+							index.value = i;
+							return item;
+						}
+					}
+					return seed;
+				} else {
+					if (callback(cs.value)) {
+						if (type & 640) {
+							index.value = 0;
+						} else if (type & 520) {
+							index.value = length - 1;
+						} else {
+							index.value = cs.index;
+						}
+						return cs.value;
+					}
+					return seed;
+				}
+			} else {
+				return seed;
+			}
+		} else {
+			if (type & 520) {
+				return seed;
+			} else if (type & 1028) {
+				if (index.value === length - 1) {
+					index.value = -1;
+					return void 0;
+				} else {
+					return seed;
+				}
+			} else if (type & 1088) {
+				if (index.value !== 0) {
+					return seed;
+				}
+			} else if (type & 640) {
+				if (callback(cs.value)) {
+					index.value = 0;
+					return cs.value;
+				}
+			} else {
+				if (cs.index !== void 0 && index < cs.index) {
+					return seed;
+				}
+			}
+		}
+		return Void;
 	}
 	window.anod = {
 		array: array,
