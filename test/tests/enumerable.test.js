@@ -33,6 +33,23 @@ module.exports = function(t) {
 			t.equal(count, 2);
 		});
 
+		t.test('every does not recompute unless necessary', t => {
+			let d = array([1,2,3]);
+			let count = 0;
+			let c1 = d.every(x => {
+				count++;
+				return x !== 4;
+			});
+			count = 0;
+			freeze(() => { d.pop(); d.pop(); });
+			t.equal(count, 0);
+			d.insertRange(1, [2,3]);
+			t.equal(count, 2);
+			d.push(4);
+			t.equal(count, 3);
+			t.equal(c1(), false);
+		});
+
 		t.test('filter filters based on callback', t => {
 			let d = array([1,2,3]);
 			let d1 = d.filter(x => x !== 2);

@@ -81,16 +81,16 @@ function cleanup(f) {
 function freeze(f) {
 	/** @type {T} */
 	var val;
-	if (State !== System.Idle) {
+	if (State !== 0) {
 		val = f();
 	} else {
 		Root.changes.reset();
-		State = System.Compute;
+		State = 1;
 		try {
 			val = f();
 			execute();
 		} finally {
-			State = System.Idle;
+			State = 0;
 		}
 	}
 	return val;
@@ -108,17 +108,17 @@ function freeze(f) {
 function bind(src, f, seed, flags) {
 	/** @type {Computation} */
 	var node = getCandidateNode();
-	if (flags & Flag.Dynamic) {
-		if (flags & Flag.Wait) {
+	if (flags & 4) {
+		if (flags & 1) {
 			bindSource(node, src);
 		}
 		makeComputationNode(node, function (seed) {
 			bindSource(node, src);
 			return f(seed);
-		}, seed, Flag.Bound | flags);
+		}, seed, 16 | flags);
 	} else {
 		bindSource(node, src);
-		makeComputationNode(node, f, seed, Flag.Bound | flags);
+		makeComputationNode(node, f, seed, 16 | flags);
 	}
 }
 
@@ -130,7 +130,7 @@ function bind(src, f, seed, flags) {
  * @returns {void}
  */
 function run(f, seed, flags) {
-	makeComputationNode(getCandidateNode(), f, seed, Flag.Unbound | flags);
+	makeComputationNode(getCandidateNode(), f, seed, 32 | flags);
 }
 
 /**
@@ -142,7 +142,7 @@ function run(f, seed, flags) {
  * @returns {function(): T}
  */
 function fn(f, seed, flags) {
-	return makeProcedureNode(getCandidateNode(), f, seed, Flag.Unbound | flags);
+	return makeProcedureNode(getCandidateNode(), f, seed, 32 | flags);
 }
 
 /**
@@ -157,17 +157,17 @@ function fn(f, seed, flags) {
 function on(src, f, seed, flags) {
 	/** @type {Computation} */
 	var node = getCandidateNode();
-	if (flags & Flag.Dynamic) {
-		if (flags & Flag.Wait) {
+	if (flags & 4) {
+		if (flags & 1) {
 			bindSource(node, src);
 		}
 		return makeProcedureNode(node, function (seed) {
 			bindSource(node, src);
 			return f(seed);
-		}, seed, Flag.Bound | flags);
+		}, seed, 16 | flags);
 	} else {
 		bindSource(node, src);
-		return makeProcedureNode(node, f, seed, Flag.Bound | flags);
+		return makeProcedureNode(node, f, seed, 16 | flags);
 	}
 }
 
@@ -187,8 +187,8 @@ function root(f) {
 	/** @type {null|function(): void} */
 	var disposer = unending ? null : function () {
 		if (node !== null) {
-			if (State !== System.Idle) {
-				if (State === System.Dispose) {
+			if (State !== 0) {
+				if (State === 5) {
 					node.dispose();
 				} else {
 					Root.disposes.add(node);
@@ -210,7 +210,7 @@ function root(f) {
 		Owner = owner;
 		Listener = listener;
 	}
-	if (unending || recycleOrClaimNode(node, null, void 0, Flag.Orphan)) {
+	if (unending || recycleOrClaimNode(node, null, void 0, 2048)) {
 		node = null;
 	}
 	return val;
@@ -385,15 +385,15 @@ function Computation() {
 Computation.prototype.get = function () {
 	if (Listener !== null) {
 		var flag = this._flag;
-		if (flag & Flag.Watch) {
-			if (State === System.Trace) {
+		if (flag & 512) {
+			if (State === 3) {
 				applyUpstreamUpdates(this);
 			}
 		}
 		if (this._age === Root.time) {
-			if (flag & Flag.Running) {
+			if (flag & 128) {
 				throw new Error('Circular dependency');
-			} else if (flag & Flag.Stale) {
+			} else if (flag & 64) {
 				this.update();
 			}
 		}
@@ -408,8 +408,8 @@ Computation.prototype.update = function () {
 	cleanupNode(this, false);
 	Owner = this;
 	var flag = this._flag;
-	if (flag & Flag.Unbound) {
-		if (flag & Flag.Static) {
+	if (flag & 32) {
+		if (flag & 8) {
 			Listener = null;
 		} else {
 			Listener = this;
@@ -417,14 +417,14 @@ Computation.prototype.update = function () {
 	} else {
 		Listener = null;
 	}
-	this._flag &= ~Flag.Stale;
-	this._flag |= Flag.Running;
+	this._flag &= ~64;
+	this._flag |= 128;
 	var val = this._val;
 	this._val = this._fn.call(this, val);
-	if (this._flag & Flag.Trace) {
+	if (this._flag & 2) {
 		markPendingComputations(this, val);
 	}
-	this._flag &= ~Flag.Running;
+	this._flag &= ~128;
 	Owner = owner;
 	Listener = listener;
 }
@@ -601,7 +601,7 @@ Enumerable.prototype.every = function (callback) {
 			if (mut !== null) {
 				/** @type {boolean|void} */
 				var result;
-				if (self._flag & Flag.Single) {
+				if (self._flag & 1024) {
 					result = applyEveryMutation(/** @type {ChangeSet} */(mut), callback, seed);
 					if (result !== void 0) {
 						return result;
@@ -633,7 +633,7 @@ Enumerable.prototype.every = function (callback) {
 			}
 		}
 		return true;
-	}, /** @type {?} */(void 0), Flag.Trace);
+	}, /** @type {?} */(void 0), 2);
 }
 
 /**
@@ -693,11 +693,11 @@ Enumerable.prototype.find = function (callback) {
 			if (mut !== null) {
 				/** @type {?} */
 				var result;
-				if (self._flag & Flag.Single) {
+				if (self._flag & 1024) {
 					var type = /** @type {ChangeSet} */(mut).type;
 					if (seed === void 0) {
-						if (type & Modification.Insertion) {
-							if (type & Modification.Range) {
+						if (type & 32) {
+							if (type & 16) {
 								var count = /** @type {ChangeSet} */(mut).count;
 								for (i = /** @type {ChangeSet} */(mut).index; count >= 0; count--) {
 									item = /** @type {ChangeSet} */(mut).value[i];
@@ -709,14 +709,14 @@ Enumerable.prototype.find = function (callback) {
 								return void 0;
 							} else {
 								if (callback(/** @type {ChangeSet} */(mut).value)) {
-									switch (type & Mutation.Type) {
-										case Mutation.Unshift:
+									switch (type & 15) {
+										case 40:
 											index = 0;
 											break;
-										case Mutation.Push:
+										case 36:
 											index = items.length - 1;
 											break;
-										case Mutation.InsertAt:
+										case 33:
 											index = /** @type {ChangeSet} */(mut).index;
 											break;
 									}
@@ -744,7 +744,7 @@ Enumerable.prototype.find = function (callback) {
 		}
 		index = -1;
 		return void 0;
-	}, /** @type {?} */(Void), Flag.Trace);
+	}, /** @type {?} */(Void), 2);
 }
 
 
@@ -767,7 +767,7 @@ Enumerable.prototype.findIndex = function (callback, index) {
 			}
 		}
 		return -1;
-	}, /** @type {?} */(void 0), Flag.Trace);
+	}, /** @type {?} */(void 0), 2);
 }
 
 /**
@@ -804,7 +804,7 @@ Enumerable.prototype.includes = function (valueToFind, fromIndex) {
 			}
 		}
 		return false;
-	}, /** @type {?} */(void 0), Flag.Trace);
+	}, /** @type {?} */(void 0), 2);
 }
 
 /**
@@ -826,7 +826,7 @@ Enumerable.prototype.indexOf = function (searchElement, fromIndex) {
 			}
 		}
 		return -1;
-	}, /** @type {?} */(void 0), Flag.Trace);
+	}, /** @type {?} */(void 0), 2);
 }
 
 /**
@@ -839,7 +839,7 @@ Enumerable.prototype.join = function (separator) {
 	var self = this;
 	return on(self.val, function () {
 		return self.val().join(separator);
-	}, /** @type {?} */(void 0), Flag.Trace);
+	}, /** @type {?} */(void 0), 2);
 }
 
 /**
@@ -861,7 +861,7 @@ Enumerable.prototype.lastIndexOf = function (searchElement, fromIndex) {
 			}
 		}
 		return -1;
-	}, /** @type {?} */(void 0), Flag.Trace);
+	}, /** @type {?} */(void 0), 2);
 }
 
 
@@ -957,7 +957,7 @@ Enumerable.prototype.reduce = function (callback, initialValue) {
 			result = callback(result, items[i], i);
 		}
 		return result;
-	}, /** @type {?} */(void 0), Flag.Trace);
+	}, /** @type {?} */(void 0), 2);
 }
 
 /**
@@ -988,7 +988,7 @@ Enumerable.prototype.reduceRight = function (callback, initialValue) {
 			result = callback(result, items[i], i);
 		}
 		return result;
-	}, /** @type {?} */(void 0), Flag.Trace);
+	}, /** @type {?} */(void 0), 2);
 }
 
 /**
@@ -1151,7 +1151,7 @@ DataArray.prototype.update = function () {
 		this._pval = Void;
 		this._mut = null;
 	} else {
-		if (this._flag & Flag.Single) {
+		if (this._flag & 1024) {
 			applyMutation(this, /** @type {ChangeSet} */(this._pmut));
 		}
 		else {
@@ -1174,7 +1174,7 @@ DataArray.prototype.update = function () {
  * @returns {void}
  */
 DataArray.prototype.insertAt = function (index, item) {
-	logMutate(this, { type: Mutation.InsertAt, index: index, value: item });
+	logMutate(this, { type: 33, index: index, value: item });
 }
 
 /**
@@ -1184,14 +1184,14 @@ DataArray.prototype.insertAt = function (index, item) {
  * @returns {void}
  */
 DataArray.prototype.insertRange = function (index, items) {
-	logMutate(this, { type: Mutation.InsertRange, index: index, value: items });
+	logMutate(this, { type: 50, index: index, value: items });
 }
 
 /**
  * @returns {void}
  */
 DataArray.prototype.pop = function () {
-	logMutate(this, { type: Mutation.Pop });
+	logMutate(this, { type: 67 });
 }
 
 /**
@@ -1200,7 +1200,7 @@ DataArray.prototype.pop = function () {
  * @returns {void}
  */
 DataArray.prototype.push = function (item) {
-	logMutate(this, { type: Mutation.Push, value: item });
+	logMutate(this, { type: 36, value: item });
 }
 
 /**
@@ -1209,7 +1209,7 @@ DataArray.prototype.push = function (item) {
  * @returns {void}
  */
 DataArray.prototype.removeAt = function (index) {
-	logMutate(this, { type: Mutation.RemoveAt, index: index });
+	logMutate(this, { type: 69, index: index });
 }
 
 /**
@@ -1219,14 +1219,14 @@ DataArray.prototype.removeAt = function (index) {
  * @returns {void}
  */
 DataArray.prototype.removeRange = function (index, count) {
-	logMutate(this, { type: Mutation.RemoveRange, index: index, count: count });
+	logMutate(this, { type: 86, index: index, count: count });
 }
 
 /**
  * @returns {void}
  */
 DataArray.prototype.shift = function () {
-	logMutate(this, { type: Mutation.Shift });
+	logMutate(this, { type: 71 });
 }
 
 /**
@@ -1235,7 +1235,7 @@ DataArray.prototype.shift = function () {
  * @returns {void}
  */
 DataArray.prototype.unshift = function (item) {
-	logMutate(this, { type: Mutation.Unshift, value: item });
+	logMutate(this, { type: 40, value: item });
 }
 
 /**
@@ -1253,15 +1253,15 @@ function DataEnumerable() {
 	this.val = function () {
 		if (Listener !== null) {
 			var flag = self._flag;
-			if (flag & Flag.Watch) {
-				if (State === System.Trace) {
+			if (flag & 512) {
+				if (State === 3) {
 					applyUpstreamUpdates(self);
 				}
 			}
 			if (self._age === Root.time) {
-				if (flag & Flag.Running) {
+				if (flag & 128) {
 					throw new Error('Circular dependency');
-				} else if (flag & Flag.Stale) {
+				} else if (flag & 64) {
 					self.update();
 				}
 			}
@@ -1298,14 +1298,14 @@ DataEnumerable.prototype.update = function () {
 	cleanupNode(this, false);
 	Owner = this;
 	Listener = null;
-	this._flag &= ~Flag.Stale;
-	this._flag |= Flag.Running;
+	this._flag &= ~64;
+	this._flag |= 128;
 	var val = this._val;
 	this._val = this._fn.call(this, val);
-	if (this._flag & Flag.Trace) {
+	if (this._flag & 2) {
 		markPendingComputations(this, val);
 	}
-	this._flag &= ~Flag.Running;
+	this._flag &= ~128;
 	Owner = owner;
 	Listener = listener;
 }
@@ -1319,47 +1319,6 @@ DataEnumerable.prototype.dispose = function () {
 /*
  * Internal implementation
  */
-/* @strip */
-/**
- * @const
- * @enum {number}
- */
-var System = {
-	Idle: 0,
-	Compute: 1,
-	Change: 2,
-	Trace: 3,
-	Update: 4,
-	Dispose: 5,
-};
-
-/**
- * @const
- * @enum {number}
- */
-var Modification = {
-	Range: 1 << 4,
-	Insertion: 1 << 5,
-	Deletion: 1 << 6,
-	Restructure: 1 << 7,
-};
-
-/**
- * @const
- * @enum {number}
- */
-var Mutation = {
-	InsertAt: 1 | Modification.Insertion,
-	InsertRange: 2 | Modification.Range | Modification.Insertion,
-	Pop: 3 | Modification.Deletion,
-	Push: 4 | Modification.Insertion,
-	RemoveAt: 5 | Modification.Deletion,
-	RemoveRange: 6 | Modification.Range | Modification.Deletion,
-	Shift: 7 | Modification.Deletion,
-	Unshift: 8 | Modification.Insertion,
-	Type: 15,
-};
-/* @strip */
 
 /**
  * @record
@@ -1400,7 +1359,7 @@ var Root = new Clock();
 /**
  * @type {number}
  */
-var State = System.Idle;
+var State = 0;
 /**
  * @type {Computation}
  */
@@ -1552,17 +1511,17 @@ function bindSource(node, src) {
 function makeComputationNode(node, fn, seed, flags) {
 	var owner = Owner;
 	var listener = Listener;
-	var toplevel = State === System.Idle;
+	var toplevel = State === 0;
 	Owner = node;
-	Listener = flags & Flag.Bound ? null : node;
+	Listener = flags & 16 ? null : node;
 	if (toplevel) {
 		Root.changes.reset();
 		Root.updates.reset();
 		try {
-			State = System.Compute;
-			seed = flags & Flag.Wait ? seed : fn(seed);
+			State = 1;
+			seed = flags & 1 ? seed : fn(seed);
 		} finally {
-			State = System.Idle;
+			State = 0;
 			Owner = Listener = null;
 		}
 	} else {
@@ -1587,17 +1546,17 @@ function makeComputationNode(node, fn, seed, flags) {
 function makeProcedureNode(node, fn, seed, flags) {
 	var owner = Owner;
 	var listener = Listener;
-	var toplevel = State === System.Idle;
+	var toplevel = State === 0;
 	Owner = node;
-	Listener = flags & Flag.Bound ? null : node;
+	Listener = flags & 16 ? null : node;
 	if (toplevel) {
 		Root.changes.reset();
 		Root.updates.reset();
 		try {
-			State = System.Compute;
-			seed = flags & Flag.Wait ? seed : fn(seed);
+			State = 1;
+			seed = flags & 1 ? seed : fn(seed);
 		} finally {
-			State = System.Idle;
+			State = 0;
 			Owner = Listener = null;
 		}
 	} else {
@@ -1629,7 +1588,7 @@ function makeProcedureNode(node, fn, seed, flags) {
 function makeEnumerableNode(node, source, fn, flags) {
 	var owner = Owner;
 	var listener = Listener;
-	var toplevel = State === System.Idle;
+	var toplevel = State === 0;
 	logRead(source, node);
 	Owner = node;
 	Listener = null;
@@ -1637,10 +1596,10 @@ function makeEnumerableNode(node, source, fn, flags) {
 		Root.changes.reset();
 		Root.updates.reset();
 		try {
-			State = System.Compute;
+			State = 1;
 			node._val = fn([]);
 		} finally {
-			State = System.Idle;
+			State = 0;
 			Owner = Listener = null;
 		}
 	} else {
@@ -1657,7 +1616,7 @@ function makeEnumerableNode(node, source, fn, flags) {
 		} else {
 			owner._owned.push(node);
 		}
-		if (owner._flag & (Flag.Trace | Flag.Watch)) {
+		if (owner._flag & (2 | 512)) {
 			logPendingOwner(owner);
 		}
 	}
@@ -1672,7 +1631,7 @@ function finishToplevelExecution() {
 		try {
 			tick(Root);
 		} finally {
-			State = System.Idle;
+			State = 0;
 		}
 	}
 }
@@ -1687,7 +1646,7 @@ function finishToplevelExecution() {
  */
 function recycleOrClaimNode(node, fn, val, flags) {
 	var i, ln;
-	var owner = flags & Flag.Orphan || Owner === null || Owner === Unowned ? null : Owner;
+	var owner = flags & 2048 || Owner === null || Owner === Unowned ? null : Owner;
 	var recycle = node._src === null && (node._owned === null && node._cleanups === null || owner !== null);
 	if (recycle) {
 		Recycled = node;
@@ -1724,7 +1683,7 @@ function recycleOrClaimNode(node, fn, val, flags) {
 			} else {
 				owner._owned.push(node);
 			}
-			if (owner._flag & (Flag.Trace | Flag.Watch)) {
+			if (owner._flag & (2 | 512)) {
 				logPendingOwner(owner);
 			}
 		}
@@ -1779,8 +1738,8 @@ function logRead(from, to) {
 		src._nodes.push(from);
 		src._slots.push(fromslot);
 	}
-	if (from._flag & (Flag.Trace | Flag.Watch)) {
-		if (to._flag & Flag.Watch) {
+	if (from._flag & (2 | 512)) {
+		if (to._flag & 512) {
 			if (to._traces === null) {
 				to._traces = [toslot];
 			} else {
@@ -1799,7 +1758,7 @@ function logRead(from, to) {
  * @returns {T}
  */
 function logWrite(node, val) {
-	if (State !== System.Idle) {
+	if (State !== 0) {
 		if (node._pval !== Void) {
 			if (val !== node._pval) {
 				throw new Error('Conflicting changes');
@@ -1826,24 +1785,24 @@ function logWrite(node, val) {
  * @param {ChangeSet<T>} changeset 
  */
 function logMutate(node, changeset) {
-	if (State !== System.Idle) {
+	if (State !== 0) {
 		if (node._pval !== Void) {
 			throw new Error('Conflicting changes');
 		}
 		if (node._pmut === null) {
 			node._pmut = changeset;
-			node._flag |= Flag.Single;
+			node._flag |= 1024;
 			Root.changes.add(node);
 		} else {
-			if (node._flag & Flag.Single) {
-				node._flag &= ~Flag.Single;
+			if (node._flag & 1024) {
+				node._flag &= ~1024;
 				node._pmut = [node._pmut, changeset];
 			} else {
 				node._pmut.push(changeset);
 			}
 		}
 	} else {
-		node._flag |= Flag.Single;
+		node._flag |= 1024;
 		if (node._log !== null) {
 			node._pmut = changeset;
 			Root.changes.add(node);
@@ -1863,7 +1822,7 @@ function logMutate(node, changeset) {
  */
 function logPendingSource(to, slot) {
 	var i, ln;
-	to._flag |= Flag.Watch;
+	to._flag |= 512;
 	if (to._traces === null) {
 		to._traces = [slot];
 	} else {
@@ -1898,7 +1857,7 @@ function logPendingOwner(owner) {
 	for (var i = 0, ln = owned.length; i < ln; i++) {
 		node = owned[i];
 		node._owner = owner;
-		node._flag |= Flag.Watch;
+		node._flag |= 512;
 		if (node._owned !== null) {
 			logPendingOwner(node);
 		}
@@ -1919,7 +1878,7 @@ function applyChanges(data) {
  * @param {Computation} node 
  */
 function applyUpdates(node) {
-	if (node._flag & Flag.Stale) {
+	if (node._flag & 64) {
 		node.update();
 	}
 }
@@ -1944,7 +1903,7 @@ function execute() {
 	} finally {
 		Owner = owner;
 		Listener = null;
-		State = System.Idle;
+		State = 0;
 	}
 }
 
@@ -1957,19 +1916,19 @@ function tick(clock) {
 	clock.disposes.reset();
 	do {
 		clock.time++;
-		State = System.Change;
+		State = 2;
 		clock.changes.run(applyChanges);
-		State = System.Trace;
+		State = 3;
 		clock.traces.run(applyUpdates);
-		State = System.Update;
+		State = 4;
 		clock.updates.run(applyUpdates);
-		State = System.Dispose;
+		State = 5;
 		clock.disposes.run(applyDisposes);
 		if (i++ > 1e5) {
 			throw new Error('Runaway clock');
 		}
 	} while (clock.changes.ln !== 0 || clock.updates.ln !== 0 || clock.disposes.ln !== 0);
-	State = System.Idle;
+	State = 0;
 }
 
 /**
@@ -2001,8 +1960,8 @@ function markComputationsForUpdate(log, time) {
  */
 function markComputationForUpdate(node, time) {
 	node._age = time;
-	node._flag |= Flag.Stale;
-	if (node._flag & Flag.Trace) {
+	node._flag |= 64;
+	if (node._flag & 2) {
 		Root.traces.add(node);
 	} else {
 		Root.updates.add(node);
@@ -2010,7 +1969,7 @@ function markComputationForUpdate(node, time) {
 	if (node._owned !== null) {
 		markComputationsDisposed(node._owned, time);
 	}
-	if (!(node._flag & Flag.Trace)) {
+	if (!(node._flag & 2)) {
 		if (node._log !== null) {
 			markComputationsForUpdate(node._log, time);
 		}
@@ -2022,8 +1981,8 @@ function markComputationForUpdate(node, time) {
  * @param {Computation} node 
  */
 function markPendingComputations(node, val) {
-	if (node._flag & Flag.Dirty) {
-		node._flag &= ~Flag.Dirty;
+	if (node._flag & 4096) {
+		node._flag &= ~4096;
 	} else if (node._val === val) {
 		return;
 	}
@@ -2042,10 +2001,10 @@ function markComputationsDisposed(nodes, time) {
 	var node;
 	for (var i = 0, ln = nodes.length; i < ln; i++) {
 		node = nodes[i];
-		if (!(node._flag & Flag.Disposed)) {
+		if (!(node._flag & 256)) {
 			node._age = time;
-			node._flag &= ~Flag.Stale;
-			node._flag |= Flag.Disposed;
+			node._flag &= ~64;
+			node._flag |= 256;
 			if (node._owned !== null) {
 				markComputationsDisposed(node._owned, time);
 			}
@@ -2073,13 +2032,13 @@ function applyUpstreamUpdates(node) {
 	if (owner !== null) {
 		applyUpstreamUpdates(owner);
 	}
-	if (!(node._flag & Flag.Disposed)) {
+	if (!(node._flag & 256)) {
 		if (traces !== null) {
 			sources = src._nodes;
 			for (var i = 0, ln = traces.length; i < ln; i++) {
 				slot = traces[i];
 				source = /** @type {Computation} */(slot === -1 ? src._node1 : sources[slot]);
-				if (source._flag & (Flag.Trace | Flag.Watch)) {
+				if (source._flag & (2 | 512)) {
 					applyUpstreamUpdates(source);
 				}
 				applyUpdates(source);
@@ -2117,11 +2076,11 @@ function cleanupNode(node, final) {
 	}
 	if (final) {
 		cleanupSources(node);
-	} else if (flag & (Flag.Static | Flag.Dynamic)) {
-		if (flag & Flag.Dynamic) {
+	} else if (flag & (8 | 4)) {
+		if (flag & 4) {
 			cleanupSources(node);
 		}
-	} else if (flag & Flag.Unbound) {
+	} else if (flag & 32) {
 		cleanupSources(node);
 	}
 
@@ -2220,25 +2179,25 @@ function applyMutation(node, changeset) {
 	/** @type {T|Array<T>} */
 	var value = changeset.value;
 	switch (changeset.type) {
-		case Mutation.InsertAt:
+		case 33:
 			array.splice(changeset.index, 0, value);
 			break;
-		case Mutation.InsertRange:
+		case 50:
 			var args = [changeset.index, 0];
 			for (i = 0, ln = value.length; i < ln; i++) {
 				args[i + 2] = value[i];
 			}
 			Array.prototype.splice.apply(array, args);
 			break;
-		case Mutation.Pop:
+		case 67:
 			if (array.length !== 0) {
 				array.length--;
 			}
 			break;
-		case Mutation.Push:
+		case 36:
 			array[array.length] = value;
 			break;
-		case Mutation.RemoveAt:
+		case 69:
 			ln = array.length;
 			if (ln > 0) {
 				i = /** @type {number} */(changeset.index);
@@ -2259,13 +2218,13 @@ function applyMutation(node, changeset) {
 				array.length--;
 			}
 			break;
-		case Mutation.RemoveRange:
+		case 86:
 			array.splice(changeset.index, changeset.count);
 			break;
-		case Mutation.Shift:
+		case 71:
 			array.shift();
 			break;
-		case Mutation.Unshift:
+		case 40:
 			array.unshift(value);
 			break;
 	}
@@ -2307,8 +2266,8 @@ function getInitialValue(object, type) {
  */
 function applyEveryMutation(cs, callback, seed) {
 	if (seed) {
-		if (cs.type & Modification.Insertion) {
-			if (cs.type & Modification.Range) {
+		if (cs.type & 32) {
+			if (cs.type & 16) {
 				for (var i = 0, ln = cs.value.length; i < ln; i++) {
 					if (!callback(cs.value[i])) {
 						return false;
@@ -2322,7 +2281,7 @@ function applyEveryMutation(cs, callback, seed) {
 			return true;
 		}
 	} else {
-		if (cs.type & Modification.Deletion) {
+		if (cs.type & 64) {
 			return void 0;
 		} else {
 			return false;
@@ -2330,28 +2289,23 @@ function applyEveryMutation(cs, callback, seed) {
 	}
 }
 
-module.exports = {
-	array: array,
-	data: data,
-	value: value,
-	Flag: Flag,
-	/* @strip */
-	System: System,
-	Mutation: Mutation,
-	Modification: Modification,
-	/* @strip */
-	cleanup: cleanup,
-	freeze: freeze,
-	bind: bind,
-	run: run,
-	fn: fn,
-	on: on,
-	root: root,
-	sample: sample,
-	Data: Data,
-	Value: Value,
-	Computation: Computation,
-	Enumerable: Enumerable,
-	DataArray: DataArray,
-	DataEnumerable: DataEnumerable,
-};
+export {
+  array,
+  data,
+  value,
+  Flag,
+  cleanup,
+  freeze,
+  bind,
+  run,
+  fn,
+  on,
+  root,
+  sample,
+  Data,
+  Value,
+  Computation,
+  Enumerable,
+  DataArray,
+  DataEnumerable,
+}

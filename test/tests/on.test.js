@@ -82,15 +82,5 @@ module.exports = function (t) {
 				t.equal(c(), 4);
 			});
 		});
-
-		t.test('test', t => {
-			const d1 = data(1);
-			const d2 = data(2);
-			const c1 = () => { return d1() > 1 ? d2() : null; };
-			const c2 = on(c1, () => { console.log("c2")}, null, Flag.Wait);
-			const c3 = on(c1, () => { console.log("c3"); }, null, Flag.Wait | Flag.Dynamic);
-			d1(2); // prints "c2", "c3"
-			d2(2); // prints "c3"
-		})
 	});
 }

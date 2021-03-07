@@ -1,7 +1,7 @@
 /**
  * 
  */
-export interface Enumerable<T> {
+export interface IEnumerable<T> {
 	/**
 	 * @returns The underlying array value
 	 */
@@ -26,7 +26,7 @@ export interface Enumerable<T> {
 	 * @param callback Predicate function to evaluate against each element
 	 * @returns Enumerable node
 	 */
-	filter(callback: (currentValue: T, index?: number) => boolean): Enumerable<T>;
+	filter(callback: (currentValue: T, index?: number) => boolean): IEnumerable<T>;
 	/**
 	 * 
 	 * @param calback 
@@ -76,7 +76,7 @@ export interface Enumerable<T> {
 	 * 
 	 * @param fn 
 	 */
-	map<U>(fn: (currentValue: T, index?: number) => U): Enumerable<U>;
+	map<U>(fn: (currentValue: T, index?: number) => U): IEnumerable<U>;
 	/**
 	 * 
 	 * @param callback 
@@ -92,13 +92,13 @@ export interface Enumerable<T> {
 	/**
 	 * 
 	 */
-	reverse(): Enumerable<T>;
+	reverse(): IEnumerable<T>;
 	/**
 	 * 
 	 * @param start 
 	 * @param end 
 	 */
-	slice(start?: number, end?: number): Enumerable<T>;
+	slice(start?: number, end?: number): IEnumerable<T>;
 	/**
 	 * 
 	 * @param callback 
@@ -108,13 +108,13 @@ export interface Enumerable<T> {
 	 * 
 	 * @param compareFunction 
 	 */
-	sort(compareFunction?: (firstEl: T, secondEl: T) => number): Enumerable<T>;
+	sort(compareFunction?: (firstEl: T, secondEl: T) => number): IEnumerable<T>;
 }
 
 /**
  * 
  */
-export interface DataArray<T> extends Enumerable<T> {
+export interface DataArray<T> extends IEnumerable<T> {
 	/**
 	 * 
 	 */
@@ -139,6 +139,19 @@ export interface DataArray<T> extends Enumerable<T> {
 	insertRange(index: number, items: T[]): void;
 	/**
 	 * 
+	 * @param from 
+	 * @param to 
+	 */
+	move(from: number, to: number): void;
+	/**
+	 * 
+	 * @param from 
+	 * @param count 
+	 * @param to 
+	 */
+	moveRange(from: number, count: number, to: number): void;
+	/**
+	 * 
 	 */
 	pop(): void;
 	/**
@@ -161,6 +174,12 @@ export interface DataArray<T> extends Enumerable<T> {
 	 * 
 	 */
 	shift(): void;
+	/**
+	 * 
+	 * @param first 
+	 * @param second 
+	 */
+	swap(first: number, second: number): void;
 	/**
 	 * 
 	 * @param item 
@@ -189,26 +208,6 @@ export enum Flag {
 	 * @public
 	 */
 	Static = 8,
-	/**
-	 * Internally implemented
-	 */
-	Data = 16,
-	/**
-	 * Internally implemented
-	 */
-	Value = 32,
-	/**
-	 * Internally implemented
-	 */
-	Computation = 64,
-	/**
-	 * Internally implemented
-	 */
-	DataArray = 128,
-	/**
-	 * Internally implemented
-	 */
-	Enumerable = 256,
 }
 
 /**
@@ -388,7 +387,14 @@ export interface ValueConstructor {
 	readonly prototype: ValueProto<unknown>;
 }
 
-export interface DataEnumerableProto<T> extends ComputationProto<T>, Enumerable<T> { }
+export interface EnumerableProto<T> extends IEnumerable<T> { }
+
+export interface EnumerableConstructor {
+	new<T>(): EnumerableProto<T>;
+	readonly prototype: EnumerableProto<unknown>;
+}
+
+export interface DataEnumerableProto<T> extends ComputationProto<T>, IEnumerable<T> { }
 
 export interface DataEnumerableConstructor {
 	new<T>(): DataEnumerableProto<T>;
@@ -409,6 +415,7 @@ export interface DataArrayConstructor {
 export const Data: DataConstructor;
 export const Value: ValueConstructor;
 export const Computation: ComputationConstructor;
-export const DataEnumerable: DataEnumerableConstructor;
+export const Enumerable: EnumerableConstructor;
 export const DataArray: DataArrayConstructor;
+export const DataEnumerable: DataEnumerableConstructor;
 

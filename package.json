@@ -7,13 +7,15 @@
   "browser": "dist/anod.js",
   "types": "lib.d.ts",
   "scripts": {
+    "make": "node make.js",
     "test": "node test"
   },
   "files": [
     "lib.d.ts",
     "dist/anod.js",
     "dist/anod.cjs",
-    "dist/anod.mjs"
+    "dist/anod.mjs",
+    "dist/anod.min.js"
   ],
   "keywords": [],
   "author": "Vilhelm Sjölund",

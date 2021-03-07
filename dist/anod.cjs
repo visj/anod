@@ -1,7 +1,3 @@
-/**
- * @const
- * @enum {number}
- */
 var Flag = {
 	Wait: 1,
 	Trace: 1 << 1,
@@ -17,51 +13,21 @@ var Flag = {
 	Orphan: 1 << 11,
 	Dirty: 1 << 12,
 };
-
-/**
- * @public
- * @template T
- * @param {Array<T>} val
- * @returns {DataArray<T>}
- */
 function array(val) {
 	return new DataArray(val);
 }
-
-/**
- * @public
- * @template T
- * @param {T} val
- * @returns {function(T=): T}
- */
 function data(val) {
-	/** @type {Data} */
 	var node = new Data(val);
-	return /** @type {function(T=): T} */(function (next) {
+	return (function (next) {
 		return arguments.length > 0 ? node.set(next) : node.get();
 	});
 }
-
-/**
- * @public
- * @template T
- * @param {T} val
- * @param {function(T,T): boolean=} eq
- * @returns {function(T=): T}
- */
 function value(val, eq) {
-	/** @type {Value} */
 	var node = new Value(val, eq);
-	return /** @type {function(T=): T} */(function (next) {
+	return (function (next) {
 		return arguments.length > 0 ? node.set(next) : node.get();
 	});
 }
-
-
-/**
- * @public
- * @param {function(): void} f
- */
 function cleanup(f) {
 	if (Owner !== null) {
 		if (Owner._cleanups === null) {
@@ -71,124 +37,66 @@ function cleanup(f) {
 		}
 	}
 }
-
-/**
- * @public
- * @template T
- * @param {function(): T} f
- * @returns {T}
- */
 function freeze(f) {
-	/** @type {T} */
 	var val;
-	if (State !== System.Idle) {
+	if (State !== 0) {
 		val = f();
 	} else {
 		Root.changes.reset();
-		State = System.Compute;
+		State = 1;
 		try {
 			val = f();
 			execute();
 		} finally {
-			State = System.Idle;
+			State = 0;
 		}
 	}
 	return val;
 }
-
-/**
- * @public
- * @template T
- * @param {Array<function(): ?>|(function(): ?)} src
- * @param {function(T): T} f
- * @param {T=} seed
- * @param {number=} flags
- * @returns {void}
- */
 function bind(src, f, seed, flags) {
-	/** @type {Computation} */
 	var node = getCandidateNode();
-	if (flags & Flag.Dynamic) {
-		if (flags & Flag.Wait) {
+	if (flags & 4) {
+		if (flags & 1) {
 			bindSource(node, src);
 		}
 		makeComputationNode(node, function (seed) {
 			bindSource(node, src);
 			return f(seed);
-		}, seed, Flag.Bound | flags);
+		}, seed, 16 | flags);
 	} else {
 		bindSource(node, src);
-		makeComputationNode(node, f, seed, Flag.Bound | flags);
+		makeComputationNode(node, f, seed, 16 | flags);
 	}
 }
-
-/**
- * @template T
- * @param {function(T): T} f
- * @param {T=} seed
- * @param {number=} flags
- * @returns {void}
- */
 function run(f, seed, flags) {
-	makeComputationNode(getCandidateNode(), f, seed, Flag.Unbound | flags);
+	makeComputationNode(getCandidateNode(), f, seed, 32 | flags);
 }
-
-/**
- * @public
- * @template T
- * @param {function(T): T} f
- * @param {T=} seed
- * @param {number=} flags
- * @returns {function(): T}
- */
 function fn(f, seed, flags) {
-	return makeProcedureNode(getCandidateNode(), f, seed, Flag.Unbound | flags);
+	return makeProcedureNode(getCandidateNode(), f, seed, 32 | flags);
 }
-
-/**
- * @public
- * @template T
- * @param {Array<function(): *>|function(): *} src
- * @param {function(T): T} f
- * @param {T=} seed
- * @param {number=} flags
- * @returns {function(): T}
- */
 function on(src, f, seed, flags) {
-	/** @type {Computation} */
 	var node = getCandidateNode();
-	if (flags & Flag.Dynamic) {
-		if (flags & Flag.Wait) {
+	if (flags & 4) {
+		if (flags & 1) {
 			bindSource(node, src);
 		}
 		return makeProcedureNode(node, function (seed) {
 			bindSource(node, src);
 			return f(seed);
-		}, seed, Flag.Bound | flags);
+		}, seed, 16 | flags);
 	} else {
 		bindSource(node, src);
-		return makeProcedureNode(node, f, seed, Flag.Bound | flags);
+		return makeProcedureNode(node, f, seed, 16 | flags);
 	}
 }
-
-/**
- * @public
- * @template T
- * @param {function(function(): void=): void} f
- * @returns {T}
- */
 function root(f) {
-	/** @type {T} */
 	var val;
-	/** @type {Computation<T>} */
 	var node;
-	/** @type {boolean} */
 	var unending = f.length === 0;
-	/** @type {null|function(): void} */
 	var disposer = unending ? null : function () {
 		if (node !== null) {
-			if (State !== System.Idle) {
-				if (State === System.Dispose) {
+			if (State !== 0) {
+				if (State === 5) {
 					node.dispose();
 				} else {
 					Root.disposes.add(node);
@@ -198,32 +106,22 @@ function root(f) {
 			}
 		}
 	};
-	/** @type {Computation} */
 	var owner = Owner;
-	/** @type {Computation} */
 	var listener = Listener;
 	Owner = node = unending ? Unowned : getCandidateNode();
 	Listener = null;
 	try {
-		val = unending ? f() : f(/** @type {function(): void} */(disposer));
+		val = unending ? f() : f((disposer));
 	} finally {
 		Owner = owner;
 		Listener = listener;
 	}
-	if (unending || recycleOrClaimNode(node, null, void 0, Flag.Orphan)) {
+	if (unending || recycleOrClaimNode(node, null, void 0, 2048)) {
 		node = null;
 	}
 	return val;
 }
-
-/**
- * @public
- * @template T
- * @param {function(): T} node
- * @returns {T}
- */
 function sample(node) {
-	/** @type {Computation} */
 	var listener = Listener;
 	try {
 		Listener = null;
@@ -232,52 +130,21 @@ function sample(node) {
 		Listener = listener;
 	}
 }
-
-/**
- * @template T
- * @constructor
- * @param {T} val
- */
 function Data(val) {
-	/**
-	 * @type {T}
-	 */
 	this._val = val;
-	/**
-	 * @type {number}
-	 */
 	this._flag = 0;
-	/**
-	 * @type {Log<Computation>}
-	 */
 	this._log = null;
-	/**
-	 * @type {T|Object}
-	 */
 	this._pval = Void;
 }
-
-/**
- * @returns {T}
- */
 Data.prototype.get = function () {
 	if (Listener !== null) {
 		logRead(this, Listener);
 	}
 	return this._val;
 }
-
-/**
- * @param {T} val
- * @returns {T}
- */
 Data.prototype.set = function (val) {
 	return logWrite(this, val);
 }
-
-/**
- * 
- */
 Data.prototype.update = function () {
 	this._val = this._pval;
 	this._pval = Void;
@@ -285,45 +152,19 @@ Data.prototype.update = function () {
 		markComputationsForUpdate(this._log, Root.time);
 	}
 }
-
-/**
- * @template T
- * @constructor
- * @extends {Data<T>}
- * @param {T} val
- * @param {function(T,T): boolean=} eq
- */
 function Value(val, eq) {
 	Data.call(this, val);
-	/**
-	 * @const
-	 * @type {(function(T,T): boolean)|undefined}
-	 */
 	this._eq = eq;
 }
-
-/**
- * @returns {T}
- */
 Value.prototype.get = function () {
 	if (Listener !== null) {
 		logRead(this, Listener);
 	}
 	return this._val;
 }
-
-/**
- * 
- * @param {T} val 
- * @returns {T}
- */
 Value.prototype.set = function (val) {
 	return (this._eq ? this._eq(this._val, val) : this._val === val) ? val : logWrite(this, val);
 }
-
-/**
- * @returns {void}
- */
 Value.prototype.update = function () {
 	this._val = this._pval;
 	this._pval = Void;
@@ -331,69 +172,30 @@ Value.prototype.update = function () {
 		markComputationsForUpdate(this._log, Root.time);
 	}
 }
-
-/**
- * @template T
- * @constructor
- */
 function Computation() {
-	/**
-	 * @type {T}
-	 */
 	this._val = void 0;
-	/**
-	 * @type {number}
-	 */
 	this._flag = 0;
-	/**
-	 * @type {Log<Computation>}
-	 */
 	this._log = null;
-	/**
-	 * @type {null|function(T): T}
-	 */
 	this._fn = null;
-	/**
-	 * @type {number}
-	 */
 	this._age = -1;
-	/**
-	 * @type {Log<Data|Computation>}
-	 */
 	this._src = null;
-	/**
-	 * @type {Computation}
-	 */
 	this._owner = null;
-	/**
-	 * @type {Array<number>}
-	 */
 	this._traces = null;
-	/**
-	 * @type {Array<Computation>}
-	 */
 	this._owned = null;
-	/**
-	 * @type {Array<function(boolean): void>}
-	 */
 	this._cleanups = null;
 }
-
-/**
- * @returns {T}
- */
 Computation.prototype.get = function () {
 	if (Listener !== null) {
 		var flag = this._flag;
-		if (flag & Flag.Watch) {
-			if (State === System.Trace) {
+		if (flag & 512) {
+			if (State === 3) {
 				applyUpstreamUpdates(this);
 			}
 		}
 		if (this._age === Root.time) {
-			if (flag & Flag.Running) {
+			if (flag & 128) {
 				throw new Error('Circular dependency');
-			} else if (flag & Flag.Stale) {
+			} else if (flag & 64) {
 				this.update();
 			}
 		}
@@ -401,15 +203,14 @@ Computation.prototype.get = function () {
 	}
 	return this._val;
 }
-
 Computation.prototype.update = function () {
 	var owner = Owner;
 	var listener = Listener;
 	cleanupNode(this, false);
 	Owner = this;
 	var flag = this._flag;
-	if (flag & Flag.Unbound) {
-		if (flag & Flag.Static) {
+	if (flag & 32) {
+		if (flag & 8) {
 			Listener = null;
 		} else {
 			Listener = this;
@@ -417,198 +218,45 @@ Computation.prototype.update = function () {
 	} else {
 		Listener = null;
 	}
-	this._flag &= ~Flag.Stale;
-	this._flag |= Flag.Running;
+	this._flag &= ~64;
+	this._flag |= 128;
 	var val = this._val;
 	this._val = this._fn.call(this, val);
-	if (this._flag & Flag.Trace) {
+	if (this._flag & 2) {
 		markPendingComputations(this, val);
 	}
-	this._flag &= ~Flag.Running;
+	this._flag &= ~128;
 	Owner = owner;
 	Listener = listener;
 }
-
 Computation.prototype.dispose = function () {
 	this.fn = null;
 	this._log = null;
 	cleanupNode(this, true);
 }
-
-/* @module */
-
-/**
- * @interface
- * @template T
- */
-function IEnumerable() { }
-
-/**
- * @returns {Array<T>}
- */
-IEnumerable.prototype.val = function () { }
-
-/**
- * 
- * @param {function(T,number=): boolean} callback 
- * @returns {function(): boolean}
- */
-IEnumerable.prototype.every = function (callback) { }
-
-/**
- * 
- * @param {function(T,number=): boolean} callback 
- * @returns {IEnumerable<T>}
- */
-IEnumerable.prototype.filter = function (callback) { }
-
-/**
- * 
- * @param {function(T,number=): boolean} callback
- * @returns {function(): T} 
- */
-IEnumerable.prototype.find = function (callback) { }
-
-/**
- * 
- * @param {function(T,number=): boolean} callback 
- * @param {number=} index 
- * @returns {function(): number}
- */
-IEnumerable.prototype.findIndex = function (callback, index) { }
-
-/**
- * 
- * @param {function(T,number=): void} callback 
- * @returns {void}
- */
-IEnumerable.prototype.forEach = function (callback) { }
-
-/**
- * 
- * @param {T} valueToFind 
- * @param {number=} fromIndex
- * @returns {function(): boolean}
- */
-IEnumerable.prototype.includes = function (valueToFind, fromIndex) { }
-
-/**
- * 
- * @param {T} searchElement 
- * @param {number=} fromIndex 
- * @returns {function(): number}
- */
-IEnumerable.prototype.indexOf = function (searchElement, fromIndex) { }
-
-/**
- * 
- * @param {string=} separator 
- * @returns {function(): string}
- */
-IEnumerable.prototype.join = function (separator) { }
-
-/**
- * 
- * @param {T} searchElement 
- * @param {number=} fromIndex
- * @returns {function(): number}
- */
-IEnumerable.prototype.lastIndexOf = function (searchElement, fromIndex) { }
-
-/**
- * @template U
- * @param {function(T,number=): U} callback
- * @returns {IEnumerable<U>} 
- */
-IEnumerable.prototype.map = function (callback) { }
-
-/**
- * @template U
- * @param {function(U,T,number=): U} callback 
- * @param {U=} initialValue
- * @returns {function(): U} 
- */
-IEnumerable.prototype.reduce = function (callback, initialValue) { }
-
-/**
- * @template U
- * @param {function(U,T,number=): U} callback 
- * @param {U=} initialValue
- * @returns {function(): U} 
- */
-IEnumerable.prototype.reduceRight = function (callback, initialValue) { }
-
-/**
- * @returns {IEnumerable<T>}
- */
-IEnumerable.prototype.reverse = function () { }
-
-/**
- * 
- * @param {number=} start 
- * @param {number=} end
- * @returns {IEnumerable<T>}
- */
-IEnumerable.prototype.slice = function (start, end) { }
-
-/**
- * 
- * @param {function(T,number=): boolean} callback
- * @returns {function(): boolean} 
- */
-IEnumerable.prototype.some = function (callback) { }
-
-/**
- * 
- * @param {function(T,T): number=} compareFunction
- * @returns {IEnumerable<T>}
- */
-IEnumerable.prototype.sort = function (compareFunction) { }
-
-/* @module */
-
-/**
- * @template T
- * @constructor
- * @implements {IEnumerable<T>}
- * @extends {Computation<Array<T>>}
- */
 function Enumerable() {
-	/** @type {function(): Array<T>} */
 	this.val;
-	/** @type {function(): (ChangeSet|Array<ChangeSet>)} */
 	this.mut;
 }
-
-/**
- * @param {function(T,number=): boolean} callback 
- * @returns {function(): boolean}
- */
 Enumerable.prototype.every = function (callback) {
 	var self = this;
-	/** @const @type {boolean} */
 	var pure = callback.length === 1;
 	return on(self.val, function (seed) {
-		/** @type {number} */
 		var i;
-		/** @type {number} */
 		var ln;
-		/** @const @type {Array<?>} */
 		var items = self.val();
 		if (seed !== void 0 && pure) {
-			/** @const @type {ChangeSet|Array<ChangeSet>} */
 			var mut = self.mut();
 			if (mut !== null) {
-				/** @type {boolean|void} */
 				var result;
-				if (self._flag & Flag.Single) {
-					result = applyEveryMutation(/** @type {ChangeSet} */(mut), callback, seed);
+				if (self._flag & 1024) {
+					result = applyEveryMutation((mut), callback, seed);
 					if (result !== void 0) {
 						return result;
 					}
 				} else {
-					for (i = 0, ln = /** @type {Array<ChangeSet>} */(mut).length; i < ln; i++) {
-						result = applyEveryMutation(/** @type {Array<ChangeSet>} */(mut)[i], callback, seed);
+					for (i = 0, ln = (mut).length; i < ln; i++) {
+						result = applyEveryMutation((mut)[i], callback, seed);
 						if (result === void 0) {
 							break;
 						}
@@ -625,7 +273,6 @@ Enumerable.prototype.every = function (callback) {
 					}
 				}
 			}
-
 		}
 		for (i = 0, ln = items.length; i < ln; i++) {
 			if (!callback(items[i], i)) {
@@ -633,30 +280,17 @@ Enumerable.prototype.every = function (callback) {
 			}
 		}
 		return true;
-	}, /** @type {?} */(void 0), Flag.Trace);
+	}, (void 0), 2);
 }
-
-/**
- * 
- * @param {function(T,number=): boolean} callback 
- * @returns {IEnumerable<T>}
- */
 Enumerable.prototype.filter = function (callback) {
-	/** @const @type {IEnumerable<T>} */
 	var self = this;
-	/** @const @type {boolean} */
 	var pure = callback.length === 1;
-	return makeEnumerableNode(new DataEnumerable(), /** @type {?} */(self), function (seed) {
-		/** @type {number} */
+	return makeEnumerableNode(new DataEnumerable(), (self), function (seed) {
 		var i;
-		/** @type {number} */
 		var ln;
-		/** @type {Array} */
 		var items = self.val();
-		/** @type {Array} */
 		var newItems = [];
 		for (i = 0, ln = items.length; i < ln; i++) {
-			/** @type {?} */
 			var item = items[i];
 			if (callback(item, i)) {
 				newItems.push(item);
@@ -665,42 +299,27 @@ Enumerable.prototype.filter = function (callback) {
 		return newItems;
 	});
 }
-
-/**
- * 
- * @param {function(T,number=): boolean} callback
- * @returns {function(): T} 
- */
 Enumerable.prototype.find = function (callback) {
-	/** @type {IEnumerable<T>} */
 	var self = this;
-	/** @type {number} */
 	var index = -1;
-	/** @const @type {boolean} */
 	var pure = callback.length === 1;
 	return on(self.val, function (seed) {
-		/** @type {number} */
 		var i;
-		/** @type {number} */
 		var ln;
-		/** @type {?} */
 		var item;
-		/** @type {Array} */
 		var items = self.val();
 		if (seed !== Void && pure) {
-			/** @type {ChangeSet|Array<ChangeSet>} */
 			var mut = self.mut();
 			if (mut !== null) {
-				/** @type {?} */
 				var result;
-				if (self._flag & Flag.Single) {
-					var type = /** @type {ChangeSet} */(mut).type;
+				if (self._flag & 1024) {
+					var type = (mut).type;
 					if (seed === void 0) {
-						if (type & Modification.Insertion) {
-							if (type & Modification.Range) {
-								var count = /** @type {ChangeSet} */(mut).count;
-								for (i = /** @type {ChangeSet} */(mut).index; count >= 0; count--) {
-									item = /** @type {ChangeSet} */(mut).value[i];
+						if (type & 32) {
+							if (type & 16) {
+								var count = (mut).count;
+								for (i = (mut).index; count >= 0; count--) {
+									item = (mut).value[i];
 									if (callback(item)) {
 										index = i;
 										return item;
@@ -708,19 +327,19 @@ Enumerable.prototype.find = function (callback) {
 								}
 								return void 0;
 							} else {
-								if (callback(/** @type {ChangeSet} */(mut).value)) {
-									switch (type & Mutation.Type) {
-										case Mutation.Unshift:
+								if (callback((mut).value)) {
+									switch (type & 15) {
+										case 40:
 											index = 0;
 											break;
-										case Mutation.Push:
+										case 36:
 											index = items.length - 1;
 											break;
-										case Mutation.InsertAt:
-											index = /** @type {ChangeSet} */(mut).index;
+										case 33:
+											index = (mut).index;
 											break;
 									}
-									return /** @type {ChangeSet} */(mut).value;
+									return (mut).value;
 								}
 								return void 0;
 							}
@@ -728,10 +347,8 @@ Enumerable.prototype.find = function (callback) {
 							return void 0;
 						}
 					} else {
-						
 					}
 				} else {
-
 				}
 			}
 		}
@@ -744,18 +361,9 @@ Enumerable.prototype.find = function (callback) {
 		}
 		index = -1;
 		return void 0;
-	}, /** @type {?} */(Void), Flag.Trace);
+	}, (Void), 2);
 }
-
-
-/**
- * 
- * @param {function(T,number=): boolean} callback 
- * @param {number=} index 
- * @returns {function(): number}
- */
 Enumerable.prototype.findIndex = function (callback, index) {
-	/** @const @type {IEnumerable<T>} */
 	var self = this;
 	return on(self.val, function () {
 		var i, ln, item;
@@ -767,33 +375,18 @@ Enumerable.prototype.findIndex = function (callback, index) {
 			}
 		}
 		return -1;
-	}, /** @type {?} */(void 0), Flag.Trace);
+	}, (void 0), 2);
 }
-
-/**
- * 
- * @param {function(T,number=): void} callback 
- * @returns {void}
- */
 Enumerable.prototype.forEach = function (callback) {
-	/** @const @type {IEnumerable<T>} */
 	var self = this;
-	makeEnumerableNode(new DataEnumerable(), /** @type {?} */(self), function (seed) {
+	makeEnumerableNode(new DataEnumerable(), (self), function (seed) {
 		var items = self.val();
 		for (var i = 0, ln = items.length; i < ln; i++) {
 			callback(items[i], i);
 		}
 	});
 }
-
-/**
- * 
- * @param {T} valueToFind 
- * @param {number=} fromIndex
- * @returns {function(): boolean}
- */
 Enumerable.prototype.includes = function (valueToFind, fromIndex) {
-	/** @const @type {IEnumerable<T>} */
 	var self = this;
 	return on(self.val, function () {
 		var i, ln;
@@ -804,17 +397,9 @@ Enumerable.prototype.includes = function (valueToFind, fromIndex) {
 			}
 		}
 		return false;
-	}, /** @type {?} */(void 0), Flag.Trace);
+	}, (void 0), 2);
 }
-
-/**
- * 
- * @param {T} searchElement 
- * @param {number=} fromIndex 
- * @returns {function(): number}
- */
 Enumerable.prototype.indexOf = function (searchElement, fromIndex) {
-	/** @const @type {IEnumerable<T>} */
 	var self = this;
 	return on(self.val, function (seed) {
 		var i, ln, item;
@@ -826,30 +411,15 @@ Enumerable.prototype.indexOf = function (searchElement, fromIndex) {
 			}
 		}
 		return -1;
-	}, /** @type {?} */(void 0), Flag.Trace);
+	}, (void 0), 2);
 }
-
-/**
- * 
- * @param {string=} separator 
- * @returns {function(): string}
- */
 Enumerable.prototype.join = function (separator) {
-	/** @const @type {IEnumerable<T>} */
 	var self = this;
 	return on(self.val, function () {
 		return self.val().join(separator);
-	}, /** @type {?} */(void 0), Flag.Trace);
+	}, (void 0), 2);
 }
-
-/**
- * 
- * @param {T} searchElement 
- * @param {number=} fromIndex
- * @returns {function(): number}
- */
 Enumerable.prototype.lastIndexOf = function (searchElement, fromIndex) {
-	/** @const @type {IEnumerable<T>} */
 	var self = this;
 	return on(self.val, function (seed) {
 		var i, item;
@@ -861,34 +431,17 @@ Enumerable.prototype.lastIndexOf = function (searchElement, fromIndex) {
 			}
 		}
 		return -1;
-	}, /** @type {?} */(void 0), Flag.Trace);
+	}, (void 0), 2);
 }
-
-
-/**
- * @template U
- * @param {function(T,number=): U} callback
- * @returns {IEnumerable<U>} 
- */
 Enumerable.prototype.map = function (callback) {
-	/** @const @type {IEnumerable<T>} */
 	var self = this;
-	/** @type {Array<Computation>} */
 	var nodes = [];
-	return makeEnumerableNode(new DataEnumerable(), /** @type {?} */(self), function (seed) {
-		/** @type {number} */
+	return makeEnumerableNode(new DataEnumerable(), (self), function (seed) {
 		var i;
-		/** @type {number} */
 		var j;
-		/** @type {number} */
 		var ln;
-		/** @type {Computation} */
 		var node;
-		/** @type {Array} */
 		var items = self.val();
-		/**
-		 * @type {function(): ?}
-		 */
 		var mapper = function () {
 			return callback(items[j], j);
 		}
@@ -920,31 +473,14 @@ Enumerable.prototype.map = function (callback) {
 		return seed;
 	});
 }
-
-/**
- * @template U
- * @param {function(U,T,number=): U} callback 
- * @param {U=} initialValue
- * @returns {function(): U} 
- */
 Enumerable.prototype.reduce = function (callback, initialValue) {
-	/** @const @type {IEnumerable<T>} */
 	var self = this;
-	/** @const @type {string} */
 	var type = typeof initialValue;
-	/**
-	 * @const
-	 * @type {boolean}
-	 */
 	var skip = arguments.length === 1;
 	return on(self.val, function () {
-		/** @type {number} */
 		var i;
-		/** @type {number} */
 		var ln;
-		/** @type {U} */
 		var result;
-		/** @type {Array<?>} */
 		var items = self.val();
 		if (skip) {
 			i = 1;
@@ -957,21 +493,11 @@ Enumerable.prototype.reduce = function (callback, initialValue) {
 			result = callback(result, items[i], i);
 		}
 		return result;
-	}, /** @type {?} */(void 0), Flag.Trace);
+	}, (void 0), 2);
 }
-
-/**
- * @template U
- * @param {function(U,T,number=): U} callback 
- * @param {U=} initialValue
- * @returns {function(): U} 
- */
 Enumerable.prototype.reduceRight = function (callback, initialValue) {
-	/** @const @type {IEnumerable<T>} */
 	var self = this;
-	/** @const @type {string} */
 	var type = typeof initialValue;
-	/** @const @type {boolean} */
 	var skip = arguments.length === 1;
 	return on(self.val, function (seed) {
 		var i;
@@ -988,16 +514,11 @@ Enumerable.prototype.reduceRight = function (callback, initialValue) {
 			result = callback(result, items[i], i);
 		}
 		return result;
-	}, /** @type {?} */(void 0), Flag.Trace);
+	}, (void 0), 2);
 }
-
-/**
- * @returns {IEnumerable<T>}
- */
 Enumerable.prototype.reverse = function () {
-	/** @const @type {IEnumerable<T>} */
 	var self = this;
-	return makeEnumerableNode(new DataEnumerable(), /** @type {?} */(self), function () {
+	return makeEnumerableNode(new DataEnumerable(), (self), function () {
 		var items = self.val();
 		var newItems = [];
 		for (var i = items.length - 1, j = 0; i >= 0; i--, j++) {
@@ -1006,20 +527,10 @@ Enumerable.prototype.reverse = function () {
 		return newItems;
 	});
 }
-
-/**
- * 
- * @param {number=} start 
- * @param {number=} end
- * @returns {IEnumerable<T>}
- */
 Enumerable.prototype.slice = function (start, end) {
-	/** @const @type {IEnumerable<T>} */
 	var self = this;
-	return makeEnumerableNode(new DataEnumerable(), /** @type {?} */(self), function (seed) {
-		/** @type {Array} */
+	return makeEnumerableNode(new DataEnumerable(), (self), function (seed) {
 		var items = self.val();
-		/** @type {Array} */
 		var newItems = [];
 		if (start !== void 0) {
 			if (start < 0) {
@@ -1060,16 +571,8 @@ Enumerable.prototype.slice = function (start, end) {
 		}
 		return newItems;
 	});
-
 }
-
-/**
- * 
- * @param {function(T,number=): boolean} callback
- * @returns {function(): boolean} 
- */
 Enumerable.prototype.some = function (callback) {
-	/** @const @type {IEnumerable<T>} */
 	var self = this;
 	return on(self.val, function (seed) {
 		var i, ln;
@@ -1082,14 +585,7 @@ Enumerable.prototype.some = function (callback) {
 		return false;
 	});
 }
-
-/**
- * 
- * @param {function(T,T): number=} compareFunction
- * @returns {IEnumerable<T>}
- */
 Enumerable.prototype.sort = function (compareFunction) {
-	/** @const @type {IEnumerable<T>} */
 	var self = this;
 	return makeEnumerableNode(new DataEnumerable(), this, function (seed) {
 		var items = self.val();
@@ -1098,20 +594,9 @@ Enumerable.prototype.sort = function (compareFunction) {
 		return newItems;
 	});
 }
-
-/**
- * @template T
- * @constructor
- * @extends {Data<Array<T>>}
- * @implements {IEnumerable<T>}
- * @param {Array<T>} val
- */
 function DataArray(val) {
-	var self = /** @type {?} */(this);
+	var self = (this);
 	Data.call(self, val);
-	/**
-	 * @type {function(Array<T>=): Array<T>}
-	 */
 	this.val = function (next) {
 		if (arguments.length > 0) {
 			logWrite(self, next);
@@ -1122,37 +607,22 @@ function DataArray(val) {
 		}
 		return self._val;
 	}
-	/**
-	 * @type {ChangeSet|Array<ChangeSet>}
-	 */
 	this._mut = null;
-	/**
-	 * @type {ChangeSet|Array<ChangeSet>}
-	 */
 	this._pmut = null;
 }
-
 DataArray.prototype = new Enumerable();
 DataArray.constructor = DataArray;
-
-/**
- * @returns {ChangeSet|Array<ChangeSet>}
- */
 DataArray.prototype.mut = function () {
 	return this._mut;
 }
-
-/**
- * @returns {void}
- */
 DataArray.prototype.update = function () {
 	if (this._pval !== Void) {
 		this._val = this._pval;
 		this._pval = Void;
 		this._mut = null;
 	} else {
-		if (this._flag & Flag.Single) {
-			applyMutation(this, /** @type {ChangeSet} */(this._pmut));
+		if (this._flag & 1024) {
+			applyMutation(this, (this._pmut));
 		}
 		else {
 			for (var i = 0, ln = this._pmut.length; i < ln; i++) {
@@ -1166,102 +636,45 @@ DataArray.prototype.update = function () {
 		markComputationsForUpdate(this._log, Root.time);
 	}
 }
-
-/**
- * 
- * @param {number} index 
- * @param {T} item 
- * @returns {void}
- */
 DataArray.prototype.insertAt = function (index, item) {
-	logMutate(this, { type: Mutation.InsertAt, index: index, value: item });
+	logMutate(this, { type: 33, index: index, value: item });
 }
-
-/**
- * 
- * @param {number} index 
- * @param {Array<T>} items 
- * @returns {void}
- */
 DataArray.prototype.insertRange = function (index, items) {
-	logMutate(this, { type: Mutation.InsertRange, index: index, value: items });
+	logMutate(this, { type: 50, index: index, value: items });
 }
-
-/**
- * @returns {void}
- */
 DataArray.prototype.pop = function () {
-	logMutate(this, { type: Mutation.Pop });
+	logMutate(this, { type: 67 });
 }
-
-/**
- * 
- * @param {T} item 
- * @returns {void}
- */
 DataArray.prototype.push = function (item) {
-	logMutate(this, { type: Mutation.Push, value: item });
+	logMutate(this, { type: 36, value: item });
 }
-
-/**
- * 
- * @param {number} index 
- * @returns {void}
- */
 DataArray.prototype.removeAt = function (index) {
-	logMutate(this, { type: Mutation.RemoveAt, index: index });
+	logMutate(this, { type: 69, index: index });
 }
-
-/**
- * 
- * @param {number} index 
- * @param {number} count 
- * @returns {void}
- */
 DataArray.prototype.removeRange = function (index, count) {
-	logMutate(this, { type: Mutation.RemoveRange, index: index, count: count });
+	logMutate(this, { type: 86, index: index, count: count });
 }
-
-/**
- * @returns {void}
- */
 DataArray.prototype.shift = function () {
-	logMutate(this, { type: Mutation.Shift });
+	logMutate(this, { type: 71 });
 }
-
-/**
- * 
- * @param {T} item
- * @returns {void}
- */
 DataArray.prototype.unshift = function (item) {
-	logMutate(this, { type: Mutation.Unshift, value: item });
+	logMutate(this, { type: 40, value: item });
 }
-
-/**
- * @template T
- * @constructor
- * @extends {Computation<Array<T>>}
- * @implements {IEnumerable<T>}
- */
 function DataEnumerable() {
 	var self = this;
 	Computation.call(this);
-	/**
-	 * @type {function(): Array<T>}
-	 */
 	this.val = function () {
 		if (Listener !== null) {
 			var flag = self._flag;
-			if (flag & Flag.Watch) {
-				if (State === System.Trace) {
+			if (flag & 512) {
+				if (State === 3) {
 					applyUpstreamUpdates(self);
 				}
 			}
 			if (self._age === Root.time) {
-				if (flag & Flag.Running) {
+				if (flag & 128) {
 					throw new Error('Circular dependency');
-				} else if (flag & Flag.Stale) {
+				} else if (flag & 64) {
 					self.update();
 				}
 			}
@@ -1269,180 +682,58 @@ function DataEnumerable() {
 		}
 		return self._val;
 	}
-	/**
-	 * @type {ChangeSet|Array<ChangeSet>}
-	 */
 	this._mut = null;
-	/**
-	 * @type {ChangeSet|Array<ChangeSet>}
-	 */
 	this._pmut = null;
 }
-
 DataEnumerable.prototype = new Enumerable();
 DataEnumerable.constructor = DataEnumerable;
-
-/**
- * @returns {ChangeSet|Array<ChangeSet>}
- */
 DataEnumerable.prototype.mut = function () {
 	return this._mut;
 }
-
-/**
- * @returns {void}
- */
 DataEnumerable.prototype.update = function () {
 	var owner = Owner;
 	var listener = Listener;
 	cleanupNode(this, false);
 	Owner = this;
 	Listener = null;
-	this._flag &= ~Flag.Stale;
-	this._flag |= Flag.Running;
+	this._flag &= ~64;
+	this._flag |= 128;
 	var val = this._val;
 	this._val = this._fn.call(this, val);
-	if (this._flag & Flag.Trace) {
+	if (this._flag & 2) {
 		markPendingComputations(this, val);
 	}
-	this._flag &= ~Flag.Running;
+	this._flag &= ~128;
 	Owner = owner;
 	Listener = listener;
 }
-
 DataEnumerable.prototype.dispose = function () {
 	this._fn = null;
 	this._log = null;
 	cleanupNode(this, true);
 }
-
-/*
- * Internal implementation
- */
-/* @strip */
-/**
- * @const
- * @enum {number}
- */
-var System = {
-	Idle: 0,
-	Compute: 1,
-	Change: 2,
-	Trace: 3,
-	Update: 4,
-	Dispose: 5,
-};
-
-/**
- * @const
- * @enum {number}
- */
-var Modification = {
-	Range: 1 << 4,
-	Insertion: 1 << 5,
-	Deletion: 1 << 6,
-	Restructure: 1 << 7,
-};
-
-/**
- * @const
- * @enum {number}
- */
-var Mutation = {
-	InsertAt: 1 | Modification.Insertion,
-	InsertRange: 2 | Modification.Range | Modification.Insertion,
-	Pop: 3 | Modification.Deletion,
-	Push: 4 | Modification.Insertion,
-	RemoveAt: 5 | Modification.Deletion,
-	RemoveRange: 6 | Modification.Range | Modification.Deletion,
-	Shift: 7 | Modification.Deletion,
-	Unshift: 8 | Modification.Insertion,
-	Type: 15,
-};
-/* @strip */
-
-/**
- * @record
- * @template T
- */
 function ChangeSet() { }
-
-/**
- * @type {number}
- */
 ChangeSet.prototype.type;
-
-/**
- * @type {number|undefined}
- */
 ChangeSet.prototype.index;
-
-/**
- * @type {number|undefined}
- */
 ChangeSet.prototype.count;
-
-/**
- * @type {T|Array<T>|undefined}
- */
 ChangeSet.prototype.value;
-
-/**
- * @const
- * @type {Object}
- */
 var Void = {};
-/**
- * @const
- * @type {Clock}
- */
 var Root = new Clock();
-/**
- * @type {number}
- */
-var State = System.Idle;
-/**
- * @type {Computation}
- */
+var State = 0;
 var Owner = null;
-/**
- * @type {Computation}
- */
 var Listener = null;
-/**
- * @type {Computation}
- */
 var Recycled = null;
-/**
- * @const
- * @type {Computation}
- */
 var Unowned = new Computation();
-
-/**
- * @template T
- * @constructor
- */
 function Queue() {
-	/**
-	 * @type {number}
-	 */
 	this.ln = 0;
-	/**
-	 * @const
-	 * @type {Array<T>} 
-	 */
 	this.items = [];
 }
-
 Queue.prototype.reset = function () {
 	this.ln = 0;
 }
-
 Queue.prototype.add = function (item) {
 	this.items[this.ln++] = item;
 }
-
 Queue.prototype.run = function (fn) {
 	var items = this.items;
 	for (var i = 0, ln = this.ln; i < ln; i++) {
@@ -1451,63 +742,19 @@ Queue.prototype.run = function (fn) {
 	}
 	this.ln = 0;
 }
-
-/**
- * @constructor
- */
 function Clock() {
-	/**
-	 * @type {number}
-	 */
 	this.time = 0;
-	/**
-	 * @const
-	 * @type {Queue<Data>}
-	 */
 	this.changes = new Queue();
-	/**
-	 * @const
-	 * @type {Queue<Computation>}
-	 */
 	this.traces = new Queue();
-	/**
-	 * @const
-	 * @type {Queue<Computation>}
-	 */
 	this.updates = new Queue();
-	/**
-	 * @const
-	 * @type {Queue<Computation>}
-	 */
 	this.disposes = new Queue();
 }
-
-/**
- * @template T
- * @constructor
- */
 function Log() {
-	/**
-	 * @type {T}
-	 */
 	this._node1 = null;
-	/**
-	 * @type {number}
-	 */
 	this._slot1 = -1;
-	/**
-	 * @type {Array<T>}
-	 */
 	this._nodes = null;
-	/**
-	 * @type {Array<number>}
-	 */
 	this._slots = null;
 }
-
-/**
- * @returns {Computation}
- */
 function getCandidateNode() {
 	var node = Recycled;
 	if (node === null) {
@@ -1517,15 +764,7 @@ function getCandidateNode() {
 		return node;
 	}
 }
-
-
-/**
- * 
- * @param {Computation} node 
- * @param {Array<function(): ?>|(function(): ?)} src 
- */
 function bindSource(node, src) {
-	/** @type {Computation} */
 	var listener = Listener;
 	try {
 		Listener = node;
@@ -1540,29 +779,20 @@ function bindSource(node, src) {
 		Listener = listener;
 	}
 }
-
-/**
- * @template T
- * @param {Computation<T>} node 
- * @param {function(T): T} fn 
- * @param {T} seed 
- * @param {number} flags 
- * @returns {void}
- */
 function makeComputationNode(node, fn, seed, flags) {
 	var owner = Owner;
 	var listener = Listener;
-	var toplevel = State === System.Idle;
+	var toplevel = State === 0;
 	Owner = node;
-	Listener = flags & Flag.Bound ? null : node;
+	Listener = flags & 16 ? null : node;
 	if (toplevel) {
 		Root.changes.reset();
 		Root.updates.reset();
 		try {
-			State = System.Compute;
-			seed = flags & Flag.Wait ? seed : fn(seed);
+			State = 1;
+			seed = flags & 1 ? seed : fn(seed);
 		} finally {
-			State = System.Idle;
+			State = 0;
 			Owner = Listener = null;
 		}
 	} else {
@@ -1575,29 +805,20 @@ function makeComputationNode(node, fn, seed, flags) {
 		finishToplevelExecution();
 	}
 }
-
-/**
- * @template T
- * @param {Computation<T>} node 
- * @param {function(T): T} fn 
- * @param {T} seed 
- * @param {number} flags 
- * @returns {function(): T}
- */
 function makeProcedureNode(node, fn, seed, flags) {
 	var owner = Owner;
 	var listener = Listener;
-	var toplevel = State === System.Idle;
+	var toplevel = State === 0;
 	Owner = node;
-	Listener = flags & Flag.Bound ? null : node;
+	Listener = flags & 16 ? null : node;
 	if (toplevel) {
 		Root.changes.reset();
 		Root.updates.reset();
 		try {
-			State = System.Compute;
-			seed = flags & Flag.Wait ? seed : fn(seed);
+			State = 1;
+			seed = flags & 1 ? seed : fn(seed);
 		} finally {
-			State = System.Idle;
+			State = 0;
 			Owner = Listener = null;
 		}
 	} else {
@@ -1617,19 +838,10 @@ function makeProcedureNode(node, fn, seed, flags) {
 		}
 	}
 }
-
-/**
- * @template T, U
- * @param {DataEnumerable<U>} node
- * @param {Computation<T>} source
- * @param {function(Array<U>): U} fn 
- * @param {number=} flags
- * @returns {IEnumerable<U>}
- */
 function makeEnumerableNode(node, source, fn, flags) {
 	var owner = Owner;
 	var listener = Listener;
-	var toplevel = State === System.Idle;
+	var toplevel = State === 0;
 	logRead(source, node);
 	Owner = node;
 	Listener = null;
@@ -1637,10 +849,10 @@ function makeEnumerableNode(node, source, fn, flags) {
 		Root.changes.reset();
 		Root.updates.reset();
 		try {
-			State = System.Compute;
+			State = 1;
 			node._val = fn([]);
 		} finally {
-			State = System.Idle;
+			State = 0;
 			Owner = Listener = null;
 		}
 	} else {
@@ -1657,7 +869,7 @@ function makeEnumerableNode(node, source, fn, flags) {
 		} else {
 			owner._owned.push(node);
 		}
-		if (owner._flag & (Flag.Trace | Flag.Watch)) {
+		if (owner._flag & (2 | 512)) {
 			logPendingOwner(owner);
 		}
 	}
@@ -1666,28 +878,18 @@ function makeEnumerableNode(node, source, fn, flags) {
 	}
 	return node;
 }
-
 function finishToplevelExecution() {
 	if (Root.changes.ln > 0 || Root.updates.ln > 0) {
 		try {
 			tick(Root);
 		} finally {
-			State = System.Idle;
+			State = 0;
 		}
 	}
 }
-
-/**
- * @template T
- * @param {Computation<T>} node 
- * @param {null|function(T): T} fn 
- * @param {T} val
- * @param {number} flags
- * @returns {boolean}
- */
 function recycleOrClaimNode(node, fn, val, flags) {
 	var i, ln;
-	var owner = flags & Flag.Orphan || Owner === null || Owner === Unowned ? null : Owner;
+	var owner = flags & 2048 || Owner === null || Owner === Unowned ? null : Owner;
 	var recycle = node._src === null && (node._owned === null && node._cleanups === null || owner !== null);
 	if (recycle) {
 		Recycled = node;
@@ -1724,25 +926,16 @@ function recycleOrClaimNode(node, fn, val, flags) {
 			} else {
 				owner._owned.push(node);
 			}
-			if (owner._flag & (Flag.Trace | Flag.Watch)) {
+			if (owner._flag & (2 | 512)) {
 				logPendingOwner(owner);
 			}
 		}
 	}
 	return recycle;
 }
-
-/**
- * 
- * @param {Data|Computation} from 
- * @param {Computation} to
- */
 function logRead(from, to) {
-	/** @type {Log<Computation>} */
 	var log;
-	/** @type {Log<Data|Computation>} */
 	var src;
-	/** @type {number} */
 	var fromslot;
 	if (from._log === null) {
 		log = from._log = new Log();
@@ -1754,7 +947,6 @@ function logRead(from, to) {
 	} else {
 		src = to._src;
 	}
-	/** @type {number} */
 	var toslot = src._node1 === null ? -1 : src._nodes === null ? 0 : src._nodes.length;
 	if (log._node1 === null) {
 		log._node1 = to;
@@ -1779,8 +971,8 @@ function logRead(from, to) {
 		src._nodes.push(from);
 		src._slots.push(fromslot);
 	}
-	if (from._flag & (Flag.Trace | Flag.Watch)) {
-		if (to._flag & Flag.Watch) {
+	if (from._flag & (2 | 512)) {
+		if (to._flag & 512) {
 			if (to._traces === null) {
 				to._traces = [toslot];
 			} else {
@@ -1791,15 +983,8 @@ function logRead(from, to) {
 		}
 	}
 }
-
-/**
- * @template T
- * @param {Data<T>} node
- * @param {T} val
- * @returns {T}
- */
 function logWrite(node, val) {
-	if (State !== System.Idle) {
+	if (State !== 0) {
 		if (node._pval !== Void) {
 			if (val !== node._pval) {
 				throw new Error('Conflicting changes');
@@ -1819,31 +1004,25 @@ function logWrite(node, val) {
 	}
 	return val;
 }
-
-/**
- * @template T
- * @param {DataArray<T>} node 
- * @param {ChangeSet<T>} changeset 
- */
 function logMutate(node, changeset) {
-	if (State !== System.Idle) {
+	if (State !== 0) {
 		if (node._pval !== Void) {
 			throw new Error('Conflicting changes');
 		}
 		if (node._pmut === null) {
 			node._pmut = changeset;
-			node._flag |= Flag.Single;
+			node._flag |= 1024;
 			Root.changes.add(node);
 		} else {
-			if (node._flag & Flag.Single) {
-				node._flag &= ~Flag.Single;
+			if (node._flag & 1024) {
+				node._flag &= ~1024;
 				node._pmut = [node._pmut, changeset];
 			} else {
 				node._pmut.push(changeset);
 			}
 		}
 	} else {
-		node._flag |= Flag.Single;
+		node._flag |= 1024;
 		if (node._log !== null) {
 			node._pmut = changeset;
 			Root.changes.add(node);
@@ -1854,16 +1033,9 @@ function logMutate(node, changeset) {
 		}
 	}
 }
-
-
-/**
- * 
- * @param {Computation} to
- * @param {number} slot
- */
 function logPendingSource(to, slot) {
 	var i, ln;
-	to._flag |= Flag.Watch;
+	to._flag |= 512;
 	if (to._traces === null) {
 		to._traces = [slot];
 	} else {
@@ -1887,56 +1059,30 @@ function logPendingSource(to, slot) {
 		logPendingOwner(to);
 	}
 }
-
-/**
- * 
- * @param {Computation} owner 
- */
 function logPendingOwner(owner) {
 	var node;
 	var owned = owner._owned;
 	for (var i = 0, ln = owned.length; i < ln; i++) {
 		node = owned[i];
 		node._owner = owner;
-		node._flag |= Flag.Watch;
+		node._flag |= 512;
 		if (node._owned !== null) {
 			logPendingOwner(node);
 		}
 	}
 }
-
-
-/**
- * 
- * @param {Data} data 
- */
 function applyChanges(data) {
 	data.update();
 }
-
-/**
- * 
- * @param {Computation} node 
- */
 function applyUpdates(node) {
-	if (node._flag & Flag.Stale) {
+	if (node._flag & 64) {
 		node.update();
 	}
 }
-
-/**
- * 
- * @param {Computation} node 
- */
 function applyDisposes(node) {
 	node.dispose();
 }
-
-/**
- * 
- */
 function execute() {
-	/** @type {Computation} */
 	var owner = Owner;
 	Root.updates.reset();
 	try {
@@ -1944,38 +1090,28 @@ function execute() {
 	} finally {
 		Owner = owner;
 		Listener = null;
-		State = System.Idle;
+		State = 0;
 	}
 }
-
-/**
- * 
- * @param {Clock} clock 
- */
 function tick(clock) {
 	var i = 0;
 	clock.disposes.reset();
 	do {
 		clock.time++;
-		State = System.Change;
+		State = 2;
 		clock.changes.run(applyChanges);
-		State = System.Trace;
+		State = 3;
 		clock.traces.run(applyUpdates);
-		State = System.Update;
+		State = 4;
 		clock.updates.run(applyUpdates);
-		State = System.Dispose;
+		State = 5;
 		clock.disposes.run(applyDisposes);
 		if (i++ > 1e5) {
 			throw new Error('Runaway clock');
 		}
 	} while (clock.changes.ln !== 0 || clock.updates.ln !== 0 || clock.disposes.ln !== 0);
-	State = System.Idle;
+	State = 0;
 }
-
-/**
- * @param {Log<Computation>} log
- * @param {number} time
- */
 function markComputationsForUpdate(log, time) {
 	var node = log._node1;
 	var nodes = log._nodes;
@@ -1993,16 +1129,10 @@ function markComputationsForUpdate(log, time) {
 		}
 	}
 }
-
-/**
- * 
- * @param {Computation} node 
- * @param {number} time
- */
 function markComputationForUpdate(node, time) {
 	node._age = time;
-	node._flag |= Flag.Stale;
-	if (node._flag & Flag.Trace) {
+	node._flag |= 64;
+	if (node._flag & 2) {
 		Root.traces.add(node);
 	} else {
 		Root.updates.add(node);
@@ -2010,20 +1140,15 @@ function markComputationForUpdate(node, time) {
 	if (node._owned !== null) {
 		markComputationsDisposed(node._owned, time);
 	}
-	if (!(node._flag & Flag.Trace)) {
+	if (!(node._flag & 2)) {
 		if (node._log !== null) {
 			markComputationsForUpdate(node._log, time);
 		}
 	}
 }
-
-/**
- * 
- * @param {Computation} node 
- */
 function markPendingComputations(node, val) {
-	if (node._flag & Flag.Dirty) {
-		node._flag &= ~Flag.Dirty;
+	if (node._flag & 4096) {
+		node._flag &= ~4096;
 	} else if (node._val === val) {
 		return;
 	}
@@ -2031,55 +1156,37 @@ function markPendingComputations(node, val) {
 		markComputationsForUpdate(node._log, Root.time);
 	}
 }
-
-
-/**
- * @param {Array<Computation>} nodes
- * @param {number} time
- */
 function markComputationsDisposed(nodes, time) {
-	/** @type {Computation} */
 	var node;
 	for (var i = 0, ln = nodes.length; i < ln; i++) {
 		node = nodes[i];
-		if (!(node._flag & Flag.Disposed)) {
+		if (!(node._flag & 256)) {
 			node._age = time;
-			node._flag &= ~Flag.Stale;
-			node._flag |= Flag.Disposed;
+			node._flag &= ~64;
+			node._flag |= 256;
 			if (node._owned !== null) {
 				markComputationsDisposed(node._owned, time);
 			}
 		}
 	}
 }
-
-/**
- * 
- * @param {Computation} node 
- */
 function applyUpstreamUpdates(node) {
-	/** @type {number} */
 	var slot;
-	/** @type {Log<Data|Computation>} */
 	var src = node._src;
-	/** @type {Computation} */
 	var source;
-	/** @type {Array<Data|Computation>} */
 	var sources;
-	/** @type {Computation} */
 	var owner = node._owner;
-	/** @type {Array<number>} */
 	var traces = node._traces;
 	if (owner !== null) {
 		applyUpstreamUpdates(owner);
 	}
-	if (!(node._flag & Flag.Disposed)) {
+	if (!(node._flag & 256)) {
 		if (traces !== null) {
 			sources = src._nodes;
 			for (var i = 0, ln = traces.length; i < ln; i++) {
 				slot = traces[i];
-				source = /** @type {Computation} */(slot === -1 ? src._node1 : sources[slot]);
-				if (source._flag & (Flag.Trace | Flag.Watch)) {
+				source = (slot === -1 ? src._node1 : sources[slot]);
+				if (source._flag & (2 | 512)) {
 					applyUpstreamUpdates(source);
 				}
 				applyUpdates(source);
@@ -2088,22 +1195,11 @@ function applyUpstreamUpdates(node) {
 		applyUpdates(node);
 	}
 }
-
-/**
- * 
- * @param {Computation} node 
- * @param {boolean} final 
- */
 function cleanupNode(node, final) {
-	/** @type {number} */
 	var i;
-	/** @type {number} */
 	var ln;
-	/** @type {number} */
 	var flag = node._flag;
-	/** @type {Array<Computation>} */
 	var owned = node._owned;
-	/** @type {Array<function(boolean): void>} */
 	var cleanups = node._cleanups;
 	if (cleanups !== null) {
 		for (i = 0, ln = cleanups.length; i < ln; i++) {
@@ -2117,31 +1213,22 @@ function cleanupNode(node, final) {
 	}
 	if (final) {
 		cleanupSources(node);
-	} else if (flag & (Flag.Static | Flag.Dynamic)) {
-		if (flag & Flag.Dynamic) {
+	} else if (flag & (8 | 4)) {
+		if (flag & 4) {
 			cleanupSources(node);
 		}
-	} else if (flag & Flag.Unbound) {
+	} else if (flag & 32) {
 		cleanupSources(node);
 	}
-
 }
-
-/**
- * 
- * @param {Computation} node 
- */
 function cleanupSources(node) {
-	/** @type {Log<Data|Computation>} */
 	var src = node._src;
 	if (src !== null) {
 		if (src._node1 !== null) {
 			cleanupSource(src._node1, src._slot1);
 		}
-		/** @type {Array<Data|Computation>} */
 		var sources = src._nodes;
 		if (sources !== null) {
-			/** @type {Array<number>} */
 			var sourceslots = src._slots;
 			for (var i = 0, ln = sources.length; i < ln; i++) {
 				cleanupSource(sources.pop(), sourceslots.pop());
@@ -2150,25 +1237,15 @@ function cleanupSources(node) {
 	}
 	node._traces = null;
 }
-
-/**
- * @param {Data|Computation} source
- * @param {number} slot
- */
 function cleanupSource(source, slot) {
 	var src;
-	/** @type {Log<Computation>} */
 	var log = source._log;
-	/** @type {Computation} */
 	var last;
-	/** @type {number} */
 	var lastslot;
 	if (slot === -1) {
 		log._node1 = null;
 	} else {
-		/** @type {Array<Computation>} */
 		var nodes = log._nodes;
-		/** @type {Array<number>} */
 		var nodeslots = log._slots;
 		last = nodes.pop();
 		lastslot = nodeslots.pop();
@@ -2184,12 +1261,6 @@ function cleanupSource(source, slot) {
 		}
 	}
 }
-
-/**
- * @template T
- * @param {function(): T} f
- * @returns {Computation<T>} 
- */
 function persist(f) {
 	var node = getCandidateNode();
 	var owner = Owner;
@@ -2204,44 +1275,34 @@ function persist(f) {
 	}
 	return node;
 }
-
-/**
- * @template T
- * @param {DataArray<T>} node 
- * @param {ChangeSet<T>} changeset
- */
 function applyMutation(node, changeset) {
-	/** @type {number} */
 	var i;
-	/** @type {number} */
 	var ln;
-	/** @type {Array<T>} */
 	var array = node._val;
-	/** @type {T|Array<T>} */
 	var value = changeset.value;
 	switch (changeset.type) {
-		case Mutation.InsertAt:
+		case 33:
 			array.splice(changeset.index, 0, value);
 			break;
-		case Mutation.InsertRange:
+		case 50:
 			var args = [changeset.index, 0];
 			for (i = 0, ln = value.length; i < ln; i++) {
 				args[i + 2] = value[i];
 			}
 			Array.prototype.splice.apply(array, args);
 			break;
-		case Mutation.Pop:
+		case 67:
 			if (array.length !== 0) {
 				array.length--;
 			}
 			break;
-		case Mutation.Push:
+		case 36:
 			array[array.length] = value;
 			break;
-		case Mutation.RemoveAt:
+		case 69:
 			ln = array.length;
 			if (ln > 0) {
-				i = /** @type {number} */(changeset.index);
+				i = (changeset.index);
 				if (i < 0) {
 					i = ln - 1 + i;
 					if (i < 0) {
@@ -2259,24 +1320,17 @@ function applyMutation(node, changeset) {
 				array.length--;
 			}
 			break;
-		case Mutation.RemoveRange:
+		case 86:
 			array.splice(changeset.index, changeset.count);
 			break;
-		case Mutation.Shift:
+		case 71:
 			array.shift();
 			break;
-		case Mutation.Unshift:
+		case 40:
 			array.unshift(value);
 			break;
 	}
 }
-
-/**
- * 
- * @param {Object} object
- * @param  {string} type
- * @returns {Object}
- */
 function getInitialValue(object, type) {
 	if (type === 'object') {
 		if (object === null) {
@@ -2284,7 +1338,6 @@ function getInitialValue(object, type) {
 		} else if (object instanceof Array) {
 			return object.slice();
 		} else {
-			/** @type {Object} */
 			var result = {};
 			for (var key in object) {
 				result[key] = object[key];
@@ -2292,23 +1345,15 @@ function getInitialValue(object, type) {
 			return result;
 		}
 	} else if (type === 'function') {
-		return /** @type {Function} */(object)();
+		return (object)();
 	} else {
 		return object;
 	}
 }
-
-/**
- * @template T
- * @param {ChangeSet<T>} cs 
- * @param {function(T,number=): boolean} callback
- * @param {boolean} seed 
- * @returns {boolean|void}
- */
 function applyEveryMutation(cs, callback, seed) {
 	if (seed) {
-		if (cs.type & Modification.Insertion) {
-			if (cs.type & Modification.Range) {
+		if (cs.type & 32) {
+			if (cs.type & 16) {
 				for (var i = 0, ln = cs.value.length; i < ln; i++) {
 					if (!callback(cs.value[i])) {
 						return false;
@@ -2322,25 +1367,19 @@ function applyEveryMutation(cs, callback, seed) {
 			return true;
 		}
 	} else {
-		if (cs.type & Modification.Deletion) {
+		if (cs.type & 64) {
 			return void 0;
 		} else {
 			return false;
 		}
 	}
 }
-
 module.exports = {
 	array: array,
 	data: data,
 	value: value,
 	Flag: Flag,
-	/* @strip */
-	System: System,
-	Mutation: Mutation,
-	Modification: Modification,
-	/* @strip */
-	cleanup: cleanup,
+		cleanup: cleanup,
 	freeze: freeze,
 	bind: bind,
 	run: run,
