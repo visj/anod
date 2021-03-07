@@ -1,7 +1,3 @@
-/**
- * @const
- * @enum {number}
- */
 var Flag = {
 	Wait: 1,
 	Trace: 1 << 1,
@@ -18,50 +14,24 @@ var Flag = {
 	Dirty: 1 << 12,
 };
 
-/**
- * @public
- * @template T
- * @param {Array<T>} val
- * @returns {DataArray<T>}
- */
 function array(val) {
 	return new DataArray(val);
 }
 
-/**
- * @public
- * @template T
- * @param {T} val
- * @returns {function(T=): T}
- */
 function data(val) {
-	/** @type {Data} */
 	var node = new Data(val);
-	return /** @type {function(T=): T} */(function (next) {
+	return function (next) {
 		return arguments.length > 0 ? node.set(next) : node.get();
-	});
+	};
 }
 
-/**
- * @public
- * @template T
- * @param {T} val
- * @param {function(T,T): boolean=} eq
- * @returns {function(T=): T}
- */
 function value(val, eq) {
-	/** @type {Value} */
 	var node = new Value(val, eq);
-	return /** @type {function(T=): T} */(function (next) {
+	return function (next) {
 		return arguments.length > 0 ? node.set(next) : node.get();
-	});
+	};
 }
 
-
-/**
- * @public
- * @param {function(): void} f
- */
 function cleanup(f) {
 	if (Owner !== null) {
 		if (Owner._cleanups === null) {
@@ -72,14 +42,7 @@ function cleanup(f) {
 	}
 }
 
-/**
- * @public
- * @template T
- * @param {function(): T} f
- * @returns {T}
- */
 function freeze(f) {
-	/** @type {T} */
 	var val;
 	if (State !== 0) {
 		val = f();
@@ -96,17 +59,7 @@ function freeze(f) {
 	return val;
 }
 
-/**
- * @public
- * @template T
- * @param {Array<function(): ?>|(function(): ?)} src
- * @param {function(T): T} f
- * @param {T=} seed
- * @param {number=} flags
- * @returns {void}
- */
 function bind(src, f, seed, flags) {
-	/** @type {Computation} */
 	var node = getCandidateNode();
 	if (flags & 4) {
 		if (flags & 1) {
@@ -122,40 +75,15 @@ function bind(src, f, seed, flags) {
 	}
 }
 
-/**
- * @template T
- * @param {function(T): T} f
- * @param {T=} seed
- * @param {number=} flags
- * @returns {void}
- */
 function run(f, seed, flags) {
 	makeComputationNode(getCandidateNode(), f, seed, 32 | flags);
 }
 
-/**
- * @public
- * @template T
- * @param {function(T): T} f
- * @param {T=} seed
- * @param {number=} flags
- * @returns {function(): T}
- */
 function fn(f, seed, flags) {
 	return makeProcedureNode(getCandidateNode(), f, seed, 32 | flags);
 }
 
-/**
- * @public
- * @template T
- * @param {Array<function(): *>|function(): *} src
- * @param {function(T): T} f
- * @param {T=} seed
- * @param {number=} flags
- * @returns {function(): T}
- */
 function on(src, f, seed, flags) {
-	/** @type {Computation} */
 	var node = getCandidateNode();
 	if (flags & 4) {
 		if (flags & 1) {
@@ -171,20 +99,9 @@ function on(src, f, seed, flags) {
 	}
 }
 
-/**
- * @public
- * @template T
- * @param {function(function(): void=): void} f
- * @returns {T}
- */
 function root(f) {
-	/** @type {T} */
-	var val;
-	/** @type {Computation<T>} */
-	var node;
-	/** @type {boolean} */
+	var val, node;
 	var unending = f.length === 0;
-	/** @type {null|function(): void} */
 	var disposer = unending ? null : function () {
 		if (node !== null) {
 			if (State !== 0) {
@@ -198,14 +115,12 @@ function root(f) {
 			}
 		}
 	};
-	/** @type {Computation} */
 	var owner = Owner;
-	/** @type {Computation} */
 	var listener = Listener;
 	Owner = node = unending ? Unowned : getCandidateNode();
 	Listener = null;
 	try {
-		val = unending ? f() : f(/** @type {function(): void} */(disposer));
+		val = unending ? f() : f(disposer);
 	} finally {
 		Owner = owner;
 		Listener = listener;
@@ -216,14 +131,7 @@ function root(f) {
 	return val;
 }
 
-/**
- * @public
- * @template T
- * @param {function(): T} node
- * @returns {T}
- */
 function sample(node) {
-	/** @type {Computation} */
 	var listener = Listener;
 	try {
 		Listener = null;
@@ -233,33 +141,13 @@ function sample(node) {
 	}
 }
 
-/**
- * @template T
- * @constructor
- * @param {T} val
- */
 function Data(val) {
-	/**
-	 * @type {T}
-	 */
 	this._val = val;
-	/**
-	 * @type {number}
-	 */
 	this._flag = 0;
-	/**
-	 * @type {Log<Computation>}
-	 */
 	this._log = null;
-	/**
-	 * @type {T|Object}
-	 */
 	this._pval = Void;
 }
 
-/**
- * @returns {T}
- */
 Data.prototype.get = function () {
 	if (Listener !== null) {
 		logRead(this, Listener);
@@ -267,17 +155,10 @@ Data.prototype.get = function () {
 	return this._val;
 }
 
-/**
- * @param {T} val
- * @returns {T}
- */
 Data.prototype.set = function (val) {
 	return logWrite(this, val);
 }
 
-/**
- * 
- */
 Data.prototype.update = function () {
 	this._val = this._pval;
 	this._pval = Void;
@@ -286,25 +167,11 @@ Data.prototype.update = function () {
 	}
 }
 
-/**
- * @template T
- * @constructor
- * @extends {Data<T>}
- * @param {T} val
- * @param {function(T,T): boolean=} eq
- */
 function Value(val, eq) {
 	Data.call(this, val);
-	/**
-	 * @const
-	 * @type {(function(T,T): boolean)|undefined}
-	 */
 	this._eq = eq;
 }
 
-/**
- * @returns {T}
- */
 Value.prototype.get = function () {
 	if (Listener !== null) {
 		logRead(this, Listener);
@@ -312,18 +179,10 @@ Value.prototype.get = function () {
 	return this._val;
 }
 
-/**
- * 
- * @param {T} val 
- * @returns {T}
- */
 Value.prototype.set = function (val) {
 	return (this._eq ? this._eq(this._val, val) : this._val === val) ? val : logWrite(this, val);
 }
 
-/**
- * @returns {void}
- */
 Value.prototype.update = function () {
 	this._val = this._pval;
 	this._pval = Void;
@@ -332,56 +191,19 @@ Value.prototype.update = function () {
 	}
 }
 
-/**
- * @template T
- * @constructor
- */
 function Computation() {
-	/**
-	 * @type {T}
-	 */
 	this._val = void 0;
-	/**
-	 * @type {number}
-	 */
 	this._flag = 0;
-	/**
-	 * @type {Log<Computation>}
-	 */
 	this._log = null;
-	/**
-	 * @type {null|function(T): T}
-	 */
 	this._fn = null;
-	/**
-	 * @type {number}
-	 */
 	this._age = -1;
-	/**
-	 * @type {Log<Data|Computation>}
-	 */
 	this._src = null;
-	/**
-	 * @type {Computation}
-	 */
 	this._owner = null;
-	/**
-	 * @type {Array<number>}
-	 */
 	this._traces = null;
-	/**
-	 * @type {Array<Computation>}
-	 */
 	this._owned = null;
-	/**
-	 * @type {Array<function(boolean): void>}
-	 */
 	this._cleanups = null;
 }
 
-/**
- * @returns {T}
- */
 Computation.prototype.get = function () {
 	if (Listener !== null) {
 		var flag = this._flag;
@@ -435,35 +257,8 @@ Computation.prototype.dispose = function () {
 	cleanupNode(this, true);
 }
 
-/**
- * @interface
- */
-function IEnumerable() { }
-
-/**
- * @param {function(T,number=): boolean} callback 
- * @returns {function(): boolean}
- */
-IEnumerable.prototype.every = function(callback) { }
-
-/**
- * 
- * @param {function(T,number=): boolean} callback 
- * @returns {Enumerable<T>}
- */
-IEnumerable.prototype.filter = function(callback) { }
-
-/**
- * @template T
- * @constructor
- * @implements {IEnumerable<T>}
- */
 function Enumerable() { }
 
-/**
- * @param {function(T,number=): boolean} callback 
- * @returns {function(): boolean}
- */
 Enumerable.prototype.every = function (callback) {
 	var self = this;
 	var pure = callback.length === 1;
@@ -506,14 +301,9 @@ Enumerable.prototype.every = function (callback) {
 			}
 		}
 		return true;
-	}, /** @type {?} */(void 0), 2);
+	}, void 0, 2);
 }
 
-/**
- * 
- * @param {function(T,number=): boolean} callback 
- * @returns {IEnumerable<T>}
- */
 Enumerable.prototype.filter = function (callback) {
 	var self = this;
 	var pure = callback.length === 1;
@@ -531,11 +321,6 @@ Enumerable.prototype.filter = function (callback) {
 	});
 }
 
-/**
- * 
- * @param {function(T,number=): boolean} callback
- * @returns {function(): T} 
- */
 Enumerable.prototype.find = function (callback) {
 	var self = this;
 	var index = -1;
@@ -554,9 +339,9 @@ Enumerable.prototype.find = function (callback) {
 					if (seed === void 0) {
 						if (type & 32) {
 							if (type & 16) {
-								var count = /** @type {ChangeSet} */(mut).count;
-								for (i = /** @type {ChangeSet} */(mut).index; count >= 0; count--) {
-									item = /** @type {ChangeSet} */(mut).value[i];
+								var count = mut.count;
+								for (i = mut.index; count >= 0; count--) {
+									item = mut.value[i];
 									if (callback(item)) {
 										index = i;
 										return item;
@@ -564,7 +349,7 @@ Enumerable.prototype.find = function (callback) {
 								}
 								return void 0;
 							} else {
-								if (callback(/** @type {ChangeSet} */(mut).value)) {
+								if (callback(mut.value)) {
 									switch (type & 15) {
 										case 40:
 											index = 0;
@@ -573,10 +358,10 @@ Enumerable.prototype.find = function (callback) {
 											index = items.length - 1;
 											break;
 										case 33:
-											index = /** @type {ChangeSet} */(mut).index;
+											index = mut.index;
 											break;
 									}
-									return /** @type {ChangeSet} */(mut).value;
+									return mut.value;
 								}
 								return void 0;
 							}
@@ -603,13 +388,6 @@ Enumerable.prototype.find = function (callback) {
 	}, Void, 2);
 }
 
-
-/**
- * 
- * @param {function(T,number=): boolean} callback 
- * @param {number=} index 
- * @returns {function(): number}
- */
 Enumerable.prototype.findIndex = function (callback, index) {
 	var self = this;
 	return on(self.val, function () {
@@ -625,11 +403,6 @@ Enumerable.prototype.findIndex = function (callback, index) {
 	}, void 0, 2);
 }
 
-/**
- * 
- * @param {function(T,number=): void} callback 
- * @returns {void}
- */
 Enumerable.prototype.forEach = function (callback) {
 	var self = this;
 	makeEnumerableNode(new DataEnumerable(), self, function (seed) {
@@ -640,12 +413,6 @@ Enumerable.prototype.forEach = function (callback) {
 	});
 }
 
-/**
- * 
- * @param {T} valueToFind 
- * @param {number=} fromIndex
- * @returns {function(): boolean}
- */
 Enumerable.prototype.includes = function (valueToFind, fromIndex) {
 	var self = this;
 	return on(self.val, function () {
@@ -660,12 +427,6 @@ Enumerable.prototype.includes = function (valueToFind, fromIndex) {
 	}, void 0, 2);
 }
 
-/**
- * 
- * @param {T} searchElement 
- * @param {number=} fromIndex 
- * @returns {function(): number}
- */
 Enumerable.prototype.indexOf = function (searchElement, fromIndex) {
 	var self = this;
 	return on(self.val, function (seed) {
@@ -681,11 +442,6 @@ Enumerable.prototype.indexOf = function (searchElement, fromIndex) {
 	}, void 0, 2);
 }
 
-/**
- * 
- * @param {string=} separator 
- * @returns {function(): string}
- */
 Enumerable.prototype.join = function (separator) {
 	var self = this;
 	return on(self.val, function () {
@@ -693,12 +449,6 @@ Enumerable.prototype.join = function (separator) {
 	}, void 0, 2);
 }
 
-/**
- * 
- * @param {T} searchElement 
- * @param {number=} fromIndex
- * @returns {function(): number}
- */
 Enumerable.prototype.lastIndexOf = function (searchElement, fromIndex) {
 	var self = this;
 	return on(self.val, function (seed) {
@@ -714,12 +464,6 @@ Enumerable.prototype.lastIndexOf = function (searchElement, fromIndex) {
 	}, void 0, 2);
 }
 
-
-/**
- * @template U
- * @param {function(T,number=): U} callback
- * @returns {Enumerable<U>} 
- */
 Enumerable.prototype.map = function (callback) {
 	var self = this;
 	var nodes = [];
@@ -758,12 +502,6 @@ Enumerable.prototype.map = function (callback) {
 	});
 }
 
-/**
- * @template U
- * @param {function(U,T,number=): U} callback 
- * @param {U=} initialValue
- * @returns {function(): U} 
- */
 Enumerable.prototype.reduce = function (callback, initialValue) {
 	var self = this;
 	var type = typeof initialValue;
@@ -785,12 +523,6 @@ Enumerable.prototype.reduce = function (callback, initialValue) {
 	}, void 0, 2);
 }
 
-/**
- * @template U
- * @param {function(U,T,number=): U} callback 
- * @param {U=} initialValue
- * @returns {function(): U} 
- */
 Enumerable.prototype.reduceRight = function (callback, initialValue) {
 	var self = this;
 	var type = typeof initialValue;
@@ -813,9 +545,6 @@ Enumerable.prototype.reduceRight = function (callback, initialValue) {
 	}, void 0, 2);
 }
 
-/**
- * @returns {Enumerable<T>}
- */
 Enumerable.prototype.reverse = function () {
 	var self = this;
 	return makeEnumerableNode(new DataEnumerable(), self, function () {
@@ -828,12 +557,6 @@ Enumerable.prototype.reverse = function () {
 	});
 }
 
-/**
- * 
- * @param {number=} start 
- * @param {number=} end
- * @returns {Enumerable<T>}
- */
 Enumerable.prototype.slice = function (start, end) {
 	var self = this;
 	return makeEnumerableNode(new DataEnumerable(), self, function (seed) {
@@ -881,11 +604,6 @@ Enumerable.prototype.slice = function (start, end) {
 
 }
 
-/**
- * 
- * @param {function(T,number=): boolean} callback
- * @returns {function(): boolean} 
- */
 Enumerable.prototype.some = function (callback) {
 	var self = this;
 	return on(self.val, function (seed) {
@@ -900,11 +618,6 @@ Enumerable.prototype.some = function (callback) {
 	});
 }
 
-/**
- * 
- * @param {function(T,T): number=} compareFunction
- * @returns {Enumerable<T>}
- */
 Enumerable.prototype.sort = function (compareFunction) {
 	var self = this;
 	return makeEnumerableNode(new DataEnumerable(), this, function (seed) {
@@ -915,21 +628,9 @@ Enumerable.prototype.sort = function (compareFunction) {
 	});
 }
 
-/**
- * @template T
- * @constructor
- * @extends {Data<Array<T>>}
- * @extends {Enumerable<T>}
- * @param {Array<T>} val
- */
 function DataArray(val) {
 	var self = this;
 	Data.call(self, val);
-	/**
-	 * 
-	 * @param {T=} next 
-	 * @returns {Array<T>}
-	 */
 	this.val = function (next) {
 		if (arguments.length > 0) {
 			logWrite(self, next);
@@ -940,29 +641,17 @@ function DataArray(val) {
 		}
 		return self._val;
 	}
-	/**
-	 * @type {ChangeSet|Array<ChangeSet>}
-	 */
 	this._mut = null;
-	/**
-	 * @type {ChangeSet|Array<ChangeSet>}
-	 */
 	this._pmut = null;
 }
 
 DataArray.prototype = new Enumerable();
 DataArray.constructor = DataArray;
 
-/**
- * @returns {ChangeSet|Array<ChangeSet>}
- */
 DataArray.prototype.mut = function () {
 	return this._mut;
 }
 
-/**
- * @returns {void}
- */
 DataArray.prototype.update = function () {
 	if (this._pval !== Void) {
 		this._val = this._pval;
@@ -985,89 +674,41 @@ DataArray.prototype.update = function () {
 	}
 }
 
-/**
- * 
- * @param {number} index 
- * @param {T} item 
- * @returns {void}
- */
 DataArray.prototype.insertAt = function (index, item) {
 	logMutate(this, { type: 33, index: index, value: item });
 }
 
-/**
- * 
- * @param {number} index 
- * @param {Array<T>} items 
- * @returns {void}
- */
 DataArray.prototype.insertRange = function (index, items) {
 	logMutate(this, { type: 50, index: index, value: items });
 }
 
-/**
- * @returns {void}
- */
 DataArray.prototype.pop = function () {
 	logMutate(this, { type: 67 });
 }
 
-/**
- * 
- * @param {T} item 
- * @returns {void}
- */
 DataArray.prototype.push = function (item) {
 	logMutate(this, { type: 36, value: item });
 }
 
-/**
- * 
- * @param {number} index 
- * @returns {void}
- */
 DataArray.prototype.removeAt = function (index) {
 	logMutate(this, { type: 69, index: index });
 }
 
-/**
- * 
- * @param {number} index 
- * @param {number} count 
- * @returns {void}
- */
 DataArray.prototype.removeRange = function (index, count) {
 	logMutate(this, { type: 86, index: index, count: count });
 }
 
-/**
- * @returns {void}
- */
 DataArray.prototype.shift = function () {
 	logMutate(this, { type: 71 });
 }
 
-/**
- * 
- * @param {T} item
- * @returns {void}
- */
 DataArray.prototype.unshift = function (item) {
 	logMutate(this, { type: 40, value: item });
 }
 
-/**
- * @template T
- * @constructor
- * @extends {Enumerable<T>}
- * @extends {Computation<Array<T>>}
- */
 function DataEnumerable() {
 	var self = this;
 	Computation.call(this);
-	/**
-	 * @returns {Array<T>}
-	 */
 	this.val = function () {
 		if (Listener !== null) {
 			var flag = self._flag;
@@ -1087,29 +728,17 @@ function DataEnumerable() {
 		}
 		return self._val;
 	}
-	/**
-	 * @type {ChangeSet|Array<ChangeSet>}
-	 */
 	this._mut = null;
-	/**
-	 * @type {ChangeSet|Array<ChangeSet>}
-	 */
 	this._pmut = null;
 }
 
 DataEnumerable.prototype = new Enumerable();
 DataEnumerable.constructor = DataEnumerable;
 
-/**
- * @returns {ChangeSet|Array<ChangeSet>}
- */
 DataEnumerable.prototype.mut = function () {
 	return this._mut;
 }
 
-/**
- * @returns {void}
- */
 DataEnumerable.prototype.update = function () {
 	var owner = Owner;
 	var listener = Listener;
@@ -1138,60 +767,16 @@ DataEnumerable.prototype.dispose = function () {
  * Internal implementation
  */
 
-/**
- * @template T
- * @typedef ChangeSet
- * @property {number} type
- * @property {number=} index
- * @property {number=} count
- * @property {T|Array<T>=} value
- */
-
-/**
- * @const
- * @type {Object}
- */
 var Void = {};
-/**
- * @const
- * @type {Clock}
- */
 var Root = new Clock();
-/**
- * @type {number}
- */
 var State = 0;
-/**
- * @type {Computation}
- */
 var Owner = null;
-/**
- * @type {Computation}
- */
 var Listener = null;
-/**
- * @type {Computation}
- */
 var Recycled = null;
-/**
- * @const
- * @type {Computation}
- */
 var Unowned = new Computation();
 
-/**
- * @template T
- * @constructor
- */
 function Queue() {
-	/**
-	 * @type {number}
-	 */
 	this.ln = 0;
-	/**
-	 * @const
-	 * @type {Array<T>} 
-	 */
 	this.items = [];
 }
 
@@ -1212,62 +797,21 @@ Queue.prototype.run = function (fn) {
 	this.ln = 0;
 }
 
-/**
- * @constructor
- */
 function Clock() {
-	/**
-	 * @type {number}
-	 */
 	this.time = 0;
-	/**
-	 * @const
-	 * @type {Queue<Data>}
-	 */
 	this.changes = new Queue();
-	/**
-	 * @const
-	 * @type {Queue<Computation>}
-	 */
 	this.traces = new Queue();
-	/**
-	 * @const
-	 * @type {Queue<Computation>}
-	 */
 	this.updates = new Queue();
-	/**
-	 * @const
-	 * @type {Queue<Computation>}
-	 */
 	this.disposes = new Queue();
 }
 
-/**
- * @template T
- * @constructor
- */
 function Log() {
-	/**
-	 * @type {T}
-	 */
 	this._node1 = null;
-	/**
-	 * @type {number}
-	 */
 	this._slot1 = -1;
-	/**
-	 * @type {Array<T>}
-	 */
 	this._nodes = null;
-	/**
-	 * @type {Array<number>}
-	 */
 	this._slots = null;
 }
 
-/**
- * @returns {Computation}
- */
 function getCandidateNode() {
 	var node = Recycled;
 	if (node === null) {
@@ -1278,12 +822,6 @@ function getCandidateNode() {
 	}
 }
 
-
-/**
- * 
- * @param {Computation} node 
- * @param {Array<function(): ?>|(function(): ?)} src 
- */
 function bindSource(node, src) {
 	var listener = Listener;
 	try {
@@ -1300,14 +838,6 @@ function bindSource(node, src) {
 	}
 }
 
-/**
- * @template T
- * @param {Computation<T>} node 
- * @param {function(T): T} fn 
- * @param {T} seed 
- * @param {number} flags 
- * @returns {void}
- */
 function makeComputationNode(node, fn, seed, flags) {
 	var clock = Root;
 	var owner = Owner;
@@ -1336,14 +866,6 @@ function makeComputationNode(node, fn, seed, flags) {
 	}
 }
 
-/**
- * @template T
- * @param {Computation<T>} node 
- * @param {function(T): T} fn 
- * @param {T} seed 
- * @param {number} flags 
- * @returns {function(): T}
- */
 function makeProcedureNode(node, fn, seed, flags) {
 	var clock = Root;
 	var owner = Owner;
@@ -1379,14 +901,6 @@ function makeProcedureNode(node, fn, seed, flags) {
 	}
 }
 
-/**
- * @template T, U
- * @param {DataEnumerable<U>} node
- * @param {Computation<T>} source
- * @param {function(Array<U>): U} fn 
- * @param {number=} flags
- * @returns {Enumerable<U>}
- */
 function makeEnumerableNode(node, source, fn, flags) {
 	var clock = Root;
 	var owner = Owner;
@@ -1439,14 +953,6 @@ function finishToplevelExecution(clock) {
 	}
 }
 
-/**
- * @template T
- * @param {Computation<T>} node 
- * @param {null|function(T): T} fn 
- * @param {T} val
- * @param {number} flags
- * @returns {boolean}
- */
 function recycleOrClaimNode(node, fn, val, flags) {
 	var i, ln;
 	var owner = flags & 2048 || Owner === null || Owner === Unowned ? null : Owner;
@@ -1494,11 +1000,6 @@ function recycleOrClaimNode(node, fn, val, flags) {
 	return recycle;
 }
 
-/**
- * 
- * @param {Data|Computation} from 
- * @param {Computation} to
- */
 function logRead(from, to) {
 	var log, src, fromslot;
 	if (from._log === null) {
@@ -1548,12 +1049,6 @@ function logRead(from, to) {
 	}
 }
 
-/**
- * @template T
- * @param {Data<T>} node
- * @param {T} val
- * @returns {T}
- */
 function logWrite(node, val) {
 	if (State !== 0) {
 		if (node._pval !== Void) {
@@ -1576,11 +1071,6 @@ function logWrite(node, val) {
 	return val;
 }
 
-/**
- * @template T
- * @param {DataArray<T>} node 
- * @param {ChangeSet<T>} changeset 
- */
 function logMutate(node, changeset) {
 	if (State !== 0) {
 		if (node._pval !== Void) {
@@ -1611,12 +1101,6 @@ function logMutate(node, changeset) {
 	}
 }
 
-
-/**
- * 
- * @param {Computation} to
- * @param {number} slot
- */
 function logPendingSource(to, slot) {
 	var i, ln;
 	to._flag |= 512;
@@ -1644,10 +1128,6 @@ function logPendingSource(to, slot) {
 	}
 }
 
-/**
- * 
- * @param {Computation} owner 
- */
 function logPendingOwner(owner) {
 	var node;
 	var owned = owner._owned;
@@ -1661,36 +1141,20 @@ function logPendingOwner(owner) {
 	}
 }
 
-
-/**
- * 
- * @param {Data} data 
- */
 function applyChanges(data) {
 	data.update();
 }
 
-/**
- * 
- * @param {Computation} node 
- */
 function applyUpdates(node) {
 	if (node._flag & 64) {
 		node.update();
 	}
 }
 
-/**
- * 
- * @param {Computation} node 
- */
 function applyDisposes(node) {
 	node.dispose();
 }
 
-/**
- * 
- */
 function execute() {
 	var owner = Owner;
 	Root.updates.reset();
@@ -1703,10 +1167,6 @@ function execute() {
 	}
 }
 
-/**
- * 
- * @param {Clock} clock 
- */
 function tick(clock) {
 	var i = 0;
 	clock.disposes.reset();
@@ -1727,10 +1187,6 @@ function tick(clock) {
 	State = 0;
 }
 
-/**
- * @param {Log<Computation>} log
- * @param {number} time
- */
 function markComputationsForUpdate(log, time) {
 	var node = log._node1;
 	var nodes = log._nodes;
@@ -1749,11 +1205,6 @@ function markComputationsForUpdate(log, time) {
 	}
 }
 
-/**
- * 
- * @param {Computation} node 
- * @param {number} time
- */
 function markComputationForUpdate(node, time) {
 	node._age = time;
 	node._flag |= 64;
@@ -1772,10 +1223,6 @@ function markComputationForUpdate(node, time) {
 	}
 }
 
-/**
- * 
- * @param {Computation} node 
- */
 function markPendingComputations(node, val) {
 	if (node._flag & 4096) {
 		node._flag &= ~4096;
@@ -1787,11 +1234,6 @@ function markPendingComputations(node, val) {
 	}
 }
 
-
-/**
- * @param {Array<Computation>} nodes
- * @param {number} time
- */
 function markComputationsDisposed(nodes, time) {
 	var node;
 	for (var i = 0, ln = nodes.length; i < ln; i++) {
@@ -1807,10 +1249,6 @@ function markComputationsDisposed(nodes, time) {
 	}
 }
 
-/**
- * 
- * @param {Computation} node 
- */
 function applyUpstreamUpdates(node) {
 	var slot, source, sources;
 	var src = node._src;
@@ -1835,11 +1273,6 @@ function applyUpstreamUpdates(node) {
 	}
 }
 
-/**
- * 
- * @param {Computation} node 
- * @param {boolean} final 
- */
 function cleanupNode(node, final) {
 	var i, ln;
 	var flag = node._flag;
@@ -1867,10 +1300,6 @@ function cleanupNode(node, final) {
 
 }
 
-/**
- * 
- * @param {Computation} node 
- */
 function cleanupSources(node) {
 	var src = node._src;
 	if (src !== null) {
@@ -1888,10 +1317,6 @@ function cleanupSources(node) {
 	node._traces = null;
 }
 
-/**
- * @param {Data|Computation} source
- * @param {number} slot
- */
 function cleanupSource(source, slot) {
 	var src, last, lastslot;
 	var log = source._log;
@@ -1915,11 +1340,6 @@ function cleanupSource(source, slot) {
 	}
 }
 
-/**
- * @template T
- * @param {function(): T} f
- * @returns {Computation<T>} 
- */
 function persist(f) {
 	var node = getCandidateNode();
 	var owner = Owner;
@@ -1935,11 +1355,6 @@ function persist(f) {
 	return node;
 }
 
-/**
- * @template T
- * @param {DataArray<T>} node 
- * @param {ChangeSet<T>} changeset
- */
 function applyMutation(node, changeset) {
 	var i, ln;
 	var array = node._val;
@@ -1996,12 +1411,6 @@ function applyMutation(node, changeset) {
 	}
 }
 
-/**
- * 
- * @param {Object} object
- * @param  {string} type
- * @returns {Object}
- */
 function getInitialValue(object, type) {
 	if (type === 'object') {
 		if (object === null) {
@@ -2022,13 +1431,6 @@ function getInitialValue(object, type) {
 	}
 }
 
-/**
- * @template T
- * @param {ChangeSet<T>} cs 
- * @param {function(T,number=): boolean} callback
- * @param {boolean} seed 
- * @returns {boolean|void}
- */
 function applyEveryMutation(cs, callback, seed) {
 	if (seed) {
 		if (cs.type & 32) {
@@ -2070,7 +1472,6 @@ export {
   Data,
   Value,
   Computation,
-  IEnumerable,
   Enumerable,
   DataArray,
   DataEnumerable,

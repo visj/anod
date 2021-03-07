@@ -19,15 +19,15 @@
 	}
 	function data(val) {
 		var node = new Data(val);
-		return (function (next) {
+		return function (next) {
 			return arguments.length > 0 ? node.set(next) : node.get();
-		});
+		};
 	}
 	function value(val, eq) {
 		var node = new Value(val, eq);
-		return (function (next) {
+		return function (next) {
 			return arguments.length > 0 ? node.set(next) : node.get();
-		});
+		};
 	}
 	function cleanup(f) {
 		if (Owner !== null) {
@@ -91,8 +91,7 @@
 		}
 	}
 	function root(f) {
-		var val;
-		var node;
+		var val, node;
 		var unending = f.length === 0;
 		var disposer = unending ? null : function () {
 			if (node !== null) {
@@ -112,7 +111,7 @@
 		Owner = node = unending ? Unowned : getCandidateNode();
 		Listener = null;
 		try {
-			val = unending ? f() : f((disposer));
+			val = unending ? f() : f(disposer);
 		} finally {
 			Owner = owner;
 			Listener = listener;
@@ -235,9 +234,6 @@
 		this._log = null;
 		cleanupNode(this, true);
 	}
-	function IEnumerable() { }
-	IEnumerable.prototype.every = function(callback) { }
-	IEnumerable.prototype.filter = function(callback) { }
 	function Enumerable() { }
 	Enumerable.prototype.every = function (callback) {
 		var self = this;
@@ -280,7 +276,7 @@
 				}
 			}
 			return true;
-		}, (void 0), 2);
+		}, void 0, 2);
 	}
 	Enumerable.prototype.filter = function (callback) {
 		var self = this;
@@ -316,9 +312,9 @@
 						if (seed === void 0) {
 							if (type & 32) {
 								if (type & 16) {
-									var count = (mut).count;
-									for (i = (mut).index; count >= 0; count--) {
-										item = (mut).value[i];
+									var count = mut.count;
+									for (i = mut.index; count >= 0; count--) {
+										item = mut.value[i];
 										if (callback(item)) {
 											index = i;
 											return item;
@@ -326,7 +322,7 @@
 									}
 									return void 0;
 								} else {
-									if (callback((mut).value)) {
+									if (callback(mut.value)) {
 										switch (type & 15) {
 											case 40:
 												index = 0;
@@ -335,10 +331,10 @@
 												index = items.length - 1;
 												break;
 											case 33:
-												index = (mut).index;
+												index = mut.index;
 												break;
 										}
-										return (mut).value;
+										return mut.value;
 									}
 									return void 0;
 								}
@@ -1374,7 +1370,6 @@
 		Data: Data,
 		Value: Value,
 		Computation: Computation,
-		IEnumerable: IEnumerable,
 		Enumerable: Enumerable,
 		DataArray: DataArray,
 		DataEnumerable: DataEnumerable
