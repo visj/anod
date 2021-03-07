@@ -252,7 +252,7 @@ Computation.prototype.update = function () {
 }
 
 Computation.prototype.dispose = function () {
-	this.fn = null;
+	this._fn = null;
 	this._log = null;
 	cleanupNode(this, true);
 }
@@ -340,18 +340,29 @@ Enumerable.prototype.find = function (callback) {
 						return result;
 					}
 				} else {
-					// too complicated
+					if (seed === void 0) {
+						for (i = 0, ln = mut.length; i < ln; i++) {
+							var mt = mut[i];
+							if (mt.type & Modification.Insertion) {
+								result = Void;
+								break;
+							}
+						}
+						if (result !== Void) {
+							return void 0;
+						}
+					}
 				}
 			}
 		}
 		for (i = 0, ln = items.length; i < ln; i++) {
 			item = items[i];
 			if (callback(item, i)) {
-				index = i;
+				index.value = i;
 				return item;
 			}
 		}
-		index = -1;
+		index.value = -1;
 		return void 0;
 	}, Void, Flag.Trace);
 }
