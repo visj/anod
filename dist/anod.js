@@ -46,39 +46,50 @@
 		return val;
 	}
 	function bind(src, f, seed, flags) {
-		var node = getCandidateNode();
+		var node = Computation.new();
 		if (flags & 4) {
 			if (flags & 1) {
 				bindSource(node, src);
 			}
-			makeComputationNode(node, function (seed) {
+			Computation.init(node, function (seed) {
 				bindSource(node, src);
 				return f(seed);
 			}, seed, 16 | flags);
 		} else {
 			bindSource(node, src);
-			makeComputationNode(node, f, seed, 16 | flags);
+			Computation.init(node, f, seed, 16 | flags);
 		}
 	}
 	function run(f, seed, flags) {
-		makeComputationNode(getCandidateNode(), f, seed, 32 | flags);
+		Computation.init(Computation.new(), f, seed, 32 | flags);
 	}
 	function fn(f, seed, flags) {
-		return makeProcedureNode(getCandidateNode(), f, seed, 32 | flags);
+		var node = Computation.new();
+		seed = Computation.init(node, f, seed, 32 | flags);
+		if (node._fn === null) {
+			return function() { return seed; }
+		} else {
+			return function() { return node.get(); }
+		}
 	}
 	function on(src, f, seed, flags) {
-		var node = getCandidateNode();
+		var node = Computation.new();
 		if (flags & 4) {
 			if (flags & 1) {
 				bindSource(node, src);
 			}
-			return makeProcedureNode(node, function (seed) {
+			seed = Computation.init(node, function (seed) {
 				bindSource(node, src);
 				return f(seed);
 			}, seed, 16 | flags);
 		} else {
 			bindSource(node, src);
-			return makeProcedureNode(node, f, seed, 16 | flags);
+			seed = Computation.init(node, f, seed, 16 | flags);
+		}
+		if (node._fn === null) {
+			return function() { return seed; }
+		} else {
+			return function() { return node.get(); }
 		}
 	}
 	function root(f) {
@@ -99,7 +110,7 @@
 					}
 				}
 			};
-		Owner = node = unending ? Unowned : getCandidateNode();
+		Owner = node = unending ? Unowned : Computation.new();
 		Listener = null;
 		try {
 			val = unending ? f() : f(disposer);
@@ -175,6 +186,15 @@
 		this._owned = null;
 		this._cleanups = null;
 	}
+	Computation.init = function(node, f, seed, flags) {
+		var clock = Root;
+		seed = initComputationNode(node, f, seed, flags);
+		recycleOrClaimNode(node, f, seed, flags);
+		if (State === 0) {
+			finishToplevelExecution(clock);
+		}
+		return seed;
+	}
 	Computation.prototype.get = function () {
 		if (Listener !== null) {
 			var flag = this._flag;
@@ -234,7 +254,7 @@
 			var i, cs,
 				items = self.val(),
 				len = items.length;
-			if (pure && len > 10 && seed !== Void) {
+			if (pure && seed !== Void) {
 				cs = self._cs;
 				if (cs !== null) {
 					found = every(self._flag, cs, callback, found);
@@ -275,7 +295,7 @@
 			var i, item, cs,
 				items = self.val(),
 				len = items.length;
-			if (pure && len > 10 && seed !== Void) {
+			if (pure && seed !== Void) {
 				cs = self._cs;
 				if (cs !== null) {
 					i = indexOf(self._flag, cs, callback, index, items.length, false);
@@ -303,7 +323,7 @@
 			var i, cs,
 				items = self.val(),
 				len = items.length;
-			if (pure && len > 10 && seed !== Void) {
+			if (pure && seed !== Void) {
 				cs = self._cs;
 				if (cs !== null) {
 					i = indexOf(self._flag, cs, callback, index, items.length, false);
@@ -337,7 +357,7 @@
 			var i, cs,
 				items = self.val(),
 				len = items.length;
-			if (pure && len > 10 && seed !== Void) {
+			if (pure && seed !== Void) {
 				cs = self._cs;
 				if (cs !== null) {
 					i = indexOf(self._flag, cs, function (item) {
@@ -364,7 +384,7 @@
 			var i, cs,
 				items = self.val(),
 				len = items.length;
-			if (pure && len > 10 && seed !== Void) {
+			if (pure && seed !== Void) {
 				cs = self._cs;
 				if (cs !== null) {
 					i = indexOf(self._flag, cs, function (item) {
@@ -591,7 +611,7 @@
 			var i, cs,
 				items = self.val(),
 				len = items.length;
-			if (pure && len > 10 && seed !== Void) {
+			if (pure && seed !== Void) {
 				cs = self._cs;
 				if (cs !== null) {
 					i = indexOf(self._flag, cs, callback, index, items.length, false);
@@ -709,6 +729,9 @@
 	}
 	DataEnumerable.prototype = new Enumerable();
 	DataEnumerable.constructor = DataEnumerable;
+	DataEnumerable.prototype.get = function() {
+		return this.val();
+	}
 	DataEnumerable.prototype.update = function () {
 		var owner = Owner;
 		var listener = Listener;
@@ -769,7 +792,7 @@
 		this._nodes = null;
 		this._slots = null;
 	}
-	function getCandidateNode() {
+	Computation.new = function () {
 		var node = Recycled;
 		if (node === null) {
 			return new Computation();
@@ -791,29 +814,6 @@
 			}
 		} finally {
 			Listener = listener;
-		}
-	}
-	function makeComputationNode(node, fn, seed, flags) {
-		var clock = Root;
-		seed = initComputationNode(node, fn, seed, flags);
-		recycleOrClaimNode(node, fn, seed, flags);
-		if (State === 0) {
-			finishToplevelExecution(clock);
-		}
-	}
-	function makeProcedureNode(node, fn, seed, flags) {
-		var clock = Root, recycled;
-		seed = initComputationNode(node, fn, seed, flags);
-		recycled = recycleOrClaimNode(node, fn, seed, flags);
-		if (State === 0) {
-			finishToplevelExecution(clock);
-		}
-		if (recycled) {
-			return function () { return seed; }
-		} else {
-			return function () {
-				return node.get();
-			}
 		}
 	}
 	function makeEnumerableNode(node, source, fn, flags) {
@@ -916,7 +916,6 @@
 				}
 			}
 		}
-		return recycle;
 	}
 	function logRead(from, to) {
 		var log, src, fromslot, toslot;
@@ -1240,7 +1239,7 @@
 		}
 	}
 	function persist(f) {
-		var node = getCandidateNode();
+		var node = Computation.new();
 		var owner = Owner;
 		var listener = Listener;
 		Owner = node;
@@ -1365,7 +1364,7 @@
 						}
 					}
 				}
-				return found;
+				return true;
 			}
 		}
 		return Void;
@@ -1492,6 +1491,7 @@
 		freeze: freeze,
 		root: root,
 		sample: sample,
+		Void: Void,
 		Data: Data,
 		Value: Value,
 		Computation: Computation,

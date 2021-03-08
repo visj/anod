@@ -190,7 +190,7 @@ export interface DataArray<T> extends IEnumerable<T> {
 /**
  * 
  */
-export enum Flag {
+export const enum Flag {
 	/**
 	 * @public
 	 */
@@ -343,6 +343,28 @@ export interface Log<T> {
 	readonly _slots: number[];
 }
 
+export const enum Modification {
+	Indexed = 256,
+	Ranged = 512,
+	Insertion = 1024,
+	Deletion = 2048,
+	Restructure = 4096,
+}
+
+export const enum Mutation {
+	InsertAt = 1 | Modification.Indexed | Modification.Insertion,
+	INsertRange = 2 | Modification.Indexed | Modification.Ranged | Modification.Insertion,
+	Pop = 4 | Modification.Deletion,
+	Push = 8 | Modification.Insertion,
+	RemoveAt = 16 | Modification.Indexed | Modification.Deletion,
+	RemoveRange = 32 | Modification.Indexed | Modification.Ranged | Modification.Deletion,
+	Shift = 64 | Modification.Deletion,
+	Unshift = 128 | Modification.Insertion,
+	TypeFlag = 255,
+}
+
+export const Void: {};
+
 /**
  * 
  */
@@ -360,7 +382,11 @@ export interface SignalProto<T> {
 }
 
 export interface DataProto<T> extends SignalProto<T> {
-	readonly _pval: Object | T;
+	readonly _pval: {} | T;
+
+	get(): T;
+	set(next: T): T;
+	update(): void;
 }
 
 export interface DataConstructor {
@@ -385,6 +411,13 @@ export interface ComputationProto<T> extends SignalProto<T> {
 	readonly _traces: number[];
 	readonly _owned: ComputationProto[];
 	readonly _cleanups: ((final: boolean) => void)[];
+
+	static new<T>(): ComputationProto<T>;
+	static init<T>(node: ComputationProto<T>, f: (seed: T) => T, seed?: T, flags?: Flag): ComputationProto<T>;
+
+	get(): T;
+	update(): void;
+	dispose(): void;
 }
 
 export interface ComputationConstructor {
@@ -392,10 +425,12 @@ export interface ComputationConstructor {
 	readonly prototype: ComputationProto<unknown>;
 }
 
-export interface DataArrayProto<T> extends DataArray<T> {
-	readonly _age: number;
-	readonly _mut: ChangeSet<T> | ChangeSet<T>[];
-	readonly _pmut: ChangeSet<T> | ChangeSet<T>[];
+export interface DataArrayProto<T> extends SignalProto<T[]>, DataArray<T> {
+	readonly _pval: {} | T;
+	readonly _cs: ChangeSet<T> | ChangeSet<T>[];
+	readonly _pcs: ChangeSet<T> | ChangeSet<T>[];
+
+	update(): void;
 }
 
 export interface DataArrayConstructor {
@@ -403,7 +438,10 @@ export interface DataArrayConstructor {
 	readonly prototype: DataArrayProto<unknown>;
 }
 
-export interface DataEnumerableProto<T> extends ComputationProto<T>, IEnumerable<T> { }
+export interface DataEnumerableProto<T> extends ComputationProto<T>, IEnumerable<T> { 
+	readonly _cs: ChangeSet<T> | ChangeSet<T>[];
+	readonly _pcs: ChangeSet<T> | ChangeSet<T>[];
+}
 
 export interface DataEnumerableConstructor {
 	new<T>(): DataEnumerableProto<T>;
