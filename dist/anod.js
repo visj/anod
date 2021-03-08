@@ -434,11 +434,11 @@
 			}
 		});
 		return makeEnumerableNode(new DataEnumerable(), self, function () {
-			var i, j, k, l, node,
+			var i, j, node,
 				temp, start, end, found,
 				newitems = self.val(),
 				newlen = newitems.length,
-				newend, mapper = function () {
+				newstart, newend, mapper = function () {
 					return callback(newitems[j], j);
 				}
 			if (newlen === 0) {
@@ -457,23 +457,24 @@
 					node = nodes[j] = persist(mapper);
 					values[j] = node._val;
 				}
+				len = newlen;
 			} else {
 				temp = new Array(newlen);
 				found = new Array(newlen);
-				for (start = 0, end = len > newlen ? len : newlen; start < end && items[start] === newitems[start]; start++) { }
-				for (end = len - 1, newend = newlen - 1; end >= 0 && newend >= 0 && items[end] === newitems[newend]; end--) {
+				newstart = 0;
+				for (start = 0, end = len > newlen ? len : newlen; start < end && items[start] === newitems[start]; start++, newstart++) { }
+				for (end = len - 1, newend = newlen - 1; end >= 0 && newend >= 0 && items[end] === newitems[newend]; end--, newend--) {
+					found[newend] = true;
 					temp[newend] = nodes[end];
 				}
 				if (start !== end) {
-					k = 0;
-					l = newend;
-					outer: for (i = start; i < end; i++) {
-						for (j = k; j < l; j++) {
+					outer: for (i = start; i <= end; i++) {
+						for (j = newstart; j <= newend; j++) {
 							if (items[i] === newitems[j]) {
 								found[j] = true;
 								temp[j] = nodes[i];
-								for (j = k; j < l && found[j]; j++, k++) { }
-								for (j = l; j > k && found[j]; j--, l--) { }
+								for (j = newstart; j < newend && found[j]; j++, newstart++) { }
+								for (j = newend; j > newstart && found[j]; j--, newend--) { }
 								continue outer;
 							}
 						}
@@ -491,6 +492,7 @@
 				}
 			}
 			items = newitems.slice();
+			len = nodes.length = values.length = newlen;
 			return values;
 		});
 	}
