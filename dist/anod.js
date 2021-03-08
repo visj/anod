@@ -186,6 +186,15 @@
 		this._owned = null;
 		this._cleanups = null;
 	}
+	Computation.new = function () {
+		var node = Recycled;
+		if (node === null) {
+			return new Computation();
+		} else {
+			Recycled = null;
+			return node;
+		}
+	}
 	Computation.init = function(node, f, seed, flags) {
 		var clock = Root;
 		seed = initComputationNode(node, f, seed, flags);
@@ -791,15 +800,6 @@
 		this._slot1 = -1;
 		this._nodes = null;
 		this._slots = null;
-	}
-	Computation.new = function () {
-		var node = Recycled;
-		if (node === null) {
-			return new Computation();
-		} else {
-			Recycled = null;
-			return node;
-		}
 	}
 	function bindSource(node, src) {
 		var listener = Listener;
@@ -1492,6 +1492,8 @@
 		root: root,
 		sample: sample,
 		Void: Void,
+		Owner: Owner,
+		Listener: Listener,
 		Data: Data,
 		Value: Value,
 		Computation: Computation,

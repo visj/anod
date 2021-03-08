@@ -364,6 +364,8 @@ export const enum Mutation {
 }
 
 export const Void: {};
+export const Owner: ComputationProto<unknown>;
+export const Listener: ComputationProto<unknown>;
 
 /**
  * 

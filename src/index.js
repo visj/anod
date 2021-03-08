@@ -217,6 +217,16 @@ function Computation() {
 	this._cleanups = null;
 }
 
+Computation.new = function () {
+	var node = Recycled;
+	if (node === null) {
+		return new Computation();
+	} else {
+		Recycled = null;
+		return node;
+	}
+}
+
 Computation.init = function(node, f, seed, flags) {
 	var clock = Root;
 	seed = initComputationNode(node, f, seed, flags);
@@ -298,7 +308,6 @@ Enumerable.prototype.every = function (callback) {
 					return found;
 				}
 			}
-
 		}
 		for (i = 0; i < len; i++) {
 			if (!callback(items[i], i)) {
@@ -898,16 +907,6 @@ function Log() {
 	this._slot1 = -1;
 	this._nodes = null;
 	this._slots = null;
-}
-
-Computation.new = function () {
-	var node = Recycled;
-	if (node === null) {
-		return new Computation();
-	} else {
-		Recycled = null;
-		return node;
-	}
 }
 
 function bindSource(node, src) {
@@ -1623,6 +1622,7 @@ module.exports = {
 	/* @exclude */
 	bind, run, fn, on,
 	cleanup, freeze, root, sample,
-	Void, Data, Value, Computation,
+	Void, Owner, Listener,
+	Data, Value, Computation,
 	DataArray, DataEnumerable,
 };
