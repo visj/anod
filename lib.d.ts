@@ -336,40 +336,30 @@ export function sample<T>(fn: () => T): T;
 /**
  * 
  */
+export interface Log<T> {
+	readonly _node1: T;
+	readonly _slot1: number;
+	readonly _nodes: T[];
+	readonly _slots: number[];
+}
+
+/**
+ * 
+ */
 export interface ChangeSet<T> {
 	readonly type: number;
-	readonly index: number;
-	readonly count: number;
-	readonly value: T | T[];
+	readonly index?: number;
+	readonly count?: number;
+	readonly value?: T | T[];
 }
 
-export interface ComputationProto<T> {
-	readonly _flag: number;
+export interface SignalProto<T> {
 	readonly _val: T;
-	readonly _node1: ComputationProto<unknown>;
-	readonly _slot1: number;
-	readonly _nodes: ComputationProto<unknown>[];
-	readonly _slots: number[];
-	readonly _fn: (seed: T) => T;
-	readonly _age: number;
-	readonly _source1: DataProto<unknown>;
-	readonly _source1slot: number;
-	readonly _sources: DataProto<unknown>[];
-	readonly _sourceslots: number[];
-}
-
-export interface ComputationConstructor {
-	new<T>(): ComputationProto<T>;
-	readonly prototype: ComputationProto<unknown>;
-}
-
-export interface DataProto<T> {
+	readonly _log: Log<ComputationProto>;
 	readonly _flag: number;
-	readonly _val: T;
-	readonly _node1: ComputationProto<unknown>;
-	readonly _slot1: number;
-	readonly _nodes: ComputationProto<unknown>[];
-	readonly _slots: number[];
+}
+
+export interface DataProto<T> extends SignalProto<T> {
 	readonly _pval: Object | T;
 }
 
@@ -387,18 +377,19 @@ export interface ValueConstructor {
 	readonly prototype: ValueProto<unknown>;
 }
 
-export interface EnumerableProto<T> extends IEnumerable<T> { }
-
-export interface EnumerableConstructor {
-	new<T>(): EnumerableProto<T>;
-	readonly prototype: EnumerableProto<unknown>;
+export interface ComputationProto<T> extends SignalProto<T> {
+	readonly _fn: (seed: T) => T;
+	readonly _age: number;
+	readonly _src: Log<SignalProto>;
+	readonly _owner: ComputationProto;
+	readonly _traces: number[];
+	readonly _owned: ComputationProto[];
+	readonly _cleanups: ((final: boolean) => void)[];
 }
 
-export interface DataEnumerableProto<T> extends ComputationProto<T>, IEnumerable<T> { }
-
-export interface DataEnumerableConstructor {
-	new<T>(): DataEnumerableProto<T>;
-	readonly prototype: DataEnumerableProto<unknown>;
+export interface ComputationConstructor {
+	new<T>(): ComputationProto<T>;
+	readonly prototype: ComputationProto<unknown>;
 }
 
 export interface DataArrayProto<T> extends DataArray<T> {
@@ -412,10 +403,16 @@ export interface DataArrayConstructor {
 	readonly prototype: DataArrayProto<unknown>;
 }
 
+export interface DataEnumerableProto<T> extends ComputationProto<T>, IEnumerable<T> { }
+
+export interface DataEnumerableConstructor {
+	new<T>(): DataEnumerableProto<T>;
+	readonly prototype: DataEnumerableProto<unknown>;
+}
+
 export const Data: DataConstructor;
 export const Value: ValueConstructor;
 export const Computation: ComputationConstructor;
-export const Enumerable: EnumerableConstructor;
 export const DataArray: DataArrayConstructor;
 export const DataEnumerable: DataEnumerableConstructor;
 

@@ -143,8 +143,8 @@ function sample(node) {
 
 function Data(val) {
 	this._val = val;
-	this._flag = 0;
 	this._log = null;
+	this._flag = 0;
 	this._pval = Void;
 }
 
@@ -193,8 +193,8 @@ Value.prototype.update = function () {
 
 function Computation() {
 	this._val = void 0;
-	this._flag = 0;
 	this._log = null;
+	this._flag = 0;
 	this._fn = null;
 	this._age = -1;
 	this._src = null;
@@ -909,9 +909,9 @@ function makeComputationNode(node, fn, seed, flags) {
 }
 
 function makeProcedureNode(node, fn, seed, flags) {
-	var clock = Root;
+	var clock = Root, recycled;
 	seed = initComputationNode(node, fn, seed, flags);
-	var recycled = recycleOrClaimNode(node, fn, seed, flags);
+	recycled = recycleOrClaimNode(node, fn, seed, flags);
 	if (State === System.Idle) {
 		finishToplevelExecution(clock);
 	}
@@ -925,8 +925,8 @@ function makeProcedureNode(node, fn, seed, flags) {
 }
 
 function makeEnumerableNode(node, source, fn, flags) {
-	var clock = Root;
-	var owner = Owner;
+	var clock = Root,
+		owner = Owner;
 	node._fn = fn;
 	node._age = clock.time;
 	node._flag |= flags;
@@ -949,10 +949,10 @@ function makeEnumerableNode(node, source, fn, flags) {
 }
 
 function initComputationNode(node, fn, seed, flags) {
-	var clock = Root;
-	var owner = Owner;
-	var listener = Listener;
-	var toplevel = State === System.Idle;
+	var clock = Root,
+		owner = Owner,
+		listener = Listener,
+		toplevel = State === System.Idle;
 	Owner = node;
 	Listener = flags & Flag.Bound ? null : node;
 	if (toplevel) {
@@ -984,9 +984,9 @@ function finishToplevelExecution(clock) {
 }
 
 function recycleOrClaimNode(node, fn, val, flags) {
-	var i, len;
-	var owner = flags & Flag.Orphan || Owner === null || Owner === Unowned ? null : Owner;
-	var recycle = node._src === null && (node._owned === null && node._cleanups === null || owner !== null);
+	var i, len,
+		owner = flags & Flag.Orphan || Owner === null || Owner === Unowned ? null : Owner,
+		recycle = node._src === null && (node._owned === null && node._cleanups === null || owner !== null);
 	if (recycle) {
 		Recycled = node;
 		if (owner !== null) {
@@ -1031,7 +1031,7 @@ function recycleOrClaimNode(node, fn, val, flags) {
 }
 
 function logRead(from, to) {
-	var log, src, fromslot;
+	var log, src, fromslot, toslot;
 	if (from._log === null) {
 		log = from._log = new Log();
 	} else {
@@ -1042,7 +1042,7 @@ function logRead(from, to) {
 	} else {
 		src = to._src;
 	}
-	var toslot = src._node1 === null ? -1 : src._nodes === null ? 0 : src._nodes.length;
+	toslot = src._node1 === null ? -1 : src._nodes === null ? 0 : src._nodes.length;
 	if (log._node1 === null) {
 		log._node1 = to;
 		log._slot1 = toslot;
@@ -1623,5 +1623,5 @@ module.exports = {
 	bind, run, fn, on,
 	cleanup, freeze, root, sample,
 	Data, Value, Computation,
-	Enumerable, DataArray, DataEnumerable,
+	DataArray, DataEnumerable,
 };

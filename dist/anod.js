@@ -132,8 +132,8 @@
 	}
 	function Data(val) {
 		this._val = val;
-		this._flag = 0;
 		this._log = null;
+		this._flag = 0;
 		this._pval = Void;
 	}
 	Data.prototype.get = function () {
@@ -174,8 +174,8 @@
 	}
 	function Computation() {
 		this._val = void 0;
-		this._flag = 0;
 		this._log = null;
+		this._flag = 0;
 		this._fn = null;
 		this._age = -1;
 		this._src = null;
@@ -811,9 +811,9 @@
 		}
 	}
 	function makeProcedureNode(node, fn, seed, flags) {
-		var clock = Root;
+		var clock = Root, recycled;
 		seed = initComputationNode(node, fn, seed, flags);
-		var recycled = recycleOrClaimNode(node, fn, seed, flags);
+		recycled = recycleOrClaimNode(node, fn, seed, flags);
 		if (State === 0) {
 			finishToplevelExecution(clock);
 		}
@@ -826,8 +826,8 @@
 		}
 	}
 	function makeEnumerableNode(node, source, fn, flags) {
-		var clock = Root;
-		var owner = Owner;
+		var clock = Root,
+			owner = Owner;
 		node._fn = fn;
 		node._age = clock.time;
 		node._flag |= flags;
@@ -849,10 +849,10 @@
 		return node;
 	}
 	function initComputationNode(node, fn, seed, flags) {
-		var clock = Root;
-		var owner = Owner;
-		var listener = Listener;
-		var toplevel = State === 0;
+		var clock = Root,
+			owner = Owner,
+			listener = Listener,
+			toplevel = State === 0;
 		Owner = node;
 		Listener = flags & 16 ? null : node;
 		if (toplevel) {
@@ -882,9 +882,9 @@
 		}
 	}
 	function recycleOrClaimNode(node, fn, val, flags) {
-		var i, len;
-		var owner = flags & 2048 || Owner === null || Owner === Unowned ? null : Owner;
-		var recycle = node._src === null && (node._owned === null && node._cleanups === null || owner !== null);
+		var i, len,
+			owner = flags & 2048 || Owner === null || Owner === Unowned ? null : Owner,
+			recycle = node._src === null && (node._owned === null && node._cleanups === null || owner !== null);
 		if (recycle) {
 			Recycled = node;
 			if (owner !== null) {
@@ -928,7 +928,7 @@
 		return recycle;
 	}
 	function logRead(from, to) {
-		var log, src, fromslot;
+		var log, src, fromslot, toslot;
 		if (from._log === null) {
 			log = from._log = new Log();
 		} else {
@@ -939,7 +939,7 @@
 		} else {
 			src = to._src;
 		}
-		var toslot = src._node1 === null ? -1 : src._nodes === null ? 0 : src._nodes.length;
+		toslot = src._node1 === null ? -1 : src._nodes === null ? 0 : src._nodes.length;
 		if (log._node1 === null) {
 			log._node1 = to;
 			log._slot1 = toslot;
@@ -1504,7 +1504,6 @@
 		Data: Data,
 		Value: Value,
 		Computation: Computation,
-		Enumerable: Enumerable,
 		DataArray: DataArray,
 		DataEnumerable: DataEnumerable
 	};
