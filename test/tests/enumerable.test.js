@@ -1,5 +1,5 @@
 const { Test } = require('boer');
-const { array, Flag, on, freeze } = require('../..');
+const { array, cleanup, Flag, on, freeze } = require('../..');
 
 /*
 	forEach
@@ -33,23 +33,6 @@ module.exports = function(t) {
 			t.equal(count, 2);
 		});
 
-		t.test('every does not recompute unless necessary', t => {
-			let d = array([1,2,3]);
-			let count = 0;
-			let c1 = d.every(x => {
-				count++;
-				return x !== 4;
-			});
-			count = 0;
-			freeze(() => { d.pop(); d.pop(); });
-			t.equal(count, 0);
-			d.insertRange(1, [2,3]);
-			t.equal(count, 2);
-			d.push(4);
-			t.equal(count, 3);
-			t.equal(c1(), false);
-		});
-
 		t.test('filter filters based on callback', t => {
 			let d = array([1,2,3]);
 			let d1 = d.filter(x => x !== 2);
@@ -64,25 +47,6 @@ module.exports = function(t) {
 			let c2 = d.find(x => x === 4);
 			t.equal(c1(), 1);
 			t.equal(c2(), undefined);
-		});
-
-		t.test('find does not recompute unless necessary', t => {
-			let d = array([1,2,3]);
-			let count1 = 0;
-			let count2 = 0;
-			let c1 = d.find(x => {
-				count1++;
-				return x === 1;
-			});
-			let c2 = d.find(x => {
-				count2++;
-				return x === 4;
-			});
-			count1 = 0;
-			count2 = 0;
-			d.push(5);
-			t.equal(count1, 0);
-			t.equal(count2, 1);
 		});
 
 		t.test('findIndex returns index or -1 when not found', t => {
@@ -148,7 +112,6 @@ module.exports = function(t) {
 			d.push(4);
 			t.equal(c1(), { 1: 1, 2: 2, 4: 4 });
 			t.equal(c2(), { 1: -1, 2: -2, 4: -4 });
-			console.log(c1());
 		});
 
 		t.test('reduceRight reduces initialValue from back to front', t => {

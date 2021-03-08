@@ -10,11 +10,11 @@ module.exports = function (t) {
 	t.test('trace', t => {
 		t.test('does not trigger downstream computations unless changed', t => {
 			root(() => {
-				let s1 = data(1);
+				let d1 = data(1);
 				let order = '';
 				let t1 = fn(() => {
 					order += 't1';
-					return s1();
+					return d1();
 				}, null, Flag.Trace);
 				let c1 = fn(() => {
 					order += 'c1';
@@ -22,63 +22,84 @@ module.exports = function (t) {
 				});
 				t.equal(order, 't1c1');
 				order = '';
-				s1(1);
+				d1(1);
 				t.equal(order, 't1');
 				order = '';
-				s1(2);
+				d1(2);
 				t.equal(order, 't1c1');
 			});
 		});
 
 		t.test('updates downstream pending nodes', t => {
 			root(() => {
-        let s1 = data(0);
-        let s2 = data(0);
+        let d1 = data(0);
+        let d2 = data(0);
         let order = '';
         let t1 = fn(() => {
           order += 't1';
-          return s1() === 0;
+          return d1() === 0;
         }, null, Flag.Trace);
         let c1 = fn(() => {
           order += 'c1';
-          return s1();
+          return d1();
         });
         let c2 = fn(() => {
           order += 'c2';
           t1();
           fn(() => {
             order += 'c2_1';
-            return s2();
+            return d2();
           });
         });
         order = '';
-        s1(1);
+        d1(1);
         t.equal(order, 't1c1c2c2_1');
       });
 		});
 
 		t.test('does not execute pending disposed nodes', t => {
 			root(() => {
-				let s1 = data(0);
+				let d1 = data(0);
 				let order = '';
 				let t1 = fn(() => {
 					order += 't1';
-					return s1();
+					return d1();
 				}, null, Flag.Trace);
 				let c1 = fn(() => {
 					t1();
 					order += 'c1';
-					if (sample(s1) === 0) {
+					if (sample(d1) === 0) {
 						let c2 = fn(() => {
 							order += 'c2';
-							s1();
+							d1();
 						});
 					}
 				});
 				t.equal(order, 't1c1c2');
 				order = '';
-				s1(1);
+				d1(1);
 				t.equal(order, 't1c1');
+			});
+		});
+
+		t.test('updates if dependent on both tracing and non-tracing node', t => {
+			root(() => {
+				let d1 = data(0);
+				let count = 0;
+				let t1 = fn(() => {
+					return d1();
+				}, null, Flag.Trace);
+				let c1 = fn(() => {
+					return d1();
+				});
+				let c2 = fn(() => {
+					count++;
+					return t1() + c1();
+				});
+				count = 0;
+				d1(1);
+				t.equal(count, 1);
+				t.equal(c2(), 2);
 			});
 		});
 	});
