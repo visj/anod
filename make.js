@@ -10,7 +10,7 @@ if (!fs.existsSync(dist)) {
 const src = path.join(__dirname, 'src');
 const file = path.join(src, 'index.js');
 
-const StripRegex = /\/\*\s*@strip\s*\*\/\n/g;
+const StripRegex = /\/\*\s*@exclude\s*\*\/[ \t]*/g;
 
 let srcFile = fs.readFileSync(file).toString().split(StripRegex).filter((_, i) => i % 2 === 0).join('');
 

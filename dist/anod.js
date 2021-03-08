@@ -1,18 +1,9 @@
 (function() {
 	var Flag = {
 		Wait: 1,
-		Trace: 1 << 1,
-		Dynamic: 1 << 2,
-		Static: 1 << 3,
-		Bound: 1 << 4,
-		Unbound: 1 << 5,
-		Stale: 1 << 6,
-		Running: 1 << 7,
-		Disposed: 1 << 8,
-		Watch: 1 << 9,
-		Single: 1 << 10,
-		Orphan: 1 << 11,
-		Dirty: 1 << 12,
+		Trace: 2,
+		Dynamic: 4,
+		Static: 8,
 	};
 	function array(val) {
 		return new DataArray(val);
@@ -20,13 +11,13 @@
 	function data(val) {
 		var node = new Data(val);
 		return function (next) {
-			return arguments.length > 0 ? node.set(next) : node.get();
+			return arguments.length === 0 ? node.get() : node.set(next);
 		};
 	}
 	function value(val, eq) {
 		var node = new Value(val, eq);
 		return function (next) {
-			return arguments.length > 0 ? node.set(next) : node.get();
+			return arguments.length === 0 ? node.get() : node.set(next);
 		};
 	}
 	function cleanup(f) {

@@ -1,17 +1,19 @@
 var Flag = {
 	Wait: 1,
-	Trace: 1 << 1,
-	Dynamic: 1 << 2,
-	Static: 1 << 3,
-	Bound: 1 << 4,
-	Unbound: 1 << 5,
-	Stale: 1 << 6,
-	Running: 1 << 7,
-	Disposed: 1 << 8,
-	Watch: 1 << 9,
-	Single: 1 << 10,
-	Orphan: 1 << 11,
-	Dirty: 1 << 12,
+	Trace: 2,
+	Dynamic: 4,
+	Static: 8,
+	/* @exclude */
+	Bound: 16,
+	Unbound: 32,
+	Stale: 64,
+	Running: 128,
+	Disposed: 256,
+	Watch: 512,
+	Single: 1024,
+	Orphan: 2048,
+	Dirty: 4096,
+	/* @exclude */
 };
 
 function array(val) {
@@ -21,14 +23,14 @@ function array(val) {
 function data(val) {
 	var node = new Data(val);
 	return function (next) {
-		return arguments.length > 0 ? node.set(next) : node.get();
+		return arguments.length === 0 ? node.get() : node.set(next);
 	};
 }
 
 function value(val, eq) {
 	var node = new Value(val, eq);
 	return function (next) {
-		return arguments.length > 0 ? node.set(next) : node.get();
+		return arguments.length === 0 ? node.get() : node.set(next);
 	};
 }
 
@@ -797,7 +799,7 @@ DataEnumerable.prototype.dispose = function () {
 	cleanupNode(this, true);
 }
 
-/* @strip */
+/* @exclude */
 var System = {
 	Idle: 0,
 	Compute: 1,
@@ -826,7 +828,7 @@ var Mutation = {
 	Unshift: 128 | Modification.Insertion,
 	Type: 255,
 };
-/* @strip */
+/* @exclude */
 
 var Void = {};
 var Root = new Clock();
@@ -1617,9 +1619,9 @@ function indexOf(flag, cs, callback, index, length, last) {
 
 module.exports = {
 	array, data, value, Flag,
-	/* @strip */
+	/* @exclude */
 	System, Mutation, Modification,
-	/* @strip */
+	/* @exclude */
 	bind, run, fn, on,
 	cleanup, freeze, root, sample,
 	Data, Value, Computation,
