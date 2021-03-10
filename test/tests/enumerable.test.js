@@ -36,9 +36,9 @@ module.exports = function(t) {
 		t.test('filter filters based on callback', t => {
 			let d = array([1,2,3]);
 			let d1 = d.filter(x => x !== 2);
-			t.equal(d1.val(), [1,3]);
+			t.equal(d1.get(), [1,3]);
 			let d2 = d.filter(x => false);
-			t.equal(d2.val(), []);
+			t.equal(d2.get(), []);
 		});
 
 		t.test('find returns item or undefined when not found', t => {
@@ -95,6 +95,19 @@ module.exports = function(t) {
 			t.equal(c3(), -1);
 		});
 
+		t.test('map', t => {
+			let d = array([1,2,3,4,5]);
+			let c1 = d.map(item => {
+				console.log('created: ' + item);
+				cleanup(() => { console.log('disposed: ' + item); });
+				return { item };
+			});
+			d.insertRange(2, [6,7,8]);
+			console.log(c1.get());
+			d.removeAt(4);
+			d.removeAt(5);
+		});
+
 		t.test('reduce reduces initialValue to a single value', t => {
 			let d = array([1,2,3]);
 			let c1 = d.reduce((seed, x) => { seed.unshift(x); return seed; }, []);
@@ -124,14 +137,14 @@ module.exports = function(t) {
 			let d = array([1,2,3]);
 			let d1 = d.reverse();
 			let d2 = d1.reverse();
-			t.equal(d1.val(), [3,2,1]);
-			t.equal(d2.val(), [1,2,3]);
+			t.equal(d1.get(), [3,2,1]);
+			t.equal(d2.get(), [1,2,3]);
 		});
 		
 		t.test('slice returns a copy of array', t => {
 			let d = array([1,2,3]);
 			let d1 = d.slice();
-			t.equal(d1.val(), [1,2,3]);
+			t.equal(d1.get(), [1,2,3]);
 		});
 
 		t.test('slice accepts positive and negative indices', t => {
@@ -139,9 +152,9 @@ module.exports = function(t) {
 			let d1 = d.slice(0, 3);
 			let d2 = d.slice(0, -3);
 			let d3 = d.slice(-2);
-			t.equal(d1.val(), [1,2,3]);
-			t.equal(d2.val(), [1,2,3]);
-			t.equal(d3.val(), [5,6]);
+			t.equal(d1.get(), [1,2,3]);
+			t.equal(d2.get(), [1,2,3]);
+			t.equal(d3.get(), [5,6]);
 		});
 
 		t.test('some returns if any matches callback', t => {

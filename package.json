@@ -4,7 +4,6 @@
   "description": "",
   "main": "dist/anod.cjs",
   "module": "dist/anod.mjs",
-  "browser": "dist/anod.js",
   "types": "lib.d.ts",
   "scripts": {
     "make": "node make.js",
@@ -12,10 +11,8 @@
   },
   "files": [
     "lib.d.ts",
-    "dist/anod.js",
     "dist/anod.cjs",
-    "dist/anod.mjs",
-    "dist/anod.min.js"
+    "dist/anod.mjs"
   ],
   "keywords": [],
   "author": "Vilhelm Sjölund",

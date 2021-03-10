@@ -6,7 +6,7 @@ const { data, fn, root } = require('../..');
  */
 module.exports = function (t) {
 
-	t.test('with subcomputations', t => {
+	t.test('with sub computations', t => {
 
 		t.test('does not register a dependency on the subcomputation', t => {
 			root(() => {
@@ -75,11 +75,8 @@ module.exports = function (t) {
 			});
 
 			t.test('disposes child when it is disposed', t => {
-				const dispose = root(dispose => {
-					init();
-					return dispose;
-				});
-				dispose();
+				const r1 = root(init);
+				r1.dispose();
 				e(3);
 				t.equal(g(), 2);
 			});

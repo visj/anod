@@ -1,3 +1,88 @@
+export interface Signal<T = unknown> {
+	get(): T;
+}
+
+export interface Data<T = unknown> extends Signal<T> {
+	/**
+	 * 
+	 */
+	set(next: T): T;
+}
+
+export interface Value<T = unknown> extends Data<T> { }
+/**
+ * 
+ */
+export interface List<T = unknown> extends Data<T[]>, IEnumerable<T> {
+	/**
+	 * Inserts item at specific index
+	 * @param index Index to insert
+	 * @param item Item to insert
+	 */
+	insertAt(index: number, item: T): void;
+	/**
+	 * Inserts range starting at specified index
+	 * @param index Index to start inserting
+	 * @param items Items to insert
+	 */
+	insertRange(index: number, items: T[]): void;
+	/**
+	 * Moves an item from `from` to `to`
+	 * @param from From index
+	 * @param to To index
+	 */
+	move(from: number, to: number): void;
+	/**
+	 * Moves a range of items, starting at `from`,
+	 * selecting `count` item, and inserts starting at `to`.
+	 * @param from Index to start selecting items
+	 * @param count Number of items to move
+	 * @param to Index to start inserting items
+	 */
+	moveRange(from: number, count: number, to: number): void;
+	/**
+	 * Removes an element from the end of the array
+	 */
+	pop(): void;
+	/**
+	 * Adds an element at the end of the array
+	 * @param item Item to be inserted
+	 */
+	push(item: T): void;
+	/**
+	 * Removes an item at specified index
+	 * @param index Index at which to remove
+	 */
+	removeAt(index: number): void;
+	/**
+	 * Removes a range, starting at index
+	 * @param index Index to start removing
+	 * @param count Number of items to remove
+	 */
+	removeRange(index: number, count: number): void;
+	/**
+	 * Removes an item from beginning of array
+	 */
+	shift(): void;
+	/**
+	 * Swaps location between item located at
+	 * index `indexA` and `indexB`
+	 * @param indexA Index of first item to swap
+	 * @param indexB Index of second item to swap
+	 */
+	swap(indexA: number, indexB: number): void;
+	/**
+	 * Adds an item to the beginning of the array
+	 * @param item Item to add
+	 */
+	unshift(item: T): void;
+}
+
+export interface Computation<T = unknown> extends Signal<T> {
+	
+	dispose(): void;
+}
+
 /**
  * 
  */
@@ -8,33 +93,35 @@ export interface IEnumerable<T> {
 	val(): T[];
 
 	/**
-	 * Determines whether all elements meet the condition of provided callback
+	 * Determines whether all elements meet the condition of provided callback.
+	 * It does not propagate changes unless the computed value changes.
 	 * @example
 	 * const d1 = array([1,2,3]);
 	 * const c1 = d1.every(x => x !== 4);
-	 * console.log(c1()); // prints "true"
+	 * const c2 = on(c1, () => { console.log("called"); });
+	 * d1.pop(); // does not print
+	 * d1.push(4); // prints "called"
 	 * @param callback Predicate function to evaluate against each element
-	 * @returns Tracing procedural function that reacts when switching between true and false
 	 */
 	every(callback: (currentValue: T, index?: number) => boolean): () => boolean;
 	/**
-	 * Returns an enumerable node with elements that meet the condition of provided callback
+	 * Returns an IEnumerable filtered for elements that meet the condition of provided callback
 	 * @example
 	 * const d1 = array([1,2,3])
 	 * const c1 = d1.filter(x => x > 1);
 	 * console.log(c1.val()); // prints "[2,3]"
 	 * @param callback Predicate function to evaluate against each element
-	 * @returns Enumerable node
 	 */
 	filter(callback: (currentValue: T, index?: number) => boolean): IEnumerable<T>;
 	/**
-	 * 
-	 * @param calback 
+	 * Searches the *first* element in the array that meet the condition, otherwise undefined
+	 * @param calback Predicate function to evaluate against each element
+	 * @returns 
 	 */
 	find(calback: (element: T, index?: number) => boolean): () => T;
 	/**
-	 * 
-	 * @param callback 
+	 * Searches the *first* index that meet the condition, otherwise -1
+	 * @param callback Predicate function to evaluate against each element
 	 */
 	findIndex(callback: (element: T, index?: number) => boolean): () => number;
 	/**
@@ -111,101 +198,48 @@ export interface IEnumerable<T> {
 	sort(compareFunction?: (firstEl: T, secondEl: T) => number): IEnumerable<T>;
 }
 
-/**
- * 
- */
-export interface DataArray<T> extends IEnumerable<T> {
-	/**
-	 * 
-	 */
-	val(): T[];
-	/**
-	 * 
-	 * @param next 
-	 */
-	val(next: T[]): T[];
+export interface Enumerable<T = unknown> extends Computation<T>, IEnumerable<T> { }
 
-	/**
-	 * 
-	 * @param index 
-	 * @param item 
-	 */
-	insertAt(index: number, item: T): void;
-	/**
-	 * 
-	 * @param index 
-	 * @param items 
-	 */
-	insertRange(index: number, items: T[]): void;
-	/**
-	 * 
-	 * @param from 
-	 * @param to 
-	 */
-	move(from: number, to: number): void;
-	/**
-	 * 
-	 * @param from 
-	 * @param count 
-	 * @param to 
-	 */
-	moveRange(from: number, count: number, to: number): void;
-	/**
-	 * 
-	 */
-	pop(): void;
-	/**
-	 * 
-	 * @param item 
-	 */
-	push(item: T): void;
-	/**
-	 * 
-	 * @param index 
-	 */
-	removeAt(index: number): void;
-	/**
-	 * 
-	 * @param index 
-	 * @param count 
-	 */
-	removeRange(index: number, count: number): void;
-	/**
-	 * 
-	 */
-	shift(): void;
-	/**
-	 * 
-	 * @param first 
-	 * @param second 
-	 */
-	swap(first: number, second: number): void;
-	/**
-	 * 
-	 * @param item 
-	 */
-	unshift(item: T): void;
-}
 
 /**
  * 
  */
 export const enum Flag {
 	/**
-	 * @public
+	 * Used to flag that a procedure should not
+	 * be invoced until next computation cycle. 
+	 * @see {on}
 	 */
 	Wait = 1,
 	/**
-	 * @public
-	 * 
+	 * Used to flag that a procedure should
+	 * only propagate changes when the computed
+	 * value changes from previous round.
+	 * @see {fn}
+	 * @see {on}
 	 */
 	Trace = 2,
 	/**
-	 * @public
+	 * Used to flag that a procedure uses
+	 * dynamic dependency tracking. This means that
+	 * each time the node is updated, the dependency 
+	 * tree is truncated and rebuild. This behavior
+	 * is default for `fn` and `run`, but can be overriden
+	 * for `on` and `bind` in case they have conditional
+	 * dependency trees.
+	 * @see {fn}
+	 * @see {on}
 	 */
 	Dynamic = 4,
 	/**
-	 * @public
+	 * Used to flag that a procedure uses
+	 * static dependency tracking. This means that 
+	 * the dependency tree is computed once and then
+	 * never rebuilt. This behavior is default for 
+	 * `on` and `bind`, but can be overriden for `fn`
+	 * and `run` in case we know that any dependency
+	 * read during first invocation will stay static 
+	 * during the lifetime of the computation node.
 	 */
 	Static = 8,
 }
@@ -242,7 +276,7 @@ export function value<T>(val: T, eq?: (a: T, b: T) => boolean): (next?: T) => T;
  * @param val Initial value used by underlying data array.
  * @throws {Error} When val is a non array-like object
  */
-export function array<T>(val: T[]): DataArray<T>;
+export function array<T>(val: T[]): List<T>;
 
 /**
  * `on` creates a static computation node and returns a procedural function. 
@@ -310,14 +344,39 @@ export function bind<T>(src: (() => any) | (() => any)[], f: (seed: T) => T, see
 export function run<T>(f: (seed: T) => T, seed?: T, flags?: number): void;
 
 /**
- * `cleanup` 
- * @param f 
+ * `cleanup` accepts a function that is run each time a computation
+ * node is updated. When the node is about to be disposed, `final`
+ * in callback function switches to true.
+ * @example
+ * root(() => {
+ * 	let d1 = data(0);
+ * 	let d2 = data(0);
+ * 	on(d1, () => {
+ * 		on(d2, () => {
+ * 			cleanup(final => { console.log(final); });
+ * 		});
+ * 	});
+ * 	d2(); // prints "false"
+ * 	d1(); // prints "true"
+ * });
+ * @param f Callback to run during update
  */
 export function cleanup(f: (final: boolean) => void): void;
 
 /**
- * 
- * @param f 
+ * `freeze` allows batching updates so that setting multiple
+ * data signals only trigger a single update cycle.
+ * @example
+ * root(() => {
+ * 	let d1 = data(0);
+ * 	let d2 = data(0);
+ * 	fn(() => { console.log(d1(), d2()); });
+ * 	freeze(() => {
+ * 		d1(1);
+ * 		d2(2);
+ * 	}); // prints "1,2"
+ * });
+ * @param f Callback to execute before running updates
  */
 export function freeze<T>(f: () => T): T;
 
@@ -325,22 +384,88 @@ export function freeze<T>(f: () => T): T;
  * 
  * @param f 
  */
-export function root<T>(f: (dispose?: () => void) => T): T;
+export function root<T>(f: () => T): Computation<T>;
 
 /**
- * 
+ * `sample` runs provided callback without creating a dependency 
+ * on any signals read during invocation.
  * @param fn 
  */
 export function sample<T>(fn: () => T): T;
 
-/**
- * 
- */
-export interface Log<T> {
-	readonly _node1: T;
-	readonly _slot1: number;
-	readonly _nodes: T[];
-	readonly _slots: number[];
+export const Data: DataConstructor;
+export const Value: ValueConstructor;
+export const List: ListConstructor;
+export const Computation: ComputationConstructor;
+export const Enumerable: EnumerableConstructor;
+
+export interface SignalProto<T = unknown> {
+	readonly _val: T;
+	readonly _log: Log<Computation>;
+	readonly _flag: number;
+}
+
+export interface DataProto<T = unknown> extends Data<T>, SignalProto<T> {
+	readonly _pval: {} | T;
+	
+	update(): void;
+}
+
+export interface DataConstructor {
+	new <T>(): Data<T>;
+	readonly prototype: DataProto<unknown>;
+}
+
+export interface ValueProto<T = unknown> extends DataProto<T> {
+	readonly _eq?: (a: T, b: T) => boolean;
+
+}
+
+export interface ValueConstructor {
+	new <T>(): Value<T>;
+	readonly prototype: ValueProto<unknown>;
+}
+
+export interface ListProto<T> extends List<T>, DataProto<T> {
+	readonly _pval: {} | T;
+	readonly _cs: ChangeSet<T> | ChangeSet<T>[];
+	readonly _pcs: ChangeSet<T> | ChangeSet<T>[];
+
+	update(): void;
+}
+
+export interface ListConstructor {
+	new <T>(): ListProto<T>;
+	readonly prototype: ListProto<unknown>;
+}
+
+export interface ComputationProto<T = unknown> extends SignalProto<T> {
+	readonly _fn: (seed: T) => T;
+	readonly _age: number;
+	readonly _src: Log<Signal>;
+	readonly _owner: Computation;
+	readonly _traces: number[];
+	readonly _owned: Computation[];
+	readonly _cleanups: ((final: boolean) => void)[];
+
+	update(): void;
+}
+
+export interface ComputationConstructor {
+	new<T>(): Computation<T>;
+	new: <T>() => Computation<T>;
+	setup: <T>(node: Computation<T>, f: (seed: T) => T, seed?: T, flags?: Flag) => Computation<T>;
+	readonly prototype: Computation<unknown>;
+}
+
+export interface EnumerableProto<T = unknown> extends Enumerable<T>, ComputationProto<T> {
+	readonly _cs: ChangeSet<T> | ChangeSet<T>[];
+	readonly _pcs: ChangeSet<T> | ChangeSet<T>[];
+}
+
+export interface EnumerableConstructor {
+	new <T>(): Enumerable<T>;
+	readonly prototype: Enumerable<unknown>;
 }
 
 export const enum Modification {
@@ -364,8 +489,18 @@ export const enum Mutation {
 }
 
 export const Void: {};
-export const Owner: ComputationProto<unknown>;
-export const Listener: ComputationProto<unknown>;
+export const Owner: Computation;
+export const Listener: Computation;
+
+/**
+ * 
+ */
+export interface Log<T> {
+	readonly _node1: T;
+	readonly _slot1: number;
+	readonly _nodes: T[];
+	readonly _slots: number[];
+}
 
 /**
  * 
@@ -376,83 +511,3 @@ export interface ChangeSet<T> {
 	readonly count?: number;
 	readonly value?: T | T[];
 }
-
-export interface SignalProto<T> {
-	readonly _val: T;
-	readonly _log: Log<ComputationProto>;
-	readonly _flag: number;
-}
-
-export interface DataProto<T> extends SignalProto<T> {
-	readonly _pval: {} | T;
-
-	get(): T;
-	set(next: T): T;
-	update(): void;
-}
-
-export interface DataConstructor {
-	new<T>(): DataProto<T>;
-	readonly prototype: DataProto<unknown>;
-}
-
-export interface ValueProto<T> extends DataProto<T> {
-	readonly _eq?: (a: T, b: T) => boolean;
-}
-
-export interface ValueConstructor {
-	new<T>(): ValueProto<T>;
-	readonly prototype: ValueProto<unknown>;
-}
-
-export interface ComputationProto<T> extends SignalProto<T> {
-	readonly _fn: (seed: T) => T;
-	readonly _age: number;
-	readonly _src: Log<SignalProto>;
-	readonly _owner: ComputationProto;
-	readonly _traces: number[];
-	readonly _owned: ComputationProto[];
-	readonly _cleanups: ((final: boolean) => void)[];
-
-	static new<T>(): ComputationProto<T>;
-	static init<T>(node: ComputationProto<T>, f: (seed: T) => T, seed?: T, flags?: Flag): ComputationProto<T>;
-
-	get(): T;
-	update(): void;
-	dispose(): void;
-}
-
-export interface ComputationConstructor {
-	new<T>(): ComputationProto<T>;
-	readonly prototype: ComputationProto<unknown>;
-}
-
-export interface DataArrayProto<T> extends SignalProto<T[]>, DataArray<T> {
-	readonly _pval: {} | T;
-	readonly _cs: ChangeSet<T> | ChangeSet<T>[];
-	readonly _pcs: ChangeSet<T> | ChangeSet<T>[];
-
-	update(): void;
-}
-
-export interface DataArrayConstructor {
-	new<T>(): DataArrayProto<T>;
-	readonly prototype: DataArrayProto<unknown>;
-}
-
-export interface DataEnumerableProto<T> extends ComputationProto<T>, IEnumerable<T> { 
-	readonly _cs: ChangeSet<T> | ChangeSet<T>[];
-	readonly _pcs: ChangeSet<T> | ChangeSet<T>[];
-}
-
-export interface DataEnumerableConstructor {
-	new<T>(): DataEnumerableProto<T>;
-	readonly prototype: DataEnumerableProto<unknown>;
-}
-
-export const Data: DataConstructor;
-export const Value: ValueConstructor;
-export const Computation: ComputationConstructor;
-export const DataArray: DataArrayConstructor;
-export const DataEnumerable: DataEnumerableConstructor;
-
