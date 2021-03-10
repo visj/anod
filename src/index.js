@@ -411,7 +411,7 @@ function IEnumerable(proto) {
 				cs = self._cs;
 				if (cs !== null) {
 					i = indexOf(self._flag, cs, callback, index, items.length, false);
-					if (i !== Void) {
+					if (i !== NoResult) {
 						return index = i;
 					}
 				}
