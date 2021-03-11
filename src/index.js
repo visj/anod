@@ -64,17 +64,13 @@ function freeze(f) {
 	return val;
 }
 
-function fn(f, seed, flags) {
+function run(f, seed, flags) {
 	var node = new Computation(Log());
-	seed = Computation.setup(node, f, seed, Flag.Unbound | flags);
-	if (node.fn === null) {
-		return function () { return seed; }
-	} else {
-		return function () { return node.get(); }
-	}
+	Computation.setup(node, f, seed, Flag.Unbound | flags);
+	return function () { return node.get(); }
 }
 
-function on(src, f, seed, flags) {
+function tie(src, f, seed, flags) {
 	var node = new Computation(Log());
 	if (flags & Flag.Dynamic) {
 		if (flags & Flag.Wait) {
@@ -88,15 +84,14 @@ function on(src, f, seed, flags) {
 		logSource(node, src);
 		seed = Computation.setup(node, f, seed, Flag.Bound | flags);
 	}
-	if (node.fn === null) {
-		return function () { return seed; }
-	} else {
-		return function () { return node.get(); }
-	}
+	return function () { return node.get(); }
 }
 
+function fn(f, seed, flags) {
+	Computation.setup(new Computation(null), f, seed, Flag.Unbound | flags);
+}
 
-function tie(src, f, seed, flags) {
+function on(src, f, seed, flags) {
 	var node = new Computation(null);
 	if (flags & Flag.Dynamic) {
 		if (flags & Flag.Wait) {
@@ -110,10 +105,6 @@ function tie(src, f, seed, flags) {
 		logSource(node, src);
 		Computation.setup(node, f, seed, Flag.Bound | flags);
 	}
-}
-
-function run(f, seed, flags) {
-	Computation.setup(new Computation(null), f, seed, Flag.Unbound | flags);
 }
 
 function root(f) {
@@ -279,10 +270,13 @@ Computation.prototype.dispose = function () {
 }
 
 function IEnumerable(proto) {
+	proto.mut = function() {
+		return this.cs;
+	}
 	proto.every = function (callback) {
 		var self = this,
 			pure = callback.length === 1;
-		return on(self, function (seed) {
+		return tie(self, function (seed) {
 			var i, ilen, j, jlen,
 				cs = self.cs,
 				items = self.get(),
@@ -375,7 +369,7 @@ function IEnumerable(proto) {
 		var self = this,
 			i = -1,
 			pure = callback.length === 1;
-		return on(self, function (seed) {
+		return tie(self, function (seed) {
 			var item,
 				cs = self.cs,
 				items = self.get(),
@@ -400,7 +394,7 @@ function IEnumerable(proto) {
 		var self = this,
 			index = -1,
 			pure = callback.length === 1 && arguments.length === 1;
-		return on(self, function (seed) {
+		return tie(self, function (seed) {
 			var i, cs,
 				items = self.get(),
 				len = items.length;
@@ -494,7 +488,7 @@ function IEnumerable(proto) {
 		var self = this,
 			i = -1,
 			pure = arguments.length === 1;
-		return on(self, function (seed) {
+		return tie(self, function (seed) {
 			var cs = self.cs,
 				items = self.get(),
 				len = items.length;
@@ -519,7 +513,7 @@ function IEnumerable(proto) {
 		var self = this,
 			i = -1,
 			pure = arguments.length === 1;
-		return on(self, function (seed) {
+		return tie(self, function (seed) {
 			var cs = self.cs,
 				items = self.get(),
 				len = items.length;
@@ -542,7 +536,7 @@ function IEnumerable(proto) {
 	}
 	proto.join = function (separator) {
 		var self = this;
-		return on(self, function () {
+		return tie(self, function () {
 			return self.get().join(separator);
 		}, void 0, Flag.Trace);
 	}
@@ -550,7 +544,7 @@ function IEnumerable(proto) {
 		var self = this,
 			i = - 1,
 			pure = arguments.length === 1;
-		return on(self, function (seed) {
+		return tie(self, function (seed) {
 			var cs;
 			var items = self.get();
 			if (pure && seed !== Void) {
@@ -667,7 +661,7 @@ function IEnumerable(proto) {
 		var self = this,
 			copy = copyValue(initialValue),
 			skip = arguments.length === 1;
-		return on(self, function () {
+		return tie(self, function () {
 			var i, len, result;
 			var items = self.get();
 			if (skip) {
@@ -687,7 +681,7 @@ function IEnumerable(proto) {
 		var self = this,
 			copy = copyValue(initialValue),
 			skip = arguments.length === 1;
-		return on(self, function (seed) {
+		return tie(self, function (seed) {
 			var i, result,
 				items = self.get();
 			if (skip) {
@@ -795,7 +789,7 @@ function IEnumerable(proto) {
 		var self = this;
 		var index = -1;
 		var pure = callback.length === 1;
-		return on(self, function (seed) {
+		return tie(self, function (seed) {
 			var i,
 				cs = self.cs,
 				items = self.get(),
@@ -1250,14 +1244,14 @@ function tick(clock) {
 	clock.disposes.len = 0;
 	do {
 		clock.time++;
-		State = System.Change;
 		queue = clock.changes;
+		State = System.Change;
 		for (j = 0; j < queue.len; j++) {
 			queue.items[j].update();
 		}
 		queue.len = 0;
-		State = System.Trace;
 		queue = clock.traces;
+		State = System.Trace;
 		for (j = 0; j < queue.len; j++) {
 			node = queue.items[j];
 			if (node.flag & Flag.Stale) {
@@ -1265,8 +1259,8 @@ function tick(clock) {
 			}
 		}
 		queue.len = 0;
-		State = System.Update;
 		queue = clock.updates;
+		State = System.Update;
 		for (j = 0; j < queue.len; j++) {
 			node = queue.items[j];
 			if (node.flag & Flag.Stale) {
@@ -1274,8 +1268,8 @@ function tick(clock) {
 			}
 		}
 		queue.len = 0;
-		State = System.Dispose;
 		queue = clock.disposes;
+		State = System.Dispose;
 		for (j = 0; j < queue.len; j++) {
 			node = queue.items[j];
 			node.fn = null;

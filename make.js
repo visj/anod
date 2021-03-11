@@ -89,4 +89,6 @@ fs.writeFileSync(path.join(dist, 'anod.js'), js);
 
 const cmd = 'npx esbuild --target=es5 --minify --outfile=dist/anod.min.js dist/anod.js';
 
-exec(cmd, function () { fs.unlinkSync(path.join(dist, 'anod.js')); });
+exec(cmd, function () { 
+	fs.unlinkSync(path.join(dist, 'anod.js')); 
+});

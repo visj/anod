@@ -1,5 +1,5 @@
 const { Test } = require('boer');
-const { array, cleanup, Flag, on, freeze } = require('../..');
+const { array, cleanup, Flag, tie, } = require('../..');
 
 /*
 	forEach
@@ -25,7 +25,7 @@ module.exports = function(t) {
 			let d = array([1,2,3]);
 			let c1 = d.every(x => x !== 4);
 			let count = 0;
-			let c2 = on(c1, () => { count++; }, void 0, Flag.Wait);
+			let c2 = tie(c1, () => { count++; }, void 0, Flag.Wait);
 			d.unshift(0);
 			d.push(3);
 			d.push(4);

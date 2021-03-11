@@ -1,5 +1,5 @@
 const { Test } = require('boer');
-const { data, fn, on, freeze, root } = require('../..');
+const { data, run, root } = require('../..');
 
 /**
  * @param {Test} t
@@ -14,10 +14,10 @@ module.exports = function (t) {
 				let innerTrigger = data(null);
 				let outer, innerRuns = 0;
 
-				outer = fn(() => {
+				outer = run(() => {
 					outerTrigger();
 					root(() => {
-						fn(() => {
+						run(() => {
 							innerTrigger();
 							innerRuns++;
 						})
@@ -39,7 +39,7 @@ module.exports = function (t) {
 		t.test('does not freeze updates when used at top level', t => {
 			root(() => {
 				let s = data(1);
-				let c = fn(() => s());
+				let c = run(() => s());
 				t.equal(c(), 1);
 				s(2);
 
@@ -53,9 +53,9 @@ module.exports = function (t) {
 		t.test('persists through entire scope when used at top level', t => {
 			root(() => {
 				let s = data(1);
-				let c1 = fn(() => s());
+				let c1 = run(() => s());
 				s(2);
-				let c2 = fn(() => s());
+				let c2 = run(() => s());
 				s(3);
 				t.equal(c2(), 3);;
 			})

@@ -6,8 +6,7 @@
   "module": "dist/anod.mjs",
   "types": "lib.d.ts",
   "scripts": {
-    "make": "node make.js",
-    "test": "node test"
+    "test": "node make && node test"
   },
   "files": [
     "lib.d.ts",

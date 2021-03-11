@@ -1,5 +1,5 @@
 const { Test } = require('boer');
-const { fn, root, value } = require('../..');
+const { run, root, value } = require('../..');
 
 /**
  * @param {Test} t
@@ -27,7 +27,7 @@ module.exports = function (t) {
 			root(() => {
 				let d = value(1);
 				let e = 0;
-				let f = fn(() => { d(); return ++e; });
+				let f = run(() => { d(); return ++e; });
 				t.equal(f(), 1);
 				d(1);
 				t.equal(f(), 1);
@@ -38,7 +38,7 @@ module.exports = function (t) {
 			root(() => {
 				let d = value(1);
 				let e = 0;
-				let f = fn(() => { d(); return ++e; });
+				let f = run(() => { d(); return ++e; });
 				t.equal(f(), 1);
 				d(1);
 				t.equal(f(), 1);
@@ -51,7 +51,7 @@ module.exports = function (t) {
 			root(() => {
 				let d = value([1], (a,b) => a[0] === b[0]);
 				let e = 0;
-				let f = fn(() => { d(); return ++e; });
+				let f = run(() => { d(); return ++e; });
 				t.equal(f(), 1);
 				d([1]);
 				t.equal(f(), 1);

@@ -1,5 +1,5 @@
 const { Test } = require('boer');
-const { data, fn, root } = require('../..');
+const { data, run, root } = require('../..');
 
 /**
  * @param {Test} t
@@ -13,9 +13,9 @@ module.exports = function (t) {
 				let d = data(1);
 				let count = 0;
 				let gcount = 0;
-				let f = fn(() => {
+				let f = run(() => {
 					count++;
-					let g = fn(() => {
+					let g = run(() => {
 						gcount++;
 						return d();
 					});
@@ -36,10 +36,10 @@ module.exports = function (t) {
 				e = data(2);
 				fcount = 0;
 				gcount = 0;
-				f = fn(() => {
+				f = run(() => {
 					fcount++;
 					d();
-					g = fn(() => {
+					g = run(() => {
 						gcount++;
 						return e();
 					});
@@ -86,12 +86,12 @@ module.exports = function (t) {
 			t.test('propagates successfully', t => {
 				root(() => {
 					let a = data(1);
-					let b = fn(() => {
-						let c = fn(() => a());
+					let b = run(() => {
+						let c = run(() => a());
 						a();
 						return { c: c };
 					});
-					let d = fn(() => b().c());
+					let d = run(() => b().c());
 					t.equal(d(), 1);
 					a(2);
 					t.equal(d(), 2);
@@ -106,14 +106,14 @@ module.exports = function (t) {
 				root(() => {
 					let a = data(1);
 					var c;
-					let b = fn(() => {
-						c = fn(() => a());
+					let b = run(() => {
+						c = run(() => a());
 						a();
 						return { c };
 					});
-					let d = fn(() => {
+					let d = run(() => {
 						c();
-						let e = fn(() => a());
+						let e = run(() => a());
 						return { e };
 					});
 

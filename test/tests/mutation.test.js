@@ -1,5 +1,5 @@
 const { Test } = require('boer');
-const { data, fn, root } = require('../..');
+const { data, run, root } = require('../..');
 
 /**
  * @param {Test} t
@@ -14,7 +14,7 @@ module.exports = function (t) {
 				let b = data(0);
 
 				let cb;
-				let c = fn(() => {
+				let c = run(() => {
 					if (a()) {
 						b(1); 
 						cb = b(); 
@@ -36,14 +36,14 @@ module.exports = function (t) {
 				let a = data(false);
 				let b = data(0);
 				let db;
-				let c = fn(() => {
+				let c = run(() => {
 					if (a()) {
 						seq += 'c';
 						b(1);
 						a(false);
 					}
 				});
-				let d = fn(() => {
+				let d = run(() => {
 					if (a()) {
 						seq += 'd';
 						db = b();
@@ -64,7 +64,7 @@ module.exports = function (t) {
 				let seq = '';
 				let a = data(0);
 
-				fn(() => {
+				run(() => {
 					seq += a();
 					if (a() < 10) {
 						a(a() + 1);
@@ -80,11 +80,11 @@ module.exports = function (t) {
 				let seq = '';
 				let a1 = data(0);
 				let c1 = data(0);
-				let b1 = fn(() => { a1(); });
-				let b2 = fn(() => { c1(a1()); });
-				let b3 = fn(() => { a1(); });
-				let d1 = fn(() => { b1(); seq += 'c4(' + c1() + ')'; });
-				let d2 = fn(() => { b3(); seq += 'c5(' + c1() + ')'; });
+				let b1 = run(() => { a1(); });
+				let b2 = run(() => { c1(a1()); });
+				let b3 = run(() => { a1(); });
+				let d1 = run(() => { b1(); seq += 'c4(' + c1() + ')'; });
+				let d2 = run(() => { b3(); seq += 'c5(' + c1() + ')'; });
 
 				seq = '';
 				a1(1);

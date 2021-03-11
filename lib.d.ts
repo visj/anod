@@ -79,7 +79,7 @@ export interface List<T = unknown> extends Data<T[]>, IEnumerable<T> {
 }
 
 export interface Computation<T = unknown> extends Signal<T> {
-	
+
 	dispose(): void;
 }
 
@@ -278,7 +278,29 @@ export function value<T>(val: T, eq?: (a: T, b: T) => boolean): (next?: T) => T;
 export function array<T>(val: T[]): List<T>;
 
 /**
- * `on` creates a static computation node and returns a procedural function. 
+ * `on` creates a computation node with a static dependency tree.
+ * This function will be more performant than `tie`, and it is advisable to 
+ * use it unless requiring reading the resulting computation node. 
+ * @see tie
+ * @param src Dependent signals
+ * @param f Function to execute when `src` changes
+ * @param seed Initial value passed to `f`
+ * @param flags Flags to override. Possible values are `Flag.Wait` and `Flag.Dynamic`.
+ */
+export function on<T>(src: (() => any) | (() => any)[], f: (seed: T) => T, seed?: T, flags?: number): () => T;
+
+/**
+ * `fn` creates a dynamic computation node.
+ * This function will be more performant than `run`, and it is advisable to 
+ * use it unless requiring reading the resulting computation node. 
+ * @param f Function to execute
+ * @param seed Initial value passed to `f`
+ * @param flags Flags to override. Possible value is `Flag.Static`.
+ */
+export function fn<T>(f: (seed: T) => T, seed?: T, flags?: number): () => T;
+
+/**
+ * `tie` creates a static computation node and returns a procedural function. 
  * It does so by constructing the initial dependency tree,
  * but unlike dynamic computation nodes does not recompute the dependency tree on each update cycle. 
  * This means that if the `src` signals are themselves conditional branches,
@@ -288,15 +310,15 @@ export function array<T>(val: T[]): List<T>;
  * @example
  * const d1 = data(1);
  * const d2 = data(2);
- * const c1 = on(d1, () => { console.log(d2()); });
+ * const c1 = tie(d1, () => { console.log(d2()); });
  * freeze(() => { d1(2); d2(3); }); // prints "3"
  * d2(4); // does not print
  * @example
  * const d1 = data(1);
  * const d2 = data(2);
  * const c1 = () => { return d1() > 1 ? d2() : null; };
- * const c2 = on(c1, () => { console.log("c2")}, void 0, Flag.Wait);
- * const c3 = on(c1, () => { console.log("c3"); }, void 0, Flag.Wait | Flag.Dynamic);
+ * const c2 = tie(c1, () => { console.log("c2")}, void 0, Flag.Wait);
+ * const c3 = tie(c1, () => { console.log("c3"); }, void 0, Flag.Wait | Flag.Dynamic);
  * d1(2); // prints "c2", "c3"
  * d2(2); // prints "c3"
  * @param src Dependent signals
@@ -304,37 +326,11 @@ export function array<T>(val: T[]): List<T>;
  * @param seed Initial value passed to `f`
  * @param flags Flags to override. Possible values are `Flag.Wait` and `Flag.Dynamic`.
  */
-export function on<T>(src: (() => any) | (() => any)[], f: (seed: T) => T, seed?: T, flags?: number): () => T;
+export function tie<T>(src: (() => any) | (() => any)[], f: (seed: T) => T, seed?: T, flags?: number): void;
 
 /**
- * `fn` creates a dynamic computation node and returns a procedural function.
- * Any signal or procedure read while `f` is executed will be logged and added to the dependency tree.
- * This behavior can be overridden by passing `Flag.Static` as flags parameter. In this case, `fn` will 
- * construct the dependency tree based on the initial invocation of `f`, and thereafter not reconstruct the tree.
- * This can be useful if we are unsure which dependencies will be logged, but know that once logged, the dependencies 
- * themselves do not change.
- * @param f Function to execute
- * @param seed Initial value passed to `f`
- * @param flags Flags to override. Possible value is `Flag.Static`.
- */
-export function fn<T>(f: (seed: T) => T, seed?: T, flags?: number): () => T;
-
-/**
- * `bind` creates a static computation node. Unless the resulting procedure
- * is bound elsewhere, it is recommended to use `bind` over `on` for performance reasons.
- * For a more in depth description of `bind` functionality, see examples provided in `on`.
- * @see on
- * @param src Dependent signals
- * @param f Function to execute when `src` changes
- * @param seed Initial value passed to `f`
- * @param flags Flags to override. Possible values are `Flag.Wait` and `Flag.Dynamic`.
- */
-export function bind<T>(src: (() => any) | (() => any)[], f: (seed: T) => T, seed?: T, flags?: number): void;
-
-/**
- * `run` creates a dynamic computation node. Unless the resulting procedure 
- * is bound elsewhere, it is recommended to use `run` over `fn` for performance reasons.
- * For a more in depth description of `run` functionality, see examples provided in `fn`.
+ * `run` creates a dynamic computation node and returns a procedural function.
+ * 
  * @see fn
  * @param f Function to execute
  * @param seed Initial value passed to `f`
@@ -403,7 +399,7 @@ export interface DataProto<T = unknown> extends Data<T> {
 	readonly log: Log<Computation>;
 	readonly flag: number;
 	readonly pval: {} | T;
-	
+
 	update(): void;
 }
 
@@ -450,7 +446,7 @@ export interface ComputationProto<T = unknown> extends Computation<T> {
 }
 
 export interface ComputationConstructor {
-	new<T>(): Computation<T>;
+	new <T>(): Computation<T>;
 	setup: <T>(node: Computation<T>, f: (seed: T) => T, seed?: T, flags?: Flag) => Computation<T>;
 	readonly prototype: Computation<unknown>;
 }

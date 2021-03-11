@@ -1,5 +1,5 @@
 const { Test } = require('boer');
-const { data, fn, root, sample } = require('../..');
+const { data, run, root, sample } = require('../..');
 
 /**
  * @param {Test} t
@@ -14,7 +14,7 @@ module.exports = function (t) {
 				let d2 = data(2);
 				let d3 = data(3);
 				let d = 0;
-				fn(() => {
+				run(() => {
 					d++;
 					d1();
 					sample(d2);

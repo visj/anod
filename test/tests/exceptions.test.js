@@ -1,5 +1,5 @@
 const { Test } = require('boer');
-const { data, fn, freeze, root } = require('../..');
+const { data, run, freeze, root } = require('../..');
 
 /**
  * @param {Test} t
@@ -12,8 +12,8 @@ module.exports = function (t) {
 			root(() => {
 				let a = data(false);
 				let b = data(1);
-				let c = fn(() => { if (a()) { throw new Error('xxx'); }});
-				let d = fn(() => b());
+				let c = run(() => { if (a()) { throw new Error('xxx'); }});
+				let d = run(() => b());
 
 				t.throws(() => {
 					freeze(() => {
@@ -30,8 +30,8 @@ module.exports = function (t) {
 			root(() => {
 				let a = data(false);
 				let b = data(1);
-				let c = fn(() => { if (a()) { throw new Error('xxx'); }});
-				let d = fn(() => b());
+				let c = run(() => { if (a()) { throw new Error('xxx'); }});
+				let d = run(() => b());
 
 				t.throws(() => {
 					freeze(() => {
@@ -52,8 +52,8 @@ module.exports = function (t) {
 			root(() => {
 				let a = data(false);
 				let b = data(1);
-				let c = fn(() => { if (a()) { throw new Error('xxx'); }});
-				let d = fn(() => b());
+				let c = run(() => { if (a()) { throw new Error('xxx'); }});
+				let d = run(() => b());
 
 				t.throws(() => {
 					freeze(() => {

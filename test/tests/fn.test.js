@@ -1,5 +1,5 @@
 const { Test } = require('boer');
-const { data, fn, root } = require('../..');
+const { data, run, root } = require('../..');
 
 /**
  * @param {Test} t
@@ -9,23 +9,23 @@ module.exports = function (t) {
 	t.test('fn', t => {
 		t.test('creation', t => {
 			t.test('throws if no function passed in', t => {
-				root(() => { t.throws(() => { fn(); }); });
+				root(() => { t.throws(() => { run(); }); });
 			});
 
 			t.test('throws if arg is not a function', t => {
-				root(() => { t.throws(() => { fn(1); }) });
+				root(() => { t.throws(() => { run(1); }) });
 			});
 
 			t.test('generates a function', t => {
 				root(() => {
-					let f = fn(() => 1);
+					let f = run(() => 1);
 					t.equal(typeof f, 'function');
 				});
 			});
 
 			t.test('returns initial value of wrapped function', t => {
 				root(() => {
-					let f = fn(() => 1);
+					let f = run(() => 1);
 					t.equal(f(), 1);
 				});
 			});
@@ -35,7 +35,7 @@ module.exports = function (t) {
 			t.test('occurs once initially', t => {
 				root(() => {
 					let count = 0;
-					fn(() => { count++; });
+					run(() => { count++; });
 					t.equal(count, 1);
 				});
 			});
@@ -43,7 +43,7 @@ module.exports = function (t) {
 			t.test('does not re-occur when read', t => {
 				root(() => {
 					let count = 0;
-					let f = fn(() => { count++; });
+					let f = run(() => { count++; });
 					f(); f(); f();
 					t.equal(count, 1);
 				});
@@ -55,7 +55,7 @@ module.exports = function (t) {
 				root(() => {
 					let d = data(1);
 					let count = 0;
-					fn(() => { count++; return d(); });
+					run(() => { count++; return d(); });
 
 					count = 0;
 					d();
@@ -67,7 +67,7 @@ module.exports = function (t) {
 				root(() => {
 					let d = data(1);
 					let count = 0;
-					let f = fn(() => { count++; return d(); });
+					let f = run(() => { count++; return d(); });
 
 					count = 0;
 					d(2);
@@ -85,7 +85,7 @@ module.exports = function (t) {
 				j = data(1);
 				e = data(2);
 				count = 0;
-				f = fn(() => { 
+				f = run(() => { 
 					count++; 
 					return i() ? j() : e(); 
 				});
@@ -135,9 +135,9 @@ module.exports = function (t) {
 			root(() => {
 				let order = '';
 				let a = data(0);
-				let b = fn(() => { order += 'b'; return a() + 1; });
-				let c = fn(() => { order += 'c'; return b() || d(); });
-				let d = fn(() => { order += 'd'; return a() + 10; });
+				let b = run(() => { order += 'b'; return a() + 1; });
+				let c = run(() => { order += 'c'; return b() || d(); });
+				let d = run(() => { order += 'd'; return a() + 10; });
 
 				t.equal(order, 'bcd');
 				order = '';
@@ -154,7 +154,7 @@ module.exports = function (t) {
 		t.test('from a function with no return value', t => {
 			t.test('reads as undefined', t => {
 				root(() => {
-					let f = fn(() => { });
+					let f = run(() => { });
 					t.equal(f(), undefined);
 				});
 			});
@@ -164,7 +164,7 @@ module.exports = function (t) {
 			t.test('reduces seed value', t => {
 				root(() => {
 					let a = data(5);
-					let f = fn(v => v + a(), 5);
+					let f = run(v => v + a(), 5);
 					t.equal(f(), 10);
 					a(6);
 					t.equal(f(), 16);
@@ -178,9 +178,9 @@ module.exports = function (t) {
 			function init() {
 				d = data(1);
 				fcount = 0;
-				f = fn(() => { fcount++; return d(); });
+				f = run(() => { fcount++; return d(); });
 				gcount = 0;
-				g = fn(() => { gcount++; return f(); });
+				g = run(() => { gcount++; return f(); });
 			}
 
 			t.test('does not cause re-evaluation', t => {
@@ -222,7 +222,7 @@ module.exports = function (t) {
 				root(() => {
 					let d = data(1);
 					t.throws(() => {
-						fn(() => { d(); d(2); });
+						run(() => { d(); d(2); });
 					});
 				});
 			});
@@ -230,11 +230,11 @@ module.exports = function (t) {
 			t.test('throws when continually setting an indirect dependency', t => {
 				root(() => {
 					let d = data(1);
-					let f1 = fn(() => d());
-					let f2 = fn(() => f1());
-					let f3 = fn(() => f2());
+					let f1 = run(() => d());
+					let f2 = run(() => f1());
+					let f3 = run(() => f2());
 					t.throws(() => {
-						fn(() => { f3(); d(2); });
+						run(() => { f3(); d(2); });
 					});
 				});
 			});
@@ -244,7 +244,7 @@ module.exports = function (t) {
 			t.test('throws when cycle created by modifying a branch', t => {
 				root(() => {
 					var d = data(1);
-					var f = fn(() => f ? f() : d());
+					var f = run(() => f ? f() : d());
 					t.throws(() => { d(0); });
 				});
 			});
@@ -255,9 +255,9 @@ module.exports = function (t) {
 				root(() => {
 					let seq = '';
 					let a1 = data(true);
-					let b1 = fn(() => { a1(); seq += 'b1'; });
-					let b2 = fn(() => { a1(); seq += 'b2'; });
-					let c1 = fn(() => { b1(), b2(); seq += 'c1'; });
+					let b1 = run(() => { a1(); seq += 'b1'; });
+					let b2 = run(() => { a1(); seq += 'b2'; });
+					let c1 = run(() => { b1(), b2(); seq += 'c1'; });
 
 					seq = '';
 					a1(true);
@@ -268,13 +268,13 @@ module.exports = function (t) {
 			t.test('only propagates once with linear convergences', t => {
 				root(() => {
 					let d = data(0);
-					let f1 = fn(() => d());
-					let f2 = fn(() => d());
-					let f3 = fn(() => d());
-					let f4 = fn(() => d());
-					let f5 = fn(() => d());
+					let f1 = run(() => d());
+					let f2 = run(() => d());
+					let f3 = run(() => d());
+					let f4 = run(() => d());
+					let f5 = run(() => d());
 					let gcount = 0;
-					fn(() => { gcount++; return f1() + f2() + f3() + f4() + f5(); });
+					run(() => { gcount++; return f1() + f2() + f3() + f4() + f5(); });
 					gcount = 0;
 					d(0);
 					t.equal(gcount, 1);
@@ -284,15 +284,15 @@ module.exports = function (t) {
 			t.test('only propagates once with exponential convergence', t => {
 				root(() => {
 					let d = data(0);
-					let f1 = fn(() => d());
-					let f2 = fn(() => d());
-					let f3 = fn(() => d());
-					let g1 = fn(() => f1() + f2() + f3());
-					let g2 = fn(() => f1() + f2() + f3());
-					let g3 = fn(() => f1() + f2() + f3());
+					let f1 = run(() => d());
+					let f2 = run(() => d());
+					let f3 = run(() => d());
+					let g1 = run(() => f1() + f2() + f3());
+					let g2 = run(() => f1() + f2() + f3());
+					let g3 = run(() => f1() + f2() + f3());
 
 					let hcount = 0;
-					let h = fn(() => { hcount++; return g1() + g2() + g3(); });
+					let h = run(() => { hcount++; return g1() + g2() + g3(); });
 					hcount = 0;
 					d(0);
 					t.equal(hcount, 1);

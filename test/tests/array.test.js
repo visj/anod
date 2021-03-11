@@ -1,5 +1,5 @@
 const { Test } = require('boer');
-const { array, fn, freeze } = require('../..');
+const { array, run, freeze } = require('../..');
 
 /**
  * 
@@ -179,14 +179,14 @@ module.exports = function(t) {
 		t.test('reactivity', t => {
 			t.test('can be listened to by nodes', t => {
 				let d = array([1,2,3]);
-				let c1 = fn(() => d.get());
+				let c1 = run(() => d.get());
 				t.equal(c1(), [1,2,3]);
 			});
 
 			t.test('updates node on change', t => {
 				let d = array([1,2,3]);
-				let c1 = fn(() => d.get());
-				let c2 = fn(() => d.get());
+				let c1 = run(() => d.get());
+				let c2 = run(() => d.get());
 				d.set([4,5,6]);
 				t.equal(c1(), [4,5,6]);
 				t.equal(c2(), [4,5,6]);

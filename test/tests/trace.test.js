@@ -1,5 +1,5 @@
 const { Test } = require('boer');
-const { data, Flag, fn, root, sample } = require('../..');
+const { data, Flag, run, root, sample } = require('../..');
 
 /**
  * 
@@ -12,11 +12,11 @@ module.exports = function (t) {
 			root(() => {
 				let d1 = data(1);
 				let order = '';
-				let t1 = fn(() => {
+				let t1 = run(() => {
 					order += 't1';
 					return d1();
 				}, null, Flag.Trace);
-				let c1 = fn(() => {
+				let c1 = run(() => {
 					order += 'c1';
 					return t1();
 				});
@@ -35,18 +35,18 @@ module.exports = function (t) {
         let d1 = data(0);
         let d2 = data(0);
         let order = '';
-        let t1 = fn(() => {
+        let t1 = run(() => {
           order += 't1';
           return d1() === 0;
         }, null, Flag.Trace);
-        let c1 = fn(() => {
+        let c1 = run(() => {
           order += 'c1';
           return d1();
         });
-        let c2 = fn(() => {
+        let c2 = run(() => {
           order += 'c2';
           t1();
-          fn(() => {
+          run(() => {
             order += 'c2_1';
             return d2();
           });
@@ -61,15 +61,15 @@ module.exports = function (t) {
 			root(() => {
 				let d1 = data(0);
 				let order = '';
-				let t1 = fn(() => {
+				let t1 = run(() => {
 					order += 't1';
 					return d1();
 				}, null, Flag.Trace);
-				let c1 = fn(() => {
+				let c1 = run(() => {
 					t1();
 					order += 'c1';
 					if (sample(d1) === 0) {
-						let c2 = fn(() => {
+						let c2 = run(() => {
 							order += 'c2';
 							d1();
 						});
@@ -86,13 +86,13 @@ module.exports = function (t) {
 			root(() => {
 				let d1 = data(0);
 				let count = 0;
-				let t1 = fn(() => {
+				let t1 = run(() => {
 					return d1();
 				}, null, Flag.Trace);
-				let c1 = fn(() => {
+				let c1 = run(() => {
 					return d1();
 				});
-				let c2 = fn(() => {
+				let c2 = run(() => {
 					count++;
 					return t1() + c1();
 				});

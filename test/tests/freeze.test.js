@@ -1,5 +1,5 @@
 const { Test } = require('boer');
-const { data, on, freeze, root } = require('../..');
+const { data, tie, freeze, root } = require('../..');
 
 /**
  * @param {Test} t
@@ -18,7 +18,7 @@ module.exports = function (t) {
 		t.test('halts propagation within its scope', t => {
 			root(() => {
 				let d = data(1);
-				let f = on(d, () => d());
+				let f = tie(d, () => d());
 				freeze(() => {
 					d(2);
 					t.equal(f(), 1);
