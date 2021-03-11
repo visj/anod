@@ -36,11 +36,13 @@ function value(val, eq) {
 }
 
 function cleanup(f) {
-	if (Owner !== null) {
-		if (Owner._cleanups === null) {
-			Owner._cleanups = [f];
+	var owner = Owner, cleanups;
+	if (owner !== null) {
+		cleanups = owner.cleanups;
+		if (cleanups === null) {
+			owner.cleanups = [f];
 		} else {
-			Owner._cleanups.push(f);
+			cleanups[cleanups.length] = f;
 		}
 	}
 }
@@ -50,7 +52,7 @@ function freeze(f) {
 	if (State !== System.Idle) {
 		val = f();
 	} else {
-		Root.changes.reset();
+		Root.changes.len = 0;
 		State = System.Compute;
 		try {
 			val = f();
@@ -62,8 +64,40 @@ function freeze(f) {
 	return val;
 }
 
-function bind(src, f, seed, flags) {
-	var node = Computation.new();
+function fn(f, seed, flags) {
+	var node = new Computation(Log());
+	seed = Computation.setup(node, f, seed, Flag.Unbound | flags);
+	if (node.fn === null) {
+		return function () { return seed; }
+	} else {
+		return function () { return node.get(); }
+	}
+}
+
+function on(src, f, seed, flags) {
+	var node = new Computation(Log());
+	if (flags & Flag.Dynamic) {
+		if (flags & Flag.Wait) {
+			logSource(node, src);
+		}
+		seed = Computation.setup(node, function (seed) {
+			logSource(node, src);
+			return f(seed);
+		}, seed, Flag.Bound | flags);
+	} else {
+		logSource(node, src);
+		seed = Computation.setup(node, f, seed, Flag.Bound | flags);
+	}
+	if (node.fn === null) {
+		return function () { return seed; }
+	} else {
+		return function () { return node.get(); }
+	}
+}
+
+
+function tie(src, f, seed, flags) {
+	var node = new Computation(null);
 	if (flags & Flag.Dynamic) {
 		if (flags & Flag.Wait) {
 			logSource(node, src);
@@ -79,38 +113,7 @@ function bind(src, f, seed, flags) {
 }
 
 function run(f, seed, flags) {
-	Computation.setup(Computation.new(), f, seed, Flag.Unbound | flags);
-}
-
-function fn(f, seed, flags) {
-	var node = Computation.new();
-	seed = Computation.setup(node, f, seed, Flag.Unbound | flags);
-	if (node._fn === null) {
-		return function () { return seed; }
-	} else {
-		return function () { return node.get(); }
-	}
-}
-
-function on(src, f, seed, flags) {
-	var node = Computation.new();
-	if (flags & Flag.Dynamic) {
-		if (flags & Flag.Wait) {
-			logSource(node, src);
-		}
-		seed = Computation.setup(node, function (seed) {
-			logSource(node, src);
-			return f(seed);
-		}, seed, Flag.Bound | flags);
-	} else {
-		logSource(node, src);
-		seed = Computation.setup(node, f, seed, Flag.Bound | flags);
-	}
-	if (node._fn === null) {
-		return function () { return seed; }
-	} else {
-		return function () { return node.get(); }
-	}
+	Computation.setup(new Computation(null), f, seed, Flag.Unbound | flags);
 }
 
 function root(f) {
@@ -140,17 +143,17 @@ function sample(node) {
 }
 
 function Data(val) {
-	this._val = val;
-	this._log = null;
-	this._flag = 0;
-	this._pval = Void;
+	this.val = val;
+	this.log = Log();
+	this.flag = 0;
+	this.pval = Void;
 }
 
 Data.prototype.get = function () {
 	if (Listener !== null) {
 		logRead(this, Listener);
 	}
-	return this._val;
+	return this.val;
 }
 
 Data.prototype.set = function (val) {
@@ -158,64 +161,58 @@ Data.prototype.set = function (val) {
 }
 
 Data.prototype.update = function () {
-	this._val = this._pval;
-	this._pval = Void;
-	if (this._flag & Flag.Logging) {
-		setComputationsStale(this._log, Root.time);
+	this.val = this.pval;
+	this.pval = Void;
+	if (this.flag & Flag.Logging) {
+		setComputationsStale(this.log, Root.time);
 	}
 }
 
 function Value(val, eq) {
 	Data.call(this, val);
-	this._eq = eq;
+	this.eq = eq;
 }
 
 Value.prototype.get = function () {
 	if (Listener !== null) {
 		logRead(this, Listener);
 	}
-	return this._val;
+	return this.val;
 }
 
 Value.prototype.set = function (val) {
-	return (this._eq ? this._eq(this._val, val) : this._val === val) ? val : logWrite(this, val);
+	return (this.eq ? this.eq(this.val, val) : this.val === val) ? val : logWrite(this, val);
 }
 
 Value.prototype.update = function () {
-	this._val = this._pval;
-	this._pval = Void;
-	if (this._flag & Flag.Logging) {
-		setComputationsStale(this._log, Root.time);
+	this.val = this.pval;
+	this.pval = Void;
+	if (this.flag & Flag.Logging) {
+		setComputationsStale(this.log, Root.time);
 	}
 }
 
-function Computation() {
-	this._val = void 0;
-	this._log = null;
-	this._flag = 0;
-	this._fn = null;
-	this._age = -1;
-	this._src = null;
-	this._owner = null;
-	this._traces = null;
-	this._owned = null;
-	this._cleanups = null;
-}
-
-Computation.new = function () {
-	var node = Recycled;
-	if (node === null) {
-		return new Computation();
-	} else {
-		Recycled = null;
-		return node;
-	}
+function Computation(log) {
+	this.val = void 0;
+	this.log = log;
+	this.flag = 0;
+	this.fn = null;
+	this.age = -1;
+	this.source1 = null;
+	this.slot1 = -1;
+	this.sources = null;
+	this.slots = null;
+	this.owner = null;
+	this.traces = null;
+	this.owned = null;
+	this.cleanups = null;
 }
 
 Computation.setup = function (node, f, seed, flags) {
-	var clock = Root;
+	var clock = Root,
+		owner = Owner;
 	seed = setupNode(node, f, seed, flags);
-	recycleOrClaimNode(node, f, seed, flags);
+	sealNode(node, owner, f, seed, flags);
 	if (State === System.Idle) {
 		finishToplevelExecution(clock);
 	}
@@ -224,13 +221,13 @@ Computation.setup = function (node, f, seed, flags) {
 
 Computation.prototype.get = function () {
 	if (Listener !== null) {
-		var flag = this._flag;
+		var flag = this.flag;
 		if (flag & Flag.Pending) {
 			if (State === System.Trace) {
 				applyUpstreamUpdates(this);
 			}
 		}
-		if (this._age === Root.time) {
+		if (this.age === Root.time) {
 			if (flag & Flag.Running) {
 				throw new Error('Circular dependency');
 			} else if (flag & Flag.Stale) {
@@ -239,14 +236,14 @@ Computation.prototype.get = function () {
 		}
 		logRead(this, Listener);
 	}
-	return this._val;
+	return this.val;
 }
 
 Computation.prototype.update = function () {
 	var owner = Owner,
 		listener = Listener,
-		flag = this._flag,
-		val = this._val;
+		flag = this.flag,
+		val = this.val;
 	cleanupNode(this, false);
 	Owner = this;
 	if (flag & Flag.Unbound) {
@@ -258,26 +255,26 @@ Computation.prototype.update = function () {
 	} else {
 		Listener = null;
 	}
-	this._flag &= ~Flag.Stale;
-	this._flag |= Flag.Running;
-	this._val = this._fn(val);
+	this.flag &= ~Flag.Stale;
+	this.flag |= Flag.Running;
+	this.val = this.fn(val);
 	if ((flag & (Flag.Trace | Flag.Logging)) === (Flag.Trace | Flag.Logging)) {
-		if (val !== this._val) {
-			setComputationsStale(this._log, Root.time);
+		if (val !== this.val) {
+			setComputationsStale(this.log, Root.time);
 		}
 	}
-	this._flag &= ~Flag.Running;
+	this.flag &= ~Flag.Running;
 	Owner = owner;
 	Listener = listener;
 }
 
 Computation.prototype.dispose = function () {
 	if (State & (System.Idle | System.Dispose)) {
-		this._fn = null;
-		this._log = null;
+		this.fn = null;
+		this.log = null;
 		cleanupNode(this, true);
 	} else {
-		Root.disposes.add(this);
+		Root.disposes.items[Root.disposes.len++] = this;
 	}
 }
 
@@ -287,13 +284,13 @@ function IEnumerable(proto) {
 			pure = callback.length === 1;
 		return on(self, function (seed) {
 			var i, ilen, j, jlen,
-				cs = self._cs,
+				cs = self.cs,
 				items = self.get(),
 				len = items.length;
 			if (seed === Void) {
 				seed = new Array(len);
 			} else if (pure && cs !== null) {
-				if (self._flag & Flag.Single) {
+				if (self.flag & Flag.Single) {
 					if (seed) {
 						if (cs.type & Mod.Insert) {
 							if (cs.type & Mod.Range) {
@@ -355,7 +352,7 @@ function IEnumerable(proto) {
 			pure = callback.length === 1;
 		return Enumerable.setup(node, self, function (seed) {
 			var i, j, item,
-				cs = self._cs,
+				cs = self.cs,
 				items = self.get(),
 				len = items.length;
 			if (seed === Void) {
@@ -369,7 +366,7 @@ function IEnumerable(proto) {
 					seed[j++] = item;
 				}
 			}
-			node._flag |= Flag.Changed;
+			node.flag |= Flag.Changed;
 			seed.length = j;
 			return seed;
 		});
@@ -380,11 +377,11 @@ function IEnumerable(proto) {
 			pure = callback.length === 1;
 		return on(self, function (seed) {
 			var item,
-				cs = self._cs,
+				cs = self.cs,
 				items = self.get(),
 				len = items.length;
 			if (pure && seed !== Void && cs !== null) {
-				i = indexOf(self._flag, cs, callback, i, items.length, false);
+				i = indexOf(self.flag, cs, callback, i, items.length, false);
 				if (i !== NoResult) {
 					return items[i];
 				}
@@ -408,9 +405,9 @@ function IEnumerable(proto) {
 				items = self.get(),
 				len = items.length;
 			if (pure && seed !== Void) {
-				cs = self._cs;
+				cs = self.cs;
 				if (cs !== null) {
-					i = indexOf(self._flag, cs, callback, index, items.length, false);
+					i = indexOf(self.flag, cs, callback, index, items.length, false);
 					if (i !== NoResult) {
 						return index = i;
 					}
@@ -498,11 +495,11 @@ function IEnumerable(proto) {
 			i = -1,
 			pure = arguments.length === 1;
 		return on(self, function (seed) {
-			var cs = self._cs,
+			var cs = self.cs,
 				items = self.get(),
 				len = items.length;
 			if (pure && seed !== Void && cs !== null) {
-				i = indexOf(self._flag, cs, function (item) {
+				i = indexOf(self.flag, cs, function (item) {
 					return item === valueToFind;
 				}, seed, i, items.length, false);
 				if (i !== NoResult) {
@@ -523,11 +520,11 @@ function IEnumerable(proto) {
 			i = -1,
 			pure = arguments.length === 1;
 		return on(self, function (seed) {
-			var cs = self._cs,
+			var cs = self.cs,
 				items = self.get(),
 				len = items.length;
 			if (pure && seed !== Void && cs !== null) {
-				i = indexOf(self._flag, cs, function (item) {
+				i = indexOf(self.flag, cs, function (item) {
 					return item === searchElement;
 				}, i, items.length, false);
 				if (i !== NoResult) {
@@ -557,9 +554,9 @@ function IEnumerable(proto) {
 			var cs;
 			var items = self.get();
 			if (pure && seed !== Void) {
-				cs = self._cs;
+				cs = self.cs;
 				if (cs !== null) {
-					i = indexOf(self._flag, cs, function (item) {
+					i = indexOf(self.flag, cs, function (item) {
 						return item === searchElement;
 					}, i, items.length, true);
 					if (i !== NoResult) {
@@ -594,21 +591,21 @@ function IEnumerable(proto) {
 				newstart, newend, mapper = function () {
 					return callback(newitems[j], j);
 				}
-			cs = self._cs;
+			cs = self.cs;
 			if (seed !== Void && cs !== null) {
-				if (self._flag & Flag.Single) {
-					node._cs = cs = applyMapMutation(callback, items, nodes, len, cs);
+				if (self.flag & Flag.Single) {
+					node.cs = cs = applyMapMutation(callback, items, nodes, len, cs);
 					len += changesetLength(cs);
 				} else {
 					j = cs.length;
-					node._cs = new Array(j);
+					node.cs = new Array(j);
 					for (i = 0; i < j; i++) {
-						node._cs[i] = cs = applyMapMutation(callback, items, nodes, len, cs[i]);
+						node.cs[i] = cs = applyMapMutation(callback, items, nodes, len, cs[i]);
 						len += changesetLength(cs);
 					}
 				}
 			} else {
-				node._cs = null;
+				node.cs = null;
 				if (newlen === 0) {
 					if (len !== 0) {
 						for (i = 0; i < len; i++) {
@@ -661,7 +658,7 @@ function IEnumerable(proto) {
 			}
 			seed.length = len;
 			for (i = 0; i < len; i++) {
-				seed[i] = nodes[i]._val;
+				seed[i] = nodes[i].val;
 			}
 			return seed;
 		});
@@ -711,23 +708,23 @@ function IEnumerable(proto) {
 			node = new Enumerable(Flag.Changed);
 		return Enumerable.setup(node, self, function (seed) {
 			var i,
-				cs = self._cs,
+				cs = self.cs,
 				items = self.get(),
 				len = items.length;
 			if (seed === Void) {
 				seed = new Array(len);
 			} else if (cs !== null) {
-				if (self._flag & Flag.Single) {
-					node._cs = applyReverseMutation(seed, cs);
+				if (self.flag & Flag.Single) {
+					node.cs = applyReverseMutation(seed, cs);
 				} else {
-					node._cs = new Array(cs.length);
+					node.cs = new Array(cs.length);
 					for (i = 0, len = cs.length; i < len; i++) {
-						node._cs[i] = applyReverseMutation(seed, cs[i]);
+						node.cs[i] = applyReverseMutation(seed, cs[i]);
 					}
 				}
 				return seed;
 			}
-			node._cs = null;
+			node.cs = null;
 			seed.length = items.length;
 			for (var i = len - 1, j = 0; i >= 0; i--, j++) {
 				seed[j] = items[i];
@@ -741,7 +738,7 @@ function IEnumerable(proto) {
 			node = new Enumerable();
 		return Enumerable.setup(node, self, function (seed) {
 			var i,
-				cs = self._cs,
+				cs = self.cs,
 				items = self.get();
 			if (start !== void 0) {
 				if (start < 0) {
@@ -780,13 +777,13 @@ function IEnumerable(proto) {
 			if (seed === Void) {
 				seed = new Array(end - start);
 			} else if (cs !== null) {
-				if (self._flag & Flag.Single) {
+				if (self.flag & Flag.Single) {
 
 				} else {
 
 				}
 			}
-			node._flag |= Flag.Changed;
+			node.flag |= Flag.Changed;
 			seed.length = end - start;
 			for (i = 0; start < end; i++, start++) {
 				seed[i] = items[start];
@@ -800,11 +797,11 @@ function IEnumerable(proto) {
 		var pure = callback.length === 1;
 		return on(self, function (seed) {
 			var i,
-				cs = self._cs,
+				cs = self.cs,
 				items = self.get(),
 				len = items.length;
 			if (pure && seed !== Void && cs !== null) {
-				i = indexOf(self._flag, cs, callback, index, items.length, false);
+				i = indexOf(self.flag, cs, callback, index, items.length, false);
 				if (i !== NoResult) {
 					return (index = i) !== -1;
 				}
@@ -833,8 +830,8 @@ function IEnumerable(proto) {
 
 function List(val) {
 	Data.call(this, val);
-	this._cs = null;
-	this._pcs = null;
+	this.cs = null;
+	this.pcs = null;
 }
 
 IEnumerable(List.prototype);
@@ -843,7 +840,7 @@ List.prototype.get = function () {
 	if (Listener !== null) {
 		logRead(this, Listener);
 	}
-	return this._val;
+	return this.val;
 }
 
 List.prototype.set = function (next) {
@@ -851,25 +848,25 @@ List.prototype.set = function (next) {
 }
 
 List.prototype.update = function () {
-	var i, len, flag = this._flag;
-	if (this._pval !== Void) {
-		this._val = this._pval;
-		this._pval = Void;
-		this._cs = null;
+	var i, len, flag = this.flag;
+	if (this.pval !== Void) {
+		this.val = this.pval;
+		this.pval = Void;
+		this.cs = null;
 	} else {
-		this._cs = this._pcs;
-		this._pcs = null;
+		this.cs = this.pcs;
+		this.pcs = null;
 		if (flag & Flag.Single) {
-			applyMutation(this._val, this._cs);
+			applyMutation(this.val, this.cs);
 		}
 		else {
-			for (i = 0, len = this._cs.length; i < len; i++) {
-				applyMutation(this._val, this._cs[i]);
+			for (i = 0, len = this.cs.length; i < len; i++) {
+				applyMutation(this.val, this.cs[i]);
 			}
 		}
 	}
 	if (flag & Flag.Logging) {
-		setComputationsStale(this._log, Root.time);
+		setComputationsStale(this.log, Root.time);
 	}
 }
 
@@ -906,10 +903,10 @@ List.prototype.unshift = function (item) {
 }
 
 function Enumerable(flag) {
-	Computation.call(this);
-	this._cs = null;
-	this._pcs = null;
-	this._flag |= flag;
+	Computation.call(this, Log());
+	this.cs = null;
+	this.pcs = null;
+	this.flag |= flag;
 }
 
 IEnumerable(Enumerable.prototype);
@@ -927,13 +924,13 @@ Enumerable.setup = function (node, source, fn) {
 
 Enumerable.prototype.get = function () {
 	if (Listener !== null) {
-		var flag = this._flag;
+		var flag = this.flag;
 		if (flag & Flag.Pending) {
 			if (State === System.Trace) {
 				applyUpstreamUpdates(this);
 			}
 		}
-		if (this._age === Root.time) {
+		if (this.age === Root.time) {
 			if (flag & Flag.Running) {
 				throw new Error('Circular dependency');
 			} else if (flag & Flag.Stale) {
@@ -942,36 +939,36 @@ Enumerable.prototype.get = function () {
 		}
 		logRead(this, Listener);
 	}
-	return this._val;
+	return this.val;
 }
 
 Enumerable.prototype.update = function () {
-	var flag = this._flag,
+	var flag = this.flag,
 		owner = Owner,
 		listener = Listener;
 	cleanupNode(this, false);
 	Owner = this;
 	Listener = null;
-	this._flag &= ~Flag.Stale;
-	this._flag |= Flag.Running;
-	this._val = this._fn(this._val);
+	this.flag &= ~Flag.Stale;
+	this.flag |= Flag.Running;
+	this.val = this.fn(this.val);
 	if ((flag & (Flag.Trace | Flag.Logging)) === (Flag.Trace | Flag.Logging)) {
 		if (flag & Flag.Changed) {
-			setComputationsStale(this._log, Root.time);
+			setComputationsStale(this.log, Root.time);
 		}
 	}
-	this._flag &= ~Flag.Running;
+	this.flag &= ~Flag.Running;
 	Owner = owner;
 	Listener = listener;
 }
 
 Enumerable.prototype.dispose = function () {
 	if (State & (System.Idle | System.Dispose)) {
-		this._fn = null;
-		this._log = null;
+		this.fn = null;
+		this.log = null;
 		cleanupNode(this, true);
 	} else {
-		Root.disposes.add(this);
+		Root.disposes.items[Root.disposes.len++] = this;
 	}
 }
 
@@ -1010,47 +1007,139 @@ var Mutation = {
 var NoResult = -2;
 /* @exclude */
 var Void = {};
-var Root = new Clock();
+var Root = Clock();
 var State = System.Idle;
 var Owner = null;
 var Listener = null;
-var Recycled = null;
 
-function Queue() {
-	this.len = 0;
-	this.items = [];
-}
-
-Queue.prototype.reset = function () {
-	this.len = 0;
-}
-
-Queue.prototype.add = function (item) {
-	this.items[this.len++] = item;
-}
-
-Queue.prototype.run = function (fn) {
-	var items = this.items;
-	for (var i = 0, len = this.len; i < len; i++) {
-		fn(items[i]);
-		items[i] = null;
-	}
-	this.len = 0;
+function Queue() { 
+	return { len: 0, items: [] };
 }
 
 function Clock() {
-	this.time = 0;
-	this.changes = new Queue();
-	this.traces = new Queue();
-	this.updates = new Queue();
-	this.disposes = new Queue();
+	return { time: 0, changes: Queue(), traces: Queue(), updates: Queue(), disposes: Queue() };
 }
 
 function Log() {
-	this._node1 = null;
-	this._slot1 = -1;
-	this._nodes = null;
-	this._slots = null;
+	return { node1: null, slot1: -1, nodes: null, slots: null };
+}
+
+function setupNode(node, fn, seed, flags) {
+	var clock = Root,
+		owner = Owner,
+		listener = Listener,
+		toplevel = State === System.Idle;
+	Owner = node;
+	Listener = flags & Flag.Bound ? null : node;
+	if (toplevel) {
+		clock.changes.len = 0;
+		clock.updates.len = 0;
+		try {
+			State = System.Compute;
+			seed = flags & Flag.Wait ? seed : fn(seed);
+		} finally {
+			State = System.Idle;
+			Owner = Listener = null;
+		}
+	} else {
+		seed = fn(seed);
+	}
+	Owner = owner;
+	Listener = listener;
+	return seed;
+}
+
+function sealNode(node, owner, fn, val, flags) {
+	node.fn = fn;
+	node.val = val;
+	node.flag |= flags;
+	node.age = Root.time;
+	if (owner !== null) {
+		if (owner.owned === null) {
+			owner.owned = [node];
+		} else {
+			owner.owned[owner.owned.length] = node;
+		}
+		if (owner.flag & (Flag.Trace | Flag.Pending)) {
+			logPendingOwner(owner);
+		}
+	}
+}
+
+function finishToplevelExecution(clock) {
+	if (clock.changes.len > 0 || clock.updates.len > 0) {
+		try {
+			tick(clock);
+		} finally {
+			State = System.Idle;
+		}
+	}
+}
+
+function logRead(from, to) {
+	var fromslot, toslot,
+		log = from.log;
+	to.flag |= Flag.Reading;
+	from.flag |= Flag.Logging;
+	toslot = to.source1 === null ? -1 : to.sources === null ? 0 : to.sources.length;
+	if (log.node1 === null) {
+		log.node1 = to;
+		log.slot1 = toslot;
+		fromslot = -1;
+	} else if (log.nodes === null) {
+		log.nodes = [to];
+		log.slots = [toslot];
+		fromslot = 0;
+	} else {
+		fromslot = log.nodes.length;
+		log.nodes[fromslot] = to;
+		log.slots[fromslot] = toslot;
+	}
+	if (to.source1 === null) {
+		to.source1 = from;
+		to.slot1 = fromslot;
+	} else if (to.sources === null) {
+		to.sources = [from];
+		to.slots = [fromslot];
+	} else {
+		to.sources[toslot] = from;
+		to.slots[toslot] = fromslot;
+	}
+	if (from.flag & (Flag.Trace | Flag.Pending)) {
+		if (to.flag & Flag.Pending) {
+			if (to.traces === null) {
+				to.traces = [toslot];
+			} else {
+				to.traces[to.traces.length] = toslot;
+			}
+		} else {
+			to.flag |= Flag.Trace;
+			logPendingSource(to, toslot);
+		}
+	}
+}
+
+function logWrite(node, val) {
+	var changes = Root.changes;
+	if (State !== System.Idle) {
+		if (node.pval !== Void) {
+			if (val !== node.pval) {
+				throw new Error('Conflicting changes');
+			}
+		} else {
+			node.pval = val;
+			changes.items[changes.len++] = node;
+		}
+	} else {
+		if (node.flag & Flag.Logging) {
+			node.pval = val;
+			changes.items[changes.len++] = node;
+			execute();
+		} else {
+			node.val = val;
+		}
+	}
+	return val;
 }
 
 function logSource(node, src) {
@@ -1071,190 +1160,32 @@ function logSource(node, src) {
 	}
 }
 
-function setupNode(node, fn, seed, flags) {
-	var clock = Root,
-		owner = Owner,
-		listener = Listener,
-		toplevel = State === System.Idle;
-	Owner = node;
-	Listener = flags & Flag.Bound ? null : node;
-	if (toplevel) {
-		clock.changes.reset();
-		clock.updates.reset();
-		try {
-			State = System.Compute;
-			seed = flags & Flag.Wait ? seed : fn(seed);
-		} finally {
-			State = System.Idle;
-			Owner = Listener = null;
-		}
-	} else {
-		seed = fn(seed);
-	}
-	Owner = owner;
-	Listener = listener;
-	return seed;
-}
-
-function sealNode(node, owner, fn, val, flags) {
-	node._fn = fn;
-	node._val = val;
-	node._flag = flags;
-	node._age = Root.time;
-	if (owner !== null) {
-		if (owner._owned === null) {
-			owner._owned = [node];
-		} else {
-			owner._owned.push(node);
-		}
-		if (owner._flag & (Flag.Trace | Flag.Pending)) {
-			logPendingOwner(owner);
-		}
-	}
-}
-
-function finishToplevelExecution(clock) {
-	if (clock.changes.len > 0 || clock.updates.len > 0) {
-		try {
-			tick(clock);
-		} finally {
-			State = System.Idle;
-		}
-	}
-}
-
-function recycleOrClaimNode(node, fn, val, flags) {
-	var i, len,
-		owner = Owner,
-		recycle = node._src === null && (node._owned === null && node._cleanups === null || owner !== null);
-	if (recycle) {
-		Recycled = node;
-		if (owner !== null) {
-			if (node._owned !== null) {
-				if (owner._owned === null) {
-					owner._owned = node._owned;
-				} else {
-					for (i = 0, len = node._owned.length; i < len; i++) {
-						owner._owned.push(node._owned[i]);
-					}
-				}
-				node._owned = null;
-			}
-			if (node._cleanups !== null) {
-				if (owner._cleanups === null) {
-					owner._cleanups = node._cleanups;
-				} else {
-					for (i = 0, len = node._cleanups.length; i < len; i++) {
-						owner._cleanups.push(node._cleanups[i]);
-					}
-				}
-				node._cleanups = null;
-			}
-		}
-	} else {
-		sealNode(node, owner, fn, val, flags);
-	}
-}
-
-function logRead(from, to) {
-	var log, src, fromslot, toslot;
-	if (from._log === null) {
-		from._flag |= Flag.Logging;
-		log = from._log = new Log();
-	} else {
-		log = from._log;
-	}
-	if (to._src === null) {
-		to._flag |= Flag.Reading;
-		src = to._src = new Log();
-	} else {
-		src = to._src;
-	}
-	toslot = src._node1 === null ? -1 : src._nodes === null ? 0 : src._nodes.length;
-	if (log._node1 === null) {
-		log._node1 = to;
-		log._slot1 = toslot;
-		fromslot = -1;
-	} else if (log._nodes === null) {
-		log._nodes = [to];
-		log._slots = [toslot];
-		fromslot = 0;
-	} else {
-		fromslot = log._nodes.length;
-		log._nodes.push(to);
-		log._slots.push(toslot);
-	}
-	if (src._node1 === null) {
-		src._node1 = from;
-		src._slot1 = fromslot;
-	} else if (src._nodes === null) {
-		src._nodes = [from];
-		src._slots = [fromslot];
-	} else {
-		src._nodes.push(from);
-		src._slots.push(fromslot);
-	}
-	if (from._flag & (Flag.Trace | Flag.Pending)) {
-		if (to._flag & Flag.Pending) {
-			if (to._traces === null) {
-				to._traces = [toslot];
-			} else {
-				to._traces.push(toslot);
-			}
-		} else {
-			to._flag |= Flag.Trace;
-			logPendingSource(to, toslot);
-		}
-	}
-}
-
-function logWrite(node, val) {
-	if (State !== System.Idle) {
-		if (node._pval !== Void) {
-			if (val !== node._pval) {
-				throw new Error('Conflicting changes');
-			}
-		} else {
-			node._pval = val;
-			Root.changes.add(node);
-		}
-	} else {
-		if (node._flag & Flag.Logging) {
-			node._pval = val;
-			Root.changes.add(node);
-			execute();
-		} else {
-			node._val = val;
-		}
-	}
-	return val;
-}
-
 function logMutate(node, cs) {
+	var changes = Root.changes;
 	if (State !== System.Idle) {
-		if (node._pval !== Void) {
+		if (node.pval !== Void) {
 			throw new Error('Conflicting changes');
 		}
-		if (node._pcs === null) {
-			node._pcs = cs;
-			node._flag |= Flag.Single;
-			Root.changes.add(node);
+		if (node.pcs === null) {
+			node.pcs = cs;
+			node.flag |= Flag.Single;
+			changes.items[changes.len++] = node;
 		} else {
-			if (node._flag & Flag.Single) {
-				node._flag &= ~Flag.Single;
-				node._pcs = [node._pcs, cs];
+			if (node.flag & Flag.Single) {
+				node.flag &= ~Flag.Single;
+				node.pcs = [node.pcs, cs];
 			} else {
-				node._pcs.push(cs);
+				node.pcs[node.pcs.length] = cs;
 			}
 		}
 	} else {
-		node._flag |= Flag.Single;
-		if (node._flag & Flag.Logging) {
-			node._pcs = cs;
-			Root.changes.add(node);
+		node.flag |= Flag.Single;
+		if (node.flag & Flag.Logging) {
+			node.pcs = cs;
+			changes.items[changes.len++] = node;
 			execute();
 		} else {
-			node._pcs = cs;
+			node.pcs = cs;
 			node.update();
 		}
 	}
@@ -1262,62 +1193,49 @@ function logMutate(node, cs) {
 
 function logPendingSource(to, slot) {
 	var i, len, log, node, nodes;
-	if (to._traces === null) {
-		to._traces = [slot];
+	if (to.traces === null) {
+		to.traces = [slot];
 	} else {
-		to._traces.push(slot);
+		to.traces[to.traces.length] = slot;
 	}
-	log = to._log;
+	log = to.log;
 	if (log !== null) {
-		node = log._node1;
-		nodes = log._nodes;
+		node = log.node1;
+		nodes = log.nodes;
 		if (node !== null) {
-			node._flag |= Flag.Pending;
+			node.flag |= Flag.Pending;
 			logPendingSource(node, -1);
 		}
 		if (nodes !== null) {
 			for (i = 0, len = nodes.length; i < len; i++) {
 				node = nodes[i];
-				node._flag |= Flag.Pending;
+				node.flag |= Flag.Pending;
 				logPendingSource(node, i);
 			}
 		}
 	}
-	if (to._owned !== null) {
+	if (to.owned !== null) {
 		logPendingOwner(to);
 	}
 }
 
 function logPendingOwner(owner) {
-	var node;
-	var owned = owner._owned;
-	for (var i = 0, len = owned.length; i < len; i++) {
+	var i, node,
+		owned = owner.owned,
+		len = owned.length;
+	for (i = 0; i < len; i++) {
 		node = owned[i];
-		node._owner = owner;
-		node._flag |= Flag.Pending;
-		if (node._owned !== null) {
+		node.owner = owner;
+		node.flag |= Flag.Pending;
+		if (node.owned !== null) {
 			logPendingOwner(node);
 		}
 	}
 }
 
-function applyChanges(data) {
-	data.update();
-}
-
-function applyUpdates(node) {
-	if (node._flag & Flag.Stale) {
-		node.update();
-	}
-}
-
-function applyDisposes(node) {
-	node.dispose();
-}
-
 function execute() {
 	var owner = Owner;
-	Root.updates.reset();
+	Root.updates.len = 0;
 	try {
 		tick(Root);
 	} finally {
@@ -1328,18 +1246,43 @@ function execute() {
 }
 
 function tick(clock) {
-	var i = 0;
-	clock.disposes.reset();
+	var i = 0, j, queue, node;
+	clock.disposes.len = 0;
 	do {
 		clock.time++;
 		State = System.Change;
-		clock.changes.run(applyChanges);
+		queue = clock.changes;
+		for (j = 0; j < queue.len; j++) {
+			queue.items[j].update();
+		}
+		queue.len = 0;
 		State = System.Trace;
-		clock.traces.run(applyUpdates);
+		queue = clock.traces;
+		for (j = 0; j < queue.len; j++) {
+			node = queue.items[j];
+			if (node.flag & Flag.Stale) {
+				node.update();
+			}
+		}
+		queue.len = 0;
 		State = System.Update;
-		clock.updates.run(applyUpdates);
+		queue = clock.updates;
+		for (j = 0; j < queue.len; j++) {
+			node = queue.items[j];
+			if (node.flag & Flag.Stale) {
+				node.update();
+			}
+		}
+		queue.len = 0;
 		State = System.Dispose;
-		clock.disposes.run(applyDisposes);
+		queue = clock.disposes;
+		for (j = 0; j < queue.len; j++) {
+			node = queue.items[j];
+			node.fn = null;
+			node.log = null;
+			cleanupNode(node, true);
+		}
+		queue.len = 0;
 		if (i++ > 1e5) {
 			throw new Error('Runaway clock');
 		}
@@ -1348,17 +1291,17 @@ function tick(clock) {
 }
 
 function setComputationsStale(log, time) {
-	var node = log._node1,
-		nodes = log._nodes;
+	var node = log.node1,
+		nodes = log.nodes;
 	if (node !== null) {
-		if (node._age < time) {
+		if (node.age < time) {
 			setComputationStale(node, time);
 		}
 	}
 	if (nodes !== null) {
 		for (var i = 0, len = nodes.length; i < len; i++) {
 			node = nodes[i];
-			if (node._age < time) {
+			if (node.age < time) {
 				setComputationStale(node, time);
 			}
 		}
@@ -1366,14 +1309,15 @@ function setComputationsStale(log, time) {
 }
 
 function setComputationStale(node, time) {
-	node._age = time;
-	node._flag |= Flag.Stale;
-	(node._flag & Flag.Trace ? Root.traces : Root.updates).add(node);
-	if (node._owned !== null) {
-		markComputationsDisposed(node._owned, time);
+	var q = node.flag & Flag.Trace ? Root.traces : Root.updates;
+	q.items[q.len++] = node;
+	node.age = time;
+	node.flag |= Flag.Stale;
+	if (node.owned !== null) {
+		markComputationsDisposed(node.owned, time);
 	}
-	if ((node._flag & (Flag.Trace | Flag.Logging)) === Flag.Logging) {
-		setComputationsStale(node._log, time);
+	if ((node.flag & (Flag.Trace | Flag.Logging)) === Flag.Logging) {
+		setComputationsStale(node.log, time);
 	}
 }
 
@@ -1381,11 +1325,12 @@ function markComputationsDisposed(nodes, time) {
 	var node, i, len;
 	for (i = 0, len = nodes.length; i < len; i++) {
 		node = nodes[i];
-		if (!(node._flag & Flag.Disposed)) {
-			node._age = time;
-			node._flag = Flag.Disposed;
-			if (node._owned !== null) {
-				markComputationsDisposed(node._owned, time);
+		if (!(node.flag & Flag.Disposed)) {
+			node.age = time;
+			node.flag &= ~Flag.Stale;
+			node.flag |= Flag.Disposed;
+			if (node.owned !== null) {
+				markComputationsDisposed(node.owned, time);
 			}
 		}
 	}
@@ -1393,33 +1338,36 @@ function markComputationsDisposed(nodes, time) {
 
 function applyUpstreamUpdates(node) {
 	var i, len, slot, source, sources,
-		src = node._src,
-		owner = node._owner,
-		traces = node._traces;
+		owner = node.owner,
+		traces = node.traces;
 	if (owner !== null) {
 		applyUpstreamUpdates(owner);
 	}
-	if (!(node._flag & Flag.Disposed)) {
+	if (!(node.flag & Flag.Disposed)) {
 		if (traces !== null) {
-			sources = src._nodes;
+			sources = node.sources;
 			for (i = 0, len = traces.length; i < len; i++) {
 				slot = traces[i];
-				source = slot === -1 ? src._node1 : sources[slot];
-				if (source._flag & (Flag.Trace | Flag.Pending)) {
+				source = slot === -1 ? node.source1 : sources[slot];
+				if (source.flag & (Flag.Trace | Flag.Pending)) {
 					applyUpstreamUpdates(source);
 				}
-				applyUpdates(source);
+				if (source.flag & Flag.Stale) {
+					source.update();
+				}
 			}
 		}
-		applyUpdates(node);
+		if (node.flag & Flag.Stale) {
+			node.update();
+		}
 	}
 }
 
 function cleanupNode(node, final) {
 	var i, len,
-		flag = node._flag,
-		owned = node._owned,
-		cleanups = node._cleanups;
+		flag = node.flag,
+		owned = node.owned,
+		cleanups = node.cleanups;
 	if (cleanups !== null) {
 		for (i = 0, len = cleanups.length; i < len; i++) {
 			cleanups[i](final);
@@ -1440,42 +1388,42 @@ function cleanupNode(node, final) {
 }
 
 function cleanupSources(node) {
-	var i, len, sources,
-		sourceslots, src = node._src;
-	if (src !== null) {
-		if (src._node1 !== null) {
-			cleanupSource(src._node1, src._slot1);
+	var i, len, sources, slots;
+	if (node.flag & Flag.Reading) {
+		if (node.source1 !== null) {
+			cleanupSource(node.source1, node.slot1);
+			node.source1 = null;
 		}
-		sources = src._nodes;
+		sources = node.sources;
 		if (sources !== null) {
-			sourceslots = src._slots;
+			slots = node.slots;
 			for (i = 0, len = sources.length; i < len; i++) {
-				cleanupSource(sources.pop(), sourceslots.pop());
+				cleanupSource(sources.pop(), slots.pop());
 			}
 		}
 	}
-	node._traces = null;
+	node.traces = null;
+	node.flag &= ~Flag.Reading;
 }
 
 function cleanupSource(source, slot) {
-	var src, last, lastslot,
-		nodes, nodeslots,
-		log = source._log;
+	var last, lastslot,
+		nodes, slots,
+		log = source.log;
 	if (slot === -1) {
-		log._node1 = null;
+		log.node1 = null;
 	} else {
-		nodes = log._nodes;
-		nodeslots = log._slots;
+		nodes = log.nodes;
+		slots = log.slots;
 		last = nodes.pop();
-		lastslot = nodeslots.pop();
+		lastslot = slots.pop();
 		if (slot !== nodes.length) {
-			src = last._src;
 			nodes[slot] = last;
-			nodeslots[slot] = lastslot;
+			slots[slot] = lastslot;
 			if (lastslot === -1) {
-				src._slot1 = slot;
+				last.slot1 = slot;
 			} else {
-				src._slots[lastslot] = slot;
+				last.slots[lastslot] = slot;
 			}
 		}
 	}
@@ -1523,7 +1471,7 @@ function applyMapMutation(callback, items, nodes, len, cs) {
 		node = root(mapper);
 		items.splice(j, 0, item);
 		nodes.splice(j, 0, node);
-		cs = { type: Mutation.InsertAt, index: j, value: node._val };
+		cs = { type: Mutation.InsertAt, index: j, value: node.val };
 	} else if (type & Mutation.InsertRange) {
 		value = cs.value;
 		len = value.length;
@@ -1534,7 +1482,7 @@ function applyMapMutation(callback, items, nodes, len, cs) {
 			j = cs.index + i;
 			itemArgs[i + 2] = item = value[i];
 			nodeArgs[i + 2] = node = root(mapper);
-			newVals[i] = node._val;
+			newVals[i] = node.val;
 		}
 		Array.prototype.splice.apply(items, itemArgs);
 		Array.prototype.splice.apply(nodes, nodeArgs);
@@ -1561,7 +1509,7 @@ function applyMapMutation(callback, items, nodes, len, cs) {
 		item = cs.value;
 		items.unshift(item);
 		nodes.unshift(node = root(mapper));
-		cs = { type: Mutation.Unshift, value: node._val };
+		cs = { type: Mutation.Unshift, value: node.val };
 	}
 	return cs;
 }
@@ -1771,7 +1719,7 @@ module.exports = {
 	/* @exclude */
 	System, Mod, Mutation,
 	/* @exclude */
-	bind, run, fn, on,
+	fn, on, run, tie,
 	cleanup, freeze, root, sample,
 	Void, Owner, Listener,
 	Data, Value, List,

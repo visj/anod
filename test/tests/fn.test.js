@@ -85,7 +85,10 @@ module.exports = function (t) {
 				j = data(1);
 				e = data(2);
 				count = 0;
-				f = fn(() => { count++; return i() ? j() : e(); });
+				f = fn(() => { 
+					count++; 
+					return i() ? j() : e(); 
+				});
 				count = 0;
 			}
 

@@ -53,7 +53,7 @@ module.exports = function (t) {
         });
         order = '';
         d1(1);
-        t.equal(order, 't1c1c2c2_1');
+        t.equal(order, 't1c2c2_1c1');
       });
 		});
 

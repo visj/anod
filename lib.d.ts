@@ -86,12 +86,11 @@ export interface Computation<T = unknown> extends Signal<T> {
 /**
  * 
  */
-export interface IEnumerable<T> {
+export interface IEnumerable<T> extends Signal<T[]> {
 	/**
-	 * @returns The underlying array value
+	 * 
 	 */
-	val(): T[];
-
+	mut(): Changeset<T>;
 	/**
 	 * Determines whether all elements meet the condition of provided callback.
 	 * It does not propagate changes unless the computed value changes.
@@ -399,14 +398,11 @@ export const List: ListConstructor;
 export const Computation: ComputationConstructor;
 export const Enumerable: EnumerableConstructor;
 
-export interface SignalProto<T = unknown> {
-	readonly _val: T;
-	readonly _log: Log<Computation>;
-	readonly _flag: number;
-}
-
-export interface DataProto<T = unknown> extends Data<T>, SignalProto<T> {
-	readonly _pval: {} | T;
+export interface DataProto<T = unknown> extends Data<T> {
+	readonly val: T;
+	readonly log: Log<Computation>;
+	readonly flag: number;
+	readonly pval: {} | T;
 	
 	update(): void;
 }
@@ -417,7 +413,7 @@ export interface DataConstructor {
 }
 
 export interface ValueProto<T = unknown> extends DataProto<T> {
-	readonly _eq?: (a: T, b: T) => boolean;
+	readonly eq?: (a: T, b: T) => boolean;
 
 }
 
@@ -427,9 +423,8 @@ export interface ValueConstructor {
 }
 
 export interface ListProto<T> extends List<T>, DataProto<T> {
-	readonly _pval: {} | T;
-	readonly _cs: ChangeSet<T> | ChangeSet<T>[];
-	readonly _pcs: ChangeSet<T> | ChangeSet<T>[];
+	readonly cs: Changeset<T> | Changeset<T>[];
+	readonly pcs: Changeset<T> | Changeset<T>[];
 
 	update(): void;
 }
@@ -439,41 +434,44 @@ export interface ListConstructor {
 	readonly prototype: ListProto<unknown>;
 }
 
-export interface ComputationProto<T = unknown> extends SignalProto<T> {
-	readonly _fn: (seed: T) => T;
-	readonly _age: number;
-	readonly _src: Log<Signal>;
-	readonly _owner: Computation;
-	readonly _traces: number[];
-	readonly _owned: Computation[];
-	readonly _cleanups: ((final: boolean) => void)[];
+export interface ComputationProto<T = unknown> extends Computation<T> {
+	readonly val: T;
+	readonly log: Log<Computation>;
+	readonly flag: number;
+	readonly fn: (seed: T) => T;
+	readonly age: number;
+	readonly src: Log<Signal>;
+	readonly owner: Computation;
+	readonly traces: number[];
+	readonly owned: Computation[];
+	readonly cleanups: ((final: boolean) => void)[];
 
 	update(): void;
 }
 
 export interface ComputationConstructor {
 	new<T>(): Computation<T>;
-	new: <T>() => Computation<T>;
 	setup: <T>(node: Computation<T>, f: (seed: T) => T, seed?: T, flags?: Flag) => Computation<T>;
 	readonly prototype: Computation<unknown>;
 }
 
 export interface EnumerableProto<T = unknown> extends Enumerable<T>, ComputationProto<T> {
-	readonly _cs: ChangeSet<T> | ChangeSet<T>[];
-	readonly _pcs: ChangeSet<T> | ChangeSet<T>[];
+	readonly cs: Changeset<T> | Changeset<T>[];
+	readonly pcs: Changeset<T> | Changeset<T>[];
 }
 
 export interface EnumerableConstructor {
 	new <T>(): Enumerable<T>;
+	setup<T>(node: Enumerable<T>, source: IEnumerable, f: (seed: T) => T): Enumerable<T>;
 	readonly prototype: Enumerable<unknown>;
 }
 
 export const enum Modification {
 	Indexed = 256,
 	Ranged = 512,
-	Insertion = 1024,
-	Deletion = 2048,
-	Restructure = 4096,
+	Insert = 1024,
+	Delete = 2048,
+	Reorder = 4096,
 }
 
 export const enum Mutation {
@@ -496,16 +494,16 @@ export const Listener: Computation;
  * 
  */
 export interface Log<T> {
-	readonly _node1: T;
-	readonly _slot1: number;
-	readonly _nodes: T[];
-	readonly _slots: number[];
+	readonly node1: T;
+	readonly slot1: number;
+	readonly nodes: T[];
+	readonly slots: number[];
 }
 
 /**
  * 
  */
-export interface ChangeSet<T> {
+export interface Changeset<T> {
 	readonly type: number;
 	readonly index?: number;
 	readonly count?: number;
