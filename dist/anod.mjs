@@ -30,6 +30,17 @@ function cleanup(f) {
 		}
 	}
 }
+function dispose(f) {
+	var owner = Owner, disposes;
+	if (owner !== null) {
+		disposes = owner.disposes;
+		if (disposes === null) {
+			owner.disposes = [f];
+		} else {
+			disposes[disposes.length] = f;
+		}
+	}
+}
 function freeze(f) {
 	var val;
 	if (State !== 1) {
@@ -165,6 +176,7 @@ function Computation(log) {
 	this.traces = null;
 	this.owned = null;
 	this.cleanups = null;
+	this.disposes = null;
 }
 Computation.setup = function (node, f, seed, flags) {
 	var clock = Root,
@@ -233,7 +245,7 @@ Computation.prototype.dispose = function () {
 	}
 }
 function IEnumerable(proto) {
-	proto.mut = function() {
+	proto.mut = function () {
 		return this.cs;
 	}
 	proto.every = function (callback) {
@@ -909,7 +921,7 @@ var Root = Clock();
 var State = 1;
 var Owner = null;
 var Listener = null;
-function Queue() { 
+function Queue() {
 	return { len: 0, items: [] };
 }
 function Clock() {
@@ -1243,21 +1255,30 @@ function applyUpstreamUpdates(node) {
 	}
 }
 function cleanupNode(node, final) {
-	var i, len,
+	var i, len, disposes,
 		flag = node.flag,
 		owned = node.owned,
 		cleanups = node.cleanups;
 	if (cleanups !== null) {
 		for (i = 0, len = cleanups.length; i < len; i++) {
-			cleanups[i](final);
+			cleanups[i]();
 		}
-		node.cleanups.length = 0;
+		cleanups.length = 0;
+	}
+	if (final) {
+		disposes = node.disposes;
+		if (disposes !== null) {
+			for (i = 0, len = cleanups.length; i < len; i++) {
+				disposes[i]();
+			}
+			disposes.length = 0;
+		}
 	}
 	if (owned !== null) {
 		for (i = 0, len = owned.length; i < len; i++) {
 			owned[i].dispose();
 		}
-		node.owned.length = 0;
+		owned.length = 0;
 	}
 	if (
 		final ||
@@ -1454,12 +1475,12 @@ function removeAt(array, len, i) {
 }
 function copyValue(value) {
 	if (value === null || typeof value !== 'object') {
-		return function() { return value; }
+		return function () { return value; }
 	} else {
 		if (Array.isArray(value)) {
-			return function() { return value.slice(); }
+			return function () { return value.slice(); }
 		} else {
-			return function() {
+			return function () {
 				var key, result = {};
 				for (key in value) {
 					result[key] = value[key];
@@ -1593,6 +1614,7 @@ export {
   run,
   tie,
   cleanup,
+  dispose,
   freeze,
   root,
   sample,

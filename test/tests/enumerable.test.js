@@ -99,7 +99,6 @@ module.exports = function(t) {
 			let d = array([1,2,3,4,5]);
 			let c1 = d.map(item => {
 				console.log('created: ' + item);
-				cleanup(() => { console.log('disposed: ' + item); });
 				return { item };
 			});
 			d.insertRange(2, [6,7,8]);
