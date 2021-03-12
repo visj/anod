@@ -287,7 +287,7 @@ export function array<T>(val: T[]): List<T>;
  * @param seed Initial value passed to `f`
  * @param flags Flags to override. Possible values are `Flag.Wait` and `Flag.Dynamic`.
  */
-export function on<T>(src: (() => any) | (() => any)[], f: (seed: T) => T, seed?: T, flags?: number): () => T;
+export function on<T>(src: (() => any) | (() => any)[], f: (seed: T) => T, seed?: T, flags?: number, dispose?: () => void): () => T;
 
 /**
  * `fn` creates a dynamic computation node.
@@ -297,7 +297,7 @@ export function on<T>(src: (() => any) | (() => any)[], f: (seed: T) => T, seed?
  * @param seed Initial value passed to `f`
  * @param flags Flags to override. Possible value is `Flag.Static`.
  */
-export function fn<T>(f: (seed: T) => T, seed?: T, flags?: number): () => T;
+export function fn<T>(f: (seed: T) => T, seed?: T, flags?: number, dispose?: () => void): () => T;
 
 /**
  * `tie` creates a static computation node and returns a procedural function. 
@@ -326,7 +326,7 @@ export function fn<T>(f: (seed: T) => T, seed?: T, flags?: number): () => T;
  * @param seed Initial value passed to `f`
  * @param flags Flags to override. Possible values are `Flag.Wait` and `Flag.Dynamic`.
  */
-export function tie<T>(src: (() => any) | (() => any)[], f: (seed: T) => T, seed?: T, flags?: number): void;
+export function tie<T>(src: (() => any) | (() => any)[], f: (seed: T) => T, seed?: T, flags?: number, dispose?: () => void): void;
 
 /**
  * `run` creates a dynamic computation node and returns a procedural function.
@@ -336,7 +336,7 @@ export function tie<T>(src: (() => any) | (() => any)[], f: (seed: T) => T, seed
  * @param seed Initial value passed to `f`
  * @param flags Flags to override. Possible value is `Flag.Static`.
  */
-export function run<T>(f: (seed: T) => T, seed?: T, flags?: number): void;
+export function run<T>(f: (seed: T) => T, seed?: T, flags?: number, dispose?: () => void): void;
 
 /**
  * `cleanup` accepts a function that is run each time a computation
@@ -357,8 +357,6 @@ export function run<T>(f: (seed: T) => T, seed?: T, flags?: number): void;
  * @param f Callback to run during update
  */
 export function cleanup(f: () => void): void;
-
-export function dispose(f: () => void): void;
 
 /**
  * `freeze` allows batching updates so that setting multiple

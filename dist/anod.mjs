@@ -30,17 +30,6 @@ function cleanup(f) {
 		}
 	}
 }
-function dispose(f) {
-	var owner = Owner, disposes;
-	if (owner !== null) {
-		disposes = owner.disposes;
-		if (disposes === null) {
-			owner.disposes = [f];
-		} else {
-			disposes[disposes.length] = f;
-		}
-	}
-}
 function freeze(f) {
 	var val;
 	if (State !== 1) {
@@ -57,12 +46,12 @@ function freeze(f) {
 	}
 	return val;
 }
-function run(f, seed, flags) {
+function run(f, seed, flags, dispose) {
 	var node = new Computation(Log());
-	Computation.setup(node, f, seed, 32 | flags);
+	Computation.setup(node, f, seed, 32 | flags, dispose);
 	return function () { return node.get(); }
 }
-function tie(src, f, seed, flags) {
+function tie(src, f, seed, flags, dispose) {
 	var node = new Computation(Log());
 	if (flags & 4) {
 		if (flags & 1) {
@@ -71,17 +60,17 @@ function tie(src, f, seed, flags) {
 		seed = Computation.setup(node, function (seed) {
 			logSource(node, src);
 			return f(seed);
-		}, seed, 16 | flags);
+		}, seed, 16 | flags, dispose);
 	} else {
 		logSource(node, src);
-		seed = Computation.setup(node, f, seed, 16 | flags);
+		seed = Computation.setup(node, f, seed, 16 | flags, dispose);
 	}
 	return function () { return node.get(); }
 }
-function fn(f, seed, flags) {
-	Computation.setup(new Computation(null), f, seed, 32 | flags);
+function fn(f, seed, flags, dispose) {
+	Computation.setup(new Computation(null), f, seed, 32 | flags, dispose);
 }
-function on(src, f, seed, flags) {
+function on(src, f, seed, flags, dispose) {
 	var node = new Computation(null);
 	if (flags & 4) {
 		if (flags & 1) {
@@ -90,10 +79,10 @@ function on(src, f, seed, flags) {
 		Computation.setup(node, function (seed) {
 			logSource(node, src);
 			return f(seed);
-		}, seed, 16 | flags);
+		}, seed, 16 | flags, dispose);
 	} else {
 		logSource(node, src);
-		Computation.setup(node, f, seed, 16 | flags);
+		Computation.setup(node, f, seed, 16 | flags, dispose);
 	}
 }
 function root(f) {
@@ -176,13 +165,13 @@ function Computation(log) {
 	this.traces = null;
 	this.owned = null;
 	this.cleanups = null;
-	this.disposes = null;
+	this.disposer = null;
 }
-Computation.setup = function (node, f, seed, flags) {
+Computation.setup = function (node, f, seed, flags, dispose) {
 	var clock = Root,
 		owner = Owner;
 	seed = setupNode(node, f, seed, flags);
-	sealNode(node, owner, f, seed, flags);
+	sealNode(node, owner, f, seed, flags, dispose);
 	if (State === 1) {
 		finishToplevelExecution(clock);
 	}
@@ -954,11 +943,14 @@ function setupNode(node, fn, seed, flags) {
 	Listener = listener;
 	return seed;
 }
-function sealNode(node, owner, fn, val, flags) {
+function sealNode(node, owner, fn, val, flags, dispose) {
 	node.fn = fn;
 	node.val = val;
 	node.flag |= flags;
 	node.age = Root.time;
+	if (dispose !== void 0) {
+		node.disposer = dispose;
+	}
 	if (owner !== null) {
 		if (owner.owned === null) {
 			owner.owned = [node];
@@ -1255,7 +1247,7 @@ function applyUpstreamUpdates(node) {
 	}
 }
 function cleanupNode(node, final) {
-	var i, len, disposes,
+	var i, len,
 		flag = node.flag,
 		owned = node.owned,
 		cleanups = node.cleanups;
@@ -1266,12 +1258,9 @@ function cleanupNode(node, final) {
 		cleanups.length = 0;
 	}
 	if (final) {
-		disposes = node.disposes;
-		if (disposes !== null) {
-			for (i = 0, len = cleanups.length; i < len; i++) {
-				disposes[i]();
-			}
-			disposes.length = 0;
+		if (node.disposer !== null) {
+			node.disposer();
+			node.disposer = null;
 		}
 	}
 	if (owned !== null) {
@@ -1614,7 +1603,6 @@ export {
   run,
   tie,
   cleanup,
-  dispose,
   freeze,
   root,
   sample,
