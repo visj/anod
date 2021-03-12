@@ -360,7 +360,7 @@ export function run<T>(f: (seed: T) => T, seed?: T, flags?: number, dispose?: ()
  * });
  * @param f Callback to run during update
  */
-export function cleanup(f: () => void): void;
+export function cleanup(f: (final: boolean) => void): void;
 
 /**
  * `freeze` allows batching updates so that setting multiple

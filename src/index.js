@@ -1388,7 +1388,7 @@ function cleanupNode(node, final) {
 		cleanups = node.cleanups;
 	if (cleanups !== null) {
 		for (i = 0, len = cleanups.length; i < len; i++) {
-			cleanups[i]();
+			cleanups[i](final);
 		}
 		cleanups.length = 0;
 	}
