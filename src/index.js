@@ -1366,11 +1366,13 @@ function cleanupNode(node, final) {
 		for (i = 0, len = cleanups.length; i < len; i++) {
 			cleanups[i](final);
 		}
+		node._cleanups.length = 0;
 	}
 	if (owned !== null) {
 		for (i = 0, len = owned.length; i < len; i++) {
 			owned[i].dispose();
 		}
+		node._owned.length = 0;
 	}
 	if (
 		final ||
