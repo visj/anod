@@ -92,6 +92,10 @@ export interface IEnumerable<T> extends Signal<T[]> {
 	 */
 	mut(): Changeset<T>;
 	/**
+	 * 
+	 */
+	roots(): Array<Computation>;
+	/**
 	 * Determines whether all elements meet the condition of provided callback.
 	 * It does not propagate changes unless the computed value changes.
 	 * @example
@@ -377,6 +381,13 @@ export function freeze<T>(f: () => T): T;
 
 /**
  * 
+ * @param node 
+ * @param f 
+ */
+export function fuse(node: Computation, f: () => any): void;
+
+/**
+ * 
  * @param f 
  */
 export function root<T>(f: () => T): Computation<T>;
@@ -384,9 +395,10 @@ export function root<T>(f: () => T): Computation<T>;
 /**
  * `sample` runs provided callback without creating a dependency 
  * on any signals read during invocation.
- * @param fn 
+ * @param f
  */
-export function sample<T>(fn: () => T): T;
+export function sample<T>(f: () => T): T;
+
 
 export const Data: DataConstructor;
 export const Value: ValueConstructor;

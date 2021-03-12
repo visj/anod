@@ -19,33 +19,6 @@ function value(val, eq) {
 		return arguments.length === 0 ? node.get() : node.set(next);
 	};
 }
-function cleanup(f) {
-	var owner = Owner, cleanups;
-	if (owner !== null) {
-		cleanups = owner.cleanups;
-		if (cleanups === null) {
-			owner.cleanups = [f];
-		} else {
-			cleanups[cleanups.length] = f;
-		}
-	}
-}
-function freeze(f) {
-	var val;
-	if (State !== 1) {
-		val = f();
-	} else {
-		Root.changes.len = 0;
-		State = 2;
-		try {
-			val = f();
-			execute();
-		} finally {
-			State = 1;
-		}
-	}
-	return val;
-}
 function run(f, seed, flags, dispose) {
 	var node = new Computation(Log());
 	Computation.setup(node, f, seed, 32 | flags, dispose);
@@ -85,8 +58,48 @@ function on(src, f, seed, flags, dispose) {
 		Computation.setup(node, f, seed, 16 | flags, dispose);
 	}
 }
+function cleanup(f) {
+	var owner = Owner, cleanups;
+	if (owner !== null) {
+		cleanups = owner.cleanups;
+		if (cleanups === null) {
+			owner.cleanups = [f];
+		} else {
+			cleanups[cleanups.length] = f;
+		}
+	}
+}
+function freeze(f) {
+	var val;
+	if (State !== 1) {
+		val = f();
+	} else {
+		Root.changes.len = 0;
+		State = 2;
+		try {
+			val = f();
+			execute();
+		} finally {
+			State = 1;
+		}
+	}
+	return val;
+}
+function fuse(node, f) {
+	var owner = Owner,
+		listener = Listener;
+	Owner = node;
+	Listener = null;
+	try {
+		f();
+	} finally {
+		Owner = owner;
+		Listener = listener;
+	}
+}
 function root(f) {
-	var node = new Computation(),
+	var val,
+		node = new Computation(),
 		owner = Owner,
 		listener = Listener;
 	Owner = node;
@@ -236,6 +249,9 @@ Computation.prototype.dispose = function () {
 function IEnumerable(proto) {
 	proto.mut = function () {
 		return this.cs;
+	}
+	proto.roots = function () {
+		return this.nodes || null;
 	}
 	proto.every = function (callback) {
 		var self = this,
@@ -535,6 +551,7 @@ function IEnumerable(proto) {
 			len = 0,
 			items = [],
 			nodes = [];
+		node.nodes = nodes;
 		cleanup(function () {
 			for (var i = 0; i < len; i++) {
 				nodes[i].dispose();
@@ -569,8 +586,8 @@ function IEnumerable(proto) {
 							nodes[i].dispose();
 						}
 						len = 0;
-						items = [];
-						nodes = [];
+						items.length = 0;
+						nodes.length = 0;
 					}
 				} else if (nodes.length === 0) {
 					for (j = 0; j < newlen; j++) {
@@ -845,6 +862,7 @@ function Enumerable(flag) {
 	Computation.call(this, Log());
 	this.cs = null;
 	this.pcs = null;
+	this.nodes = null;
 	this.flag |= flag;
 }
 IEnumerable(Enumerable.prototype);
@@ -1604,6 +1622,7 @@ module.exports = {
 	tie: tie,
 	cleanup: cleanup,
 	freeze: freeze,
+	fuse: fuse,
 	root: root,
 	sample: sample,
 	Void: Void,
