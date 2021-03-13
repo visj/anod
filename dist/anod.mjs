@@ -250,9 +250,6 @@ function IEnumerable(proto) {
 	proto.mut = function () {
 		return this.cs;
 	}
-	proto.roots = function () {
-		return this.nodes || null;
-	}
 	proto.every = function (callback) {
 		var self = this,
 			pure = callback.length === 1;
@@ -550,11 +547,11 @@ function IEnumerable(proto) {
 			node = new Enumerable(8192),
 			len = 0,
 			items = [],
-			nodes = [];
-		node.nodes = nodes;
+			roots = [];
+		node.roots = roots;
 		cleanup(function () {
 			for (var i = 0; i < len; i++) {
-				nodes[i].dispose();
+				roots[i].dispose();
 			}
 		});
 		return Enumerable.setup(node, self, function (seed) {
@@ -568,13 +565,13 @@ function IEnumerable(proto) {
 			cs = self.cs;
 			if (seed !== Void && cs !== null) {
 				if (self.flag & 4096) {
-					node.cs = cs = applyMapMutation(callback, items, nodes, len, cs);
+					node.cs = cs = applyMapMutation(callback, items, roots, len, cs);
 					len += changesetLength(cs);
 				} else {
 					j = cs.length;
 					node.cs = new Array(j);
 					for (i = 0; i < j; i++) {
-						node.cs[i] = cs = applyMapMutation(callback, items, nodes, len, cs[i]);
+						node.cs[i] = cs = applyMapMutation(callback, items, roots, len, cs[i]);
 						len += changesetLength(cs);
 					}
 				}
@@ -583,16 +580,16 @@ function IEnumerable(proto) {
 				if (newlen === 0) {
 					if (len !== 0) {
 						for (i = 0; i < len; i++) {
-							nodes[i].dispose();
+							roots[i].dispose();
 						}
 						len = 0;
 						items.length = 0;
-						nodes.length = 0;
+						roots.length = 0;
 					}
-				} else if (nodes.length === 0) {
+				} else if (roots.length === 0) {
 					for (j = 0; j < newlen; j++) {
 						items[j] = newitems[j];
-						nodes[j] = root(mapper);
+						roots[j] = root(mapper);
 					}
 					len = newlen;
 				} else {
@@ -602,36 +599,36 @@ function IEnumerable(proto) {
 					for (start = 0, end = len > newlen ? len : newlen; start < end && items[start] === newitems[start]; start++, newstart++) { }
 					for (end = len - 1, newend = newlen - 1; end >= 0 && newend >= 0 && items[end] === newitems[newend]; end--, newend--) {
 						found[newend] = true;
-						temp[newend] = nodes[end];
+						temp[newend] = roots[end];
 					}
 					if (start !== end) {
 						outer: for (i = start; i <= end; i++) {
 							for (j = newstart; j <= newend; j++) {
 								if (items[i] === newitems[j]) {
 									found[j] = true;
-									temp[j] = nodes[i];
+									temp[j] = roots[i];
 									for (j = newstart; j < newend && found[j]; j++, newstart++) { }
 									for (j = newend; j > newstart && found[j]; j--, newend--) { }
 									continue outer;
 								}
 							}
-							nodes[i].dispose();
+							roots[i].dispose();
 						}
 					}
 					for (j = start; j < newlen; j++) {
 						if (found[j]) {
-							nodes[j] = temp[j];
+							roots[j] = temp[j];
 						} else {
-							nodes[j] = root(mapper);
+							roots[j] = root(mapper);
 						}
 					}
 				}
 				items = newitems.slice();
-				len = nodes.length = newlen;
+				len = roots.length = newlen;
 			}
 			seed.length = len;
 			for (i = 0; i < len; i++) {
-				seed[i] = nodes[i].val;
+				seed[i] = roots[i].val;
 			}
 			return seed;
 		});
@@ -861,8 +858,7 @@ List.prototype.unshift = function (item) {
 function Enumerable(flag) {
 	Computation.call(this, Log());
 	this.cs = null;
-	this.pcs = null;
-	this.nodes = null;
+	this.roots = null;
 	this.flag |= flag;
 }
 IEnumerable(Enumerable.prototype);

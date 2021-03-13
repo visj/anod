@@ -92,10 +92,6 @@ export interface IEnumerable<T> extends Signal<T[]> {
 	 */
 	mut(): Changeset<T>;
 	/**
-	 * 
-	 */
-	roots(): Array<Computation>;
-	/**
 	 * Determines whether all elements meet the condition of provided callback.
 	 * It does not propagate changes unless the computed value changes.
 	 * @example
@@ -381,16 +377,11 @@ export function freeze<T>(f: () => T): T;
 
 /**
  * 
- * @param node 
- * @param f 
- */
-export function fuse(node: Computation, f: () => any): void;
-
-/**
- * 
  * @param f 
  */
 export function root<T>(f: () => T): Computation<T>;
+
+export function root<T>(node: Computation<T>, f: () => T): T;
 
 /**
  * `sample` runs provided callback without creating a dependency 
@@ -444,16 +435,17 @@ export interface ListConstructor {
 
 export interface ComputationProto<T = unknown> extends Computation<T> {
 	readonly val: T;
-	readonly log: Log<Computation>;
+	readonly log: Log<Computation> | null;
 	readonly flag: number;
-	readonly fn: (seed: T) => T;
+	readonly fn: (seed: T) => T | null;
 	readonly age: number;
-	readonly src: Log<Signal>;
-	readonly owner: Computation;
-	readonly traces: number[];
-	readonly owned: Computation[];
-	readonly cleanups: ((final: boolean) => void)[];
-
+	readonly src: Log<Signal> | null;
+	readonly owner: Computation | null;
+	readonly traces: number[] | null;
+	readonly owned: Computation[] | null;
+	readonly cleanups: (() => void)[] | null;
+	readonly disposer: (() => void) | null;
+	
 	update(): void;
 }
 
@@ -463,9 +455,9 @@ export interface ComputationConstructor {
 	readonly prototype: Computation<unknown>;
 }
 
-export interface EnumerableProto<T = unknown> extends Enumerable<T>, ComputationProto<T> {
+export interface Enumerable<T = unknown> extends Enumerable<T>, ComputationProto<T> {
 	readonly cs: Changeset<T> | Changeset<T>[];
-	readonly pcs: Changeset<T> | Changeset<T>[];
+	readonly roots: Computation[];
 }
 
 export interface EnumerableConstructor {
