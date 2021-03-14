@@ -33,14 +33,6 @@ export interface List<T = unknown> extends Data<T[]>, IEnumerable<T> {
 	 */
 	move(from: number, to: number): void;
 	/**
-	 * Moves a range of items, starting at `from`,
-	 * selecting `count` item, and inserts starting at `to`.
-	 * @param from Index to start selecting items
-	 * @param count Number of items to move
-	 * @param to Index to start inserting items
-	 */
-	moveRange(from: number, count: number, to: number): void;
-	/**
 	 * Removes an element from the end of the array
 	 */
 	pop(): void;
@@ -61,16 +53,22 @@ export interface List<T = unknown> extends Data<T[]>, IEnumerable<T> {
 	 */
 	removeRange(index: number, count: number): void;
 	/**
+	 * 
+	 * @param index 
+	 * @param item 
+	 */
+	replace(index: number, item: T): void;
+	/**
 	 * Removes an item from beginning of array
 	 */
 	shift(): void;
 	/**
 	 * Swaps location between item located at
 	 * index `indexA` and `indexB`
-	 * @param indexA Index of first item to swap
-	 * @param indexB Index of second item to swap
+	 * @param i1 Index of first item to swap
+	 * @param i2 Index of second item to swap
 	 */
-	swap(indexA: number, indexB: number): void;
+	swap(i1: number, i2: number): void;
 	/**
 	 * Adds an item to the beginning of the array
 	 * @param item Item to add
@@ -114,10 +112,10 @@ export interface IEnumerable<T> extends Signal<T[]> {
 	filter(callback: (currentValue: T, index?: number) => boolean): IEnumerable<T>;
 	/**
 	 * Searches the *first* element in the array that meet the condition, otherwise undefined
-	 * @param calback Predicate function to evaluate against each element
+	 * @param callback Predicate function to evaluate against each element
 	 * @returns 
 	 */
-	find(calback: (element: T, index?: number) => boolean): () => T;
+	find(callback: (element: T, index?: number) => boolean): () => T;
 	/**
 	 * Searches the *first* index that meet the condition, otherwise -1
 	 * @param callback Predicate function to evaluate against each element

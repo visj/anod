@@ -1,5 +1,5 @@
 const { Test } = require('boer');
-const { data, Flag, tie, root } = require('../..');
+const { data, Flag, tie, root } = require('../../..');
 
 /**
  * @param {Test} t

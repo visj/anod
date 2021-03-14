@@ -1,5 +1,5 @@
 const { Test } = require('boer');
-const { run, root, value } = require('../..');
+const { run, root, value } = require('../../..');
 
 /**
  * @param {Test} t

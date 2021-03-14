@@ -1,5 +1,5 @@
 const { Test } = require('boer');
-const { data, Flag, run, root, sample } = require('../..');
+const { data, Flag, run, root, sample } = require('../../..');
 
 /**
  * 
