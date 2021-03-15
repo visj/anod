@@ -1,5 +1,5 @@
 const { Test } = require('boer');
-const { array, cleanup, Flag, tie, } = require('../../..');
+const { array, cleanup, freeze, Flag, tie, } = require('../../..');
 /**
  * 
  * @param {Test} t 
@@ -26,15 +26,59 @@ module.exports = function (t) {
 			d.pop();
 			t.equal(count, 2);
 		});
-	});
 
-	t.test('filter', t => {
-		t.test('filters based on callback', t => {
-			let d = array([1, 2, 3]);
-			let d1 = d.filter(x => x !== 2);
-			t.equal(d1.get(), [1, 3]);
-			let d2 = d.filter(x => false);
-			t.equal(d2.get(), []);
+		t.test('mutations', t => {
+
+			t.test('handles end of array operations', t => {
+				let d = array([1, 2, 3]);
+				let count = 0;
+				let c1 = d.every(x => {
+					count++;
+					return x !== 4;
+				});
+				t.equal(count, 3);
+				d.push(1);
+				t.equal(count, 4);
+				t.equal(c1(), true);
+				d.pop();
+				t.equal(count, 4);
+				freeze(() => { d.push(4); d.push(4); });
+				t.equal(c1(), false);
+				t.equal(count, 5);
+				d.pop();
+				t.equal(c1(), false);
+				t.equal(count, 9);
+			});
+
+			t.test('handles insertions correctly', t => {
+				let d = array([1, 2, 3]);
+				let count = 0;
+				d.every(x => {
+					count++;
+					return x !== 4;
+				});
+				d.insertAt(1, 5);
+				t.equal(count, 4);
+				d.insertRange(2, [6, 7, 8]);
+				t.equal(count, 7);
+			});
+
+			t.test('handles deletions correctly', t => {
+				let d = array([1, 2, 3]);
+				let count = 0;
+				let c1 = d.every(x => {
+					count++;
+					return x !== 4;
+				});
+				d.removeRange(0, 3);
+				t.equal(count, 3);
+				t.equal(c1(), true);
+				d.insertRange(0, [4, 4, 4]);
+				t.equal(c1(), false);
+				t.equal(count, 4);
+				d.removeAt(1);
+				t.equal(count, 5);
+			});
 		});
 	});
 
@@ -45,6 +89,40 @@ module.exports = function (t) {
 			let c2 = d.find(x => x === 4);
 			t.equal(c1(), 1);
 			t.equal(c2(), undefined);
+		});
+
+		t.test('mutations', t => {
+			t.test('handles insertion mutation correctly', t => {
+				let d = array([1, 2, 3]);
+				let count = 0;
+				let c1 = d.find(x => {
+					count++;
+					return x === 4;
+				});
+				d.push(5);
+				t.equal(count, 4);
+				t.equal(c1(), void 0);
+				d.push(4);
+				t.equal(count, 5);
+				t.equal(c1(), 4);
+			});
+
+			t.test('handles deletion mutation correctly', t => {
+				let d = array([1, 2, 3]);
+				let count = 0;
+				let c1 = d.find(x => {
+					count++;
+					return x === 4;
+				});
+				d.shift();
+				t.equal(count, 3);
+				d.pop();
+				t.equal(count, 3);
+				d.set([4,1,2,3,4]);
+				count = 0;
+				d.shift();
+				t.equal(count, 4);
+			});
 		});
 	});
 
@@ -71,7 +149,7 @@ module.exports = function (t) {
 	});
 
 	t.test('indexOf', t => {
-		t.test('indexOf returns index of item or -1 if not found', t => {
+		t.test('returns index of item or -1 if not found', t => {
 			let d = array([1, 2, 3]);
 			let c1 = d.indexOf(1);
 			let c2 = d.indexOf(4);
@@ -81,7 +159,7 @@ module.exports = function (t) {
 	});
 
 	t.test('join', t => {
-		t.test('join returns string joined by optional separator', t => {
+		t.test('returns string joined by optional separator', t => {
 			let d = array([1, 2, 3]);
 			let c1 = d.join('');
 			let c2 = d.join(',');
@@ -153,7 +231,7 @@ module.exports = function (t) {
 	});
 
 	t.test('some', t => {
-		t.test('some returns if any matches callback', t => {
+		t.test('returns if any matches callback', t => {
 			let d = array([1, 2, 3]);
 			let c1 = d.some(x => x === 3);
 			let c2 = d.some(x => x === 4);

@@ -15,7 +15,6 @@ for (let i = 2; i < process.argv.length; i++) {
 for (let i = 0; i < dirs.length; i++) {
 	const dir = dirs[i];
 	let subdirs = fs.readdirSync(path.join(testdir, dir));
-	console.log(subdirs);
 	for (let j = 0; j < subdirs.length; j++) {
 		let file = subdirs[j];
 		if (filter.length) {

@@ -38,13 +38,12 @@ String.prototype.replaceEnum = function (obj, name) {
 
 /**
  * 
- * @param {string} str 
  * @param {string} name 
  * @param {number|string} value 
  * @returns {string}
  */
 String.prototype.replaceVar = function (name, value) {
-	return this.replace(name, value);
+	return this.replace(new RegExp(name, 'g'), value);
 }
 
 /**
