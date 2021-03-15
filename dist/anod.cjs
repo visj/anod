@@ -1,8 +1,4 @@
-//#region 1. Core reactivity library
-	//#region 1.1 Type definitions
-	//#endregion
-	//#region 1.2 Public API
-	function data(val) {
+function data(val) {
 		var node = new Data(val);
 		return function (next) {
 			return arguments.length === 0 ? node.get() : node.set(next);
@@ -108,9 +104,6 @@
 			Listener = listener;
 		}
 	}
-	//#endregion
-	//#region 1.3 Object implementations
-	//#region 1.3.1 Data
 	function Data(val) {
 		this.val = val;
 		this.log = Log();
@@ -133,8 +126,6 @@
 			setComputationsStale(this.log, Root.time);
 		}
 	}
-	//#endregion
-	//#region 1.3.2 Value
 	function Value(val, eq) {
 		Data.call(this, val);
 		this.eq = eq;
@@ -155,8 +146,6 @@
 			setComputationsStale(this.log, Root.time);
 		}
 	}
-	//#endregion
-	//#region 1.3.3 Computation
 	function Computation(log) {
 		this.val = void 0;
 		this.log = log;
@@ -239,26 +228,17 @@
 			Root.disposes.items[Root.disposes.len++] = this;
 		}
 	}
-	//#endregion
-	//#endregion
-	//#region 1.4 System variablesconstants
-	//#region 1.4.1 Enums
 	var Flag = {
 		Wait: 1,
 		Trace: 2,
 		Dynamic: 4,
 		Static: 8,
 	};
-	//#endregion
-	//#region 1.4.2 Variables
 	var Void = {};
 	var Root = Clock();
 	var State = 1;
 	var Owner = null;
 	var Listener = null;
-	//#endregion
-	//#endregion
-	//#region 1.5 Internal functionality
 	function Queue() {
 		return { len: 0, items: [] };
 	}
@@ -638,18 +618,9 @@
 			}
 		}
 	}
-	//#endregion
-	//#endregion
-	//#region 2. Array reactivity library
-	//#region 2.1 Type definitions
-	//#endregion
-	//#region 2.2 Public API
-	function array(val) {
+	function list(val) {
 		return new List(val);
 	}
-	//#endregion
-	//#region 2.3 Object implementations
-	//#region 2.3.1 IEnumerable
 	function IEnumerable(prototype) {
 		prototype.mut = function () {
 			return this.cs;
@@ -845,6 +816,8 @@
 							node.flag &= ~8192;
 						}
 					} else if (mut & 131201) {
+						i = k[cs.i1];
+						j = k[cs.i2];
 					} else if (mut & 262186) {
 						found = callback(cs.value);
 						k.unshift(found ? 0 : -1);
@@ -1446,8 +1419,6 @@
 			});
 		}
 	}
-	//#endregion
-	//#region 2.3.2 List
 	function List(val) {
 		Data.call(this, val);
 		this.cs = null;
@@ -1519,8 +1490,6 @@
 	List.prototype.unshift = function (item) {
 		logMutate(this, { type: 262186, value: item });
 	}
-	//#endregion
-	//#region 2.3.3 Enumerable
 	function Enumerable() {
 		Computation.call(this, Log());
 		this.cs = null;
@@ -1584,10 +1553,6 @@
 			Root.disposes.items[Root.disposes.len++] = this;
 		}
 	}
-	//#endregion
-	//#endregion
-	//#region 2.4 System variables
-	//#region 2.4.1 Enums
 	var Mod = {
 		Index: 1,
 		Value: 2,
@@ -1611,11 +1576,6 @@
 		Void: 524288,
 		Mutation: 524032,
 	};
-	//#endregion
-	//#region 2.4.2 Variables
-	//#endregion
-	//#endregion
-	//#region 2.5 Internal functionality
 	function logMutate(node, cs) {
 		var changes = Root.changes;
 		if (State !== 1) {
@@ -1890,9 +1850,7 @@
 		} else if (type & 32867) {
 			i = len - 1 - cs.i1;
 		} else if (type & 65608) {
-			if (len > 0) {
-				array.length--;
-			}
+			array.length--;
 			cs = { type: 2128 };
 		} else if (type & 131201) {
 		} else if (type & 262186) {
@@ -2054,13 +2012,10 @@
 			}
 		}
 	}
-	//#endregion
-	//#endregion
-	//#region 3. System exports
 	module.exports = {
-		array: array,
 		data: data,
 		value: value,
+		list: list,
 		fn: fn,
 		on: on,
 		run: run,
@@ -2080,4 +2035,3 @@
 		Computation: Computation,
 		Enumerable: Enumerable
 	};
-	//#endregion

@@ -18,7 +18,7 @@ String.prototype.trimExcludes = function () {
  * @returns {string}
  */
 String.prototype.trimComments = function () {
-	return this.replace(/\/\*[\s\S]*?\*\//gm, '');
+	return this.replace(/\/\*[\s\S]*?\*\/|\/\/.*/gm, '');
 }
 
 /**

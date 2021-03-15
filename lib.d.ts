@@ -273,7 +273,7 @@ export function value<T>(val: T, eq?: (a: T, b: T) => boolean): (next?: T) => T;
  * @param val Initial value used by underlying data array.
  * @throws {Error} When val is a non array-like object
  */
-export function array<T>(val: T[]): List<T>;
+export function list<T>(val: T[]): List<T>;
 
 /**
  * `on` creates a computation node with a static dependency tree.

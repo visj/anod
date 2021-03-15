@@ -1,5 +1,5 @@
 const { Test } = require('boer');
-const { array, cleanup, freeze, Flag, tie, } = require('../../..');
+const { list, cleanup, freeze, Flag, tie, } = require('../../..');
 /**
  * 
  * @param {Test} t 
@@ -8,7 +8,7 @@ module.exports = function (t) {
 
 	t.test('every', t => {
 		t.test('checks if every matches condition', t => {
-			let d = array([1, 2, 3]);
+			let d = list([1, 2, 3]);
 			let c1 = d.every(x => x > 0);
 			let c2 = d.every(x => x !== 2);
 			
@@ -17,7 +17,7 @@ module.exports = function (t) {
 		});
 
 		t.test('does not trigger unless condition changes', t => {
-			let d = array([1, 2, 3]);
+			let d = list([1, 2, 3]);
 			let c1 = d.every(x => x !== 4);
 			let count = 0;
 			tie(c1, () => { count++; }, void 0, Flag.Wait);
@@ -32,7 +32,7 @@ module.exports = function (t) {
 		t.test('mutations', t => {
 
 			t.test('insertAt', t => {
-				let d = array([1,2,3]);
+				let d = list([1,2,3]);
 				let count = 0;
 				let c1 = d.every(x => {
 					count++;
@@ -55,7 +55,7 @@ module.exports = function (t) {
 			});
 
 			t.test('insertAt beyond range', t => {
-				let d = array([1,2,3]);
+				let d = list([1,2,3]);
 				let c1 = d.every(x =>  x !== 4);
 				
 				t.not.throws(() => d.insertAt(-1, 4));
@@ -69,7 +69,7 @@ module.exports = function (t) {
 			});
 
 			t.test('insertRange', t => {
-				let d = array([1,2,3]);
+				let d = list([1,2,3]);
 				let count = 0;
 				let c1 = d.every(x => {
 					count++;
@@ -87,7 +87,7 @@ module.exports = function (t) {
 			});
 
 			t.test('move', t => {
-				let d = array([1,2,3]);
+				let d = list([1,2,3]);
 				let count = 0;
 				let c1 = d.every(x => {
 					count++;
@@ -102,7 +102,7 @@ module.exports = function (t) {
 
 	t.test('find', t => {
 		t.test('returns item or undefined when not found', t => {
-			let d = array([1, 2, 3]);
+			let d = list([1, 2, 3]);
 			let c1 = d.find(x => x === 1);
 			let c2 = d.find(x => x === 4);
 			t.equal(c1(), 1);
@@ -111,7 +111,7 @@ module.exports = function (t) {
 
 		t.test('mutations', t => {
 			t.test('handles insertion mutation correctly', t => {
-				let d = array([1, 2, 3]);
+				let d = list([1, 2, 3]);
 				let count = 0;
 				let c1 = d.find(x => {
 					count++;
@@ -126,7 +126,7 @@ module.exports = function (t) {
 			});
 
 			t.test('handles deletion mutation correctly', t => {
-				let d = array([1, 2, 3]);
+				let d = list([1, 2, 3]);
 				let count = 0;
 				let c1 = d.find(x => {
 					count++;
@@ -146,7 +146,7 @@ module.exports = function (t) {
 
 	t.test('findIndex', t => {
 		t.test('returns index or -1 when not found', t => {
-			let d = array([1, 2, 3]);
+			let d = list([1, 2, 3]);
 			let c1 = d.findIndex(x => x === 2);
 			let c2 = d.findIndex(x => x === 4);
 			t.equal(c1(), 1);
@@ -156,7 +156,7 @@ module.exports = function (t) {
 
 	t.test('includes', t => {
 		t.test('returns boolean whether item is found', t => {
-			let d = array([1, 2, 3]);
+			let d = list([1, 2, 3]);
 			let c1 = d.includes(3);
 			let c2 = d.includes(1);
 			let c3 = d.includes(4);
@@ -168,7 +168,7 @@ module.exports = function (t) {
 
 	t.test('indexOf', t => {
 		t.test('returns index of item or -1 if not found', t => {
-			let d = array([1, 2, 3]);
+			let d = list([1, 2, 3]);
 			let c1 = d.indexOf(1);
 			let c2 = d.indexOf(4);
 			t.equal(c1(), 0);
@@ -178,7 +178,7 @@ module.exports = function (t) {
 
 	t.test('join', t => {
 		t.test('returns string joined by optional separator', t => {
-			let d = array([1, 2, 3]);
+			let d = list([1, 2, 3]);
 			let c1 = d.join('');
 			let c2 = d.join(',');
 			let c3 = d.join();
@@ -190,7 +190,7 @@ module.exports = function (t) {
 
 	t.test('lastIndexOf', t => {
 		t.test('returns last index of item or -1 if not found', t => {
-			let d = array([1, 2, 3, 1, 2, 3]);
+			let d = list([1, 2, 3, 1, 2, 3]);
 			let c1 = d.lastIndexOf(1);
 			let c2 = d.lastIndexOf(2);
 			let c3 = d.lastIndexOf(4);
@@ -202,13 +202,13 @@ module.exports = function (t) {
 
 	t.test('reduce', t => {
 		t.test('reduces initialValue to a single value', t => {
-			let d = array([1, 2, 3]);
+			let d = list([1, 2, 3]);
 			let c1 = d.reduce((seed, x) => { seed.unshift(x); return seed; }, []);
 			t.equal(c1(), [3, 2, 1]);
 		});
 
 		t.test('does not corrupt initial value', t => {
-			let d = array([1, 2, 3]);
+			let d = list([1, 2, 3]);
 			let c1 = d.reduce((seed, x) => { seed[x] = x; return seed; }, {});
 			let c2 = d.reduce((seed, x) => { seed[x] = -x; return seed; }, {});
 			t.equal(c1(), { 1: 1, 2: 2, 3: 3 });
@@ -223,7 +223,7 @@ module.exports = function (t) {
 
 	t.test('reduceRight', t => {
 		t.test('reduces initialValue from end to tart', t => {
-			let d = array([1, 2, 3]);
+			let d = list([1, 2, 3]);
 			let c1 = d.reduceRight((seed, x) => { seed.push(x); return seed; }, []);
 			t.equal(c1(), [3, 2, 1]);
 		});
@@ -231,14 +231,14 @@ module.exports = function (t) {
 
 	t.test('slice', t => {
 
-		t.test('returns a copy of array', t => {
-			let d = array([1, 2, 3]);
+		t.test('returns a copy of list', t => {
+			let d = list([1, 2, 3]);
 			let d1 = d.slice();
 			t.equal(d1.get(), [1, 2, 3]);
 		});
 
 		t.test('accepts positive and negative indices', t => {
-			let d = array([1, 2, 3, 4, 5, 6]);
+			let d = list([1, 2, 3, 4, 5, 6]);
 			let d1 = d.slice(0, 3);
 			let d2 = d.slice(0, -3);
 			let d3 = d.slice(-2);
@@ -250,7 +250,7 @@ module.exports = function (t) {
 
 	t.test('some', t => {
 		t.test('returns if any matches callback', t => {
-			let d = array([1, 2, 3]);
+			let d = list([1, 2, 3]);
 			let c1 = d.some(x => x === 3);
 			let c2 = d.some(x => x === 4);
 			t.equal(c1(), true);

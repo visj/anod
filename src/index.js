@@ -1147,7 +1147,7 @@ function cleanupSource(source, slot) {
  * @param {T} val 
  * @returns {List<T>}
  */
-function array(val) {
+function list(val) {
 	return new List(val);
 }
 
@@ -1375,7 +1375,9 @@ function IEnumerable(prototype) {
 						node.flag &= ~Flag.Changed;
 					}
 				} else if (mut & Mod.Swap) {
-
+					i = k[cs.i1];
+					j = k[cs.i2];
+					
 				} else if (mut & Mod.Unshift) {
 					found = callback(cs.value);
 					k.unshift(found ? 0 : -1);
@@ -2705,9 +2707,7 @@ function applyReverseMutation(array, cs) {
 	} else if (type & Mod.Replace) {
 		i = len - 1 - cs.i1;
 	} else if (type & Mod.Shift) {
-		if (len > 0) {
-			array.length--;
-		}
+		array.length--;
 		cs = { type: Mod.Pop };
 	} else if (type & Mod.Swap) {
 
@@ -2907,7 +2907,7 @@ function copyValue(value) {
 //#region 3. System exports
 
 module.exports = {
-	array, data, value,
+	data, value, list,
 	/* @exclude */
 	System, Type,
 	/* @exclude */
