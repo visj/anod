@@ -6,7 +6,7 @@ const { array, run, freeze } = require('../../..');
  * @param {Test} t 
  */
 module.exports = function (t) {
-	t.test('array extension methods', t => {
+	t.test('array extensions', t => {
 
 		t.test('insertAt', t => {
 			t.test('inserts at index', t => {
@@ -33,7 +33,7 @@ module.exports = function (t) {
 
 		t.test('insertRange', t => {
 
-			t.test('inserts range into array handling out of bounds indices', t => {
+			t.test('handles out of bounds indices', t => {
 				let d = array([1, 2, 3]);
 				d.insertRange(1, [4, 5, 6]);
 				t.equal(d.get(), [1, 4, 5, 6, 2, 3]);
@@ -41,6 +41,29 @@ module.exports = function (t) {
 				d.insertRange(15, [8]);
 				t.equal(d.get(), [7, 1, 4, 5, 6, 2, 3, 8]);
 			});
+		});
+
+		t.test('move', t => {
+			t.test('moves between indices inside array', t => {
+				let d = array([1,2,3,4,5]);
+				d.move(2, 4);
+				t.equal(d.get(), [1,2,4,5,3]);
+			});
+
+			t.test('handles negative indices', t => {
+				let d = array([1,2,3,4,5]);
+				d.move(-1, -3);
+				t.equal(d.get(), [1,2,5,3,4]);
+			});
+
+			t.test('handles out of bounds indices', t => {
+				let d = array([1,2,3,4,5]);
+				d.move(7, -8);
+				t.equal(d.get(), [5,1,2,3,4]);
+				d.move(2, 6);
+				t.equal(d.get(), [5,1,3,4,2]);
+
+			})
 		});
 
 		t.test('removeAt', t => {
@@ -53,12 +76,18 @@ module.exports = function (t) {
 				t.equal(d.get(), [3]);
 			});
 
-			t.test('handles negative and out of bounds indices', t => {
+			t.test('handles negative indices', t => {
 				let d = array([1, 2, 3]);
 				d.removeAt(-1);
-				t.equal(d.get(), [1, 3]);
+				t.equal(d.get(), [1, 2]);
 				d.removeAt(-5);
-				t.equal(d.get(), [3]);
+				t.equal(d.get(), [2]);
+			});
+
+			t.test('handles out of range indices', t => {
+				let d = array([1, 2, 3]);
+				d.removeAt(4);
+				t.equal(d.get(), [1, 2]);
 			});
 		});
 
@@ -70,13 +99,19 @@ module.exports = function (t) {
 				t.equal(d.get(), [1, 2, 3]);
 			});
 
-			t.test('handles negative and out of bounds indices', t => {
+			t.test('handles negative indices', t => {
 				let d = array([1, 2, 3, 4, 5, 6]);
 				d.removeRange(-4, 2);
 				t.equal(d.get(), [1, 2, 5, 6]);
 				d.removeRange(8, 2);
 				t.equal(d.get(), [1, 2, 5, 6]);
 			});
+			t.test('handles out of range indices', t => {
+				let d = array([1, 2, 3, 4, 5, 6]);
+				d.removeRange(8, 2);
+				t.equal(d.get(), [1, 2, 3, 4, 5, 6]);
+			});
+
 		})
 
 	})

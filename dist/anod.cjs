@@ -644,13 +644,13 @@
 	//#region 2.1 Type definitions
 	//#endregion
 	//#region 2.2 Public API
-	 function array(val) {
+	function array(val) {
 		return new List(val);
 	}
 	//#endregion
 	//#region 2.3 Object implementations
 	//#region 2.3.1 IEnumerable
-	 function IEnumerable(prototype) {
+	function IEnumerable(prototype) {
 		prototype.mut = function () {
 			return this.cs;
 		}
@@ -778,8 +778,7 @@
 							node.flag &= ~8192;
 						}
 					} else if (mut & 2128) {
-						i = k[i];
-						k.pop();
+						i = k.pop();
 						if (i !== -1) {
 							seed.pop();
 							node.flag |= 8192;
@@ -790,13 +789,13 @@
 						i = cs.i1;
 						j = k[i];
 						if (j !== -1) {
-							removeAt(k, k.length, i);
+							removeAt(k, i);
 							for (i++; i < len; i++) {
 								if (k[i] !== -1) {
 									k[i]--;
 								}
 							}
-							removeAt(seed, seed.length, j);
+							removeAt(seed, j);
 							node.flag |= 8192;
 						} else {
 							node.flag &= ~8192;
@@ -1609,6 +1608,7 @@
 		Shift: 65608,
 		Swap: 131201,
 		Unshift: 262186,
+		Void: 524288,
 		Mutation: 524032,
 	};
 	//#endregion
@@ -1616,7 +1616,7 @@
 	//#endregion
 	//#endregion
 	//#region 2.5 Internal functionality
-	 function logMutate(node, cs) {
+	function logMutate(node, cs) {
 		var changes = Root.changes;
 		if (State !== 1) {
 			if (node.pval !== Void) {
@@ -1646,50 +1646,92 @@
 			}
 		}
 	}
-	 function applyMutation(array, cs) {
-		var i, args, value,
+	function applyMutation(array, cs) {
+		var i, j, k, args, value,
 			len = array.length,
-			type = cs.type & 524032;
-		if (type & 291) {
+			type = cs.type,
+			mut = type & 524032;
+		if (type & 1) {
+			cs.i1 = actualIndex(len, cs.i1);
+		}
+		if (type & 128) {
+			cs.i2 = actualIndex(len, cs.i2);
+		}
+		if (mut & 291) {
 			array.splice(cs.i1, 0, cs.value);
-		} else if (type & 551) {
+		} else if (mut & 551) {
 			args = [cs.i1, 0];
 			value = cs.value;
 			for (i = 0; i < value.length; i++) {
 				args[i + 2] = value[i];
 			}
 			array.splice.apply(array, args);
-		} else if (type & 1153) {
-			// todo
-		} else if (type & 2128) {
+		} else if (mut & 1153) {
+			i = cs.i1;
+			j = cs.i2;
+			if (i !== j) {
+				if (i === len) {
+					i = --cs.i1;
+				}
+				if (j === len) {
+					j = --cs.i2;
+				}
+				k = j > i ? 1 : -1;
+				args = array[i];
+				for (; i !== j; i += k) {
+					array[i] = array[i + k];
+				}
+				array[j] = args;
+			} else {
+				cs.type = 524288;
+			}
+		} else if (mut & 2128) {
 			if (len > 0) {
 				array.length--;
+			} else {
+				cs.type = 524288;
 			}
-		} else if (type & 4146) {
+		} else if (mut & 4146) {
 			array[len] = cs.value;
-		} else if (type & 8257) {
-			removeAt(array, len, cs.i1);
-		} else if (type & 16453) {
-			array.splice(cs.i1, cs.i2);
-		} else if (type & 32867) {
+		} else if (mut & 8257) {
+			if (len > 0) {
+				removeAt(array, cs.i1);
+			} else {
+				cs.type = 524288;
+			}
+		} else if (mut & 16453) {
+			if (cs.i1 < len) {
+				if (cs.i1 + cs.i2 > len) {
+					cs.i2 = len - cs.i1;
+				}
+				array.splice(cs.i1, cs.i2);
+			} else {
+				cs.type = 524288;
+			}
+		} else if (mut & 32867) {
 			array[cs.i1] = cs.value;
-		} else if (type & 65608) {
-			array.shift();
-		} else if (type & 131201) {
+		} else if (mut & 65608) {
+			if (len > 0) {
+				array.shift();
+			} else {
+				cs.type = 524288;
+			}
+		} else if (mut & 131201) {
 			value = array[cs.i1];
 			array[cs.i1] = array[cs.i2];
 			array[cs.i2] = value;
-		} else if (type & 262186) {
+		} else if (mut & 262186) {
 			array.unshift(cs.value);
 		}
 	}
 	function applyMapMutation(callback, items, seed, roots, len, cs) {
-		var j, j, len, item, node, value,
-			type = cs.type & 524032,
+		var i, j, k, len, item, node, value,
+			itemArgs, nodeArgs, newVals,
+			mut = cs.type & 524032,
 			mapper = function () {
 				return callback(item, j);
 			}
-		if (type & 291) {
+		if (mut & 291) {
 			j = cs.i1;
 			item = cs.value;
 			node = root(mapper);
@@ -1699,10 +1741,10 @@
 				seed.splice(j, 0, item);
 			}
 			cs = { type: 291, i1: j, value: node.val };
-		} else if (type & 551) {
+		} else if (mut & 551) {
 			value = cs.value;
 			len = value.length;
-			var itemArgs = [cs.i1, 0],
+			itemArgs = [cs.i1, 0],
 				nodeArgs = [cs.i1, 0],
 				newVals = new Array(len);
 			seedArgs;
@@ -1724,16 +1766,36 @@
 				seed.splice.apply(seed, seedArgs);
 			}
 			cs = { type: 551, i1: cs.i1, value: newVals };
-		} else if (type & 8257) {
-			if (len > 0) {
-				j = removeAt(items, len, cs.i1);
-				roots[j].dispose();
-				removeAt(roots, len, j);
+		} else if (mut & 1153) {
+			i = cs.i1;
+			j = cs.i2;
+			k = j > i ? 1 : -1;
+			item = items[i];
+			node = roots[i];
+			if (seed !== null) {
+				value = seed[i];
+			}
+			for (; i !== j; i += k) {
+				items[i] = items[i + k];
+				roots[i] = roots[i + k];
 				if (seed !== null) {
-					removeAt(seed, len, j);
+					seed[i] = seed[i + k];
 				}
 			}
-		} else if (type & 16453) {
+			items[j] = item;
+			roots[j] = node;
+			if (seed !== null) {
+				seed[j] = value;
+			}
+		} else if (mut & 8257) {
+			j = cs.i1;
+			removeAt(items, j);
+			roots[j].dispose();
+			removeAt(roots, j);
+			if (seed !== null) {
+				removeAt(seed, j);
+			}
+		} else if (mut & 16453) {
 			for (j = cs.i1, len = cs.i2; len >= 0; j++, len--) {
 				roots[j].dispose();
 			}
@@ -1742,25 +1804,23 @@
 			if (seed !== null) {
 				seed.splice(cs.i1, cs.i2);
 			}
-		} else if (type & 32867) {
+		} else if (mut & 32867) {
 			j = cs.i1;
 			roots[j].dispose();
-			items = cs.value;
 			node = root(mapper);
+			items[j] = cs.value;
 			roots[j] = node;
 			if (seed !== null) {
 				seed[j] = node.val;
 			}
-		} else if (type & 65608) {
-			if (len > 0) {
-				roots[0].dispose();
-				items.shift();
-				roots.shift();
-				if (seed !== null) {
-					seed.shift();
-				}
+		} else if (mut & 65608) {
+			roots[0].dispose();
+			items.shift();
+			roots.shift();
+			if (seed !== null) {
+				seed.shift();
 			}
-		} else if (type & 131201) {
+		} else if (mut & 131201) {
 			i = cs.i1;
 			j = cs.i2;
 			value = items[i];
@@ -1774,10 +1834,10 @@
 				seed[i] = seed[j];
 				seed[j] = value;
 			}
-		} else if (type & 262186) {
+		} else if (mut & 262186) {
 			j = 0;
-			items.unshift(cs.value);
 			node = root(mapper)
+			items.unshift(cs.value);
 			roots.unshift(node);
 			if (seed !== null) {
 				seed.unshift(node.val);
@@ -1787,13 +1847,14 @@
 		return cs;
 	}
 	function applyReverseMutation(array, cs) {
-		var i, value, args,
+		var i, j, k, value, args,
 			len = array.length,
 			type = cs.type & 524032;
 		if (type & 291) {
 			i = len - 1 - cs.i1;
-			array.splice(i, 0, cs.value);
-			cs = { type: InsertAt, i1: i, value: cs.value };
+			value = cs.value;
+			array.splice(i, 0, value);
+			cs = { type: InsertAt, i1: i, value: value };
 		} else if (type & 551) {
 			i = len - 1 - cs.i1;
 			value = cs.value;
@@ -1804,7 +1865,14 @@
 			array.splice.apply(array, args);
 			cs = { type: 551, i1: i, value: value };
 		} else if (type & 1153) {
-			// todo
+			i = len - 1 - cs.i1;
+			j = len - 1 - cs.i2;
+			k = j > i ? 1 : -1;
+			value = array[i];
+			for (; i !== j; i += k) {
+				array[i] = array[i + k];
+			}
+			array[j] = value;
 		} else if (type & 2128) {
 			array.shift();
 			cs = { type: 65608 }
@@ -1812,7 +1880,8 @@
 			array.unshift(value);
 			cs = { type: 262186, value: value };
 		} else if (type & 8257) {
-			i = removeAt(array, len, cs.i1)
+			i = len - cs.i1;
+			removeAt(array, i)
 			cs = { type: RemoveAt, i1: i };
 		} else if (type & 16453) {
 			i = len - 1 - cs.i1 - cs.i2;
@@ -1832,7 +1901,7 @@
 		}
 		return cs;
 	}
-	function applySlicedMutation(array, cs) {
+	function applySliceMutation(array, cs) {
 	}
 	function indexOf(flag, cs, item, call, index, length, last) {
 		var type, mut, i, len, c;
@@ -1944,16 +2013,22 @@
 		}
 		return -2;
 	}
-	function removeAt(array, len, i) {
-		var j;
-		if (len > 0) {
+	function actualIndex(len, i) {
+		if (i < 0) {
+			i = len + i;
 			if (i < 0) {
-				i = len - 1 + i;
-				if (i < 0) {
-					i = 0;
-				}
+				i = 0;
+			} else if (i > len) {
+				i = len;
 			}
-			j = i;
+		} else if (i > len) {
+			i = len;
+		}
+		return i;
+	}
+	function removeAt(array, i) {
+		var len = array.length;
+		if (len > 0) {
 			if (i < len) {
 				for (; i < len; i++) {
 					array[i] = array[i + 1];
@@ -1961,7 +2036,6 @@
 			}
 			array.length--;
 		}
-		return j;
 	}
 	function copyValue(value) {
 		if (value === null || typeof value !== 'object') {

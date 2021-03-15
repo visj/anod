@@ -1147,7 +1147,7 @@ function cleanupSource(source, slot) {
  * @param {T} val 
  * @returns {List<T>}
  */
- function array(val) {
+function array(val) {
 	return new List(val);
 }
 
@@ -1161,7 +1161,7 @@ function cleanupSource(source, slot) {
  * @template T
  * @param {IEnumerable<T>} prototype 
  */
- function IEnumerable(prototype) {
+function IEnumerable(prototype) {
 	/**
 	 * @this {IEnumerable<T>}
 	 * @returns {Changeset<T>}
@@ -1308,8 +1308,7 @@ function cleanupSource(source, slot) {
 						node.flag &= ~Flag.Changed;
 					}
 				} else if (mut & Mod.Pop) {
-					i = k[i];
-					k.pop();
+					i = k.pop();
 					if (i !== -1) {
 						seed.pop();
 						node.flag |= Flag.Changed;
@@ -1320,13 +1319,13 @@ function cleanupSource(source, slot) {
 					i = cs.i1;
 					j = k[i];
 					if (j !== -1) {
-						removeAt(k, k.length, i);
+						removeAt(k, i);
 						for (i++; i < len; i++) {
 							if (k[i] !== -1) {
 								k[i]--;
 							}
 						}
-						removeAt(seed, seed.length, j);
+						removeAt(seed, j);
 						node.flag |= Flag.Changed;
 					} else {
 						node.flag &= ~Flag.Changed;
@@ -2385,6 +2384,7 @@ var Mod = {
 	Shift: (65536 | Type.Head | Type.Delete),
 	Swap: (131072 | Type.Index | Type.Reorder),
 	Unshift: (262144 | Type.Insert | Type.Value | Type.Head),
+	Void: 524288,
 	Mutation: 524032,
 };
 
@@ -2407,7 +2407,7 @@ var NoResult = -2;
  * @param {List<T>} node 
  * @param {Changeset<T>} cs 
  */
- function logMutate(node, cs) {
+function logMutate(node, cs) {
 	var changes = Root.changes;
 	if (State !== System.Idle) {
 		if (node.pval !== Void) {
@@ -2438,46 +2438,86 @@ var NoResult = -2;
 	}
 }
 
-
 /**
  * @template T
  * @param {Array<T>} array 
  * @param {Changeset<T>} cs 
  */
- function applyMutation(array, cs) {
-	var i, args, value,
+function applyMutation(array, cs) {
+	var i, j, k, args, value,
 		len = array.length,
-		type = cs.type & Mod.Mutation;
-	if (type & Mod.InsertAt) {
+		type = cs.type,
+		mut = type & Mod.Mutation;
+	if (type & Mod.Index) {
+		cs.i1 = actualIndex(len, cs.i1);
+	}
+	if (type & Mod.Reordering) {
+		cs.i2 = actualIndex(len, cs.i2);
+	}
+	if (mut & Mod.InsertAt) {
 		array.splice(cs.i1, 0, cs.value);
-	} else if (type & Mod.InsertRange) {
+	} else if (mut & Mod.InsertRange) {
 		args = [cs.i1, 0];
 		value = cs.value;
 		for (i = 0; i < value.length; i++) {
 			args[i + 2] = value[i];
 		}
 		array.splice.apply(array, args);
-	} else if (type & Mod.Move) {
-		// todo
-	} else if (type & Mod.Pop) {
+	} else if (mut & Mod.Move) {
+		i = cs.i1;
+		j = cs.i2;
+		if (i !== j) {
+			if (i === len) {
+				i = --cs.i1;
+			}
+			if (j === len) {
+				j = --cs.i2;
+			}
+			k = j > i ? 1 : -1;
+			args = array[i];
+			for (; i !== j; i += k) {
+				array[i] = array[i + k];
+			}
+			array[j] = args;
+		} else {
+			cs.type = Mod.Void;
+		}
+	} else if (mut & Mod.Pop) {
 		if (len > 0) {
 			array.length--;
+		} else {
+			cs.type = Mod.Void;
 		}
-	} else if (type & Mod.Push) {
+	} else if (mut & Mod.Push) {
 		array[len] = cs.value;
-	} else if (type & Mod.RemoveAt) {
-		removeAt(array, len, cs.i1);
-	} else if (type & Mod.RemoveRange) {
-		array.splice(cs.i1, cs.i2);
-	} else if (type & Mod.Replace) {
+	} else if (mut & Mod.RemoveAt) {
+		if (len > 0) {
+			removeAt(array, cs.i1);
+		} else {
+			cs.type = Mod.Void;
+		}
+	} else if (mut & Mod.RemoveRange) {
+		if (cs.i1 < len) {
+			if (cs.i1 + cs.i2 > len) {
+				cs.i2 = len - cs.i1;
+			}
+			array.splice(cs.i1, cs.i2);
+		} else {
+			cs.type = Mod.Void;
+		}
+	} else if (mut & Mod.Replace) {
 		array[cs.i1] = cs.value;
-	} else if (type & Mod.Shift) {
-		array.shift();
-	} else if (type & Mod.Swap) {
+	} else if (mut & Mod.Shift) {
+		if (len > 0) {
+			array.shift();
+		} else {
+			cs.type = Mod.Void;
+		}
+	} else if (mut & Mod.Swap) {
 		value = array[cs.i1];
 		array[cs.i1] = array[cs.i2];
 		array[cs.i2] = value;
-	} else if (type & Mod.Unshift) {
+	} else if (mut & Mod.Unshift) {
 		array.unshift(cs.value);
 	}
 }
@@ -2493,12 +2533,13 @@ var NoResult = -2;
  * @returns {Changeset<T>}
  */
 function applyMapMutation(callback, items, seed, roots, len, cs) {
-	var j, j, len, item, node, value,
-		type = cs.type & Mod.Mutation,
+	var i, j, k, len, item, node, value,
+		itemArgs, nodeArgs, newVals,
+		mut = cs.type & Mod.Mutation,
 		mapper = function () {
 			return callback(item, j);
 		}
-	if (type & Mod.InsertAt) {
+	if (mut & Mod.InsertAt) {
 		j = cs.i1;
 		item = cs.value;
 		node = root(mapper);
@@ -2508,10 +2549,10 @@ function applyMapMutation(callback, items, seed, roots, len, cs) {
 			seed.splice(j, 0, item);
 		}
 		cs = { type: Mod.InsertAt, i1: j, value: node.val };
-	} else if (type & Mod.InsertRange) {
+	} else if (mut & Mod.InsertRange) {
 		value = cs.value;
 		len = value.length;
-		var itemArgs = [cs.i1, 0],
+		itemArgs = [cs.i1, 0],
 			nodeArgs = [cs.i1, 0],
 			newVals = new Array(len);
 		seedArgs;
@@ -2533,16 +2574,36 @@ function applyMapMutation(callback, items, seed, roots, len, cs) {
 			seed.splice.apply(seed, seedArgs);
 		}
 		cs = { type: Mod.InsertRange, i1: cs.i1, value: newVals };
-	} else if (type & Mod.RemoveAt) {
-		if (len > 0) {
-			j = removeAt(items, len, cs.i1);
-			roots[j].dispose();
-			removeAt(roots, len, j);
+	} else if (mut & Mod.Move) {
+		i = cs.i1;
+		j = cs.i2;
+		k = j > i ? 1 : -1;
+		item = items[i];
+		node = roots[i];
+		if (seed !== null) {
+			value = seed[i];
+		}
+		for (; i !== j; i += k) {
+			items[i] = items[i + k];
+			roots[i] = roots[i + k];
 			if (seed !== null) {
-				removeAt(seed, len, j);
+				seed[i] = seed[i + k];
 			}
 		}
-	} else if (type & Mod.RemoveRange) {
+		items[j] = item;
+		roots[j] = node;
+		if (seed !== null) {
+			seed[j] = value;
+		}
+	} else if (mut & Mod.RemoveAt) {
+		j = cs.i1;
+		removeAt(items, j);
+		roots[j].dispose();
+		removeAt(roots, j);
+		if (seed !== null) {
+			removeAt(seed, j);
+		}
+	} else if (mut & Mod.RemoveRange) {
 		for (j = cs.i1, len = cs.i2; len >= 0; j++, len--) {
 			roots[j].dispose();
 		}
@@ -2551,25 +2612,23 @@ function applyMapMutation(callback, items, seed, roots, len, cs) {
 		if (seed !== null) {
 			seed.splice(cs.i1, cs.i2);
 		}
-	} else if (type & Mod.Replace) {
+	} else if (mut & Mod.Replace) {
 		j = cs.i1;
 		roots[j].dispose();
-		items = cs.value;
 		node = root(mapper);
+		items[j] = cs.value;
 		roots[j] = node;
 		if (seed !== null) {
 			seed[j] = node.val;
 		}
-	} else if (type & Mod.Shift) {
-		if (len > 0) {
-			roots[0].dispose();
-			items.shift();
-			roots.shift();
-			if (seed !== null) {
-				seed.shift();
-			}
+	} else if (mut & Mod.Shift) {
+		roots[0].dispose();
+		items.shift();
+		roots.shift();
+		if (seed !== null) {
+			seed.shift();
 		}
-	} else if (type & Mod.Swap) {
+	} else if (mut & Mod.Swap) {
 		i = cs.i1;
 		j = cs.i2;
 		value = items[i];
@@ -2583,10 +2642,10 @@ function applyMapMutation(callback, items, seed, roots, len, cs) {
 			seed[i] = seed[j];
 			seed[j] = value;
 		}
-	} else if (type & Mod.Unshift) {
+	} else if (mut & Mod.Unshift) {
 		j = 0;
-		items.unshift(cs.value);
 		node = root(mapper)
+		items.unshift(cs.value);
 		roots.unshift(node);
 		if (seed !== null) {
 			seed.unshift(node.val);
@@ -2603,13 +2662,14 @@ function applyMapMutation(callback, items, seed, roots, len, cs) {
  * @returns {Changeset<T>}
  */
 function applyReverseMutation(array, cs) {
-	var i, value, args,
+	var i, j, k, value, args,
 		len = array.length,
 		type = cs.type & Mod.Mutation;
 	if (type & Mod.InsertAt) {
 		i = len - 1 - cs.i1;
-		array.splice(i, 0, cs.value);
-		cs = { type: InsertAt, i1: i, value: cs.value };
+		value = cs.value;
+		array.splice(i, 0, value);
+		cs = { type: InsertAt, i1: i, value: value };
 	} else if (type & Mod.InsertRange) {
 		i = len - 1 - cs.i1;
 		value = cs.value;
@@ -2620,7 +2680,14 @@ function applyReverseMutation(array, cs) {
 		array.splice.apply(array, args);
 		cs = { type: Mod.InsertRange, i1: i, value: value };
 	} else if (type & Mod.Move) {
-		// todo
+		i = len - 1 - cs.i1;
+		j = len - 1 - cs.i2;
+		k = j > i ? 1 : -1;
+		value = array[i];
+		for (; i !== j; i += k) {
+			array[i] = array[i + k];
+		}
+		array[j] = value;
 	} else if (type & Mod.Pop) {
 		array.shift();
 		cs = { type: Mod.Shift }
@@ -2628,7 +2695,8 @@ function applyReverseMutation(array, cs) {
 		array.unshift(value);
 		cs = { type: Mod.Unshift, value: value };
 	} else if (type & Mod.RemoveAt) {
-		i = removeAt(array, len, cs.i1)
+		i = len - cs.i1;
+		removeAt(array, i)
 		cs = { type: RemoveAt, i1: i };
 	} else if (type & Mod.RemoveRange) {
 		i = len - 1 - cs.i1 - cs.i2;
@@ -2650,7 +2718,7 @@ function applyReverseMutation(array, cs) {
 	return cs;
 }
 
-function applySlicedMutation(array, cs) {
+function applySliceMutation(array, cs) {
 
 }
 
@@ -2776,6 +2844,20 @@ function indexOf(flag, cs, item, call, index, length, last) {
 	return NoResult;
 }
 
+function actualIndex(len, i) {
+	if (i < 0) {
+		i = len + i;
+		if (i < 0) {
+			i = 0;
+		} else if (i > len) {
+			i = len;
+		}
+	} else if (i > len) {
+		i = len;
+	}
+	return i;
+}
+
 /**
  * 
  * @param {Array} array 
@@ -2783,16 +2865,9 @@ function indexOf(flag, cs, item, call, index, length, last) {
  * @param {number} i 
  * @returns {number}
  */
-function removeAt(array, len, i) {
-	var j;
+function removeAt(array, i) {
+	var len = array.length;
 	if (len > 0) {
-		if (i < 0) {
-			i = len - 1 + i;
-			if (i < 0) {
-				i = 0;
-			}
-		}
-		j = i;
 		if (i < len) {
 			for (; i < len; i++) {
 				array[i] = array[i + 1];
@@ -2800,7 +2875,6 @@ function removeAt(array, len, i) {
 		}
 		array.length--;
 	}
-	return j;
 }
 
 /**

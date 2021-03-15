@@ -11,6 +11,7 @@ module.exports = function (t) {
 			let d = array([1, 2, 3]);
 			let c1 = d.every(x => x > 0);
 			let c2 = d.every(x => x !== 2);
+			
 			t.equal(c1(), true);
 			t.equal(c2(), false);
 		});
@@ -24,60 +25,77 @@ module.exports = function (t) {
 			d.push(3);
 			d.push(4);
 			d.pop();
+			
 			t.equal(count, 2);
 		});
 
 		t.test('mutations', t => {
 
-			t.test('handles end of array operations', t => {
-				let d = array([1, 2, 3]);
+			t.test('insertAt', t => {
+				let d = array([1,2,3]);
 				let count = 0;
 				let c1 = d.every(x => {
 					count++;
 					return x !== 4;
 				});
-				t.equal(count, 3);
-				d.push(1);
+				d.insertAt(0, 1);
+				
 				t.equal(count, 4);
-				t.equal(c1(), true);
-				d.pop();
-				t.equal(count, 4);
-				freeze(() => { d.push(4); d.push(4); });
-				t.equal(c1(), false);
+				t.assert(c1());
+				
+				d.insertAt(4, 4);
+				
 				t.equal(count, 5);
-				d.pop();
-				t.equal(c1(), false);
-				t.equal(count, 9);
+				t.not.assert(c1());
+				
+				d.insertAt(3, 4);
+				
+				t.equal(count, 5);
+				t.not.assert(c1());
 			});
 
-			t.test('handles insertions correctly', t => {
-				let d = array([1, 2, 3]);
-				let count = 0;
-				d.every(x => {
-					count++;
-					return x !== 4;
-				});
-				d.insertAt(1, 5);
-				t.equal(count, 4);
-				d.insertRange(2, [6, 7, 8]);
-				t.equal(count, 7);
+			t.test('insertAt beyond range', t => {
+				let d = array([1,2,3]);
+				let c1 = d.every(x =>  x !== 4);
+				
+				t.not.throws(() => d.insertAt(-1, 4));
+				t.not.assert(c1());
+				t.not.throws(() => d.insertAt(8, 4));
+				t.not.assert(c1());
+				
+				d.set([]);
+				t.not.throws(() => d.insertAt(2, 4));
+				t.not.assert(c1());
 			});
 
-			t.test('handles deletions correctly', t => {
-				let d = array([1, 2, 3]);
+			t.test('insertRange', t => {
+				let d = array([1,2,3]);
 				let count = 0;
 				let c1 = d.every(x => {
 					count++;
 					return x !== 4;
 				});
-				d.removeRange(0, 3);
-				t.equal(count, 3);
-				t.equal(c1(), true);
-				d.insertRange(0, [4, 4, 4]);
-				t.equal(c1(), false);
-				t.equal(count, 4);
-				d.removeAt(1);
-				t.equal(count, 5);
+				d.insertRange(0, [1,2,3]);
+				t.equal(count, 6);
+				t.assert(c1());
+				d.insertRange(6, [6,7,8]);
+				d.set([1]);
+				t.equal(count, 10);
+				t.assert(c1());
+				d.insertRange(1, [5,4,1,1,1]);
+				t.not.assert(c1());
+			});
+
+			t.test('move', t => {
+				let d = array([1,2,3]);
+				let count = 0;
+				let c1 = d.every(x => {
+					count++;
+					return x !== 4;
+				});
+				d.move(2, 0);
+				
+				t.assert(c1());
 			});
 		});
 	});
