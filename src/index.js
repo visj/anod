@@ -569,7 +569,7 @@ var Flag = {
 
 /**
  * @const
- * @type {Object}
+ * @type {{}}
  */
 var Void = {};
 /**
@@ -1113,9 +1113,29 @@ function cleanupSource(source, slot) {
 /**
  * @template T
  * @typedef {Object} IEnumerable
- * @property {function(function(T,number=): boolean): void} every
- * @property {function(function(T,number=): boolean): void} filter
- * @property {function(function(T,number=): boolean): void} find
+ * @property {T[]} val
+ * @property {Log<Computation>} log
+ * @property {number} flag
+ * @property {Changeset<T>} cs
+ * @property {function(): T[]} get
+ * @property {function(): Changeset<T>} mut
+ * @property {function(function(T,number=): boolean): (function(): boolean)} every
+ * @property {function(function(T,number=): boolean): IEnumerable<T>} filter
+ * @property {function(function(T,number=): boolean): (function(): number)} find
+ * @property {function(function(T,number=): boolean): (function(): number)} findIndex
+ * @property {function(function(T,number=): void): void} forEach
+ * @property {function(T,number=): (function(): boolean)} includes
+ * @property {function(T,number=): (function(): boolean)} indexOf
+ * @property {function(string=): (function(): string)} join
+ * @property {function(T,number=): (function(): number)} lastIndexOf
+ * @property {function(function(T,number=): *): IEnumerable<*>} map
+ * @property {function(function(*,T,number=):*, *=): (function(): *)} reduce
+ * @property {function(function(*,T,number=):*, *=): (function(): *)} reduceRight
+ * @property {function(): IEnumerable<T>} reverse
+ * @property {function(number=,number=): IEnumerable<T>} slice
+ * @property {function(function(T,number=): boolean): (function(): boolean)} some
+ * @property {function(function(T,T): number): IEnumerable<T>} sort
+ * 
  */
 
 //#endregion
@@ -1139,11 +1159,11 @@ function cleanupSource(source, slot) {
 
 /**
  * @template T
- * @param {List<T>|Enumerable<T>} prototype 
+ * @param {IEnumerable<T>} prototype 
  */
  function IEnumerable(prototype) {
 	/**
-	 * 
+	 * @this {IEnumerable<T>}
 	 * @returns {Changeset<T>}
 	 */
 	prototype.mut = function () {
@@ -1152,13 +1172,14 @@ function cleanupSource(source, slot) {
 
 	/**
 	 * @template T
+	 * @this {IEnumerable<T>}
 	 * @param {function(T,number=): boolean} callback 
 	 * @returns {function(): boolean}
 	 */
 	prototype.every = function (callback) {
 		var src = this,
 			pure = callback.length === 1;
-		return tie(src, function (seed) {
+		return tie(src, /** @param {boolean} seed */ function (seed) {
 			var i, ilen, j, jlen, c,
 				cs = src.cs,
 				items = src.get(),
@@ -1223,15 +1244,16 @@ function cleanupSource(source, slot) {
 	}
 	/**
 	 * @template T
+	 * @this {IEnumerable<T>}
 	 * @param {function(T,number=): boolean} callback 
-	 * @returns {Enumerable<T>}
+	 * @returns {IEnumerable<T>}
 	 */
 	prototype.filter = function (callback) {
 		var src = this,
 			k = null,
 			node = new Enumerable(),
 			pure = callback.length === 1;
-		return Enumerable.setup(node, src, function (seed) {
+		return Enumerable.setup(node, src, /** @param {T[]} seed */ function (seed) {
 			var i, j, n, m, item,
 				mut, mut, found,
 				cs = src.cs,
@@ -1402,7 +1424,7 @@ function cleanupSource(source, slot) {
 	}
 	/**
 	 * @template T
-	 * @this {Enumerable<T>}
+	 * @this {IEnumerable<T>}
 	 * @param {function(T,number=): boolean} callback 
 	 * @returns {function(): T}
 	 */
@@ -1410,7 +1432,7 @@ function cleanupSource(source, slot) {
 		var src = this,
 			i = -1,
 			pure = callback.length === 1;
-		return tie(src, function (seed) {
+		return tie(src, /** @param {number=} seed */ function (seed) {
 			var item,
 				cs = src.cs,
 				items = src.get(),
@@ -1433,7 +1455,7 @@ function cleanupSource(source, slot) {
 	}
 	/**
 	 * @template T
-	 * @this {Enumerable<T>}
+	 * @this {IEnumerable<T>}
 	 * @param {function(T,number=): boolean} callback 
 	 * @param {number} index 
 	 * @returns {function(): number}
@@ -1442,7 +1464,7 @@ function cleanupSource(source, slot) {
 		var src = this,
 			index = -1,
 			pure = callback.length === 1 && arguments.length === 1;
-		return tie(src, function (seed) {
+		return tie(src, /** @param {number} seed */ function (seed) {
 			var i, cs,
 				items = src.get(),
 				len = items.length;
@@ -1465,7 +1487,7 @@ function cleanupSource(source, slot) {
 	}
 	/**
 	 * @template T
-	 * @this {Enumerable<T>}
+	 * @this {IEnumerable<T>}
 	 * @param {function(T,number=): void} callback 
 	 * @returns {void}
 	 */
@@ -1480,7 +1502,7 @@ function cleanupSource(source, slot) {
 				roots[i].dispose();
 			}
 		});
-		Enumerable.setup(node, src, function (seed) {
+		Enumerable.setup(node, src, /** @param {{}} seed */ function (seed) {
 			var i, j, cs, loop,
 				temps, found,
 				cmin, cmax, umin, umax, ulen,
@@ -1601,7 +1623,7 @@ function cleanupSource(source, slot) {
 	}
 	/**
 	 * @template T
-	 * @this {Enumerable<T>}
+	 * @this {IEnumerable<T>}
 	 * @param {T} valueToFind 
 	 * @param {number=} fromIndex 
 	 * @returns {function(): boolean}
@@ -1610,7 +1632,7 @@ function cleanupSource(source, slot) {
 		var src = this,
 			i = -1,
 			pure = arguments.length === 1;
-		return tie(src, function (seed) {
+		return tie(src, /** @param {boolean} seed */ function (seed) {
 			var cs = src.cs,
 				items = src.get(),
 				len = items.length;
@@ -1631,7 +1653,7 @@ function cleanupSource(source, slot) {
 	}
 	/**
 	 * @template T
-	 * @this {Enumerable<T>}
+	 * @this {IEnumerable<T>}
 	 * @param {T} searchElement 
 	 * @param {number=} fromIndex 
 	 * @returns {function(): number}
@@ -1640,7 +1662,7 @@ function cleanupSource(source, slot) {
 		var src = this,
 			i = -1,
 			pure = arguments.length === 1;
-		return tie(src, function (seed) {
+		return tie(src, /** @param {number} seed */ function (seed) {
 			var cs = src.cs,
 				items = src.get(),
 				len = items.length;
@@ -1660,7 +1682,7 @@ function cleanupSource(source, slot) {
 		}, Void, Flag.Trace);
 	}
 	/**
-	 * 
+	 * @this {IEnumerable<T>}
 	 * @param {string=} separator 
 	 * @returns {function(): string}
 	 */
@@ -1672,7 +1694,7 @@ function cleanupSource(source, slot) {
 	}
 	/**
 	 * @template T
-	 * @this {Enumerable<T>}
+	 * @this {IEnumerable<T>}
 	 * @param {T} searchElement 
 	 * @param {number=} fromIndex 
 	 * @returns {function(): number}
@@ -1703,9 +1725,9 @@ function cleanupSource(source, slot) {
 	}
 	/**
 	 * @template T,U
-	 * @this {Enumerable<T>}
+	 * @this {IEnumerable<T>}
 	 * @param {function(T,number): U} callback 
-	 * @returns {Enumerable<U>}
+	 * @returns {IEnumerable<U>}
 	 */
 	prototype.map = function (callback) {
 		var src = this,
@@ -1848,7 +1870,7 @@ function cleanupSource(source, slot) {
 	}
 	/**
 	 * @template T,U
-	 * @this {Enumerable<T>}
+	 * @this {IEnumerable<T>}
 	 * @param {function(U,T,number): U} callback 
 	 * @param {U=} initialValue 
 	 * @returns {function(): U}
@@ -1875,7 +1897,7 @@ function cleanupSource(source, slot) {
 	}
 	/**
 	 * @template T,U
-	 * @this {Enumerable<T>}
+	 * @this {IEnumerable<T>}
 	 * @param {function(U,T,number): U} callback 
 	 * @param {U=} initialValue 
 	 * @returns {function(): U}
@@ -1902,13 +1924,14 @@ function cleanupSource(source, slot) {
 	}
 	/**
 	 * @template T
-	 * @this {Enumerable<T>}
-	 * @returns {Enumerable<T>}
+	 * @this {IEnumerable<T>}
+	 * @returns {IEnumerable<T>}
 	 */
 	prototype.reverse = function () {
 		var src = this,
-			node = new Enumerable(Flag.Changed);
-		return Enumerable.setup(node, src, function (seed) {
+			node = new Enumerable();
+		node.flag |= Flag.Changed;
+		return Enumerable.setup(node, src, /** @param {T[]} seed */ function (seed) {
 			var i,
 				cs = src.cs,
 				items = src.get(),
@@ -1937,15 +1960,15 @@ function cleanupSource(source, slot) {
 	}
 	/**
 	 * @template T
-	 * @this {Enumerable<T>}
+	 * @this {IEnumerable<T>}
 	 * @param {number} start 
 	 * @param {number} end 
-	 * @returns {Enumerable<T>}
+	 * @returns {IEnumerable<T>}
 	 */
 	prototype.slice = function (start, end) {
 		var src = this,
 			node = new Enumerable();
-		return Enumerable.setup(node, src, function (seed) {
+		return Enumerable.setup(node, src, /** @param {T[]} seed */ function (seed) {
 			var i,
 				cs = src.cs,
 				items = src.get();
@@ -2002,7 +2025,7 @@ function cleanupSource(source, slot) {
 	}
 	/**
 	 * @template T
-	 * @this {Enumerable<T>}
+	 * @this {IEnumerable<T>}
 	 * @param {function(T,number): boolean} callback 
 	 * @returns {function(): boolean}
 	 */
@@ -2010,7 +2033,7 @@ function cleanupSource(source, slot) {
 		var src = this,
 			index = -1,
 			pure = callback.length === 1;
-		return tie(src, function (seed) {
+		return tie(src, /** @param {boolean} seed */ function (seed) {
 			var i,
 				cs = src.cs,
 				items = src.get(),
@@ -2033,15 +2056,15 @@ function cleanupSource(source, slot) {
 	}
 	/**
 	 * @template T
-	 * @this {Enumerable<T>}
+	 * @this {IEnumerable<T>}
 	 * @param {function(T,T): number} compareFunction 
-	 * @returns {Enumerable<T>}
+	 * @returns {IEnumerable<T>}
 	 */
 	prototype.sort = function (compareFunction) {
-		var self = this,
+		var src = this,
 			node = new Enumerable(Flag.Changed);
-		return Enumerable.setup(node, this, function (seed) {
-			var items = self.get();
+		return Enumerable.setup(node, this, function () {
+			var items = src.get();
 			var newItems = items.slice();
 			newItems.sort(compareFunction);
 			return newItems;

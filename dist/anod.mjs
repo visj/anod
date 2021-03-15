@@ -657,7 +657,7 @@
 		prototype.every = function (callback) {
 			var src = this,
 				pure = callback.length === 1;
-			return tie(src, function (seed) {
+			return tie(src,  function (seed) {
 				var i, ilen, j, jlen, c,
 					cs = src.cs,
 					items = src.get(),
@@ -725,7 +725,7 @@
 				k = null,
 				node = new Enumerable(),
 				pure = callback.length === 1;
-			return Enumerable.setup(node, src, function (seed) {
+			return Enumerable.setup(node, src,  function (seed) {
 				var i, j, n, m, item,
 					mut, mut, found,
 					cs = src.cs,
@@ -894,7 +894,7 @@
 			var src = this,
 				i = -1,
 				pure = callback.length === 1;
-			return tie(src, function (seed) {
+			return tie(src,  function (seed) {
 				var item,
 					cs = src.cs,
 					items = src.get(),
@@ -919,7 +919,7 @@
 			var src = this,
 				index = -1,
 				pure = callback.length === 1 && arguments.length === 1;
-			return tie(src, function (seed) {
+			return tie(src,  function (seed) {
 				var i, cs,
 					items = src.get(),
 					len = items.length;
@@ -951,7 +951,7 @@
 					roots[i].dispose();
 				}
 			});
-			Enumerable.setup(node, src, function (seed) {
+			Enumerable.setup(node, src,  function (seed) {
 				var i, j, cs, loop,
 					temps, found,
 					cmin, cmax, umin, umax, ulen,
@@ -1074,7 +1074,7 @@
 			var src = this,
 				i = -1,
 				pure = arguments.length === 1;
-			return tie(src, function (seed) {
+			return tie(src,  function (seed) {
 				var cs = src.cs,
 					items = src.get(),
 					len = items.length;
@@ -1097,7 +1097,7 @@
 			var src = this,
 				i = -1,
 				pure = arguments.length === 1;
-			return tie(src, function (seed) {
+			return tie(src,  function (seed) {
 				var cs = src.cs,
 					items = src.get(),
 					len = items.length;
@@ -1327,8 +1327,9 @@
 		}
 		prototype.reverse = function () {
 			var src = this,
-				node = new Enumerable(8192);
-			return Enumerable.setup(node, src, function (seed) {
+				node = new Enumerable();
+			node.flag |= 8192;
+			return Enumerable.setup(node, src,  function (seed) {
 				var i,
 					cs = src.cs,
 					items = src.get(),
@@ -1357,7 +1358,7 @@
 		prototype.slice = function (start, end) {
 			var src = this,
 				node = new Enumerable();
-			return Enumerable.setup(node, src, function (seed) {
+			return Enumerable.setup(node, src,  function (seed) {
 				var i,
 					cs = src.cs,
 					items = src.get();
@@ -1414,7 +1415,7 @@
 			var src = this,
 				index = -1,
 				pure = callback.length === 1;
-			return tie(src, function (seed) {
+			return tie(src,  function (seed) {
 				var i,
 					cs = src.cs,
 					items = src.get(),
@@ -1436,10 +1437,10 @@
 			}, Void, 2);
 		}
 		prototype.sort = function (compareFunction) {
-			var self = this,
+			var src = this,
 				node = new Enumerable(8192);
-			return Enumerable.setup(node, this, function (seed) {
-				var items = self.get();
+			return Enumerable.setup(node, this, function () {
+				var items = src.get();
 				var newItems = items.slice();
 				newItems.sort(compareFunction);
 				return newItems;
