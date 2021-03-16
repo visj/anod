@@ -330,7 +330,7 @@ function data(val) {
 			to.slots[toslot] = fromslot;
 		}
 		if (from.flag & 2050) {
-			if (to.flag & 2048) {
+			if (to.flag & 2050) {
 				if (to.traces === null) {
 					to.traces = [toslot];
 				} else {
@@ -622,9 +622,6 @@ function data(val) {
 		return new List(val);
 	}
 	function IEnumerable(prototype) {
-		prototype.mut = function () {
-			return this.cs;
-		}
 		prototype.every = function (callback) {
 			var src = this,
 				pure = callback.length === 1;
@@ -697,8 +694,8 @@ function data(val) {
 				node = new Enumerable(),
 				pure = callback.length === 1;
 			return Enumerable.setup(node, src,  function (seed) {
-				var i, j, n, m, item,
-					mut, mut, found,
+				var i, j, n, m, item, args,
+					mut, mut, found, value,
 					cs = src.cs,
 					items = src.get(),
 					len = items.length;
@@ -737,7 +734,56 @@ function data(val) {
 							node.flag &= ~8192;
 						}
 					} else if (mut & 551) {
+						i = cs.i1;
+						n = k.length;
+						value = cs.value;
+						if (len > 0 && i < n) {
+							for (j = i; j < n && k[j] === -1; j++) { }
+							if (j >= n) {
+								j = seed.length;
+							} else {
+								j = k[j];
+							}
+						} else {
+							j = seed.length;
+						}
+						args = [i, 0];
+						n = value.length;
+						for (i = 0, m = 2; i < n; i++) {
+							args[m++] = -1;
+						}
+						k.splice.apply(k, args);
+						args[0] = j;
+						args.length = 2;
+						for (i = cs.i1, m = 2, n = i + n; i < n; i++) {
+							item = items[i];
+							if (callback(item)) {
+								k[i] = j++;
+								args[m++] = item;
+							}
+						}
+						n = args.length;
+						if (n > 2) {
+							n -= 2;
+							for (j = cs.i1 + value.length, m = len; j < m; j++) {
+								if (k[j] !== -1) {
+									k[j] += n;
+								}
+							}
+							seed.splice.apply(seed, args);
+							node.flag |= 8192;
+						} else {
+							node.flag &= ~8192;
+						}
 					} else if (mut & 1153) {
+						i = cs.i1;
+						j = cs.i2;
+						m = j > i ? 1 : -1;
+						item = k[i];
+						for (; i !== j; i += m) {
+							k[i] = k[i + m];
+						}
+						k[j] = item;
 					} else if (mut & 4146) {
 						found = callback(cs.value);
 						i = seed.length;
@@ -835,30 +881,18 @@ function data(val) {
 					}
 					return seed;
 				}
-				found = false;
 				for (i = 0, j = 0; i < len; i++) {
 					item = items[i];
 					if (callback(item, i)) {
-						if (k[i] !== j) {
-							found = true;
-							k[i] = j;
-							seed[j] = item;
-						}
-						j++;
+						k[i] = j;
+						seed[j++] = item;
 					} else {
-						if (k[i] !== j) {
-							found = true;
-							k[i] = -1;
-						}
+						k[i] = -1;
 					}
 				}
 				k.length = len;
 				seed.length = j;
-				if (found) {
-					node.flag |= 8192;
-				} else {
-					node.flag &= ~8192;
-				}
+				node.flag |= 8192;
 				return seed;
 			});
 		}
@@ -1618,7 +1652,16 @@ function data(val) {
 			cs.i2 = actualIndex(len, cs.i2);
 		}
 		if (mut & 291) {
-			array.splice(cs.i1, 0, cs.value);
+			i = cs.i1;
+			if (len === i) {
+				array.push(cs.value);
+				cs.type = 4146;
+			} else if (i === 0) {
+				array.unshift(cs.value);
+				cs.type = 262186;
+			} else {
+				array.splice(cs.i1, 0, cs.value);
+			}
 		} else if (mut & 551) {
 			args = [cs.i1, 0];
 			value = cs.value;
@@ -1655,7 +1698,16 @@ function data(val) {
 			array[len] = cs.value;
 		} else if (mut & 8257) {
 			if (len > 0) {
-				removeAt(array, cs.i1);
+				i = cs.i1;
+				if (len === i) {
+					array.pop();
+					cs.type = 2128;
+				} else if (len === 0) {
+					array.shift();
+					cs.type = 65608;
+				} else {
+					removeAt(array, i);
+				}
 			} else {
 				cs.type = 524288;
 			}
@@ -1811,44 +1863,60 @@ function data(val) {
 			len = array.length,
 			type = cs.type & 524032;
 		if (type & 291) {
-			i = len - 1 - cs.i1;
 			value = cs.value;
+			i = len - 1 - cs.i1;
 			array.splice(i, 0, value);
-			cs = { type: InsertAt, i1: i, value: value };
+			cs = { type: 291, i1: i, value: value };
 		} else if (type & 551) {
-			i = len - 1 - cs.i1;
-			value = cs.value;
+			i = cs.i1;
+			if (len === i) {
+				i = 0;
+			} else {
+				i = len - i;
+			}
 			args = [i, 0];
-			for (i = 0, len = value.length; i < len; i++) {
-				args[i + 2] = value[i];
+			value = cs.value;
+			for (j = 2, i = value.length - 1; i >= 0; i--) {
+				args[j++] = value[i];
 			}
 			array.splice.apply(array, args);
 			cs = { type: 551, i1: i, value: value };
 		} else if (type & 1153) {
-			i = len - 1 - cs.i1;
-			j = len - 1 - cs.i2;
+			if (len === cs.i1) {
+				i = 0;
+			} else {
+				i = len - 1 - cs.i1;
+			}
+			if (len === cs.i2) {
+				j = 0;
+			} else {
+				j = len - 1 - cs.i2;
+			}
 			k = j > i ? 1 : -1;
 			value = array[i];
 			for (; i !== j; i += k) {
 				array[i] = array[i + k];
 			}
 			array[j] = value;
+			cs = { type: 1153, i1: i, i2: j };
 		} else if (type & 2128) {
 			array.shift();
 			cs = { type: 65608 }
 		} else if (type & 4146) {
-			array.unshift(value);
-			cs = { type: 262186, value: value };
+			array.unshift(cs.value);
+			cs = { type: 262186, value: cs.value };
 		} else if (type & 8257) {
-			i = len - cs.i1;
+			i = len - 1 - cs.i1;
 			removeAt(array, i)
-			cs = { type: RemoveAt, i1: i };
+			cs = { type: 8257, i1: i };
 		} else if (type & 16453) {
-			i = len - 1 - cs.i1 - cs.i2;
+			i = len - cs.i1 - cs.i2;
 			array.splice(i, cs.i2);
 			cs = { type: 16453, i1: i, i2: cs.i2 };
 		} else if (type & 32867) {
 			i = len - 1 - cs.i1;
+			array[i] = cs.value;
+			cs = { type: 32867, i1: i, value: cs.value };
 		} else if (type & 65608) {
 			array.length--;
 			cs = { type: 2128 };
@@ -1858,8 +1926,6 @@ function data(val) {
 			cs = { type: 4146, value: cs.value };
 		}
 		return cs;
-	}
-	function applySliceMutation(array, cs) {
 	}
 	function indexOf(flag, cs, item, call, index, length, last) {
 		var type, mut, i, len, c;

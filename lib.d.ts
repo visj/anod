@@ -10,6 +10,7 @@ export interface Data<T = unknown> extends Signal<T> {
 }
 
 export interface Value<T = unknown> extends Data<T> { }
+
 /**
  * 
  */
@@ -77,18 +78,21 @@ export interface List<T = unknown> extends Data<T[]>, IEnumerable<T> {
 }
 
 export interface Computation<T = unknown> extends Signal<T> {
-
+	
+	/**
+	 * 
+	 */
 	dispose(): void;
 }
 
 /**
  * 
  */
-export interface IEnumerable<T> extends Signal<T[]> {
+export interface IEnumerable<T = unknown> extends Signal<T[]> {
 	/**
 	 * 
 	 */
-	mut(): Changeset<T>;
+	readonly cs: Changeset<T>;
 	/**
 	 * Determines whether all elements meet the condition of provided callback.
 	 * It does not propagate changes unless the computed value changes.
@@ -420,7 +424,6 @@ export interface ValueConstructor {
 }
 
 export interface ListProto<T> extends List<T>, DataProto<T> {
-	readonly cs: Changeset<T> | Changeset<T>[];
 	readonly pcs: Changeset<T> | Changeset<T>[];
 
 	update(): void;
@@ -443,18 +446,23 @@ export interface ComputationProto<T = unknown> extends Computation<T> {
 	readonly owned: Computation[] | null;
 	readonly cleanups: (() => void)[] | null;
 	readonly disposer: (() => void) | null;
-	
+
 	update(): void;
 }
 
 export interface ComputationConstructor {
-	new <T>(): Computation<T>;
+	/**
+	 * 
+	 */
+	new: <T>(log?: boolean) => Computation<T>;
+	/**
+	 * 
+	 */
 	setup: <T>(node: Computation<T>, f: (seed: T) => T, seed?: T, flags?: Flag) => Computation<T>;
 	readonly prototype: Computation<unknown>;
 }
 
 export interface Enumerable<T = unknown> extends Enumerable<T>, ComputationProto<T> {
-	readonly cs: Changeset<T> | Changeset<T>[];
 	readonly roots: Computation[];
 }
 

@@ -17,12 +17,13 @@ for (let i = 0; i < dirs.length; i++) {
 	let subdirs = fs.readdirSync(path.join(testdir, dir));
 	for (let j = 0; j < subdirs.length; j++) {
 		let file = subdirs[j];
+		let testfile = path.join(testdir, dir, file)
 		if (filter.length) {
-			if (filter.some(f => file.includes(f))) {
-				require(path.join(testdir, dir, file))(t);
+			if (filter.some(f => testfile.includes(f))) {
+				require(testfile)(t);
 			}
 		} else {
-			require(path.join(testdir, dir, file))(t);
+			require(testfile)(t);
 		}
 	}
 	

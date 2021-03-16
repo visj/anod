@@ -37,6 +37,65 @@ module.exports = function (t) {
 				t.equal(c1.get(), [1,0,4]);
 			});
 
+			t.test('insertRange', t => {
+				let d = list([1,2,3,4,5,6]);
+				let c1 = d.filter(x => x % 2 === 1 && x !== 3);
+				d.insertRange(5, [1,2,3,4]);
+				t.equal(c1.get(), [1,5,1]);
+
+				d.insertRange(3, [5,6,7,8,9,10,11]);
+				t.equal(c1.get(), [1,5,7,9,11,5,1]);
+			});
+
+			t.test('insertRange on empty array', t => {
+				let d = list([]);
+				let c1 = d.filter(x => x % 2 === 1 && x !== 3);
+				d.insertRange(4, [1,2,3,4,5]);
+				t.equal(c1.get(), [1,5]);
+			});
+
+			t.test('insertRange beyond range of array', t => {
+				let d = list([1,2,3,4,5,6]);
+				let c1 = d.filter(x => x % 2 === 1 && x !== 3);
+				d.insertRange(6, [1,2,3,4,5]);
+				t.equal(c1.get(), [1,5,1,5]);
+			});
+
+			t.test('move', t => {
+				let d = list([1,2,3,4,5,6,7]);
+				let c1 = d.filter(x => x % 2 === 1 && x !== 3);
+				d.move(6, 2);
+				t.equal(c1.get(), [1,7,5]);
+			});
+
+			t.test('move from existing to existing', t => {
+				let d = list([1,2,3,4,5,6,7]);
+				let c1 = d.filter(x => x % 2 === 1 && x !== 3);
+				d.move(4,0);
+				t.equal(c1.get(), [5,1,7]);
+			});
+
+			t.test('move from existing to non existing', t => {
+				let d = list([1,2,3,4,5,6,7]);
+				let c1 = d.filter(x => x % 2 === 1 && x !== 3);
+				d.move(0, 5);
+				t.equal(c1.get(), [5,1,7]);
+			});
+
+			t.test('move from non existing to existing', t => {
+				let d = list([1,2,3,4,5,6,7]);
+				let c1 = d.filter(x => x % 2 === 1 && x !== 3);
+				d.move(2, 4);
+				t.equal(c1.get(), [1,5,7]);
+			});
+
+			t.test('move from non existing to non existing', t => {
+				let d = list([1,2,3,4,5,6,7]);
+				let c1 = d.filter(x => x % 2 === 1 && x !== 3);
+				d.move(1, 3);
+				t.equal(c1.get(), [1,5,7]);
+			})
+
 			t.test('push', t => {
 				let d = list([1,2,3,4,5,6]);
 				let c1 = d.filter(x => x % 2 === 1 && x !== 3);
@@ -54,6 +113,8 @@ module.exports = function (t) {
 				d.pop();
 				t.equal(c1.get(), [1]);
 			});
+
+
 		});
 	});
 }
