@@ -6,12 +6,13 @@ const { list, cleanup, root, Flag, tie, } = require('../../..');
  */
 module.exports = function (t) {
 	t.test('filter', t => {
+
 		t.test('filters based on callback', t => {
 			let d = list([1, 2, 3]);
-			let d1 = d.filter(x => x !== 2);
-			t.equal(d1.get(), [1, 3]);
-			let d2 = d.filter(x => false);
-			t.equal(d2.get(), []);
+			let c1 = d.filter(x => x !== 2);
+			t.equal(c1.get(), [1, 3]);
+			let c2 = d.filter(x => false);
+			t.equal(c2.get(), []);
 		});
 
 		t.test('mutations', t => {
@@ -64,8 +65,8 @@ module.exports = function (t) {
 			t.test('move', t => {
 				let d = list([1,2,3,4,5,6,7]);
 				let c1 = d.filter(x => x % 2 === 1 && x !== 3);
-				d.move(6, 2);
-				t.equal(c1.get(), [1,7,5]);
+				d.move(5, 2);
+				t.equal(c1.get(), [1,5,7]);
 			});
 
 			t.test('move from existing to existing', t => {
@@ -94,7 +95,7 @@ module.exports = function (t) {
 				let c1 = d.filter(x => x % 2 === 1 && x !== 3);
 				d.move(1, 3);
 				t.equal(c1.get(), [1,5,7]);
-			})
+			});
 
 			t.test('push', t => {
 				let d = list([1,2,3,4,5,6]);

@@ -14,14 +14,13 @@ const { data, run /* ... */ } = window.anod;
 Anod started out as a research project looking at fine grain data binding with conditional branching. Related research was initated by S.js with [subclocks](https://github.com/adamhaile/S#ssubclock--code) as a proposed solution. For some related discussion, see [#1](https://github.com/adamhaile/S/issues/26), [#2](https://github.com/adamhaile/S/issues/32), [#3](https://github.com/ryansolid/solid/issues/55).
 
 # Status
-Anod is still a work in progress and some features - notably for some array operations - are still missing. The core reactive library with conditional branching logic is fully functional and tested.
+Anod is still a work in progress and there might be bugs. Focus right now is to increase test coverage.
 
 # Documentation
 Anod is based on [S](https://github.com/adamhaile/S#api) with a slightly different API.
 
 ## Quick start
-
-
+\# Todo
 ## Data signals
 Signals hold a current value that can be read by computations, and once set, will notify any dependent computation to trigger an update.
 
@@ -124,8 +123,35 @@ ds2(4); // does not print
 ## Ownership
 Any computation created inside the scope of another is owned by that parent computation. Whenever the parent computation is updated or disposed, the child computation is automatically disposed.
 ### `root<T>(node: Computation<T> | () => T, f?: () => T): Computation<T>`
+`root` creates a root computation that lives until manually disposed. That means, a root computation created inside the scope of another computation will not be automatically disposed.
+```js
+import { data, fn, root } from 'anod';
+const ds = data(1);
+let roots = [];
+let seed = 0;
+fn(() => {
+	ds();
+	let id = seed++;
+	roots[id] = root(() => {
+		fn(() => { console.log(id); });
+	});
+});
+ds(2); // prints "0", "1"
+ds(3); // prints "0", "1", "2"
+roots.forEach(r => r.dispose());
+ds(4); // prints "3"
+```
+`root` also accepts a computation node as first argument. This way, one may extend existing root computation nodes with additional computations to be owned by that root. Any computation created inside this scope will be disposed once the provided root computation is disposed.
 
+## Lifecycle
+### `cleanup(f: () => void): void`
+`cleanup` adds cleanup logic to a computation node. Whenever a node is updated, `f` will be run. `cleanup` is run finally once when a computation node is disposed.
 
+### `disposer: () => void`
+Computation nodes optionally accept a last parameter `disposer`. This function will run once a computation node is disposed.
+## Batching changes
+### `freeze<T>(f: () => T): T`
+`freeze` pauses execution until `f` has run, and then applies any changes in a single commit. This is especially useful when computations are bound to multiple data signals and you only want them to update once despite updating multiple signals.
 ## Reactivity
 Anod offers a few different flags contained by the enum `Flag` that modifies how computations behave.
 

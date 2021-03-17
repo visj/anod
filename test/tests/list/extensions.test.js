@@ -1,5 +1,5 @@
 const { Test } = require('boer');
-const { list, run, freeze } = require('../../..');
+const { list, run, freeze, Mod } = require('../../..');
 
 /**
  * 
@@ -33,6 +33,18 @@ module.exports = function (t) {
 				d.insertAt(3, 6);
 				d.insertAt(8, 7);
 				t.equal(d.get(), [1, 2, 3, 6, 4, 5, 7]);
+			});
+
+			t.test('converts to push when added to end', t => {
+				let d = list([1,2,3]);
+				d.insertAt(3, 4);
+				t.equal(d.cs.type, Mod.Push);
+			});
+
+			t.test('converts to unshift when added to start', t => {
+				let d = list([1,2,3]);
+				d.insertAt(0, 0);
+				t.equal(d.cs.type, Mod.Unshift);
 			})
 		});
 
@@ -91,8 +103,7 @@ module.exports = function (t) {
 				t.equal(d.get(), [5, 1, 2, 3, 4]);
 				d.move(2, 6);
 				t.equal(d.get(), [5, 1, 3, 4, 2]);
-
-			})
+			});
 		});
 
 		t.test('removeAt', t => {
@@ -124,6 +135,18 @@ module.exports = function (t) {
 				let d = list([1, 2, 3]);
 				d.removeAt(4);
 				t.equal(d.get(), [1, 2]);
+			});
+
+			t.test('converts to pop when removed at end', t => {
+				let d = list([1,2,3]);
+				d.removeAt(4);
+				t.equal(d.cs.type, Mod.Pop);
+			});
+
+			t.test('converts to shift when removed at start', t => {
+				let d = list([1,2,3]);
+				d.removeAt(0);
+				t.equal(d.cs.type, Mod.Shift);
 			});
 		});
 

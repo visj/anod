@@ -358,7 +358,7 @@ export function run<T>(f: (seed: T) => T, seed?: T, flags?: number, dispose?: ()
  * });
  * @param f Callback to run during update
  */
-export function cleanup(f: (final: boolean) => void): void;
+export function cleanup(f: () => void): void;
 
 /**
  * `freeze` allows batching updates so that setting multiple
@@ -472,7 +472,7 @@ export interface EnumerableConstructor {
 	readonly prototype: Enumerable<unknown>;
 }
 
-export const enum Modification {
+export const enum Mod {
 	Indexed = 256,
 	Ranged = 512,
 	Insert = 1024,
@@ -480,7 +480,7 @@ export const enum Modification {
 	Reorder = 4096,
 }
 
-export const enum Mutation {
+export const enum Mod {
 	InsertAt = 1 | Modification.Indexed | Modification.Insertion,
 	INsertRange = 2 | Modification.Indexed | Modification.Ranged | Modification.Insertion,
 	Pop = 4 | Modification.Deletion,

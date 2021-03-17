@@ -1,5 +1,5 @@
 const { Test } = require('boer');
-const { list, run, freeze } = require('../../..');
+const { list, run, freeze, Mod } = require('../../..');
 
 /**
  * 
@@ -52,6 +52,31 @@ module.exports = function (t) {
 				let c1 = run(() => d.get());
 				d.set([4, 5, 6]);
 				t.equal(c1(), [4, 5, 6]);
+			});
+		});
+
+		t.test('mutation', t => {
+			t.test('creates single mutations on each update', t => {
+				let d = list([1,2,3]);
+				t.equal(d.cs, null);
+				d.push(4);
+				t.equal(typeof d.cs, 'object');
+				t.equal(d.cs.type, Mod.Push);
+			});
+
+			t.test('creates array of mutations when set inside freeze', t => {
+				let d = list([1,2,3]);
+				freeze(() => { d.push(4); d.removeAt(1); });
+				t.assert(Array.isArray(d.cs));
+				t.equal(d.cs.length, 2);
+			});
+
+			t.test('sets changeset to null when setting new value', t => {
+				let d = list([1,2,3]);
+				d.shift();
+				t.not.equal(d.cs, null);
+				d.set([1,2,3]);
+				t.equal(d.cs, null);
 			});
 		});
 	});

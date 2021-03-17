@@ -32,7 +32,7 @@ function data(val) {
 		return function () { return node.get(); }
 	}
 	function fn(f, seed, flags, dispose) {
-		Computation.setup(new Computation(), f, seed, 32 | flags, dispose);
+		Computation.setup(new Computation(null), f, seed, 32 | flags, dispose);
 	}
 	function on(src, f, seed, flags, dispose) {
 		var node = new Computation(null);
@@ -82,7 +82,7 @@ function data(val) {
 			listener = Listener;
 		if (typeof node === 'function') {
 			f = node;
-			node = new Computation();
+			node = new Computation(null);
 		}
 		Owner = node;
 		Listener = null;
@@ -161,6 +161,9 @@ function data(val) {
 		this.owned = null;
 		this.cleanups = null;
 		this.disposer = null;
+	}
+	Computation.new = function (log) {
+		return new Computation(log ? Log() : null);
 	}
 	Computation.setup = function (node, f, seed, flags, dispose) {
 		var clock = Root,
@@ -354,12 +357,12 @@ function data(val) {
 				changes.items[changes.len++] = node;
 			}
 		} else {
+			node.pval = val;
 			if (node.flag & 512) {
-				node.pval = val;
 				changes.items[changes.len++] = node;
 				execute();
 			} else {
-				node.val = val;
+				node.update();
 			}
 		}
 		return val;
@@ -704,182 +707,185 @@ function data(val) {
 					seed = new Array(len);
 				} else if (pure && cs !== null) {
 					mut = cs.type & 524032;
-					if (mut & 291) {
-						i = cs.i1;
-						item = cs.value;
-						found = callback(item);
-						if (found) {
-							if (seed.length > 0) {
-								for (j = i, n = k.length; j < n; j++) {
-									m = k[j];
-									if (m !== -1) {
-										seed.splice(m, 0, item);
-										break;
+					if (cs.type & 128) {
+					} else {
+						if (mut & 291) {
+							i = cs.i1;
+							item = cs.value;
+							found = callback(item);
+							if (found) {
+								if (seed.length > 0) {
+									for (j = i, n = k.length; j < n; j++) {
+										m = k[j];
+										if (m !== -1) {
+											seed.splice(m, 0, item);
+											break;
+										}
+									}
+									k.splice(i, 0, m);
+								} else {
+									n = seed.length;
+									seed[n] = item;
+									k.splice(i, 0, n);
+								}
+								node.flag |= 8192;
+								for (i++; i < len; i++) {
+									if (k[i] !== -1) {
+										k[i]++;
 									}
 								}
-								k.splice(i, 0, m);
 							} else {
-								n = seed.length;
-								seed[n] = item;
-								k.splice(i, 0, n);
+								k.splice(i, 0, -1);
+								node.flag &= ~8192;
 							}
-							node.flag |= 8192;
-							for (i++; i < len; i++) {
-								if (k[i] !== -1) {
-									k[i]++;
+						} else if (mut & 551) {
+							i = cs.i1;
+							n = k.length;
+							value = cs.value;
+							if (len > 0 && i < n) {
+								for (j = i; j < n && k[j] === -1; j++) { }
+								if (j >= n) {
+									j = seed.length;
+								} else {
+									j = k[j];
 								}
-							}
-						} else {
-							k.splice(i, 0, -1);
-							node.flag &= ~8192;
-						}
-					} else if (mut & 551) {
-						i = cs.i1;
-						n = k.length;
-						value = cs.value;
-						if (len > 0 && i < n) {
-							for (j = i; j < n && k[j] === -1; j++) { }
-							if (j >= n) {
+							} else {
 								j = seed.length;
-							} else {
-								j = k[j];
 							}
-						} else {
-							j = seed.length;
-						}
-						args = [i, 0];
-						n = value.length;
-						for (i = 0, m = 2; i < n; i++) {
-							args[m++] = -1;
-						}
-						k.splice.apply(k, args);
-						args[0] = j;
-						args.length = 2;
-						for (i = cs.i1, m = 2, n = i + n; i < n; i++) {
-							item = items[i];
-							if (callback(item)) {
-								k[i] = j++;
-								args[m++] = item;
+							args = [i, 0];
+							n = value.length;
+							for (i = 0, m = 2; i < n; i++) {
+								args[m++] = -1;
 							}
-						}
-						n = args.length;
-						if (n > 2) {
-							n -= 2;
-							for (j = cs.i1 + value.length, m = len; j < m; j++) {
-								if (k[j] !== -1) {
-									k[j] += n;
+							k.splice.apply(k, args);
+							args[0] = j;
+							args.length = 2;
+							for (i = cs.i1, m = 2, n = i + n; i < n; i++) {
+								item = items[i];
+								if (callback(item)) {
+									k[i] = j++;
+									args[m++] = item;
 								}
 							}
-							seed.splice.apply(seed, args);
-							node.flag |= 8192;
-						} else {
-							node.flag &= ~8192;
-						}
-					} else if (mut & 1153) {
-						i = cs.i1;
-						j = cs.i2;
-						m = j > i ? 1 : -1;
-						item = k[i];
-						for (; i !== j; i += m) {
-							k[i] = k[i + m];
-						}
-						k[j] = item;
-					} else if (mut & 4146) {
-						found = callback(cs.value);
-						i = seed.length;
-						k[k.length] = found ? i : -1;
-						if (found) {
-							seed[i] = cs.value;
-							node.flag |= 8192;
-						} else {
-							node.flag &= ~8192;
-						}
-					} else if (mut & 2128) {
-						i = k.pop();
-						if (i !== -1) {
-							seed.pop();
-							node.flag |= 8192;
-						} else {
-							node.flag &= ~8192;
-						}
-					} else if (mut & 8257) {
-						i = cs.i1;
-						j = k[i];
-						if (j !== -1) {
-							removeAt(k, i);
-							for (i++; i < len; i++) {
+							n = args.length;
+							if (n > 2) {
+								n -= 2;
+								for (j = cs.i1 + value.length, m = len; j < m; j++) {
+									if (k[j] !== -1) {
+										k[j] += n;
+									}
+								}
+								seed.splice.apply(seed, args);
+								node.flag |= 8192;
+							} else {
+								node.flag &= ~8192;
+							}
+						} else if (mut & 1153) {
+							i = cs.i1;
+							j = cs.i2;
+							m = j > i ? 1 : -1;
+							item = k[i];
+							for (; i !== j; i += m) {
+								k[i] = k[i + m];
+							}
+							k[j] = item;
+						} else if (mut & 4146) {
+							found = callback(cs.value);
+							i = seed.length;
+							k[k.length] = found ? i : -1;
+							if (found) {
+								seed[i] = cs.value;
+								node.flag |= 8192;
+							} else {
+								node.flag &= ~8192;
+							}
+						} else if (mut & 2128) {
+							i = k.pop();
+							if (i !== -1) {
+								seed.pop();
+								node.flag |= 8192;
+							} else {
+								node.flag &= ~8192;
+							}
+						} else if (mut & 8257) {
+							i = cs.i1;
+							j = k[i];
+							if (j !== -1) {
+								removeAt(k, i);
+								for (i++; i < len; i++) {
+									if (k[i] !== -1) {
+										k[i]--;
+									}
+								}
+								removeAt(seed, j);
+								node.flag |= 8192;
+							} else {
+								node.flag &= ~8192;
+							}
+						} else if (mut & 16453) {
+							i = cs.i1;
+							j = cs.i2;
+							n = 0;
+							for (; j >= 0; i++, j--) {
+								if (k[i] !== -1) {
+									n++;
+									k[i] = -1;
+								}
+							}
+							if (n > 0) {
+								for (i = cs.i1; i < len; i++) {
+									if (k[i] !== -1) {
+										k[i] -= n;
+									}
+								}
+								seed.splice(cs.i1, n);
+								node.flag |= 8192;
+							} else {
+								node.flag &= ~8192;
+							}
+						} else if (mut & 32867) {
+							i = cs.i1;
+							j = k[i];
+							if (j !== -1) {
+								seed[j] = cs.value;
+								node.flag |= 8192;
+							} else {
+								node.flag &= 8192;
+							}
+						} else if (mut & 65608) {
+							j = k[0];
+							k.shift();
+							for (i = 1; i < len; i++) {
 								if (k[i] !== -1) {
 									k[i]--;
 								}
 							}
-							removeAt(seed, j);
-							node.flag |= 8192;
-						} else {
-							node.flag &= ~8192;
-						}
-					} else if (mut & 16453) {
-						i = cs.i1;
-						j = cs.i2;
-						n = 0;
-						for (; j >= 0; i++, j--) {
-							if (k[i] !== -1) {
-								n++;
-								k[i] = -1;
+							if (j !== -1) {
+								seed.shift();
+								node.flag |= 8192;
+							} else {
+								node.flag &= ~8192;
 							}
-						}
-						if (n > 0) {
-							for (i = cs.i1; i < len; i++) {
+						} else if (mut & 131201) {
+							i = k[cs.i1];
+							j = k[cs.i2];
+						} else if (mut & 262186) {
+							found = callback(cs.value);
+							k.unshift(found ? 0 : -1);
+							for (i = 1; i < len; i++) {
 								if (k[i] !== -1) {
-									k[i] -= n;
+									k[i]++;
 								}
 							}
-							seed.splice(cs.i1, n);
-							node.flag |= 8192;
-						} else {
-							node.flag &= ~8192;
-						}
-					} else if (mut & 32867) {
-						i = cs.i1;
-						j = k[i];
-						if (j !== -1) {
-							seed[j] = cs.value;
-							node.flag |= 8192;
-						} else {
-							node.flag &= 8192;
-						}
-					} else if (mut & 65608) {
-						j = k[0];
-						k.shift();
-						for (i = 1; i < len; i++) {
-							if (k[i] !== -1) {
-								k[i]--;
+							if (found) {
+								seed.unshift(cs.value);
+								node.flag |= 8192;
+							} else {
+								node.flag &= ~8192;
 							}
 						}
-						if (j !== -1) {
-							seed.shift();
-							node.flag |= 8192;
-						} else {
-							node.flag &= ~8192;
-						}
-					} else if (mut & 131201) {
-						i = k[cs.i1];
-						j = k[cs.i2];
-					} else if (mut & 262186) {
-						found = callback(cs.value);
-						k.unshift(found ? 0 : -1);
-						for (i = 1; i < len; i++) {
-							if (k[i] !== -1) {
-								k[i]++;
-							}
-						}
-						if (found) {
-							seed.unshift(cs.value);
-							node.flag |= 8192;
-						} else {
-							node.flag &= ~8192;
-						}
+						return seed;
 					}
-					return seed;
 				}
 				for (i = 0, j = 0; i < len; i++) {
 					item = items[i];
@@ -1650,6 +1656,19 @@ function data(val) {
 		}
 		if (type & 128) {
 			cs.i2 = actualIndex(len, cs.i2);
+			i = cs.i1;
+			j = cs.i2;
+			if (i !== j) {
+				if (i === len) {
+					i = --cs.i1;
+				}
+				if (j === len) {
+					j = --cs.i2;
+				}
+			} else {
+				cs.type = 524288;
+				return cs;
+			}
 		}
 		if (mut & 291) {
 			i = cs.i1;
@@ -1670,24 +1689,12 @@ function data(val) {
 			}
 			array.splice.apply(array, args);
 		} else if (mut & 1153) {
-			i = cs.i1;
-			j = cs.i2;
-			if (i !== j) {
-				if (i === len) {
-					i = --cs.i1;
-				}
-				if (j === len) {
-					j = --cs.i2;
-				}
-				k = j > i ? 1 : -1;
-				args = array[i];
-				for (; i !== j; i += k) {
-					array[i] = array[i + k];
-				}
-				array[j] = args;
-			} else {
-				cs.type = 524288;
+			k = j > i ? 1 : -1;
+			args = array[i];
+			for (; i !== j; i += k) {
+				array[i] = array[i + k];
 			}
+			array[j] = args;
 		} else if (mut & 2128) {
 			if (len > 0) {
 				array.length--;
@@ -1702,7 +1709,7 @@ function data(val) {
 				if (len === i) {
 					array.pop();
 					cs.type = 2128;
-				} else if (len === 0) {
+				} else if (i === 0) {
 					array.shift();
 					cs.type = 65608;
 				} else {
@@ -1729,9 +1736,9 @@ function data(val) {
 				cs.type = 524288;
 			}
 		} else if (mut & 131201) {
-			value = array[cs.i1];
-			array[cs.i1] = array[cs.i2];
-			array[cs.i2] = value;
+			value = array[i];
+			array[i] = array[j];
+			array[j] = value;
 		} else if (mut & 262186) {
 			array.unshift(cs.value);
 		}
@@ -1921,8 +1928,13 @@ function data(val) {
 			array.length--;
 			cs = { type: 2128 };
 		} else if (type & 131201) {
+			i = len - 1 - cs.i1;
+			j = len - 1 - cs.i2;
+			value = array[i];
+			array[i] = array[j];
+			array[j] = value;
 		} else if (type & 262186) {
-			array[len] = value;
+			array[len] = cs.value;
 			cs = { type: 4146, value: cs.value };
 		}
 		return cs;
