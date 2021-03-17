@@ -38,13 +38,13 @@ module.exports = function (t) {
 			t.test('converts to push when added to end', t => {
 				let d = list([1,2,3]);
 				d.insertAt(3, 4);
-				t.equal(d.cs.type, Mod.Push);
+				t.equal(d.cs.mod, Mod.Push);
 			});
 
 			t.test('converts to unshift when added to start', t => {
 				let d = list([1,2,3]);
 				d.insertAt(0, 0);
-				t.equal(d.cs.type, Mod.Unshift);
+				t.equal(d.cs.mod, Mod.Unshift);
 			})
 		});
 
@@ -140,13 +140,13 @@ module.exports = function (t) {
 			t.test('converts to pop when removed at end', t => {
 				let d = list([1,2,3]);
 				d.removeAt(4);
-				t.equal(d.cs.type, Mod.Pop);
+				t.equal(d.cs.mod, Mod.Pop);
 			});
 
 			t.test('converts to shift when removed at start', t => {
 				let d = list([1,2,3]);
 				d.removeAt(0);
-				t.equal(d.cs.type, Mod.Shift);
+				t.equal(d.cs.mod, Mod.Shift);
 			});
 		});
 

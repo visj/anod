@@ -61,7 +61,7 @@ module.exports = function (t) {
 				t.equal(d.cs, null);
 				d.push(4);
 				t.equal(typeof d.cs, 'object');
-				t.equal(d.cs.type, Mod.Push);
+				t.equal(d.cs.mod, Mod.Push);
 			});
 
 			t.test('creates array of mutations when set inside freeze', t => {

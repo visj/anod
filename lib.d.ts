@@ -1,7 +1,15 @@
+/**
+ * A signal is the foundation of Anod, and 
+ * any object that can be read extends this interface,
+ * regardless of whether it logs changes or not.
+ */
 export interface Signal<T = unknown> {
 	get(): T;
 }
 
+/**
+ * 
+ */
 export interface Data<T = unknown> extends Signal<T> {
 	/**
 	 * 
@@ -29,12 +37,20 @@ export interface List<T = unknown> extends Data<T[]>, IEnumerable<T> {
 	insertRange(index: number, items: T[]): void;
 	/**
 	 * Moves an item from `from` to `to`
+	 * If an index is negative, `move` will
+	 * count backwards. -1 is the last index
+	 * of the array and then counting.
+	 * If an index lies beyond the range of 
+	 * the array, the last or first index 
+	 * will be used respectively.
 	 * @param from From index
 	 * @param to To index
 	 */
 	move(from: number, to: number): void;
 	/**
 	 * Removes an element from the end of the array
+	 * If the array is empty, this method will 
+	 * dispatch a void changeset.
 	 */
 	pop(): void;
 	/**
@@ -44,6 +60,12 @@ export interface List<T = unknown> extends Data<T[]>, IEnumerable<T> {
 	push(item: T): void;
 	/**
 	 * Removes an item at specified index
+	 * If provided index is negative, `removeAt`
+	 * will start counting backwards. -1 is the last
+	 * index of the array and then counting.
+	 * When removing at first or last index, this 
+	 * method will dispatch a `shift` or `pop` 
+	 * changeset respectively. 
 	 * @param index Index at which to remove
 	 */
 	removeAt(index: number): void;
@@ -54,18 +76,28 @@ export interface List<T = unknown> extends Data<T[]>, IEnumerable<T> {
 	 */
 	removeRange(index: number, count: number): void;
 	/**
-	 * 
+	 * Replace sets an item at a specific index. 
+	 * It is the equivalent of setting an array 
+	 * index in a normal manner, `list[index] = item`.
 	 * @param index 
 	 * @param item 
 	 */
 	replace(index: number, item: T): void;
 	/**
-	 * Removes an item from beginning of array
+	 * Removes an item from beginning of array.
+	 * If the array is empty, this method will
+	 * dispatch a void changeset.
 	 */
 	shift(): void;
 	/**
 	 * Swaps location between item located at
-	 * index `indexA` and `indexB`
+	 * index `i1` and `i2`
+	 * If provided index is negative, `swap` will
+	 * start counting backwards. -1 is
+	 * the last index of the array and then counting.
+	 * If an index lies beyond the range 
+	 * of the array, it will truncate to the last
+	 * or first index.
 	 * @param i1 Index of first item to swap
 	 * @param i2 Index of second item to swap
 	 */
@@ -245,6 +277,30 @@ export const enum Flag {
 	Static = 8,
 }
 
+export const enum Mod {
+	Index = 1,
+	Value = 2,
+	Range = 4,
+	Head = 8,
+	Tail = 16,
+	Add = 32,
+	Delete = 64,
+	Reorder = 128,
+	InsertAt = 256 | Mod.Index | Mod.Value | Mod.Add,
+	InsertRange = 512 | Mod.Index | Mod.Value | Mod.Range | Mod.Add,
+	Move = 1024 | Mod.Index | Mod.Reorder,
+	Pop = 2048 | Mod.Tail | Mod.Delete,
+	Push = 4096 | Mod.Value | Mod.Tail | Mod.Add,
+	RemoveAt = 8192 | Mod.Index | Mod.Delete,
+	RemoveRange = 16384 | Mod.Index | Mod.Range | Mod.Delete,
+	Replace = 32768 | Mod.Index | Mod.Value | Mod.Add | Mod.Delete,
+	Shift = 65536 | Mod.Head | Mod.Delete,
+	Swap = 131072 | Mod.Index | Mod.Reorder,
+	Unshift = 262144 | Mod.Add | Mod.Value | Mod.Head,
+	Void = 524288,
+	Type = 524032,
+}
+
 /**
  * Creates a data signal that can be read by computation nodes.
  * When passed a new value, it always trigger dependent computation nodes.
@@ -378,11 +434,33 @@ export function cleanup(f: () => void): void;
 export function freeze<T>(f: () => T): T;
 
 /**
- * 
- * @param f 
+ * `root` creates a root computation node that lives until
+ * `dispose` is called manually. It means, if created inside
+ * the scope of a parent, it will outlive this parent.
+ * @example
+ * let ds = data(0);
+ * let roots;
+ * fn(() => {
+ * 	ds();
+ * 	roots[roots.length] = root(() => {
+ * 		cleanup(() => { console.log('disposed'); });
+ * 	});
+ * });
+ * ds(1);
+ * ds(2);
+ * roots.forEach(r => r.dispose()); // prints "disposed" three times
+ * @param f Callback to setup computation node with
  */
 export function root<T>(f: () => T): Computation<T>;
 
+/**
+ * `root` accepts an existing computation node and extends it.
+ * That is, any cleanup or computation created inside `f` will 
+ * be owned by `node` and added to its lifecycle.
+ * @see root
+ * @param node Computation node to extend
+ * @param f Callback to extend node with
+ */
 export function root<T>(node: Computation<T>, f: () => T): T;
 
 /**
@@ -398,6 +476,28 @@ export const Value: ValueConstructor;
 export const List: ListConstructor;
 export const Computation: ComputationConstructor;
 export const Enumerable: EnumerableConstructor;
+
+export const Void: {};
+
+/**
+ * 
+ */
+ export interface Log<T> {
+	readonly node1: T;
+	readonly slot1: number;
+	readonly nodes: T[];
+	readonly slots: number[];
+}
+
+/**
+ * 
+ */
+export interface Changeset<T> {
+	readonly type: number;
+	readonly index?: number;
+	readonly count?: number;
+	readonly value?: T | T[];
+}
 
 export interface DataProto<T = unknown> extends Data<T> {
 	readonly val: T;
@@ -451,10 +551,11 @@ export interface ComputationProto<T = unknown> extends Computation<T> {
 }
 
 export interface ComputationConstructor {
+	new(log: Log | null): Computation<T>;
 	/**
 	 * 
 	 */
-	new: <T>(log?: boolean) => Computation<T>;
+	make: <T>(log?: boolean) => Computation<T>;
 	/**
 	 * 
 	 */
@@ -470,48 +571,4 @@ export interface EnumerableConstructor {
 	new <T>(): Enumerable<T>;
 	setup<T>(node: Enumerable<T>, source: IEnumerable, f: (seed: T) => T): Enumerable<T>;
 	readonly prototype: Enumerable<unknown>;
-}
-
-export const enum Mod {
-	Indexed = 256,
-	Ranged = 512,
-	Insert = 1024,
-	Delete = 2048,
-	Reorder = 4096,
-}
-
-export const enum Mod {
-	InsertAt = 1 | Modification.Indexed | Modification.Insertion,
-	INsertRange = 2 | Modification.Indexed | Modification.Ranged | Modification.Insertion,
-	Pop = 4 | Modification.Deletion,
-	Push = 8 | Modification.Insertion,
-	RemoveAt = 16 | Modification.Indexed | Modification.Deletion,
-	RemoveRange = 32 | Modification.Indexed | Modification.Ranged | Modification.Deletion,
-	Shift = 64 | Modification.Deletion,
-	Unshift = 128 | Modification.Insertion,
-	TypeFlag = 255,
-}
-
-export const Void: {};
-export const Owner: Computation;
-export const Listener: Computation;
-
-/**
- * 
- */
-export interface Log<T> {
-	readonly node1: T;
-	readonly slot1: number;
-	readonly nodes: T[];
-	readonly slots: number[];
-}
-
-/**
- * 
- */
-export interface Changeset<T> {
-	readonly type: number;
-	readonly index?: number;
-	readonly count?: number;
-	readonly value?: T | T[];
 }

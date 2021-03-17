@@ -162,7 +162,7 @@ function data(val) {
 		this.cleanups = null;
 		this.disposer = null;
 	}
-	Computation.new = function (log) {
+	Computation.make = function (log) {
 		return new Computation(log ? Log() : null);
 	}
 	Computation.setup = function (node, f, seed, flags, dispose) {
@@ -636,8 +636,8 @@ function data(val) {
 				if (seed !== Void && pure && cs !== null) {
 					if (src.flag & 4096) {
 						if (seed) {
-							if (cs.type & 32) {
-								if (cs.type & 4) {
+							if (cs.mod & 32) {
+								if (cs.mod & 4) {
 									for (i = 0, ilen = cs.value.length; i < ilen; i++) {
 										if (!callback(cs.value[i])) {
 											return false;
@@ -651,7 +651,7 @@ function data(val) {
 								return true;
 							}
 						} else {
-							if (cs.type & 160) {
+							if (cs.mod & 160) {
 								return false;
 							}
 						}
@@ -660,8 +660,8 @@ function data(val) {
 							for (i = 0, ilen = cs.length; i < ilen; i++) {
 								c = cs[i];
 								if (seed) {
-									if (c.type & 32) {
-										if (c.type & 4) {
+									if (c.mod & 32) {
+										if (c.mod & 4) {
 											for (j = 0, jlen = c.value.length; j < jlen; j++) {
 												if (!callback(c.value[j])) {
 													return false;
@@ -674,7 +674,7 @@ function data(val) {
 										}
 									}
 								} else {
-									if (c.type & 64) {
+									if (c.mod & 64) {
 										break scope;
 									}
 								}
@@ -706,8 +706,8 @@ function data(val) {
 					k = new Array(len);
 					seed = new Array(len);
 				} else if (pure && cs !== null) {
-					mut = cs.type & 524032;
-					if (cs.type & 128) {
+					mut = cs.mod & 524032;
+					if (cs.mod & 128) {
 					} else {
 						if (mut & 291) {
 							i = cs.i1;
@@ -1498,37 +1498,37 @@ function data(val) {
 		}
 	}
 	List.prototype.insertAt = function (index, item) {
-		logMutate(this, { type: 291, i1: index, value: item });
+		logMutate(this, { mod: 291, i1: index, value: item });
 	}
 	List.prototype.insertRange = function (index, items) {
-		logMutate(this, { type: 551, i1: index, value: items });
+		logMutate(this, { mod: 551, i1: index, value: items });
 	}
 	List.prototype.move = function (from, to) {
-		logMutate(this, { type: 1153, i1: from, i2: to });
+		logMutate(this, { mod: 1153, i1: from, i2: to });
 	}
 	List.prototype.pop = function () {
-		logMutate(this, { type: 2128 });
+		logMutate(this, { mod: 2128 });
 	}
 	List.prototype.push = function (item) {
-		logMutate(this, { type: 4146, value: item });
+		logMutate(this, { mod: 4146, value: item });
 	}
 	List.prototype.removeAt = function (index) {
-		logMutate(this, { type: 8257, i1: index });
+		logMutate(this, { mod: 8257, i1: index });
 	}
 	List.prototype.removeRange = function (index, count) {
-		logMutate(this, { type: 16453, i1: index, i2: count });
+		logMutate(this, { mod: 16453, i1: index, i2: count });
 	}
 	List.prototype.replace = function (index, item) {
-		logMutate(this, { type: 32867, i1: index, value: item });
+		logMutate(this, { mod: 32867, i1: index, value: item });
 	}
 	List.prototype.shift = function () {
-		logMutate(this, { type: 65608 });
+		logMutate(this, { mod: 65608 });
 	}
 	List.prototype.swap = function (i1, i2) {
-		logMutate(this, { type: 131201, i1: i1, i2: i2 });
+		logMutate(this, { mod: 131201, i1: i1, i2: i2 });
 	}
 	List.prototype.unshift = function (item) {
-		logMutate(this, { type: 262186, value: item });
+		logMutate(this, { mod: 262186, value: item });
 	}
 	function Enumerable() {
 		Computation.call(this, Log());
@@ -1599,9 +1599,9 @@ function data(val) {
 		Range: 4,
 		Head: 8,
 		Tail: 16,
-		Insertion: 32,
-		Deletion: 64,
-		Reordering: 128,
+		Add: 32,
+		Delete: 64,
+		Reorder: 128,
 		InsertAt: 291,
 		InsertRange: 551,
 		Move: 1153,
@@ -1614,7 +1614,7 @@ function data(val) {
 		Swap: 131201,
 		Unshift: 262186,
 		Void: 524288,
-		Mutation: 524032,
+		Type: 524032,
 	};
 	function logMutate(node, cs) {
 		var changes = Root.changes;
@@ -1649,12 +1649,12 @@ function data(val) {
 	function applyMutation(array, cs) {
 		var i, j, k, args, value,
 			len = array.length,
-			type = cs.type,
-			mut = type & 524032;
-		if (type & 1) {
+			mod = cs.mod,
+			mut = mod & 524032;
+		if (mod & 1) {
 			cs.i1 = actualIndex(len, cs.i1);
 		}
-		if (type & 128) {
+		if (mod & 128) {
 			cs.i2 = actualIndex(len, cs.i2);
 			i = cs.i1;
 			j = cs.i2;
@@ -1666,7 +1666,7 @@ function data(val) {
 					j = --cs.i2;
 				}
 			} else {
-				cs.type = 524288;
+				cs.mod = 524288;
 				return cs;
 			}
 		}
@@ -1674,10 +1674,10 @@ function data(val) {
 			i = cs.i1;
 			if (len === i) {
 				array.push(cs.value);
-				cs.type = 4146;
+				cs.mod = 4146;
 			} else if (i === 0) {
 				array.unshift(cs.value);
-				cs.type = 262186;
+				cs.mod = 262186;
 			} else {
 				array.splice(cs.i1, 0, cs.value);
 			}
@@ -1699,7 +1699,7 @@ function data(val) {
 			if (len > 0) {
 				array.length--;
 			} else {
-				cs.type = 524288;
+				cs.mod = 524288;
 			}
 		} else if (mut & 4146) {
 			array[len] = cs.value;
@@ -1708,15 +1708,15 @@ function data(val) {
 				i = cs.i1;
 				if (len === i) {
 					array.pop();
-					cs.type = 2128;
+					cs.mod = 2128;
 				} else if (i === 0) {
 					array.shift();
-					cs.type = 65608;
+					cs.mod = 65608;
 				} else {
 					removeAt(array, i);
 				}
 			} else {
-				cs.type = 524288;
+				cs.mod = 524288;
 			}
 		} else if (mut & 16453) {
 			if (cs.i1 < len) {
@@ -1725,7 +1725,7 @@ function data(val) {
 				}
 				array.splice(cs.i1, cs.i2);
 			} else {
-				cs.type = 524288;
+				cs.mod = 524288;
 			}
 		} else if (mut & 32867) {
 			array[cs.i1] = cs.value;
@@ -1733,7 +1733,7 @@ function data(val) {
 			if (len > 0) {
 				array.shift();
 			} else {
-				cs.type = 524288;
+				cs.mod = 524288;
 			}
 		} else if (mut & 131201) {
 			value = array[i];
@@ -1746,7 +1746,7 @@ function data(val) {
 	function applyMapMutation(callback, items, seed, roots, len, cs) {
 		var i, j, k, len, item, node, value,
 			itemArgs, nodeArgs, newVals,
-			mut = cs.type & 524032,
+			mut = cs.mod & 524032,
 			mapper = function () {
 				return callback(item, j);
 			}
@@ -1759,7 +1759,7 @@ function data(val) {
 			if (seed !== null) {
 				seed.splice(j, 0, item);
 			}
-			cs = { type: 291, i1: j, value: node.val };
+			cs = { mod: 291, i1: j, value: node.val };
 		} else if (mut & 551) {
 			value = cs.value;
 			len = value.length;
@@ -1784,7 +1784,7 @@ function data(val) {
 			if (seed !== null) {
 				seed.splice.apply(seed, seedArgs);
 			}
-			cs = { type: 551, i1: cs.i1, value: newVals };
+			cs = { mod: 551, i1: cs.i1, value: newVals };
 		} else if (mut & 1153) {
 			i = cs.i1;
 			j = cs.i2;
@@ -1861,19 +1861,19 @@ function data(val) {
 			if (seed !== null) {
 				seed.unshift(node.val);
 			}
-			cs = { type: 262186, value: node.val };
+			cs = { mod: 262186, value: node.val };
 		}
 		return cs;
 	}
 	function applyReverseMutation(array, cs) {
 		var i, j, k, value, args,
 			len = array.length,
-			type = cs.type & 524032;
+			type = cs.mod & 524032;
 		if (type & 291) {
 			value = cs.value;
 			i = len - 1 - cs.i1;
 			array.splice(i, 0, value);
-			cs = { type: 291, i1: i, value: value };
+			cs = { mod: 291, i1: i, value: value };
 		} else if (type & 551) {
 			i = cs.i1;
 			if (len === i) {
@@ -1887,7 +1887,7 @@ function data(val) {
 				args[j++] = value[i];
 			}
 			array.splice.apply(array, args);
-			cs = { type: 551, i1: i, value: value };
+			cs = { mod: 551, i1: i, value: value };
 		} else if (type & 1153) {
 			if (len === cs.i1) {
 				i = 0;
@@ -1905,28 +1905,28 @@ function data(val) {
 				array[i] = array[i + k];
 			}
 			array[j] = value;
-			cs = { type: 1153, i1: i, i2: j };
+			cs = { mod: 1153, i1: i, i2: j };
 		} else if (type & 2128) {
 			array.shift();
-			cs = { type: 65608 }
+			cs = { mod: 65608 }
 		} else if (type & 4146) {
 			array.unshift(cs.value);
-			cs = { type: 262186, value: cs.value };
+			cs = { mod: 262186, value: cs.value };
 		} else if (type & 8257) {
 			i = len - 1 - cs.i1;
 			removeAt(array, i)
-			cs = { type: 8257, i1: i };
+			cs = { mod: 8257, i1: i };
 		} else if (type & 16453) {
 			i = len - cs.i1 - cs.i2;
 			array.splice(i, cs.i2);
-			cs = { type: 16453, i1: i, i2: cs.i2 };
+			cs = { mod: 16453, i1: i, i2: cs.i2 };
 		} else if (type & 32867) {
 			i = len - 1 - cs.i1;
 			array[i] = cs.value;
-			cs = { type: 32867, i1: i, value: cs.value };
+			cs = { mod: 32867, i1: i, value: cs.value };
 		} else if (type & 65608) {
 			array.length--;
-			cs = { type: 2128 };
+			cs = { mod: 2128 };
 		} else if (type & 131201) {
 			i = len - 1 - cs.i1;
 			j = len - 1 - cs.i2;
@@ -1935,19 +1935,19 @@ function data(val) {
 			array[j] = value;
 		} else if (type & 262186) {
 			array[len] = cs.value;
-			cs = { type: 4146, value: cs.value };
+			cs = { mod: 4146, value: cs.value };
 		}
 		return cs;
 	}
 	function indexOf(flag, cs, item, call, index, length, last) {
-		var type, mut, i, len, c;
+		var mod, type, i, len, c;
 		if (cs !== null) {
 			if (flag & 4096) {
-				mut = cs.type & 524032;
-				type = cs.type;
+				mod = cs.mod;
+				type = mod & 524032;
 				if (index === -1) {
-					if (type & 32) {
-						if (type & 4) {
+					if (mod & 32) {
+						if (mod & 4) {
 							count = cs.i2;
 							for (i = cs.i1; count >= 0; count--) {
 								if (call ? item(cs.value[i]) : cs.value[i] === item) {
@@ -1957,9 +1957,9 @@ function data(val) {
 							return -1;
 						} else {
 							if (call ? item(cs.value) : cs.value === item) {
-								if (mut & 262186) {
+								if (type & 262186) {
 									return 0;
-								} else if (mut & 4146) {
+								} else if (type & 4146) {
 									return length - 1;
 								} else {
 									return cs.i1;
@@ -1971,7 +1971,7 @@ function data(val) {
 						return index;
 					}
 				} else {
-					if (mut & 4146) {
+					if (type & 4146) {
 						if (last) {
 							if (call ? item(cs.value) : cs.value === item) {
 								return length - 1;
@@ -1981,17 +1981,17 @@ function data(val) {
 						} else {
 							return index;
 						}
-					} else if (mut & 2128) {
+					} else if (type & 2128) {
 						if (index === length - 1) {
 							return -1;
 						} else {
 							return index;
 						}
-					} else if (mut & 65608) {
+					} else if (type & 65608) {
 						if (index !== 0) {
 							return index;
 						}
-					} else if (mut & 262186) {
+					} else if (type & 262186) {
 						if (last) {
 							return index;
 						} else {
@@ -2002,7 +2002,7 @@ function data(val) {
 							}
 						}
 					} else {
-						if (mut & 1) {
+						if (type & 1) {
 							if (last) {
 								if (index > cs.i1) {
 									return index;
@@ -2019,7 +2019,7 @@ function data(val) {
 				if (index === -1) {
 					scope: {
 						for (i = 0, len = cs.length; i < len; i++) {
-							if (cs[i].type & 32) {
+							if (cs[i].mod & 32) {
 								break scope;
 							}
 						}
@@ -2029,12 +2029,12 @@ function data(val) {
 					scope: {
 						for (i = 0, len = cs.length; i < len; i++) {
 							c = cs[i];
-							type = c.type;
-							if (type & 16) {
+							mod = c.mod;
+							if (mod & 16) {
 								if (index === length - 1) {
 									break scope;
 								}
-							} else if (type & 1) {
+							} else if (mod & 1) {
 								if (index >= c.i1) {
 									break scope;
 								}
@@ -2105,8 +2105,6 @@ function data(val) {
 	  Flag,
 	  Mod,
 	  Void,
-	  Owner,
-	  Listener,
 	  Data,
 	  Value,
 	  List,

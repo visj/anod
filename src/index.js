@@ -428,7 +428,7 @@ function Computation(log) {
 	this.disposer = null;
 }
 
-Computation.new = function (log) {
+Computation.make = function (log) {
 	return new Computation(log ? Log() : null);
 }
 
@@ -1108,7 +1108,7 @@ function cleanupSource(source, slot) {
 /**
  * @template T
  * @typedef {Object} Changeset
- * @property {number} type
+ * @property {number} mod
  * @property {number=} i1
  * @property {number=} i2
  * @property {T|T[]=} value
@@ -1183,8 +1183,8 @@ function IEnumerable(prototype) {
 			if (seed !== Void && pure && cs !== null) {
 				if (src.flag & Flag.Single) {
 					if (seed) {
-						if (cs.type & Mod.Insertion) {
-							if (cs.type & Mod.Range) {
+						if (cs.mod & Mod.Add) {
+							if (cs.mod & Mod.Range) {
 								for (i = 0, ilen = cs.value.length; i < ilen; i++) {
 									if (!callback(cs.value[i])) {
 										return false;
@@ -1198,7 +1198,7 @@ function IEnumerable(prototype) {
 							return true;
 						}
 					} else {
-						if (cs.type & (Mod.Insertion | Mod.Reordering)) {
+						if (cs.mod & (Mod.Add | Mod.Reorder)) {
 							return false;
 						}
 					}
@@ -1207,8 +1207,8 @@ function IEnumerable(prototype) {
 						for (i = 0, ilen = cs.length; i < ilen; i++) {
 							c = cs[i];
 							if (seed) {
-								if (c.type & Mod.Insertion) {
-									if (c.type & Mod.Range) {
+								if (c.mod & Mod.Add) {
+									if (c.mod & Mod.Range) {
 										for (j = 0, jlen = c.value.length; j < jlen; j++) {
 											if (!callback(c.value[j])) {
 												return false;
@@ -1221,7 +1221,7 @@ function IEnumerable(prototype) {
 									}
 								}
 							} else {
-								if (c.type & Mod.Deletion) {
+								if (c.mod & Mod.Delete) {
 									break scope;
 								}
 							}
@@ -1259,8 +1259,8 @@ function IEnumerable(prototype) {
 				k = new Array(len);
 				seed = new Array(len);
 			} else if (pure && cs !== null) {
-				mut = cs.type & Mod.Mutation;
-				if (cs.type & Mod.Reordering) {
+				mut = cs.mod & Mod.Type;
+				if (cs.mod & Mod.Reorder) {
 					// # Todo
 				} else {
 					if (mut & Mod.InsertAt) {
@@ -2186,7 +2186,7 @@ List.prototype.update = function () {
  * @param {T} item 
  */
 List.prototype.insertAt = function (index, item) {
-	logMutate(this, { type: Mod.InsertAt, i1: index, value: item });
+	logMutate(this, { mod: Mod.InsertAt, i1: index, value: item });
 }
 
 /**
@@ -2195,7 +2195,7 @@ List.prototype.insertAt = function (index, item) {
  * @param {T[]} items 
  */
 List.prototype.insertRange = function (index, items) {
-	logMutate(this, { type: Mod.InsertRange, i1: index, value: items });
+	logMutate(this, { mod: Mod.InsertRange, i1: index, value: items });
 }
 
 /**
@@ -2204,14 +2204,14 @@ List.prototype.insertRange = function (index, items) {
  * @param {number} to 
  */
 List.prototype.move = function (from, to) {
-	logMutate(this, { type: Mod.Move, i1: from, i2: to });
+	logMutate(this, { mod: Mod.Move, i1: from, i2: to });
 }
 
 /**
  * 
  */
 List.prototype.pop = function () {
-	logMutate(this, { type: Mod.Pop });
+	logMutate(this, { mod: Mod.Pop });
 }
 
 /**
@@ -2219,7 +2219,7 @@ List.prototype.pop = function () {
  * @param {T} item 
  */
 List.prototype.push = function (item) {
-	logMutate(this, { type: Mod.Push, value: item });
+	logMutate(this, { mod: Mod.Push, value: item });
 }
 
 /**
@@ -2227,7 +2227,7 @@ List.prototype.push = function (item) {
  * @param {number} index 
  */
 List.prototype.removeAt = function (index) {
-	logMutate(this, { type: Mod.RemoveAt, i1: index });
+	logMutate(this, { mod: Mod.RemoveAt, i1: index });
 }
 
 /**
@@ -2236,7 +2236,7 @@ List.prototype.removeAt = function (index) {
  * @param {number} count 
  */
 List.prototype.removeRange = function (index, count) {
-	logMutate(this, { type: Mod.RemoveRange, i1: index, i2: count });
+	logMutate(this, { mod: Mod.RemoveRange, i1: index, i2: count });
 }
 
 /**
@@ -2245,14 +2245,14 @@ List.prototype.removeRange = function (index, count) {
  * @param {T} item 
  */
 List.prototype.replace = function (index, item) {
-	logMutate(this, { type: Mod.Replace, i1: index, value: item });
+	logMutate(this, { mod: Mod.Replace, i1: index, value: item });
 }
 
 /**
  * 
  */
 List.prototype.shift = function () {
-	logMutate(this, { type: Mod.Shift });
+	logMutate(this, { mod: Mod.Shift });
 }
 
 /**
@@ -2261,7 +2261,7 @@ List.prototype.shift = function () {
  * @param {number} i2 
  */
 List.prototype.swap = function (i1, i2) {
-	logMutate(this, { type: Mod.Swap, i1: i1, i2: i2 });
+	logMutate(this, { mod: Mod.Swap, i1: i1, i2: i2 });
 }
 
 /**
@@ -2269,7 +2269,7 @@ List.prototype.swap = function (i1, i2) {
  * @param {T} item 
  */
 List.prototype.unshift = function (item) {
-	logMutate(this, { type: Mod.Unshift, value: item });
+	logMutate(this, { mod: Mod.Unshift, value: item });
 }
 
 //#endregion
@@ -2392,7 +2392,7 @@ var Type = {
 	Range: 4,
 	Head: 8,
 	Tail: 16,
-	Insert: 32,
+	Add: 32,
 	Delete: 64,
 	Reorder: 128,
 }
@@ -2407,22 +2407,22 @@ var Mod = {
 	Range: Type.Range,
 	Head: Type.Head,
 	Tail: Type.Tail,
-	Insertion: Type.Insert,
-	Deletion: Type.Delete,
-	Reordering: Type.Reorder,
-	InsertAt: (256 | Type.Index | Type.Value | Type.Insert),
-	InsertRange: (512 | Type.Index | Type.Value | Type.Range | Type.Insert),
+	Add: Type.Add,
+	Delete: Type.Delete,
+	Reorder: Type.Reorder,
+	InsertAt: (256 | Type.Index | Type.Value | Type.Add),
+	InsertRange: (512 | Type.Index | Type.Value | Type.Range | Type.Add),
 	Move: (1024 | Type.Index | Type.Reorder),
 	Pop: (2048 | Type.Tail | Type.Delete),
-	Push: (4096 | Type.Value | Type.Tail | Type.Insert),
+	Push: (4096 | Type.Value | Type.Tail | Type.Add),
 	RemoveAt: (8192 | Type.Index | Type.Delete),
 	RemoveRange: (16384 | Type.Index | Type.Range | Type.Delete),
-	Replace: (32768 | Type.Index | Type.Value | Type.Insert | Type.Delete),
+	Replace: (32768 | Type.Index | Type.Value | Type.Add | Type.Delete),
 	Shift: (65536 | Type.Head | Type.Delete),
 	Swap: (131072 | Type.Index | Type.Reorder),
-	Unshift: (262144 | Type.Insert | Type.Value | Type.Head),
+	Unshift: (262144 | Type.Add | Type.Value | Type.Head),
 	Void: 524288,
-	Mutation: 524032,
+	Type: 524032,
 };
 
 //#endregion
@@ -2483,12 +2483,12 @@ function logMutate(node, cs) {
 function applyMutation(array, cs) {
 	var i, j, k, args, value,
 		len = array.length,
-		type = cs.type,
-		mut = type & Mod.Mutation;
-	if (type & Mod.Index) {
+		mod = cs.mod,
+		mut = mod & Mod.Type;
+	if (mod & Mod.Index) {
 		cs.i1 = actualIndex(len, cs.i1);
 	}
-	if (type & Mod.Reordering) {
+	if (mod & Mod.Reorder) {
 		cs.i2 = actualIndex(len, cs.i2);
 		i = cs.i1;
 		j = cs.i2;
@@ -2500,7 +2500,7 @@ function applyMutation(array, cs) {
 				j = --cs.i2;
 			}
 		} else {
-			cs.type = Mod.Void;
+			cs.mod = Mod.Void;
 			return cs;
 		}
 	}
@@ -2508,10 +2508,10 @@ function applyMutation(array, cs) {
 		i = cs.i1;
 		if (len === i) {
 			array.push(cs.value);
-			cs.type = Mod.Push;
+			cs.mod = Mod.Push;
 		} else if (i === 0) {
 			array.unshift(cs.value);
-			cs.type = Mod.Unshift;
+			cs.mod = Mod.Unshift;
 		} else {
 			array.splice(cs.i1, 0, cs.value);
 		}
@@ -2533,7 +2533,7 @@ function applyMutation(array, cs) {
 		if (len > 0) {
 			array.length--;
 		} else {
-			cs.type = Mod.Void;
+			cs.mod = Mod.Void;
 		}
 	} else if (mut & Mod.Push) {
 		array[len] = cs.value;
@@ -2542,15 +2542,15 @@ function applyMutation(array, cs) {
 			i = cs.i1;
 			if (len === i) {
 				array.pop();
-				cs.type = Mod.Pop;
+				cs.mod = Mod.Pop;
 			} else if (i === 0) {
 				array.shift();
-				cs.type = Mod.Shift;
+				cs.mod = Mod.Shift;
 			} else {
 				removeAt(array, i);
 			}
 		} else {
-			cs.type = Mod.Void;
+			cs.mod = Mod.Void;
 		}
 	} else if (mut & Mod.RemoveRange) {
 		if (cs.i1 < len) {
@@ -2559,7 +2559,7 @@ function applyMutation(array, cs) {
 			}
 			array.splice(cs.i1, cs.i2);
 		} else {
-			cs.type = Mod.Void;
+			cs.mod = Mod.Void;
 		}
 	} else if (mut & Mod.Replace) {
 		array[cs.i1] = cs.value;
@@ -2567,7 +2567,7 @@ function applyMutation(array, cs) {
 		if (len > 0) {
 			array.shift();
 		} else {
-			cs.type = Mod.Void;
+			cs.mod = Mod.Void;
 		}
 	} else if (mut & Mod.Swap) {
 		value = array[i];
@@ -2591,7 +2591,7 @@ function applyMutation(array, cs) {
 function applyMapMutation(callback, items, seed, roots, len, cs) {
 	var i, j, k, len, item, node, value,
 		itemArgs, nodeArgs, newVals,
-		mut = cs.type & Mod.Mutation,
+		mut = cs.mod & Mod.Type,
 		mapper = function () {
 			return callback(item, j);
 		}
@@ -2604,7 +2604,7 @@ function applyMapMutation(callback, items, seed, roots, len, cs) {
 		if (seed !== null) {
 			seed.splice(j, 0, item);
 		}
-		cs = { type: Mod.InsertAt, i1: j, value: node.val };
+		cs = { mod: Mod.InsertAt, i1: j, value: node.val };
 	} else if (mut & Mod.InsertRange) {
 		value = cs.value;
 		len = value.length;
@@ -2629,7 +2629,7 @@ function applyMapMutation(callback, items, seed, roots, len, cs) {
 		if (seed !== null) {
 			seed.splice.apply(seed, seedArgs);
 		}
-		cs = { type: Mod.InsertRange, i1: cs.i1, value: newVals };
+		cs = { mod: Mod.InsertRange, i1: cs.i1, value: newVals };
 	} else if (mut & Mod.Move) {
 		i = cs.i1;
 		j = cs.i2;
@@ -2706,7 +2706,7 @@ function applyMapMutation(callback, items, seed, roots, len, cs) {
 		if (seed !== null) {
 			seed.unshift(node.val);
 		}
-		cs = { type: Mod.Unshift, value: node.val };
+		cs = { mod: Mod.Unshift, value: node.val };
 	}
 	return cs;
 }
@@ -2720,12 +2720,12 @@ function applyMapMutation(callback, items, seed, roots, len, cs) {
 function applyReverseMutation(array, cs) {
 	var i, j, k, value, args,
 		len = array.length,
-		type = cs.type & Mod.Mutation;
+		type = cs.mod & Mod.Type;
 	if (type & Mod.InsertAt) {
 		value = cs.value;
 		i = len - 1 - cs.i1;
 		array.splice(i, 0, value);
-		cs = { type: Mod.InsertAt, i1: i, value: value };
+		cs = { mod: Mod.InsertAt, i1: i, value: value };
 	} else if (type & Mod.InsertRange) {
 		i = cs.i1;
 		if (len === i) {
@@ -2739,7 +2739,7 @@ function applyReverseMutation(array, cs) {
 			args[j++] = value[i];
 		}
 		array.splice.apply(array, args);
-		cs = { type: Mod.InsertRange, i1: i, value: value };
+		cs = { mod: Mod.InsertRange, i1: i, value: value };
 	} else if (type & Mod.Move) {
 		if (len === cs.i1) {
 			i = 0;
@@ -2757,28 +2757,28 @@ function applyReverseMutation(array, cs) {
 			array[i] = array[i + k];
 		}
 		array[j] = value;
-		cs = { type: Mod.Move, i1: i, i2: j };
+		cs = { mod: Mod.Move, i1: i, i2: j };
 	} else if (type & Mod.Pop) {
 		array.shift();
-		cs = { type: Mod.Shift }
+		cs = { mod: Mod.Shift }
 	} else if (type & Mod.Push) {
 		array.unshift(cs.value);
-		cs = { type: Mod.Unshift, value: cs.value };
+		cs = { mod: Mod.Unshift, value: cs.value };
 	} else if (type & Mod.RemoveAt) {
 		i = len - 1 - cs.i1;
 		removeAt(array, i)
-		cs = { type: Mod.RemoveAt, i1: i };
+		cs = { mod: Mod.RemoveAt, i1: i };
 	} else if (type & Mod.RemoveRange) {
 		i = len - cs.i1 - cs.i2;
 		array.splice(i, cs.i2);
-		cs = { type: Mod.RemoveRange, i1: i, i2: cs.i2 };
+		cs = { mod: Mod.RemoveRange, i1: i, i2: cs.i2 };
 	} else if (type & Mod.Replace) {
 		i = len - 1 - cs.i1;
 		array[i] = cs.value;
-		cs = { type: Mod.Replace, i1: i, value: cs.value };
+		cs = { mod: Mod.Replace, i1: i, value: cs.value };
 	} else if (type & Mod.Shift) {
 		array.length--;
-		cs = { type: Mod.Pop };
+		cs = { mod: Mod.Pop };
 	} else if (type & Mod.Swap) {
 		i = len - 1 - cs.i1;
 		j = len - 1 - cs.i2;
@@ -2787,7 +2787,7 @@ function applyReverseMutation(array, cs) {
 		array[j] = value;
 	} else if (type & Mod.Unshift) {
 		array[len] = cs.value;
-		cs = { type: Mod.Push, value: cs.value };
+		cs = { mod: Mod.Push, value: cs.value };
 	}
 	return cs;
 }
@@ -2804,14 +2804,14 @@ function applyReverseMutation(array, cs) {
  * @returns {number}
  */
 function indexOf(flag, cs, item, call, index, length, last) {
-	var type, mut, i, len, c;
+	var mod, type, i, len, c;
 	if (cs !== null) {
 		if (flag & Flag.Single) {
-			mut = cs.type & Mod.Mutation;
-			type = cs.type;
+			mod = cs.mod;
+			type = mod & Mod.Type;
 			if (index === -1) {
-				if (type & Mod.Insertion) {
-					if (type & Mod.Range) {
+				if (mod & Mod.Add) {
+					if (mod & Mod.Range) {
 						count = cs.i2;
 						for (i = cs.i1; count >= 0; count--) {
 							if (call ? item(cs.value[i]) : cs.value[i] === item) {
@@ -2821,9 +2821,9 @@ function indexOf(flag, cs, item, call, index, length, last) {
 						return -1;
 					} else {
 						if (call ? item(cs.value) : cs.value === item) {
-							if (mut & Mod.Unshift) {
+							if (type & Mod.Unshift) {
 								return 0;
-							} else if (mut & Mod.Push) {
+							} else if (type & Mod.Push) {
 								return length - 1;
 							} else {
 								return cs.i1;
@@ -2835,7 +2835,7 @@ function indexOf(flag, cs, item, call, index, length, last) {
 					return index;
 				}
 			} else {
-				if (mut & Mod.Push) {
+				if (type & Mod.Push) {
 					if (last) {
 						if (call ? item(cs.value) : cs.value === item) {
 							return length - 1;
@@ -2845,17 +2845,17 @@ function indexOf(flag, cs, item, call, index, length, last) {
 					} else {
 						return index;
 					}
-				} else if (mut & Mod.Pop) {
+				} else if (type & Mod.Pop) {
 					if (index === length - 1) {
 						return -1;
 					} else {
 						return index;
 					}
-				} else if (mut & Mod.Shift) {
+				} else if (type & Mod.Shift) {
 					if (index !== 0) {
 						return index;
 					}
-				} else if (mut & Mod.Unshift) {
+				} else if (type & Mod.Unshift) {
 					if (last) {
 						return index;
 					} else {
@@ -2866,7 +2866,7 @@ function indexOf(flag, cs, item, call, index, length, last) {
 						}
 					}
 				} else {
-					if (mut & Mod.Index) {
+					if (type & Mod.Index) {
 						if (last) {
 							if (index > cs.i1) {
 								return index;
@@ -2883,7 +2883,7 @@ function indexOf(flag, cs, item, call, index, length, last) {
 			if (index === -1) {
 				scope: {
 					for (i = 0, len = cs.length; i < len; i++) {
-						if (cs[i].type & Mod.Insertion) {
+						if (cs[i].mod & Mod.Add) {
 							break scope;
 						}
 					}
@@ -2893,12 +2893,12 @@ function indexOf(flag, cs, item, call, index, length, last) {
 				scope: {
 					for (i = 0, len = cs.length; i < len; i++) {
 						c = cs[i];
-						type = c.type;
-						if (type & Mod.Tail) {
+						mod = c.mod;
+						if (mod & Mod.Tail) {
 							if (index === length - 1) {
 								break scope;
 							}
-						} else if (type & Mod.Index) {
+						} else if (mod & Mod.Index) {
 							if (index >= c.i1) {
 								break scope;
 							}
@@ -2983,8 +2983,7 @@ module.exports = {
 	/* @exclude */
 	fn, on, run, tie,
 	cleanup, freeze, root, sample,
-	Flag, Mod,
-	Void, Owner, Listener,
+	Flag, Mod, Void,
 	Data, Value, List,
 	Computation, Enumerable,
 };
