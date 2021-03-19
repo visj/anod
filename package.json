@@ -16,7 +16,7 @@
   "keywords": [],
   "author": "Vilhelm Sjölund",
   "license": "MIT",
-  "dependencies": {
+  "devDependencies": {
     "boer": "^0.1.8"
   },
   "repository": {

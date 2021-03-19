@@ -13,7 +13,7 @@ function data(val) {
 	function run(f, seed, flags, dispose) {
 		var node = new Computation(Log());
 		Computation.setup(node, f, seed, 32 | flags, dispose);
-		return function () { return node.get(); }
+		return function () {return node.get();}
 	}
 	function tie(src, f, seed, flags, dispose) {
 		var node = new Computation(Log());
@@ -29,7 +29,7 @@ function data(val) {
 			logSource(node, src);
 			seed = Computation.setup(node, f, seed, 16 | flags, dispose);
 		}
-		return function () { return node.get(); }
+		return function () {return node.get();}
 	}
 	function fn(f, seed, flags, dispose) {
 		Computation.setup(new Computation(null), f, seed, 32 | flags, dispose);
@@ -243,13 +243,13 @@ function data(val) {
 	var Owner = null;
 	var Listener = null;
 	function Queue() {
-		return { len: 0, items: [] };
+		return {len: 0, items: []};
 	}
 	function Clock() {
-		return { time: 0, changes: Queue(), traces: Queue(), updates: Queue(), disposes: Queue() };
+		return {time: 0, changes: Queue(), traces: Queue(), updates: Queue(), disposes: Queue()};
 	}
 	function Log() {
-		return { node1: null, slot1: -1, nodes: null, slots: null };
+		return {node1: null, slot1: -1, nodes: null, slots: null};
 	}
 	function setupNode(node, fn, seed, flags) {
 		var clock = Root,
@@ -697,8 +697,8 @@ function data(val) {
 				node = new Enumerable(),
 				pure = callback.length === 1;
 			return Enumerable.setup(node, src,  function (seed) {
-				var i, j, n, m, item, args,
-					mut, mut, found, value,
+				var i, j, m, n, item, args,
+					mod, found, value, csval,
 					cs = src.cs,
 					items = src.get(),
 					len = items.length;
@@ -706,10 +706,10 @@ function data(val) {
 					k = new Array(len);
 					seed = new Array(len);
 				} else if (pure && cs !== null) {
-					mut = cs.mod & 524032;
+					mod = cs.mod & 524032;
 					if (cs.mod & 128) {
 					} else {
-						if (mut & 291) {
+						if (mod & 291) {
 							i = cs.i1;
 							item = cs.value;
 							found = callback(item);
@@ -738,12 +738,12 @@ function data(val) {
 								k.splice(i, 0, -1);
 								node.flag &= ~8192;
 							}
-						} else if (mut & 551) {
+						} else if (mod & 551) {
 							i = cs.i1;
 							n = k.length;
 							value = cs.value;
 							if (len > 0 && i < n) {
-								for (j = i; j < n && k[j] === -1; j++) { }
+								for (j = i; j < n && k[j] === -1; j++) {}
 								if (j >= n) {
 									j = seed.length;
 								} else {
@@ -753,34 +753,36 @@ function data(val) {
 								j = seed.length;
 							}
 							args = [i, 0];
-							n = value.length;
-							for (i = 0, m = 2; i < n; i++) {
+							for (i = 0, m = 2, n = value.length; i < n; i++) {
 								args[m++] = -1;
 							}
 							k.splice.apply(k, args);
+							csval = [];
 							args[0] = j;
-							args.length = 2;
 							for (i = cs.i1, m = 2, n = i + n; i < n; i++) {
 								item = items[i];
 								if (callback(item)) {
 									k[i] = j++;
-									args[m++] = item;
+									args[m] = item;
+									csval[m++ - 2] = item;
 								}
 							}
-							n = args.length;
-							if (n > 2) {
-								n -= 2;
-								for (j = cs.i1 + value.length, m = len; j < m; j++) {
-									if (k[j] !== -1) {
-										k[j] += n;
+							n = csval.length;
+							if (n > 0) {
+								args.length = n + 2;
+								for (i = cs.i1 + value.length; i < len; i++) {
+									if (k[i] !== -1) {
+										k[i] += n;
 									}
 								}
 								seed.splice.apply(seed, args);
+								node.cs = {mod: 551, i1: j - n, value: csval};
 								node.flag |= 8192;
 							} else {
+								node.cs = VoidMod;
 								node.flag &= ~8192;
 							}
-						} else if (mut & 1153) {
+						} else if (mod & 1153) {
 							i = cs.i1;
 							j = cs.i2;
 							m = j > i ? 1 : -1;
@@ -789,98 +791,130 @@ function data(val) {
 								k[i] = k[i + m];
 							}
 							k[j] = item;
-						} else if (mut & 4146) {
+						} else if (mod & 4146) {
 							found = callback(cs.value);
-							i = seed.length;
-							k[k.length] = found ? i : -1;
+							j = seed.length;
+							n = k.length;
 							if (found) {
-								seed[i] = cs.value;
+								k[n] = j;
+								seed[j] = cs.value;
+								if (j === cs.i1) {
+									node.cs = cs;
+								} else {
+									node.cs = {mod: 4146, i1: j, value: cs.value};
+								}
 								node.flag |= 8192;
 							} else {
+								k[n] = -1;
+								node.cs = VoidMod;
 								node.flag &= ~8192;
 							}
-						} else if (mut & 2128) {
+						} else if (mod & 2128) {
 							i = k.pop();
 							if (i !== -1) {
 								seed.pop();
+								node.cs = cs;
 								node.flag |= 8192;
 							} else {
+								node.cs = VoidMod;
 								node.flag &= ~8192;
 							}
-						} else if (mut & 8257) {
+						} else if (mod & 8257) {
 							i = cs.i1;
 							j = k[i];
+							removeAt(k, i);
 							if (j !== -1) {
-								removeAt(k, i);
 								for (i++; i < len; i++) {
 									if (k[i] !== -1) {
 										k[i]--;
 									}
 								}
 								removeAt(seed, j);
+								if (i === j) {
+									node.cs = cs;
+								} else {
+									node.cs = {mod: 8257, i1: j};
+								}
 								node.flag |= 8192;
 							} else {
+								node.cs = VoidMod;
 								node.flag &= ~8192;
 							}
-						} else if (mut & 16453) {
+						} else if (mod & 16453) {
 							i = cs.i1;
-							j = cs.i2;
-							n = 0;
-							for (; j >= 0; i++, j--) {
+							m = 0;
+							j = -1;
+							n = i + cs.i2;
+							for (; i < n; i++) {
 								if (k[i] !== -1) {
-									n++;
-									k[i] = -1;
+									if (j === -1) {
+										j = k[i];
+									}
+									m++;
 								}
 							}
-							if (n > 0) {
+							k.splice(cs.i1, cs.i2);
+							if (m > 0) {
 								for (i = cs.i1; i < len; i++) {
 									if (k[i] !== -1) {
 										k[i] -= n;
 									}
 								}
-								seed.splice(cs.i1, n);
+								seed.splice(j, m);
+								node.cs = {mod: 16453, i1: j, i2: m};
 								node.flag |= 8192;
 							} else {
+								node.cs = VoidMod;
 								node.flag &= ~8192;
 							}
-						} else if (mut & 32867) {
+						} else if (mod & 32867) {
 							i = cs.i1;
-							j = k[i];
-							if (j !== -1) {
+							n = k.length;
+							for (j = i; j < n && k[j] === -1; j++) {}
+							if (j >= n) {
+								j = seed.length;
+							} else {
+								j = k[j];
+							}
+							found = callback(cs.value);
+							if (found) {
 								seed[j] = cs.value;
+								node.cs = {mod: 32867, i1: j, value: cs.value};
 								node.flag |= 8192;
 							} else {
+								node.cs = VoidMod;
 								node.flag &= 8192;
 							}
-						} else if (mut & 65608) {
-							j = k[0];
-							k.shift();
-							for (i = 1; i < len; i++) {
-								if (k[i] !== -1) {
-									k[i]--;
-								}
-							}
+						} else if (mod & 65608) {
+							j = k.shift();
 							if (j !== -1) {
+								for (i = 1; i < len; i++) {
+									if (k[i] !== -1) {
+										k[i]--;
+									}
+								}
 								seed.shift();
+								node.cs = cs;
 								node.flag |= 8192;
 							} else {
+								node.cs = VoidMod;
 								node.flag &= ~8192;
 							}
-						} else if (mut & 131201) {
-							i = k[cs.i1];
-							j = k[cs.i2];
-						} else if (mut & 262186) {
+						} else if (mod & 262186) {
 							found = callback(cs.value);
-							k.unshift(found ? 0 : -1);
-							for (i = 1; i < len; i++) {
-								if (k[i] !== -1) {
-									k[i]++;
-								}
-							}
 							if (found) {
+								k.unshift(0);
+								for (i = 1; i < len; i++) {
+									if (k[i] !== -1) {
+										k[i]++;
+									}
+								}
 								seed.unshift(cs.value);
+								node.cs = cs;
 								node.flag |= 8192;
 							} else {
+								k.unshift(-1);
+								node.cs = VoidMod;
 								node.flag &= ~8192;
 							}
 						}
@@ -898,6 +932,7 @@ function data(val) {
 				}
 				k.length = len;
 				seed.length = j;
+				node.cs = null;
 				node.flag |= 8192;
 				return seed;
 			});
@@ -1060,8 +1095,8 @@ function data(val) {
 									if (c[i] === u[j]) {
 										found[j] = true;
 										temps[j] = roots[i];
-										for (j = umin; j < umax && found[j]; j++, umin++) { }
-										for (j = umax; j > umin && found[j]; j--, umax--) { }
+										for (j = umin; j < umax && found[j]; j++, umin++) {}
+										for (j = umax; j > umin && found[j]; j--, umax--) {}
 										continue outer;
 									}
 								}
@@ -1273,8 +1308,8 @@ function data(val) {
 									if (c[i] === u[j]) {
 										found[j] = true;
 										temps[j] = roots[i];
-										for (j = umin; j < umax && found[j]; j++, umin++) { }
-										for (j = umax; j > umin && found[j]; j--, umax--) { }
+										for (j = umin; j < umax && found[j]; j++, umin++) {}
+										for (j = umax; j > umin && found[j]; j--, umax--) {}
 										continue outer;
 									}
 								}
@@ -1350,8 +1385,10 @@ function data(val) {
 					seed = new Array(len);
 				} else if (cs !== null) {
 					if (src.flag & 4096) {
+						node.flag |= 4096;
 						node.cs = applyReverseMutation(seed, cs);
 					} else {
+						node.flag &= ~4096;
 						node.cs = new Array(cs.length);
 						for (i = 0, len = cs.length; i < len; i++) {
 							node.cs[i] = applyReverseMutation(seed, cs[i]);
@@ -1360,7 +1397,7 @@ function data(val) {
 					return seed;
 				}
 				node.cs = null;
-				seed.length = items.length;
+				seed.length = len;
 				for (var i = len - 1, j = 0; i >= 0; i--, j++) {
 					seed[j] = items[i];
 				}
@@ -1498,37 +1535,37 @@ function data(val) {
 		}
 	}
 	List.prototype.insertAt = function (index, item) {
-		logMutate(this, { mod: 291, i1: index, value: item });
+		logMutate(this, {mod: 291, i1: index, value: item});
 	}
 	List.prototype.insertRange = function (index, items) {
-		logMutate(this, { mod: 551, i1: index, value: items });
+		logMutate(this, {mod: 551, i1: index, value: items});
 	}
 	List.prototype.move = function (from, to) {
-		logMutate(this, { mod: 1153, i1: from, i2: to });
+		logMutate(this, {mod: 1153, i1: from, i2: to});
 	}
 	List.prototype.pop = function () {
-		logMutate(this, { mod: 2128 });
+		logMutate(this, {mod: 2128});
 	}
 	List.prototype.push = function (item) {
-		logMutate(this, { mod: 4146, value: item });
+		logMutate(this, {mod: 4146, value: item});
 	}
 	List.prototype.removeAt = function (index) {
-		logMutate(this, { mod: 8257, i1: index });
+		logMutate(this, {mod: 8257, i1: index});
 	}
 	List.prototype.removeRange = function (index, count) {
-		logMutate(this, { mod: 16453, i1: index, i2: count });
+		logMutate(this, {mod: 16453, i1: index, i2: count});
 	}
 	List.prototype.replace = function (index, item) {
-		logMutate(this, { mod: 32867, i1: index, value: item });
+		logMutate(this, {mod: 32867, i1: index, value: item});
 	}
 	List.prototype.shift = function () {
-		logMutate(this, { mod: 65608 });
+		logMutate(this, {mod: 65608});
 	}
 	List.prototype.swap = function (i1, i2) {
-		logMutate(this, { mod: 131201, i1: i1, i2: i2 });
+		logMutate(this, {mod: 131201, i1: i1, i2: i2});
 	}
 	List.prototype.unshift = function (item) {
-		logMutate(this, { mod: 262186, value: item });
+		logMutate(this, {mod: 262186, value: item});
 	}
 	function Enumerable() {
 		Computation.call(this, Log());
@@ -1616,6 +1653,9 @@ function data(val) {
 		Void: 524288,
 		Type: 524032,
 	};
+	var PopMod = {mod: 2128};
+	var ShiftMod = {mod: 65608};
+	var VoidMod = {mod: 524288};
 	function logMutate(node, cs) {
 		var changes = Root.changes;
 		if (State !== 1) {
@@ -1759,7 +1799,7 @@ function data(val) {
 			if (seed !== null) {
 				seed.splice(j, 0, item);
 			}
-			cs = { mod: 291, i1: j, value: node.val };
+			cs = {mod: 291, i1: j, value: node.val};
 		} else if (mut & 551) {
 			value = cs.value;
 			len = value.length;
@@ -1784,7 +1824,7 @@ function data(val) {
 			if (seed !== null) {
 				seed.splice.apply(seed, seedArgs);
 			}
-			cs = { mod: 551, i1: cs.i1, value: newVals };
+			cs = {mod: 551, i1: cs.i1, value: newVals};
 		} else if (mut & 1153) {
 			i = cs.i1;
 			j = cs.i2;
@@ -1861,7 +1901,7 @@ function data(val) {
 			if (seed !== null) {
 				seed.unshift(node.val);
 			}
-			cs = { mod: 262186, value: node.val };
+			cs = {mod: 262186, value: node.val};
 		}
 		return cs;
 	}
@@ -1871,29 +1911,21 @@ function data(val) {
 			type = cs.mod & 524032;
 		if (type & 291) {
 			value = cs.value;
-			i = len - 1 - cs.i1;
+			i = len - cs.i1;
 			array.splice(i, 0, value);
-			cs = { mod: 291, i1: i, value: value };
+			cs = {mod: 291, i1: i, value: value};
 		} else if (type & 551) {
 			i = cs.i1;
-			if (len === i) {
-				i = 0;
-			} else {
-				i = len - i;
-			}
+			i = len - i;
 			args = [i, 0];
 			value = cs.value;
 			for (j = 2, i = value.length - 1; i >= 0; i--) {
 				args[j++] = value[i];
 			}
 			array.splice.apply(array, args);
-			cs = { mod: 551, i1: i, value: value };
+			cs = {mod: 551, i1: i, value: value};
 		} else if (type & 1153) {
-			if (len === cs.i1) {
-				i = 0;
-			} else {
-				i = len - 1 - cs.i1;
-			}
+			i = len - 1 - cs.i1;
 			if (len === cs.i2) {
 				j = 0;
 			} else {
@@ -1905,37 +1937,38 @@ function data(val) {
 				array[i] = array[i + k];
 			}
 			array[j] = value;
-			cs = { mod: 1153, i1: i, i2: j };
+			cs = {mod: 1153, i1: i, i2: j};
 		} else if (type & 2128) {
 			array.shift();
-			cs = { mod: 65608 }
+			cs = {mod: 65608}
 		} else if (type & 4146) {
 			array.unshift(cs.value);
-			cs = { mod: 262186, value: cs.value };
+			cs = {mod: 262186, value: cs.value};
 		} else if (type & 8257) {
 			i = len - 1 - cs.i1;
 			removeAt(array, i)
-			cs = { mod: 8257, i1: i };
+			cs = {mod: 8257, i1: i};
 		} else if (type & 16453) {
 			i = len - cs.i1 - cs.i2;
 			array.splice(i, cs.i2);
-			cs = { mod: 16453, i1: i, i2: cs.i2 };
+			cs = {mod: 16453, i1: i, i2: cs.i2};
 		} else if (type & 32867) {
 			i = len - 1 - cs.i1;
 			array[i] = cs.value;
-			cs = { mod: 32867, i1: i, value: cs.value };
+			cs = {mod: 32867, i1: i, value: cs.value};
 		} else if (type & 65608) {
 			array.length--;
-			cs = { mod: 2128 };
+			cs = {mod: 2128};
 		} else if (type & 131201) {
 			i = len - 1 - cs.i1;
 			j = len - 1 - cs.i2;
 			value = array[i];
 			array[i] = array[j];
 			array[j] = value;
+			cs = {mod: 131201, i1: i, i2: j};
 		} else if (type & 262186) {
 			array[len] = cs.value;
-			cs = { mod: 4146, value: cs.value };
+			cs = {mod: 4146, value: cs.value};
 		}
 		return cs;
 	}
@@ -2075,10 +2108,10 @@ function data(val) {
 	}
 	function copyValue(value) {
 		if (value === null || typeof value !== 'object') {
-			return function () { return value; }
+			return function () {return value;}
 		} else {
 			if (Array.isArray(value)) {
-				return function () { return value.slice(); }
+				return function () {return value.slice();}
 			} else {
 				return function () {
 					var key, result = {};

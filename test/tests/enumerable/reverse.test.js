@@ -1,5 +1,5 @@
-const { Test } = require('boer');
-const { list, cleanup, freeze, Flag, tie, } = require('../../..');
+const {Test} = require('boer');
+const {list, cleanup, freeze, Flag, tie, } = require('../../..');
 /**
  * 
  * @param {Test} t 
@@ -31,10 +31,10 @@ module.exports = function (t) {
 				let c1 = d.reverse();
 				d.insertAt(3, 6);
 
-				t.equal(c1.get(), [5, 6, 4, 3, 2, 1]);
+				t.equal(c1.get(), [5, 4, 6, 3, 2, 1]);
 
 				d.insertAt(8, 7);
-				t.equal(c1.get(), [7, 5, 6, 4, 3, 2, 1]);
+				t.equal(c1.get(), [7, 5, 4, 6, 3, 2, 1]);
 			});
 
 			t.test('insertRange', t => {
@@ -100,7 +100,7 @@ module.exports = function (t) {
 			t.test('pop all elements returns empty array', t => {
 				let d = list([1, 2]);
 				let c1 = d.reverse();
-				freeze(() => { d.pop(); d.pop(); });
+				freeze(() => {d.pop(); d.pop();});
 				t.equal(c1.get(), []);
 			});
 
@@ -169,46 +169,84 @@ module.exports = function (t) {
 			});
 
 			t.test('replace at start', t => {
-				let d = list([1,2,3]);
+				let d = list([1, 2, 3]);
 				let c1 = d.reverse();
 				d.replace(0, 0);
-				t.equal(c1.get(), [3,2,0]);
+				t.equal(c1.get(), [3, 2, 0]);
 			});
 
 			t.test('swap forward', t => {
-				let d = list([1,2,3,4,5]);
+				let d = list([1, 2, 3, 4, 5]);
 				let c1 = d.reverse();
-				d.swap(1,3); // 1,4,3,2,5
-				t.equal(c1.get(), [5,2,3,4,1]);
+				d.swap(1, 3); // 1,4,3,2,5
+				t.equal(c1.get(), [5, 2, 3, 4, 1]);
 			});
 
 			t.test('swap backwards', t => {
-				let d = list([1,2,3,4,5]);
+				let d = list([1, 2, 3, 4, 5]);
 				let c1 = d.reverse();
 				d.swap(3, 2);
-				t.equal(c1.get(), [5,3,4,2,1]);
+				t.equal(c1.get(), [5, 3, 4, 2, 1]);
 			});
 
 			t.test('swap from end to mid', t => {
-				let d = list([1,2,3,4,5]);
+				let d = list([1, 2, 3, 4, 5]);
 				let c1 = d.reverse();
 				d.swap(4, 2);
-				t.equal(c1.get(), [3,4,5,2,1]);
+				t.equal(c1.get(), [3, 4, 5, 2, 1]);
 			});
 
 			t.test('swap from start to mid', t => {
-				let d = list([1,2,3,4,5]);
+				let d = list([1, 2, 3, 4, 5]);
 				let c1 = d.reverse();
 				d.swap(0, 2);
-				t.equal(c1.get(), [5,4,1,2,3]);
+				t.equal(c1.get(), [5, 4, 1, 2, 3]);
 			});
 
 			t.test('unshift', t => {
-				let d = list([1,2,3]);
+				let d = list([1, 2, 3]);
 				let c1 = d.reverse();
 				d.unshift(0);
-				t.equal(c1.get(), [3,2,1,0]);
+				t.equal(c1.get(), [3, 2, 1, 0]);
 			});
+		});
+
+		t.test('Array compatibility', t => {
+			let ar = [];
+			let ft1 = function () {
+				return ar.slice().reverse();
+			}
+			let ft2 = function () {
+				return ft1().reverse();
+			}
+
+			let as = list([]);
+			let es1 = as.reverse();
+			let es2 = es1.reverse();
+
+			function check(t) {
+				t.equal(es1.get(), ft1());
+				t.equal(es2.get(), ft2());
+			}
+
+			t.test('sets value', t => {
+				ar = [1, 2, 3];
+				as.set([1, 2, 3]);
+				check(t);
+			});
+
+			t.test('inserts at index', t => {
+				ar.splice(1, 0, 4);
+				as.insertAt(1, 4);
+				check(t);
+			});
+
+			// t.test('inserts range', t => {
+			// 	ar.splice(2, 0, 5, 6, 7);
+			// 	as.insertRange(2, [5, 6, 7]);
+			// 	check(t);
+			// });
+
 		});
 	});
 }
