@@ -11,7 +11,8 @@
   "files": [
     "lib.d.ts",
     "dist/anod.cjs",
-    "dist/anod.mjs"
+    "dist/anod.mjs",
+    "dist/anod.min.js"
   ],
   "keywords": [],
   "author": "Vilhelm Sjölund",

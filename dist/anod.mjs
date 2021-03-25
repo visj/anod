@@ -76,14 +76,11 @@ function data(val) {
 		}
 		return val;
 	}
-	function root(node, f) {
-		var val,
+	function root(f) {
+		var val, 
+			node = new Computation(null),
 			owner = Owner,
 			listener = Listener;
-		if (typeof node === 'function') {
-			f = node;
-			node = new Computation(null);
-		}
 		Owner = node;
 		Listener = null;
 		try {

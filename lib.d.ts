@@ -454,16 +454,6 @@ export function freeze<T>(f: () => T): T;
 export function root<T>(f: () => T): Computation<T>;
 
 /**
- * `root` accepts an existing computation node and extends it.
- * That is, any cleanup or computation created inside `f` will 
- * be owned by `node` and added to its lifecycle.
- * @see root
- * @param node Computation node to extend
- * @param f Callback to extend node with
- */
-export function root<T>(node: Computation<T>, f: () => T): T;
-
-/**
  * `sample` runs provided callback without creating a dependency 
  * on any signals read during invocation.
  * @param f

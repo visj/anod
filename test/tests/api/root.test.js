@@ -60,39 +60,5 @@ module.exports = function (t) {
 				t.equal(c2(), 3);;
 			})
 		});
-
-		t.test('can extend existing root computation nodes', t => {
-			let count = 0;
-			let node = root(() => {
-				cleanup(() => { count++; });
-			});
-			root(node, () => {
-				cleanup(() => { count += 2; });
-			});
-			node.dispose();
-			t.equal(count, 3);
-		});
-
-		t.test('owned nodes in extended node are properly disposed', t => {
-			let d1 = data(1);
-			let count = 0;
-			let disposed = false;
-			let node = root(() => {
-				cleanup(() => { disposed = true; });
-			});
-			root(node, () => {
-				run(() => {
-					d1();
-					count++;
-				});
-			});
-			d1(2);
-			t.equal(count, 2);
-			t.equal(disposed, false);
-			node.dispose();
-			d1(3);
-			t.equal(count, 2);
-			t.equal(disposed, true);
-		})
 	});
 }
