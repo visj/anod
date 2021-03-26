@@ -1,5 +1,5 @@
-const {Test} = require('boer');
-const {list, cleanup, root, Flag, tie, } = require('../../..');
+const { Test } = require('boer');
+const { list, cleanup, root, Flag, tie, fn } = require('../../..');
 /**
  * 
  * @param {Test} t 
