@@ -1,2160 +1,3445 @@
+/**
+ * @fileoverview
+ * Table of Contents
+ * 1. Core reactivity library
+ * 	1.1 Type definitions 
+ * 	1.2 Public API
+ * 	1.3 Object implementations
+ * 		1.3.1 Data
+ * 		1.3.2 Value
+ * 		1.3.3 Computation
+ * 	1.4 System variables
+ * 		1.4.1 Enums
+ * 		1.4.2 Variables
+ * 	1.5 Internal functionality
+ * 2. Array reactivity library
+ * 	2.1 Type definitions
+ * 	2.2 Public API
+ * 	2.3 Object implementations
+ * 		2.3.1 IEnumerable
+ * 		2.3.2 List
+ * 		2.3.3 Enumerable
+ * 	2.4 System variables
+ * 		2.4.1 Enums
+ * 		2.4.2 Variables
+ * 	2.5 Internal functionality
+ * 3. System exports
+ */
+
+//#region 1. Core reactivity library
+
+//#region 1.1 Type definitions
+
+/* @module */
+/**
+ * @typedef {Data|Computation}
+ */
+var Signal;
+
+/**
+ * @typedef {Signal|function(): *}
+ */
+var Source;
+/* @module */
+
+//#endregion
+
+//#region 1.2 Public API
+
+/**
+ * @template T
+ * @param {T} val 
+ * @returns {function(T=): T}
+ */
 function data(val) {
-		var node = new Data(val);
-		return function (next) {
-			return arguments.length === 0 ? node.get() : node.set(next);
-		};
-	}
-	function value(val, eq) {
-		var node = new Value(val, eq);
-		return function (next) {
-			return arguments.length === 0 ? node.get() : node.set(next);
-		};
-	}
-	function run(f, seed, flags, dispose) {
-		var node = new Computation(Log());
-		Computation.setup(node, f, seed, 32 | flags, dispose);
-		return function () { return node.get(); }
-	}
-	function tie(src, f, seed, flags, dispose) {
-		var node = new Computation(Log());
-		if (flags & 4) {
-			if (flags & 1) {
-				logSource(node, src);
-			}
-			seed = Computation.setup(node, function (seed) {
-				logSource(node, src);
-				return f(seed);
-			}, seed, 16 | flags, dispose);
-		} else {
+	/**
+	 * @const
+	 * @type {Data<T>}
+	 */
+	var node = new Data(val);
+	return /** @type {function(T=): T} */(function (next) {
+		return arguments.length === 0 ? node.get() : node.set(next);
+	});
+}
+
+/**
+ * @template T
+ * @param {T} val 
+ * @param {function(T,T): boolean=} eq 
+ * @returns {function(T=): T}
+ */
+function value(val, eq) {
+	/**
+	 * @const
+	 * @type {Value<T>}
+	 */
+	var node = new Value(val, eq);
+	return /** @type {function(T=): T} */(function (next) {
+		return arguments.length === 0 ? node.get() : node.set(next);
+	});
+}
+
+/**
+ * @template T
+ * @param {function(T): T} f 
+ * @param {T=} seed 
+ * @param {number=} flags 
+ * @param {function(): *=} disposer 
+ * @returns {function(): T}
+ */
+function run(f, seed, flags, disposer) {
+	/**
+	 * @const
+	 * @type {Computation<T>}
+	 */
+	var node = new Computation(new Log());
+	Computation.setup(node, f, seed, 32 | flags, disposer);
+	return function () { return node.get(); }
+}
+
+/**
+ * @template T
+ * @param {Array<Source>|Source} src
+ * @param {function(T): T} f 
+ * @param {T=} seed 
+ * @param {number=} flags 
+ * @param {function(): *=} disposer 
+ * @returns {function(): T}
+ */
+function tie(src, f, seed, flags, disposer) {
+	/**
+	 * @const
+	 * @type {Computation<T>}
+	 */
+	var node = new Computation(new Log());
+	if (flags & 4) {
+		if (flags & 1) {
 			logSource(node, src);
-			seed = Computation.setup(node, f, seed, 16 | flags, dispose);
 		}
-		return function () { return node.get(); }
-	}
-	function fn(f, seed, flags, dispose) {
-		Computation.setup(new Computation(null), f, seed, 32 | flags, dispose);
-	}
-	function on(src, f, seed, flags, dispose) {
-		var node = new Computation(null);
-		if (flags & 4) {
-			if (flags & 1) {
-				logSource(node, src);
-			}
-			Computation.setup(node, function (seed) {
-				logSource(node, src);
-				return f(seed);
-			}, seed, 16 | flags, dispose);
-		} else {
+		seed = Computation.setup(node, function (seed) {
 			logSource(node, src);
-			Computation.setup(node, f, seed, 16 | flags, dispose);
-		}
+			return f(seed);
+		}, seed, 16 | flags, disposer);
+	} else {
+		logSource(node, src);
+		seed = Computation.setup(node, f, seed, 16 | flags, disposer);
 	}
-	function cleanup(f) {
-		var owner = Owner, cleanups;
-		if (owner !== null) {
-			cleanups = owner.cleanups;
-			if (cleanups === null) {
-				owner.cleanups = [f];
-			} else {
-				cleanups[cleanups.length] = f;
-			}
+	return function () { return node.get(); }
+}
+
+/**
+ * @template T
+ * @param {function(T): T} f 
+ * @param {T=} seed 
+ * @param {number=} flags 
+ * @param {function(): *=} disposer 
+ * @returns {void}
+ */
+function fn(f, seed, flags, disposer) {
+	Computation.setup(new Computation(null), f, seed, 32 | flags, disposer);
+}
+
+
+/**
+ * @template T
+ * @param {Array<Source>|Source} src
+ * @param {function(T): T} f 
+ * @param {T=} seed 
+ * @param {number=} flags 
+ * @param {function(): *=} disposer
+ * @returns {void}
+ */
+function on(src, f, seed, flags, disposer) {
+	/**
+	 * @const
+	 * @type {Computation<T>}
+	 */
+	var node = new Computation(null);
+	if (flags & 4) {
+		if (flags & 1) {
+			logSource(node, src);
 		}
+		Computation.setup(node, function (seed) {
+			logSource(node, src);
+			return f(seed);
+		}, seed, 16 | flags, disposer);
+	} else {
+		logSource(node, src);
+		Computation.setup(node, f, seed, 16 | flags, disposer);
 	}
-	function freeze(f) {
-		var val;
-		if (State !== 1) {
-			val = f();
+}
+
+/**
+ * 
+ * @param {function(): *} f
+ * @returns {void}
+ */
+function cleanup(f) {
+	/** @type {Array<function(): *>} */
+	var cleanups;
+	/** @type {Computation} */
+	var owner = Owner;
+	if (owner !== null) {
+		cleanups = owner.cleanups;
+		if (cleanups === null) {
+			owner.cleanups = [f];
 		} else {
-			Root.changes.len = 0;
-			State = 2;
-			try {
-				val = f();
-				execute();
-			} finally {
-				State = 1;
-			}
+			cleanups[cleanups.length] = f;
 		}
-		return val;
 	}
-	function root(f) {
-		var val, 
-			node = new Computation(null),
-			owner = Owner,
-			listener = Listener;
-		Owner = node;
-		Listener = null;
+}
+
+/**
+ * @template T
+ * @param {function(): T} f 
+ * @returns {T}
+ */
+function freeze(f) {
+	/** @type {T} */
+	var val;
+	if (State !== 1) {
+		val = f();
+	} else {
+		Root.changes.len = 0;
+		State = 2;
 		try {
 			val = f();
+			execute();
 		} finally {
-			Owner = owner;
-			Listener = listener;
-		}
-		sealNode(node, null, void 0, val, 0);
-		return node;
-	}
-	function sample(node) {
-		var listener = Listener;
-		try {
-			Listener = null;
-			return typeof node === 'function' ? node() : node.get();
-		} finally {
-			Listener = listener;
-		}
-	}
-	function Data(val) {
-		this.val = val;
-		this.log = Log();
-		this.flag = 0;
-		this.pval = Void;
-	}
-	Data.prototype.get = function () {
-		if (Listener !== null) {
-			logRead(this, Listener);
-		}
-		return this.val;
-	}
-	Data.prototype.set = function (val) {
-		return logWrite(this, val);
-	}
-	Data.prototype.update = function () {
-		this.val = this.pval;
-		this.pval = Void;
-		if (this.flag & 512) {
-			setComputationsStale(this.log, Root.time);
-		}
-	}
-	function Value(val, eq) {
-		Data.call(this, val);
-		this.eq = eq;
-	}
-	Value.prototype.get = function () {
-		if (Listener !== null) {
-			logRead(this, Listener);
-		}
-		return this.val;
-	}
-	Value.prototype.set = function (val) {
-		return (this.eq ? this.eq(this.val, val) : this.val === val) ? val : logWrite(this, val);
-	}
-	Value.prototype.update = function () {
-		this.val = this.pval;
-		this.pval = Void;
-		if (this.flag & 512) {
-			setComputationsStale(this.log, Root.time);
-		}
-	}
-	function Computation(log) {
-		this.val = void 0;
-		this.log = log;
-		this.flag = 0;
-		this.fn = null;
-		this.age = -1;
-		this.source1 = null;
-		this.slot1 = -1;
-		this.sources = null;
-		this.slots = null;
-		this.owner = null;
-		this.traces = null;
-		this.owned = null;
-		this.cleanups = null;
-		this.disposer = null;
-	}
-	Computation.make = function (log) {
-		return new Computation(log ? Log() : null);
-	}
-	Computation.setup = function (node, f, seed, flags, dispose) {
-		var clock = Root,
-			owner = Owner;
-		seed = setupNode(node, f, seed, flags);
-		sealNode(node, owner, f, seed, flags, dispose);
-		if (State === 1) {
-			finishToplevelExecution(clock);
-		}
-		return seed;
-	}
-	Computation.prototype.get = function () {
-		if (Listener !== null) {
-			var flag = this.flag;
-			if (flag & 2048) {
-				if (State === 8) {
-					applyUpstreamUpdates(this);
-				}
-			}
-			if (this.age === Root.time) {
-				if (flag & 128) {
-					throw new Error('Circular dependency');
-				} else if (flag & 64) {
-					this.update();
-				}
-			}
-			logRead(this, Listener);
-		}
-		return this.val;
-	}
-	Computation.prototype.update = function () {
-		var owner = Owner,
-			listener = Listener,
-			flag = this.flag,
-			val = this.val;
-		cleanupNode(this, false);
-		Owner = this;
-		if (flag & 32) {
-			if (flag & 8) {
-				Listener = null;
-			} else {
-				Listener = this;
-			}
-		} else {
-			Listener = null;
-		}
-		this.flag &= ~64;
-		this.flag |= 128;
-		this.val = this.fn(val);
-		if ((flag & 514) === 514) {
-			if (val !== this.val) {
-				setComputationsStale(this.log, Root.time);
-			}
-		}
-		this.flag &= ~128;
-		Owner = owner;
-		Listener = listener;
-	}
-	Computation.prototype.dispose = function () {
-		if (State & 33) {
-			this.fn = null;
-			this.log = null;
-			cleanupNode(this, true);
-		} else {
-			Root.disposes.items[Root.disposes.len++] = this;
-		}
-	}
-	var Flag = {
-		Wait: 1,
-		Trace: 2,
-		Dynamic: 4,
-		Static: 8,
-	};
-	var Void = {};
-	var Root = Clock();
-	var State = 1;
-	var Owner = null;
-	var Listener = null;
-	function Queue() {
-		return { len: 0, items: [] };
-	}
-	function Clock() {
-		return { time: 0, changes: Queue(), traces: Queue(), updates: Queue(), disposes: Queue() };
-	}
-	function Log() {
-		return { node1: null, slot1: -1, nodes: null, slots: null };
-	}
-	function setupNode(node, fn, seed, flags) {
-		var clock = Root,
-			owner = Owner,
-			listener = Listener,
-			toplevel = State === 1;
-		Owner = node;
-		Listener = flags & 16 ? null : node;
-		if (toplevel) {
-			clock.changes.len = 0;
-			clock.updates.len = 0;
-			try {
-				State = 2;
-				seed = flags & 1 ? seed : fn(seed);
-			} finally {
-				State = 1;
-				Owner = Listener = null;
-			}
-		} else {
-			seed = fn(seed);
-		}
-		Owner = owner;
-		Listener = listener;
-		return seed;
-	}
-	function sealNode(node, owner, fn, val, flags, dispose) {
-		node.fn = fn;
-		node.val = val;
-		node.flag |= flags;
-		node.age = Root.time;
-		if (dispose !== void 0) {
-			node.disposer = dispose;
-		}
-		if (owner !== null) {
-			if (owner.owned === null) {
-				owner.owned = [node];
-			} else {
-				owner.owned[owner.owned.length] = node;
-			}
-			if (owner.flag & 2050) {
-				logPendingOwner(owner);
-			}
-		}
-	}
-	function finishToplevelExecution(clock) {
-		if (clock.changes.len > 0 || clock.updates.len > 0) {
-			try {
-				tick(clock);
-			} finally {
-				State = 1;
-			}
-		}
-	}
-	function logRead(from, to) {
-		var fromslot, toslot,
-			log = from.log;
-		to.flag |= 1024;
-		from.flag |= 512;
-		toslot = to.source1 === null ? -1 : to.sources === null ? 0 : to.sources.length;
-		if (log.node1 === null) {
-			log.node1 = to;
-			log.slot1 = toslot;
-			fromslot = -1;
-		} else if (log.nodes === null) {
-			log.nodes = [to];
-			log.slots = [toslot];
-			fromslot = 0;
-		} else {
-			fromslot = log.nodes.length;
-			log.nodes[fromslot] = to;
-			log.slots[fromslot] = toslot;
-		}
-		if (to.source1 === null) {
-			to.source1 = from;
-			to.slot1 = fromslot;
-		} else if (to.sources === null) {
-			to.sources = [from];
-			to.slots = [fromslot];
-		} else {
-			to.sources[toslot] = from;
-			to.slots[toslot] = fromslot;
-		}
-		if (from.flag & 2050) {
-			if (to.flag & 2050) {
-				if (to.traces === null) {
-					to.traces = [toslot];
-				} else {
-					to.traces[to.traces.length] = toslot;
-				}
-			} else {
-				to.flag |= 2;
-				logPendingSource(to, toslot);
-			}
-		}
-	}
-	function logWrite(node, val) {
-		var changes = Root.changes;
-		if (State !== 1) {
-			if (node.pval !== Void) {
-				if (val !== node.pval) {
-					throw new Error('Conflicting changes');
-				}
-			} else {
-				node.pval = val;
-				changes.items[changes.len++] = node;
-			}
-		} else {
-			node.pval = val;
-			if (node.flag & 512) {
-				changes.items[changes.len++] = node;
-				execute();
-			} else {
-				node.update();
-			}
-		}
-		return val;
-	}
-	function logSource(node, src) {
-		var s,
-			listener = Listener;
-		try {
-			Listener = node;
-			if (Array.isArray(src)) {
-				for (var i = 0, len = src.length; i < len; i++) {
-					s = src[i];
-					typeof s === 'function' ? s() : s.get();
-				}
-			} else {
-				typeof src === 'function' ? src() : src.get();
-			}
-		} finally {
-			Listener = listener;
-		}
-	}
-	function logPendingSource(to, slot) {
-		var i, len, log, node, nodes;
-		if (to.traces === null) {
-			to.traces = [slot];
-		} else {
-			to.traces[to.traces.length] = slot;
-		}
-		log = to.log;
-		if (log !== null) {
-			node = log.node1;
-			nodes = log.nodes;
-			if (node !== null) {
-				node.flag |= 2048;
-				logPendingSource(node, -1);
-			}
-			if (nodes !== null) {
-				for (i = 0, len = nodes.length; i < len; i++) {
-					node = nodes[i];
-					node.flag |= 2048;
-					logPendingSource(node, i);
-				}
-			}
-		}
-		if (to.owned !== null) {
-			logPendingOwner(to);
-		}
-	}
-	function logPendingOwner(owner) {
-		var i, node,
-			owned = owner.owned,
-			len = owned.length;
-		for (i = 0; i < len; i++) {
-			node = owned[i];
-			node.owner = owner;
-			node.flag |= 2048;
-			if (node.owned !== null) {
-				logPendingOwner(node);
-			}
-		}
-	}
-	function execute() {
-		var owner = Owner;
-		Root.updates.len = 0;
-		try {
-			tick(Root);
-		} finally {
-			Owner = owner;
-			Listener = null;
 			State = 1;
 		}
 	}
-	function tick(clock) {
-		var j, queue, node,
-			i = 0;
-		clock.disposes.len = 0;
-		do {
-			clock.time++;
-			queue = clock.changes;
-			State = 4;
-			for (j = 0; j < queue.len; j++) {
-				queue.items[j].update();
-			}
-			queue.len = 0;
-			queue = clock.traces;
-			State = 8;
-			for (j = 0; j < queue.len; j++) {
-				node = queue.items[j];
-				if (node.flag & 64) {
-					node.update();
-				}
-			}
-			queue.len = 0;
-			queue = clock.updates;
-			State = 16;
-			for (j = 0; j < queue.len; j++) {
-				node = queue.items[j];
-				if (node.flag & 64) {
-					node.update();
-				}
-			}
-			queue.len = 0;
-			queue = clock.disposes;
-			State = 32;
-			for (j = 0; j < queue.len; j++) {
-				node = queue.items[j];
-				node.fn = null;
-				node.log = null;
-				cleanupNode(node, true);
-			}
-			queue.len = 0;
-			if (i++ > 1e5) {
-				throw new Error('Runaway clock');
-			}
-		} while (clock.changes.len !== 0 || clock.updates.len !== 0 || clock.disposes.len !== 0);
-		State = 1;
+	return val;
+}
+
+/**
+ * @template T
+ * @param {function(): T=} f 
+ * @returns {Computation<T>}
+ */
+function root(f) {
+	/** @type {T} */
+	var val;
+	/** @type {Computation<T>} */
+	var node = new Computation(null);
+	/** @type {Computation} */
+	var owner = Owner;
+	/** @type {Computation} */
+	var listener = Listener;
+	Owner = node;
+	Listener = null;
+	try {
+		val = f();
+	} finally {
+		Owner = owner;
+		Listener = listener;
 	}
-	function setComputationsStale(log, time) {
-		var node = log.node1,
-			nodes = log.nodes;
-		if (node !== null) {
-			if (node.age < time) {
-				setComputationStale(node, time);
+	sealNode(node, null, /** @type {?} */(void 0), val, 0);
+	return node;
+}
+
+/**
+ * @template T
+ * @param {Signal<T>|function(): T} node 
+ * @returns {T}
+ */
+function sample(node) {
+	/** @type {Computation} */
+	var listener = Listener;
+	try {
+		Listener = null;
+		return typeof node === 'function' ? node() : node.get();
+	} finally {
+		Listener = listener;
+	}
+}
+
+//#endregion
+
+//#region 1.3 Object implementations
+
+//#region 1.3.1 Data
+
+/**
+ * @template T
+ * @constructor
+ * @param {T} val 
+ */
+function Data(val) {
+	/**
+	 * @type {T}
+	 */
+	this.val = val;
+	/**
+	 * @const
+	 * @type {Log<Computation>}
+	 */
+	this.log = new Log();
+	/**
+	 * @type {number}
+	 */
+	this.flag = 0;
+	/**
+	 * @type {T|Object}
+	 */
+	this.pval = Void;
+}
+
+/**
+ * @public
+ * @returns {T}
+ */
+Data.prototype.get = function () {
+	if (Listener !== null) {
+		logRead(this, Listener);
+	}
+	return this.val;
+}
+
+/**
+ * @public
+ * @param {T} val 
+ * @returns {T}
+ */
+Data.prototype.set = function (val) {
+	return logWrite(this, val);
+}
+
+/**
+ * @returns {void}
+ */
+Data.prototype.update = function () {
+	this.val = this.pval;
+	this.pval = Void;
+	if (this.flag & 512) {
+		setComputationsStale(this.log, Root.time);
+	}
+}
+
+//#endregion
+
+//#region 1.3.2 Value
+
+/**
+ * @template T
+ * @constructor
+ * @extends {Data<T>}
+ * @param {T} val 
+ * @param {function(T,T): boolean=} eq 
+ */
+function Value(val, eq) {
+	Data.call(this, val);
+	/**
+	 * @const
+	 * @type {(function(T,T): boolean)|undefined}
+	 */
+	this.eq = eq;
+}
+
+/**
+ * @public
+ * @returns {T}
+ */
+Value.prototype.get = function () {
+	if (Listener !== null) {
+		logRead(this, Listener);
+	}
+	return this.val;
+}
+
+/**
+ * @public
+ * @param {T} val 
+ * @returns {T}
+ */
+Value.prototype.set = function (val) {
+	return (this.eq ? this.eq(this.val, val) : this.val === val) ? val : logWrite(this, val);
+}
+
+/**
+ * @returns {void}
+ */
+Value.prototype.update = function () {
+	this.val = this.pval;
+	this.pval = Void;
+	if (this.flag & 512) {
+		setComputationsStale(this.log, Root.time);
+	}
+}
+
+//#endregion
+
+//#region 1.3.3 Computation
+
+/**
+ * @template T
+ * @constructor
+ * @param {Log<Computation>} log 
+ */
+function Computation(log) {
+	/**
+	 * @type {T}
+	 */
+	this.val = void 0;
+	/**
+	 * @type {Log<Computation>|null}
+	 */
+	this.log = log;
+	/**
+	 * @type {number}
+	 */
+	this.flag = 0;
+	/**
+	 * @type {(function(T): T)|null}
+	 */
+	this.fn = null;
+	/**
+	 * @type {number}
+	 */
+	this.age = -1;
+	/**
+	 * @type {Signal|null}
+	 */
+	this.source1 = null;
+	/**
+	 * @type {number}
+	 */
+	this.slot1 = -1;
+	/**
+	 * @type {Array<Signal>|null}
+	 */
+	this.sources = null;
+	/**
+	 * @type {Array<number>|null}
+	 */
+	this.slots = null;
+	/**
+	 * @type {Computation|null}
+	 */
+	this.owner = null;
+	/**
+	 * @type {Array<number>|null}
+	 */
+	this.traces = null;
+	/**
+	 * @type {Array<Computation>|null}
+	 */
+	this.owned = null;
+	/**
+	 * @type {Array<function(): *>|null}
+	 */
+	this.cleanups = null;
+	/**
+	 * @type {(function(): *)|null}
+	 */
+	this.disposer = null;
+}
+
+/**
+ * @public
+ * @static
+ * @template T
+ * @param {Computation<T>} node 
+ * @param {function(T): T} f 
+ * @param {T=} seed 
+ * @param {number=} flags 
+ * @param {function(): *=} dispose 
+ * @returns {T}
+ */
+Computation.setup = function (node, f, seed, flags, dispose) {
+	/** @type {Clock} */
+	var clock = Root;
+	/** @type {Computation|null} */
+	var owner = Owner;
+	seed = setupNode(node, f, seed, flags);
+	sealNode(node, owner, f, seed, flags, dispose);
+	if (State === 1) {
+		finishToplevelExecution(clock);
+	}
+	return seed;
+}
+
+/**
+ * @public
+ * @returns {T}
+ */
+Computation.prototype.get = function () {
+	/** @type {number} */
+	var flag;
+	if (Listener !== null) {
+		flag = this.flag;
+		if (flag & 2048) {
+			if (State === 8) {
+				applyUpstreamUpdates(this);
 			}
+		}
+		if (this.age === Root.time) {
+			if (flag & 128) {
+				throw new Error('Circular dependency');
+			} else if (flag & 64) {
+				this.update();
+			}
+		}
+		logRead(this, Listener);
+	}
+	return this.val;
+}
+
+/**
+ * @returns {void}
+ */
+Computation.prototype.update = function () {
+	/** @type {Computation|null} */
+	var owner = Owner;
+	/** @type {Computation|null} */
+	var listener = Listener;
+	/** @type {number} */
+	var flag = this.flag;
+	/** @type {T} */
+	var val = this.val;
+	cleanupNode(this, false);
+	Owner = this;
+	if (flag & 32) {
+		if (flag & 8) {
+			Listener = null;
+		} else {
+			Listener = this;
+		}
+	} else {
+		Listener = null;
+	}
+	this.flag &= ~64;
+	this.flag |= 128;
+	this.val = this.fn(val);
+	if ((flag & 514) === 514) {
+		if (val !== this.val) {
+			setComputationsStale(this.log, Root.time);
+		}
+	}
+	this.flag &= ~128;
+	Owner = owner;
+	Listener = listener;
+}
+
+/**
+ * @returns {void}
+ */
+Computation.prototype.dispose = function () {
+	if (State & 33) {
+		this.fn = null;
+		this.log = null;
+		cleanupNode(this, true);
+	} else {
+		Root.disposes.add(this);
+	}
+}
+
+//#endregion
+
+//#endregion
+
+//#region 1.4 System variablesconstants
+
+//#region 1.4.1 Enums
+
+
+
+/**
+ * @const
+ * @enum {number}
+ */
+var Flag = {
+	Wait: 1,
+	Trace: 2,
+	Dynamic: 4,
+	Static: 8,
+	
+};
+
+//#endregion
+
+//#region 1.4.2 Variables
+
+/**
+ * @const
+ * @type {Object}
+ */
+var Void = {};
+/**
+ * @const
+ * @type {Clock}
+ */
+var Root = new Clock();
+/**
+ * @type {number}
+ */
+var State = 1;
+/**
+ * @type {Computation|null}
+ */
+var Owner = null;
+/**
+ * @type {Computation|null}
+ */
+var Listener = null;
+
+//#endregion
+
+//#endregion
+
+//#region 1.5 Internal functionality
+
+
+/**
+ * @template T
+ * @constructor
+ */
+function Queue() {
+	/**
+	 * @type {number}
+	 */
+	this.len = 0;
+	/**
+	 * @const
+	 * @type {Array<T>}
+	 */
+	this.items = [];
+}
+
+/**
+ * 
+ * @param {T} item
+ * @returns {void} 
+ */
+Queue.prototype.add = function (item) {
+	this.items[this.len++] = item;
+}
+
+/**
+ * @constructor
+ */
+function Clock() {
+	/**
+	 * @type {number}
+	 */
+	this.time = 0;
+	/**
+	 * @const
+	 * @type {Queue<Data>}
+	 */
+	this.changes = new Queue();
+	/**
+	 * @const
+	 * @type {Queue<Computation>}
+	 */
+	this.traces = new Queue();
+	/**
+	 * @const
+	 * @type {Queue<Computation>}
+	 */
+	this.updates = new Queue();
+	/**
+	 * @const
+	 * @type {Queue<Computation>}
+	 */
+	this.disposes = new Queue();
+}
+
+/**
+ * @template T
+ * @constructor
+ */
+function Log() {
+	/**
+	 * @type {T}
+	 */
+	this.node1 = null;
+	/**
+	 * @type {number}
+	 */
+	this.slot1 = -1;
+	/**
+	 * @type {Array<T>|null}
+	 */
+	this.nodes = null;
+	/**
+	 * @type {Array<number>|null}
+	 */
+	this.slots = null;
+}
+
+/**
+ * @template T
+ * @param {Computation<T>} node 
+ * @param {function(T): T} fn 
+ * @param {T=} seed 
+ * @param {number=} flags 
+ * @returns {T}
+ */
+function setupNode(node, fn, seed, flags) {
+	/**
+	 * @type {Clock}
+	 */
+	var clock = Root;
+	/**
+	 * @type {Computation|null}
+	 */
+	var owner = Owner;
+	/**
+	 * @type {Computation|null}
+	 */
+	var listener = Listener;
+	/**
+	 * @type {boolean}
+	 */
+	var toplevel = State === 1;
+	Owner = node;
+	Listener = flags & 16 ? null : node;
+	if (toplevel) {
+		clock.changes.len = 0;
+		clock.updates.len = 0;
+		try {
+			State = 2;
+			seed = flags & 1 ? seed : fn(seed);
+		} finally {
+			State = 1;
+			Owner = Listener = null;
+		}
+	} else {
+		seed = flags & 1 ? seed : fn(seed);
+	}
+	Owner = owner;
+	Listener = listener;
+	return seed;
+}
+
+/**
+ * @template T
+ * @param {Computation<T>} node 
+ * @param {Computation} owner 
+ * @param {function(T): T} fn 
+ * @param {T} val 
+ * @param {number=} flags 
+ * @param {function(): *=} disposer 
+ * @returns {void}
+ */
+function sealNode(node, owner, fn, val, flags, disposer) {
+	node.fn = fn;
+	node.val = val;
+	node.flag |= flags;
+	node.age = Root.time;
+	if (disposer !== void 0) {
+		node.disposer = disposer;
+	}
+	if (owner !== null) {
+		if (owner.owned === null) {
+			owner.owned = [node];
+		} else {
+			owner.owned[owner.owned.length] = node;
+		}
+		if (owner.flag & 2050) {
+			logPendingOwner(owner);
+		}
+	}
+}
+
+/**
+ * 
+ * @param {Clock} clock 
+ * @returns {void}
+ */
+function finishToplevelExecution(clock) {
+	if (clock.changes.len > 0 || clock.updates.len > 0) {
+		try {
+			tick(clock);
+		} finally {
+			State = 1;
+		}
+	}
+}
+
+/**
+ * 
+ * @param {Signal} from 
+ * @param {Computation} to 
+ * @returns {void}
+ */
+function logRead(from, to) {
+	/**
+	 * @type {number}
+	 */
+	var fromslot;
+	/**
+	 * @type {number}
+	 */
+	var toslot;
+	/**
+	 * @type {Log}
+	 */
+	var log = from.log;
+	to.flag |= 1024;
+	from.flag |= 512;
+	toslot = to.source1 === null ? -1 : to.sources === null ? 0 : to.sources.length;
+	if (log.node1 === null) {
+		log.node1 = to;
+		log.slot1 = toslot;
+		fromslot = -1;
+	} else if (log.nodes === null) {
+		log.nodes = [to];
+		log.slots = [toslot];
+		fromslot = 0;
+	} else {
+		fromslot = log.nodes.length;
+		log.nodes[fromslot] = to;
+		log.slots[fromslot] = toslot;
+	}
+	if (to.source1 === null) {
+		to.source1 = from;
+		to.slot1 = fromslot;
+	} else if (to.sources === null) {
+		to.sources = [from];
+		to.slots = [fromslot];
+	} else {
+		to.sources[toslot] = from;
+		to.slots[toslot] = fromslot;
+	}
+	if (from.flag & 2050) {
+		if (to.flag & 2050) {
+			if (to.traces === null) {
+				to.traces = [toslot];
+			} else {
+				to.traces[to.traces.length] = toslot;
+			}
+		} else {
+			to.flag |= 2;
+			logPendingSource(to, toslot);
+		}
+	}
+}
+
+/**
+ * @template T
+ * @param {Data<T>} node 
+ * @param {T} val 
+ * @returns {T}
+ */
+function logWrite(node, val) {
+	/**
+	 * @type {Queue<Data>}
+	 */
+	var changes = Root.changes;
+	if (State !== 1) {
+		if (node.pval !== Void) {
+			if (val !== node.pval) {
+				throw new Error('Conflicting changes');
+			}
+		} else {
+			node.pval = val;
+			changes.add(node);
+		}
+	} else {
+		node.pval = val;
+		if (node.flag & 512) {
+			changes.add(node);
+			execute();
+		} else {
+			node.update();
+		}
+	}
+	return val;
+}
+
+/**
+ * 
+ * @param {Computation} node 
+ * @param {Array<Source>|Source} src 
+ * @returns {void}
+ */
+function logSource(node, src) {
+	/**
+	 * @type {Source}
+	 */
+	var s;
+	/**
+	 * @type {number}
+	 */
+	var i;
+	/**
+	 * @type {number}
+	 */
+	var len;
+	/**
+	 * @type {Computation|null}
+	 */
+	var listener = Listener;
+	try {
+		Listener = node;
+		if (Array.isArray(src)) {
+			for (i = 0, len = src.length; i < len; i++) {
+				s = src[i];
+				typeof s === 'function' ? s() : s.get();
+			}
+		} else {
+			typeof src === 'function' ? src() : src.get();
+		}
+	} finally {
+		Listener = listener;
+	}
+}
+
+/**
+ * 
+ * @param {Computation} to 
+ * @param {number} slot 
+ */
+function logPendingSource(to, slot) {
+	/**
+	 * @type {number}
+	 */
+	var i;
+	/**
+	 * @type {number}
+	 */
+	var len;
+	/**
+	 * @type {Log<Computation>}
+	 */
+	var log;
+	/**
+	 * @type {Computation}
+	 */
+	var node; 
+	/**
+	 * @type {Array<Computation>}
+	 */
+	var nodes;
+	if (to.traces === null) {
+		to.traces = [slot];
+	} else {
+		to.traces[to.traces.length] = slot;
+	}
+	log = to.log;
+	if (log !== null) {
+		node = log.node1;
+		nodes = log.nodes;
+		if (node !== null) {
+			node.flag |= 2048;
+			logPendingSource(node, -1);
 		}
 		if (nodes !== null) {
-			for (var i = 0, len = nodes.length; i < len; i++) {
+			for (i = 0, len = nodes.length; i < len; i++) {
 				node = nodes[i];
-				if (node.age < time) {
-					setComputationStale(node, time);
-				}
+				node.flag |= 2048;
+				logPendingSource(node, i);
 			}
 		}
 	}
-	function setComputationStale(node, time) {
-		if (node.flag & 2) {
-			Root.traces.items[Root.traces.len++] = node;
-		} else {
-			Root.updates.items[Root.updates.len++] = node;
-		}
-		node.age = time;
-		node.flag |= 64;
+	if (to.owned !== null) {
+		logPendingOwner(to);
+	}
+}
+
+/**
+ * 
+ * @param {Computation} owner 
+ * @returns {void}
+ */
+function logPendingOwner(owner) {
+	/**
+	 * @type {number}
+	 */
+	var i;
+	/**
+	 * @type {Computation}
+	 */
+	var node;
+	/**
+	 * @type {Array<Computation>}
+	 */
+	var owned = owner.owned;
+	/**
+	 * @type {number}
+	 */
+	var len = owned.length;
+	for (i = 0; i < len; i++) {
+		node = owned[i];
+		node.owner = owner;
+		node.flag |= 2048;
 		if (node.owned !== null) {
-			markComputationsDisposed(node.owned, time);
-		}
-		if ((node.flag & 514) === 512) {
-			setComputationsStale(node.log, time);
+			logPendingOwner(node);
 		}
 	}
-	function markComputationsDisposed(nodes, time) {
-		var node, i, len;
-		for (i = 0, len = nodes.length; i < len; i++) {
-			node = nodes[i];
-			if (!(node.flag & 256)) {
-				node.age = time;
-				node.flag &= ~64;
-				node.flag |= 256;
-				if (node.owned !== null) {
-					markComputationsDisposed(node.owned, time);
-				}
-			}
-		}
+}
+
+/**
+ * @returns {void}
+ */
+function execute() {
+	/**
+	 * @type {Computation}
+	 */
+	var owner = Owner;
+	Root.updates.len = 0;
+	try {
+		tick(Root);
+	} finally {
+		Owner = owner;
+		Listener = null;
+		State = 1;
 	}
-	function applyUpstreamUpdates(node) {
-		var i, len, slot,
-			source, sources,
-			owner = node.owner,
-			traces = node.traces;
-		if (owner !== null) {
-			applyUpstreamUpdates(owner);
+}
+
+/**
+ * 
+ * @param {Clock} clock 
+ * @returns {void}
+ */
+function tick(clock) {
+	/**
+	 * @type {number}
+	 */
+	var j;
+	/**
+	 * @type {Queue<Data>|Queue<Computation>}
+	 */
+	var queue;
+	/**
+	 * @type {Computation}
+	 */
+	var node;
+	/**
+	 * @type {number}
+	 */
+	var i = 0;
+	clock.disposes.len = 0;
+	do {
+		clock.time++;
+		queue = clock.changes;
+		State = 4;
+		for (j = 0; j < queue.len; j++) {
+			queue.items[j].update();
 		}
-		if (!(node.flag & 256)) {
-			if (traces !== null) {
-				sources = node.sources;
-				for (i = 0, len = traces.length; i < len; i++) {
-					slot = traces[i];
-					source = slot === -1 ? node.source1 : sources[slot];
-					if (source.flag & 2050) {
-						applyUpstreamUpdates(source);
-					}
-					if (source.flag & 64) {
-						source.update();
-					}
-				}
-			}
+		queue.len = 0;
+		queue = clock.traces;
+		State = 8;
+		for (j = 0; j < queue.len; j++) {
+			node = /** @type {Queue<Computation>} */(queue).items[j];
 			if (node.flag & 64) {
 				node.update();
 			}
 		}
-	}
-	function cleanupNode(node, final) {
-		var i, len,
-			flag = node.flag,
-			owned = node.owned,
-			cleanups = node.cleanups;
-		if (cleanups !== null) {
-			for (i = 0, len = cleanups.length; i < len; i++) {
-				cleanups[i]();
-			}
-			cleanups.length = 0;
-		}
-		if (final) {
-			if (node.disposer !== null) {
-				node.disposer();
-				node.disposer = null;
-			}
-		}
-		if (owned !== null) {
-			for (i = 0, len = owned.length; i < len; i++) {
-				owned[i].dispose();
-			}
-			owned.length = 0;
-		}
-		if (
-			final ||
-			(flag & 12) === 4 ||
-			(flag & 44) === 32
-		) {
-			cleanupSources(node);
-		}
-	}
-	function cleanupSources(node) {
-		var i, len, sources, slots;
-		if (node.flag & 1024) {
-			if (node.source1 !== null) {
-				cleanupSource(node.source1, node.slot1);
-				node.source1 = null;
-			}
-			sources = node.sources;
-			if (sources !== null) {
-				slots = node.slots;
-				for (i = 0, len = sources.length; i < len; i++) {
-					cleanupSource(sources.pop(), slots.pop());
-				}
-			}
-			if (node.traces !== null) {
-				node.traces.length = 0;
-			}
-			node.flag &= ~1024;
-		}
-	}
-	function cleanupSource(source, slot) {
-		var last, lastslot,
-			nodes, slots,
-			log = source.log;
-		if (slot === -1) {
-			log.node1 = null;
-		} else {
-			nodes = log.nodes;
-			slots = log.slots;
-			last = nodes.pop();
-			lastslot = slots.pop();
-			if (slot !== nodes.length) {
-				nodes[slot] = last;
-				slots[slot] = lastslot;
-				if (lastslot === -1) {
-					last.slot1 = slot;
-				} else {
-					last.slots[lastslot] = slot;
-				}
-			}
-		}
-	}
-	function list(val) {
-		return new List(val);
-	}
-	function IEnumerable(prototype) {
-		prototype.every = function (callback) {
-			var src = this,
-				pure = callback.length === 1;
-			return tie(src,  function (seed) {
-				var i, ilen, j, jlen, c,
-					cs = src.cs,
-					items = src.get(),
-					len = items.length;
-				if (seed !== Void && pure && cs !== null) {
-					if (src.flag & 4096) {
-						if (seed) {
-							if (cs.mod & 32) {
-								if (cs.mod & 4) {
-									for (i = 0, ilen = cs.value.length; i < ilen; i++) {
-										if (!callback(cs.value[i])) {
-											return false;
-										}
-									}
-									return true;
-								} else {
-									return callback(cs.value);
-								}
-							} else {
-								return true;
-							}
-						} else {
-							if (cs.mod & 160) {
-								return false;
-							}
-						}
-					} else {
-						scope: {
-							for (i = 0, ilen = cs.length; i < ilen; i++) {
-								c = cs[i];
-								if (seed) {
-									if (c.mod & 32) {
-										if (c.mod & 4) {
-											for (j = 0, jlen = c.value.length; j < jlen; j++) {
-												if (!callback(c.value[j])) {
-													return false;
-												}
-											}
-										} else {
-											if (!callback(c.value)) {
-												return false;
-											}
-										}
-									}
-								} else {
-									if (c.mod & 64) {
-										break scope;
-									}
-								}
-							}
-							return true;
-						}
-					}
-				}
-				for (i = 0; i < len; i++) {
-					if (!callback(items[i], i)) {
-						return false;
-					}
-				}
-				return true;
-			}, Void, 2);
-		}
-		prototype.filter = function (callback) {
-			var src = this,
-				k = null,
-				node = new Enumerable(),
-				pure = callback.length === 1;
-			return Enumerable.setup(node, src,  function (seed) {
-				var i, j, item,
-					cs = src.cs, changed,
-					items = src.get(),
-					len = items.length;
-				if (seed === Void) {
-					k = new Array(len);
-					seed = new Array(len);
-				} else if (pure && cs !== null) {
-					mut = cs.mod & 524032;
-					if (cs.mod & 128) {
-					} else {
-						if (cs.mod === 524288) {
-							node.cs = cs;
-							node.flag &= ~8192;
-						} else {
-							if (src.flag & 4096) {
-								node.flag |= 4096;
-								node.cs = cs = applyFilterMutation(callback, items, seed, k, len, cs);
-								if (cs.mod !== 524288) {
-									node.flag |= 8192;
-								} else {
-									node.flag &= ~8192;
-								}
-							} else {
-								node.flag &= ~4096;
-								j = cs.value.length;
-								node.cs = new Array(j);
-								for (i = 0; i < j; i++) {
-									node.cs[i] = cs = applyFilterMutation(callback, items, seed, k, len, src.cs[i]);
-									if (cs.mod !== 524288) {
-										changed = true;
-									}
-								}
-								if (changed) {
-									node.flag |= 8192;
-								} else {
-									node.flag &= ~8192;
-								}
-							}
-						}
-						return seed;
-					}
-				}
-				for (i = 0, j = 0; i < len; i++) {
-					item = items[i];
-					if (callback(item, i)) {
-						k[i] = j;
-						seed[j++] = item;
-					} else {
-						k[i] = -1;
-					}
-				}
-				k.length = len;
-				seed.length = j;
-				node.cs = null;
-				node.flag |= 8192;
-				return seed;
-			});
-		}
-		prototype.find = function (callback) {
-			var src = this,
-				i = -1,
-				pure = callback.length === 1;
-			return tie(src,  function (seed) {
-				var item,
-					cs = src.cs,
-					items = src.get(),
-					len = items.length;
-				if (pure && seed !== Void && cs !== null) {
-					i = indexOf(src.flag, cs, callback, true, i, len, false);
-					if (i !== -2) {
-						return i < 0 ? void 0 : items[i];
-					}
-				}
-				for (i = 0; i < len; i++) {
-					item = items[i];
-					if (callback(item, i)) {
-						return item;
-					}
-				}
-				i = -1;
-				return void 0;
-			}, Void, 2);
-		}
-		prototype.findIndex = function (callback, index) {
-			var src = this,
-				index = -1,
-				pure = callback.length === 1 && arguments.length === 1;
-			return tie(src,  function (seed) {
-				var i, cs,
-					items = src.get(),
-					len = items.length;
-				if (pure && seed !== Void) {
-					cs = src.cs;
-					if (cs !== null) {
-						i = indexOf(src.flag, cs, callback, true, index, len, false);
-						if (i !== -2) {
-							return index = i;
-						}
-					}
-				}
-				for (i = 0; i < len; i++) {
-					if (callback(items[i], i)) {
-						return index = i;
-					}
-				}
-				return index = -1;
-			}, Void, 2);
-		}
-		prototype.forEach = function (callback) {
-			var src = this,
-				node = new Enumerable(),
-				c = [],
-				clen = 0,
-				roots = [];
-			cleanup(function () {
-				for (var i = 0; i < len; i++) {
-					roots[i].dispose();
-				}
-			});
-			Enumerable.setup(node, src,  function (seed) {
-				var i, j, cs, loop,
-					temps, found,
-					cmin, cmax, umin, umax, ulen,
-					smin, smax, temp,
-					u = src.get(),
-					ulen = u.length,
-					remap = seed !== Void,
-					mapper = function () {
-						callback(u[j], j);
-					}
-				cs = src.cs;
-				if (remap && cs !== null) {
-					if (src.flag & 4096) {
-						node.flag |= 4096;
-						node.cs = applyRootMutation(callback, c, null, roots, clen, cs);
-					} else {
-						node.flag &= ~4096;
-						j = cs.length;
-						node.cs = new Array(j);
-						for (i = 0; i < j; i++) {
-							node.cs[i] = applyRootMutation(callback, c, null, roots, clen, cs[i]);
-						}
-					}
-				} else {
-					node.cs = null;
-					umax = u.length - 1;
-					if (umax < 0) {
-						if (clen > 0) {
-							for (i = 0; i < clen; i++) {
-								roots[i].dispose();
-							}
-						}
-					} else if (clen === 0) {
-						for (j = 0; j <= umax; j++) {
-							c[j] = u[j];
-							roots[j] = root(mapper);
-						}
-					} else {
-						loop = true;
-						temps = new Array(umax);
-						found = new Array(umax);
-						cmin = 0;
-						umin = 0;
-						cmax = clen - 1;
-						patch: for (; loop;) {
-							loop = false;
-							for (; c[cmin] === u[umin]; cmin++, umin++) {
-								if (cmin > cmax || umin > umax) {
-									break patch;
-								}
-							}
-							for (; c[cmax] === u[umax]; cmax--, umax--) {
-								temp = roots[cmax];
-								found[umax] = true;
-								temps[umax] = temp;
-								if (cmin > cmax || umin > umax) {
-									break patch;
-								}
-							}
-							for (; c[cmax] === u[umin]; cmax--, umin++) {
-								temp = roots[cmax];
-								temp[umin] = true;
-								temp[umin] = temp;
-								seed[umin] = temp.val;
-								if (cmin > cmax || umin > umax) {
-									break patch;
-								}
-								loop = true;
-							}
-							for (; c[cmin] === u[umax]; cmin++, umax--) {
-								temp = roots[cmin];
-								temp[umax] = true;
-								temp[umax] = temp;
-								if (cmin > cmax || umin > umax) {
-									break patch;
-								}
-								loop = true;
-							}
-						}
-						if (umin > umax) {
-							for (; cmin < cmax; cmax--) {
-								roots[cmin].dispose();
-							}
-						} else if (cmin > cmax) {
-							for (j = umin; j <= umax; j++) {
-								c[j] = u[j];
-								roots[j] = root(mapper);
-							}
-						} else {
-							smin = umin;
-							smax = umax;
-							outer: for (i = cmin; i <= cmax; i++) {
-								for (j = umin; j <= umax; j++) {
-									if (c[i] === u[j]) {
-										found[j] = true;
-										temps[j] = roots[i];
-										for (j = umin; j < umax && found[j]; j++, umin++) { }
-										for (j = umax; j > umin && found[j]; j--, umax--) { }
-										continue outer;
-									}
-								}
-								roots[i].dispose();
-							}
-							for (j = smin; j <= smax; j++) {
-								if (found[j]) {
-									temp = temps[j];
-									roots[j] = temp;
-								} else {
-									c[j] = u[j];
-									roots[j] = root(mapper);
-								}
-							}
-						}
-					}
-				}
-				clen = c.length = roots.length = ulen;
-			});
-		}
-		prototype.includes = function (valueToFind, fromIndex) {
-			var src = this,
-				i = -1,
-				pure = arguments.length === 1;
-			return tie(src,  function (seed) {
-				var cs = src.cs,
-					items = src.get(),
-					len = items.length;
-				if (pure && seed !== Void && cs !== null) {
-					i = indexOf(src.flag, cs, valueToFind, false, seed, i, len, false);
-					if (i !== -2) {
-						return i !== -1;
-					}
-				}
-				for (i = fromIndex === void 0 ? 0 : fromIndex; i < len; i++) {
-					if (valueToFind === items[i]) {
-						return true;
-					}
-				}
-				i = -1;
-				return false;
-			}, Void, 2);
-		}
-		prototype.indexOf = function (searchElement, fromIndex) {
-			var src = this,
-				i = -1,
-				pure = arguments.length === 1;
-			return tie(src,  function (seed) {
-				var cs = src.cs,
-					items = src.get(),
-					len = items.length;
-				if (pure && seed !== Void && cs !== null) {
-					i = indexOf(src.flag, cs, searchElement, false, i, len, false);
-					if (i !== -2) {
-						return i;
-					}
-				}
-				for (i = fromIndex === void 0 ? 0 : fromIndex; i < len; i++) {
-					item = items[i];
-					if (searchElement === items[i]) {
-						return i;
-					}
-				}
-				return -1;
-			}, Void, 2);
-		}
-		prototype.join = function (separator) {
-			var src = this;
-			return tie(src, function () {
-				return src.get().join(separator);
-			}, void 0, 2);
-		}
-		prototype.lastIndexOf = function (searchElement, fromIndex) {
-			var src = this,
-				i = -1,
-				pure = arguments.length === 1;
-			return tie(src, function (seed) {
-				var cs = src.cs,
-					items = src.get(),
-					len = items.length;
-				if (pure && seed !== Void && cs !== null) {
-					i = indexOf(src.flag, cs, searchElement, false, i, len, true);
-					if (i !== -2) {
-						return i;
-					}
-				}
-				for (i = fromIndex === void 0 ? len - 1 : fromIndex; i >= 0; i--) {
-					if (searchElement === items[i]) {
-						return i;
-					}
-				}
-				return i = -1;
-			}, Void, 2);
-		}
-		prototype.map = function (callback) {
-			var src = this,
-				node = new Enumerable(),
-				c = [],
-				clen = 0,
-				roots = [];
-			node.roots = roots;
-			node.flag |= 8192;
-			cleanup(function () {
-				for (var i = 0; i < clen; i++) {
-					roots[i].dispose();
-				}
-			});
-			return Enumerable.setup(node, src, function (seed) {
-				var i, j, cs, loop,
-					temps, found,
-					cmin, cmax, umin, umax, ulen,
-					smin, smax, temp,
-					u = src.get(),
-					ulen = u.length,
-					remap = seed !== Void,
-					mapper = function () {
-						return seed[j] = callback(u[j], j);
-					}
-				cs = src.cs;
-				if (remap && cs !== null) {
-					if (src.flag & 4096) {
-						node.flag |= 4096;
-						node.cs = applyRootMutation(callback, c, seed, roots, clen, cs);
-					} else {
-						node.flag &= ~4096;
-						j = cs.length;
-						node.cs = new Array(j);
-						for (i = 0; i < j; i++) {
-							node.cs[i] = applyRootMutation(callback, c, seed, roots, clen, cs[i]);
-						}
-					}
-				} else {
-					node.cs = null;
-					umax = u.length - 1;
-					if (!remap) {
-						seed = new Array(umax + 1);
-					}
-					if (umax < 0) {
-						if (clen > 0) {
-							for (i = 0; i < clen; i++) {
-								roots[i].dispose();
-							}
-						}
-					} else if (clen === 0) {
-						for (j = 0; j <= umax; j++) {
-							c[j] = u[j];
-							roots[j] = root(mapper);
-						}
-					} else {
-						loop = true;
-						temps = new Array(umax);
-						found = new Array(umax);
-						cmin = 0;
-						umin = 0;
-						cmax = clen - 1;
-						patch: for (; loop;) {
-							loop = false;
-							for (; c[cmin] === u[umin]; cmin++, umin++) {
-								if (cmin > cmax || umin > umax) {
-									break patch;
-								}
-							}
-							for (; c[cmax] === u[umax]; cmax--, umax--) {
-								temp = roots[cmax];
-								found[umax] = true;
-								temps[umax] = temp;
-								seed[umax] = temp.val;
-								if (cmin > cmax || umin > umax) {
-									break patch;
-								}
-							}
-							for (; c[cmax] === u[umin]; cmax--, umin++) {
-								temp = roots[cmax];
-								temp[umin] = true;
-								temp[umin] = temp;
-								seed[umin] = temp.val;
-								if (cmin > cmax || umin > umax) {
-									break patch;
-								}
-								loop = true;
-							}
-							for (; c[cmin] === u[umax]; cmin++, umax--) {
-								temp = roots[cmin];
-								temp[umax] = true;
-								temp[umax] = temp;
-								seed[umax] = temp.val;
-								if (cmin > cmax || umin > umax) {
-									break patch;
-								}
-								loop = true;
-							}
-						}
-						if (umin > umax) {
-							for (; cmin < cmax; cmax--) {
-								roots[cmin].dispose();
-							}
-						} else if (cmin > cmax) {
-							for (j = umin; j <= umax; j++) {
-								c[j] = u[j];
-								roots[j] = root(mapper);
-							}
-						} else {
-							smin = umin;
-							smax = umax;
-							outer: for (i = cmin; i <= cmax; i++) {
-								for (j = umin; j <= umax; j++) {
-									if (c[i] === u[j]) {
-										found[j] = true;
-										temps[j] = roots[i];
-										for (j = umin; j < umax && found[j]; j++, umin++) { }
-										for (j = umax; j > umin && found[j]; j--, umax--) { }
-										continue outer;
-									}
-								}
-								roots[i].dispose();
-							}
-							for (j = smin; j <= smax; j++) {
-								if (found[j]) {
-									temp = temps[j];
-									roots[j] = temp;
-									seed[j] = temp.val;
-								} else {
-									c[j] = u[j];
-									roots[j] = root(mapper);
-								}
-							}
-						}
-					}
-				}
-				clen = c.length = seed.length = roots.length = ulen;
-				return seed;
-			});
-		}
-		prototype.reduce = function (callback, initialValue) {
-			var src = this,
-				copy = copyValue(initialValue),
-				skip = arguments.length === 1;
-			return tie(src, function () {
-				var i, result,
-					items = src.get(),
-					len = items.length;
-				if (skip) {
-					i = 1;
-					result = items[0];
-				} else {
-					i = 0;
-					result = copy();
-				}
-				for (; i < len; i++) {
-					result = callback(result, items[i], i);
-				}
-				return result;
-			}, void 0, 2);
-		}
-		prototype.reduceRight = function (callback, initialValue) {
-			var src = this,
-				copy = copyValue(initialValue),
-				skip = arguments.length === 1;
-			return tie(src, function (seed) {
-				var i, result,
-					items = src.get()
-				len = items.length;
-				if (skip) {
-					i = len - 2;
-					result = items[len - 1];
-				} else {
-					i = len - 1;
-					result = copy();
-				}
-				for (; i >= 0; i--) {
-					result = callback(result, items[i], i);
-				}
-				return result;
-			}, Void, 2);
-		}
-		prototype.reverse = function () {
-			var src = this,
-				node = new Enumerable();
-			node.flag |= 8192;
-			return Enumerable.setup(node, src,  function (seed) {
-				var i,
-					cs = src.cs,
-					items = src.get(),
-					len = items.length;
-				if (seed === Void) {
-					seed = new Array(len);
-				} else if (cs !== null) {
-					if (src.flag & 4096) {
-						node.flag |= 4096;
-						node.cs = applyReverseMutation(seed, cs);
-					} else {
-						node.flag &= ~4096;
-						node.cs = new Array(cs.length);
-						for (i = 0, len = cs.length; i < len; i++) {
-							node.cs[i] = applyReverseMutation(seed, cs[i]);
-						}
-					}
-					return seed;
-				}
-				node.cs = null;
-				seed.length = len;
-				for (var i = len - 1, j = 0; i >= 0; i--, j++) {
-					seed[j] = items[i];
-				}
-				return seed;
-			});
-		}
-		prototype.slice = function (start, end) {
-			var src = this,
-				node = new Enumerable();
-			return Enumerable.setup(node, src,  function (seed) {
-				var i,
-					cs = src.cs,
-					items = src.get();
-				if (start !== void 0) {
-					if (start < 0) {
-						if (-1 * start < items.length) {
-							start = items.length + start;
-						} else {
-							start = 0;
-						}
-					} else {
-						if (start < items.length) {
-							start = start;
-						} else {
-							start = 0;
-						}
-					}
-				} else {
-					start = 0;
-				}
-				if (end !== void 0) {
-					if (end < 0) {
-						if (-1 * end < items.length && items.length + end > start) {
-							end = items.length + end;
-						} else {
-							end = items.length;
-						}
-					} else {
-						if (end > start && end < items.length) {
-							end = end;
-						} else {
-							end = items.length;
-						}
-					}
-				} else {
-					end = items.length;
-				}
-				if (seed === Void) {
-					seed = new Array(end - start);
-				} else if (cs !== null) {
-					if (src.flag & 4096) {
-					} else {
-					}
-				}
-				node.flag |= 8192;
-				seed.length = end - start;
-				for (i = 0; start < end; i++, start++) {
-					seed[i] = items[start];
-				}
-				return seed;
-			});
-		}
-		prototype.some = function (callback) {
-			var src = this,
-				index = -1,
-				pure = callback.length === 1;
-			return tie(src,  function (seed) {
-				var i,
-					cs = src.cs,
-					items = src.get(),
-					len = items.length;
-				if (pure && seed !== Void && cs !== null) {
-					i = indexOf(src.flag, cs, callback, true, index, len, false);
-					if (i !== -2) {
-						return (index = i) !== -1;
-					}
-				}
-				for (i = 0; i < len; i++) {
-					if (callback(items[i], i)) {
-						index = i;
-						return true;
-					}
-				}
-				index = -1;
-				return false;
-			}, Void, 2);
-		}
-		prototype.sort = function (compareFunction) {
-			var src = this,
-				node = new Enumerable(8192);
-			return Enumerable.setup(node, this, function () {
-				var items = src.get();
-				var newItems = items.slice();
-				newItems.sort(compareFunction);
-				return newItems;
-			});
-		}
-	}
-	function List(val) {
-		Data.call(this, val);
-		this.cs = null;
-		this.pcs = null;
-	}
-	IEnumerable(List.prototype);
-	List.prototype.get = function () {
-		if (Listener !== null) {
-			logRead(this, Listener);
-		}
-		return this.val;
-	}
-	List.prototype.set = function (next) {
-		return logWrite(this, next);
-	}
-	List.prototype.update = function () {
-		var i, len,
-			flag = this.flag;
-		if (this.pval !== Void) {
-			this.cs = null;
-			this.val = this.pval;
-			this.pval = Void;
-		} else {
-			this.cs = this.pcs;
-			this.pcs = null;
-			if (flag & 4096) {
-				this.cs = applyMutation(this.val, this.cs);
-			}
-			else {
-				for (i = 0, len = this.cs.length; i < len; i++) {
-					this.cs[i] = applyMutation(this.val, this.cs[i]);
-				}
-			}
-		}
-		if (flag & 512) {
-			setComputationsStale(this.log, Root.time);
-		}
-	}
-	List.prototype.insertAt = function (index, item) {
-		logMutate(this, { mod: 291, i1: index, value: item });
-	}
-	List.prototype.insertRange = function (index, items) {
-		logMutate(this, { mod: 551, i1: index, value: items });
-	}
-	List.prototype.move = function (from, to) {
-		logMutate(this, { mod: 1153, i1: from, i2: to });
-	}
-	List.prototype.pop = function () {
-		logMutate(this, { mod: 2128 });
-	}
-	List.prototype.push = function (item) {
-		logMutate(this, { mod: 4146, value: item });
-	}
-	List.prototype.removeAt = function (index) {
-		logMutate(this, { mod: 8257, i1: index });
-	}
-	List.prototype.removeRange = function (index, count) {
-		logMutate(this, { mod: 16453, i1: index, i2: count });
-	}
-	List.prototype.replace = function (index, item) {
-		logMutate(this, { mod: 32867, i1: index, value: item });
-	}
-	List.prototype.shift = function () {
-		logMutate(this, { mod: 65608 });
-	}
-	List.prototype.swap = function (i1, i2) {
-		logMutate(this, { mod: 131201, i1: i1, i2: i2 });
-	}
-	List.prototype.unshift = function (item) {
-		logMutate(this, { mod: 262186, value: item });
-	}
-	function Enumerable() {
-		Computation.call(this, Log());
-		this.cs = null;
-		this.roots = null;
-	}
-	IEnumerable(Enumerable.prototype);
-	Enumerable.setup = function (node, source, fn) {
-		var clock = Root,
-			owner = Owner;
-		logRead(source, node);
-		sealNode(node, owner, fn, setupNode(node, fn, Void, 16), 0);
-		if (State === 1) {
-			finishToplevelExecution(clock);
-		}
-		return node;
-	}
-	Enumerable.prototype.get = function () {
-		if (Listener !== null) {
-			var flag = this.flag;
-			if (flag & 2048) {
-				if (State === 8) {
-					applyUpstreamUpdates(this);
-				}
-			}
-			if (this.age === Root.time) {
-				if (flag & 128) {
-					throw new Error('Circular dependency');
-				} else if (flag & 64) {
-					this.update();
-				}
-			}
-			logRead(this, Listener);
-		}
-		return this.val;
-	}
-	Enumerable.prototype.update = function () {
-		var flag = this.flag,
-			owner = Owner,
-			listener = Listener;
-		cleanupNode(this, false);
-		Owner = this;
-		Listener = null;
-		this.flag &= ~64;
-		this.flag |= 128;
-		this.val = this.fn(this.val);
-		if ((flag & 514) === 514) {
-			if (flag & 8192) {
-				setComputationsStale(this.log, Root.time);
-			}
-		}
-		this.flag &= ~128;
-		Owner = owner;
-		Listener = listener;
-	}
-	Enumerable.prototype.dispose = function () {
-		if (State & 33) {
-			this.fn = null;
-			this.log = null;
-			cleanupNode(this, true);
-		} else {
-			Root.disposes.items[Root.disposes.len++] = this;
-		}
-	}
-	var Mod = {
-		Index: 1,
-		Value: 2,
-		Range: 4,
-		Head: 8,
-		Tail: 16,
-		Add: 32,
-		Delete: 64,
-		Reorder: 128,
-		InsertAt: 291,
-		InsertRange: 551,
-		Move: 1153,
-		Pop: 2128,
-		Push: 4146,
-		RemoveAt: 8257,
-		RemoveRange: 16453,
-		Replace: 32867,
-		Shift: 65608,
-		Swap: 131201,
-		Unshift: 262186,
-		Void: 524288,
-		Type: 524032,
-	};
-	var PopMod = { mod: 2128 };
-	var ShiftMod = { mod: 65608 };
-	var VoidMod = { mod: 524288 };
-	function logMutate(node, cs) {
-		var changes = Root.changes;
-		if (State !== 1) {
-			if (node.pval !== Void) {
-				throw new Error('Conflicting changes');
-			}
-			if (node.pcs === null) {
-				node.pcs = cs;
-				node.flag |= 4096;
-				changes.items[changes.len++] = node;
-			} else {
-				if (node.flag & 4096) {
-					node.flag &= ~4096;
-					node.pcs = [node.pcs, cs];
-				} else {
-					node.pcs[node.pcs.length] = cs;
-				}
-			}
-		} else {
-			node.pcs = cs;
-			node.flag |= 4096;
-			if (node.flag & 512) {
-				changes.items[changes.len++] = node;
-				execute();
-			} else {
+		queue.len = 0;
+		queue = clock.updates;
+		State = 16;
+		for (j = 0; j < queue.len; j++) {
+			node = /** @type {Queue<Computation>} */(queue).items[j];
+			if (node.flag & 64) {
 				node.update();
 			}
 		}
+		queue.len = 0;
+		queue = clock.disposes;
+		State = 32;
+		for (j = 0; j < queue.len; j++) {
+			node = /** @type {Queue<Computation>} */(queue).items[j];
+			node.fn = null;
+			node.log = null;
+			cleanupNode(node, true);
+		}
+		queue.len = 0;
+		if (i++ > 1e5) {
+			throw new Error('Runaway clock');
+		}
+	} while (clock.changes.len > 0 || clock.updates.len > 0 || clock.disposes.len > 0);
+	State = 1;
+}
+
+/**
+ * 
+ * @param {Log<Computation>} log 
+ * @param {number} time 
+ */
+function setComputationsStale(log, time) {
+	/**
+	 * @type {number}
+	 */
+	var i;
+	/**
+	 * @type {number}
+	 */
+	var len;
+	/**
+	 * @type {Computation|null}
+	 */
+	var node = log.node1;
+	/**
+	 * @type {Array<Computation>|null}
+	 */
+	var nodes = log.nodes;
+	if (node !== null) {
+		if (node.age < time) {
+			setComputationStale(node, time);
+		}
 	}
-	function applyMutation(array, cs) {
-		var i, j, k, args, value,
-			len = array.length,
-			mod = cs.mod,
-			mut = mod & 524032;
-		if (mod & 1) {
-			cs.i1 = actualIndex(len, cs.i1);
-		}
-		if (mod & 128) {
-			cs.i2 = actualIndex(len, cs.i2);
-			i = cs.i1;
-			j = cs.i2;
-			if (i !== j) {
-				if (i === len) {
-					i = --cs.i1;
-				}
-				if (j === len) {
-					j = --cs.i2;
-				}
-			} else {
-				cs = VoidMod;
-				return cs;
+	if (nodes !== null) {
+		for (i = 0, len = nodes.length; i < len; i++) {
+			node = nodes[i];
+			if (node.age < time) {
+				setComputationStale(node, time);
 			}
 		}
-		if (mut & 291) {
-			i = cs.i1;
-			if (len === i) {
-				array.push(cs.value);
-				cs.mod = 4146;
-			} else if (i === 0) {
-				array.unshift(cs.value);
-				cs.mod = 262186;
+	}
+}
+
+/**
+ * 
+ * @param {Computation} node 
+ * @param {number} time 
+ */
+function setComputationStale(node, time) {
+	if (node.flag & 2) {
+		Root.traces.add(node);
+	} else {
+		Root.updates.add(node);
+	}
+	node.age = time;
+	node.flag |= 64;
+	if (node.owned !== null) {
+		markComputationsDisposed(node.owned, time);
+	}
+	if ((node.flag & 514) === 512) {
+		setComputationsStale(node.log, time);
+	}
+}
+
+/**
+ * 
+ * @param {Array<Computation>} nodes 
+ * @param {number} time 
+ * @returns {void}
+ */
+function markComputationsDisposed(nodes, time) {
+	/**
+	 * @type {number}
+	 */
+	var i;
+	/**
+	 * @type {number}
+	 */
+	var len;
+	/**
+	 * @type {Computation}
+	 */
+	var node;
+	for (i = 0, len = nodes.length; i < len; i++) {
+		node = nodes[i];
+		if (!(node.flag & 256)) {
+			node.age = time;
+			node.flag &= ~64;
+			node.flag |= 256;
+			if (node.owned !== null) {
+				markComputationsDisposed(node.owned, time);
+			}
+		}
+	}
+}
+
+/**
+ * 
+ * @param {Computation} node 
+ * @returns {void}
+ */
+function applyUpstreamUpdates(node) {
+	/**
+	 * @type {number}
+	 */
+	var i;
+	/**
+	 * @type {number}
+	 */
+	var len;
+	/**
+	 * @type {number}
+	 */
+	var slot;
+	/**
+	 * @type {Signal}
+	 */
+	var source;
+	/**
+	 * @type {Array<Signal>}
+	 */
+	var sources;
+	/**
+	 * @type {Computation}
+	 */
+	var owner = node.owner;
+	/**
+	 * @type {Array<number>}
+	 */
+	var traces = node.traces;
+	if (owner !== null) {
+		applyUpstreamUpdates(owner);
+	}
+	if (!(node.flag & 256)) {
+		if (traces !== null) {
+			sources = node.sources;
+			for (i = 0, len = traces.length; i < len; i++) {
+				slot = traces[i];
+				source = slot === -1 ? node.source1 : sources[slot];
+				applyUpstreamUpdates(/** @type {Computation} */(source));
+				if (source.flag & 64) {
+					source.update();
+				}
+			}
+		}
+		if (node.flag & 64) {
+			node.update();
+		}
+	}
+}
+
+/**
+ * 
+ * @param {Computation} node 
+ * @param {boolean} final 
+ * @returns {void}
+ */
+function cleanupNode(node, final) {
+	/**
+	 * @type {number}
+	 */
+	var i;
+	/**
+	 * @type {number}
+	 */
+	var len;
+	/**
+	 * @type {number}
+	 */
+	var flag = node.flag;
+	/**
+	 * @type {Array<Computation>|null}
+	 */
+	var owned = node.owned;
+	/**
+	 * @type {Array<function(): *>|null}
+	 */
+	var cleanups = node.cleanups;
+	if (cleanups !== null) {
+		for (i = 0, len = cleanups.length; i < len; i++) {
+			cleanups[i]();
+		}
+		cleanups.length = 0;
+	}
+	if (final) {
+		if (node.disposer !== null) {
+			node.disposer();
+			node.disposer = null;
+		}
+	}
+	if (owned !== null) {
+		for (i = 0, len = owned.length; i < len; i++) {
+			owned[i].dispose();
+		}
+		owned.length = 0;
+	}
+	if (
+		final ||
+		(flag & 12) === 4 ||
+		(flag & 44) === 32
+	) {
+		cleanupSources(node);
+	}
+}
+
+/**
+ * 
+ * @param {Computation} node 
+ * @returns {void}
+ */
+function cleanupSources(node) {
+	/**
+	 * @type {number}
+	 */
+	var i;
+	/**
+	 * @type {number}
+	 */
+	var len;
+	/**
+	 * @type {Array<Signal>|null}
+	 */
+	var sources;
+	/**
+	 * @type {Array<number>}
+	 */
+	var slots;
+	if (node.flag & 1024) {
+		if (node.source1 !== null) {
+			cleanupSource(node.source1, node.slot1);
+			node.source1 = null;
+		}
+		sources = node.sources;
+		if (sources !== null) {
+			slots = node.slots;
+			for (i = 0, len = sources.length; i < len; i++) {
+				cleanupSource(sources.pop(), slots.pop());
+			}
+		}
+		if (node.traces !== null) {
+			node.traces.length = 0;
+		}
+		node.flag &= ~1024;
+	}
+}
+
+/**
+ * 
+ * @param {Signal} source 
+ * @param {number} slot 
+ * @returns {void}
+ */
+function cleanupSource(source, slot) {
+	/**
+	 * @type {Computation}
+	 */
+	var last;
+	/**
+	 * @type {number}
+	 */
+	var lastslot;
+	/**
+	 * @type {Array<Computation>}
+	 */
+	var nodes;
+	/**
+	 * @type {Array<number>}
+	 */
+	var slots;
+	/**
+	 * @type {Log<Computation>}
+	 */
+	var log = source.log;
+	if (slot === -1) {
+		log.node1 = null;
+	} else {
+		nodes = log.nodes;
+		slots = log.slots;
+		last = nodes.pop();
+		lastslot = slots.pop();
+		if (slot !== nodes.length) {
+			nodes[slot] = last;
+			slots[slot] = lastslot;
+			if (lastslot === -1) {
+				last.slot1 = slot;
 			} else {
-				array.splice(cs.i1, 0, cs.value);
+				last.slots[lastslot] = slot;
 			}
-		} else if (mut & 551) {
-			args = [cs.i1, 0];
-			value = cs.value;
-			for (i = 0; i < value.length; i++) {
-				args[i + 2] = value[i];
-			}
-			array.splice.apply(array, args);
-		} else if (mut & 1153) {
-			k = j > i ? 1 : -1;
-			args = array[i];
-			for (; i !== j; i += k) {
-				array[i] = array[i + k];
-			}
-			array[j] = args;
-		} else if (mut & 2128) {
-			if (len > 0) {
-				array.length--;
-			} else {
-				cs = VoidMod;
-			}
-		} else if (mut & 4146) {
-			array[len] = cs.value;
-		} else if (mut & 8257) {
-			if (len > 0) {
-				i = cs.i1;
-				if (len === i) {
-					array.pop();
-					cs = PopMod;
-				} else if (i === 0) {
-					array.shift();
-					cs = ShiftMod;
+		}
+	}
+}
+
+//#endregion
+
+//#endregion
+
+//#region 2. Array reactivity library
+
+//#region 2.1 Type definitions
+
+/* @module */
+/**
+ * @record
+ * @template T
+ */
+function Changeset() { }
+
+/**
+ * @type {number}
+ */
+Changeset.prototype.mod;
+
+/**
+ * @type {number|undefined}
+ */
+Changeset.prototype.i1;
+
+/**
+ * @type {number|undefined}
+ */
+Changeset.prototype.i2;
+
+/**
+ * @type {Array<T>|T|undefined}
+ */
+Changeset.prototype.value;
+
+/**
+ * @interface
+ * @template T
+ */
+function IEnumerable() { }
+
+/**
+ * @type {Changeset<T>}
+ */
+IEnumerable.prototype.cs;
+
+/**
+ * @returns {T}
+ */
+IEnumerable.prototype.get = function () { }
+
+/**
+ * 
+ * @param {function(T,number=): boolean} callback
+ * @returns {function(): boolean} 
+ */
+IEnumerable.prototype.every = function (callback) { }
+
+/**
+ * 
+ * @param {function(T,number=): boolean} callback 
+ * @returns {IEnumerable<T>}
+ */
+IEnumerable.prototype.filter = function (callback) { }
+
+/**
+ * 
+ * @param {function(T,number=): boolean} callback 
+ * @returns {function(): (T|undefined)}
+ */
+IEnumerable.prototype.find = function(callback) { }
+
+/**
+ * 
+ * @param {function(T,number=): boolean} callback 
+ * @param {number=} index
+ * @returns {function(): number}
+ */
+IEnumerable.prototype.findIndex = function(callback, index) { }
+
+/**
+ * 
+ * @param {function(T,number=): void} callback
+ * @returns {void} 
+ */
+IEnumerable.prototype.forEach = function(callback) { }
+
+/* @module */
+
+//#endregion
+
+//#region 2.2 Public API
+
+/**
+ * @template T
+ * @param {T} val 
+ * @returns {List<T>}
+ */
+function list(val) {
+	return new List(val);
+}
+
+//#endregion
+
+//#region 2.3 Object implementations
+
+//#region 2.3.1 IEnumerable
+
+/**
+ * @template T
+ * @this {IEnumerable<T>}
+ * @param {function(T,number=): boolean} callback 
+ * @returns {function(): boolean}
+ */
+function every(callback) {
+	var src = this;
+	var pure = callback.length === 1;
+	return tie(src, /** @param {boolean} seed */ function (seed) {
+		var i, ilen, j, jlen, c,
+			cs = src.cs,
+			items = src.get(),
+			len = items.length;
+		if (seed !== Void && pure && cs !== null) {
+			if (src.flag & 4096) {
+				if (seed) {
+					if (cs.mod & 32) {
+						if (cs.mod & 4) {
+							for (i = 0, ilen = cs.value.length; i < ilen; i++) {
+								if (!callback(cs.value[i])) {
+									return false;
+								}
+							}
+							return true;
+						} else {
+							return callback(cs.value);
+						}
+					} else {
+						return true;
+					}
 				} else {
-					removeAt(array, i);
+					if (cs.mod & 160) {
+						return false;
+					}
 				}
 			} else {
-				cs = VoidMod;
-			}
-		} else if (mut & 16453) {
-			if (cs.i1 < len) {
-				if (cs.i1 + cs.i2 > len) {
-					cs.i2 = len - cs.i1;
-				}
-				array.splice(cs.i1, cs.i2);
-			} else {
-				cs = VoidMod;
-			}
-		} else if (mut & 32867) {
-			array[cs.i1] = cs.value;
-		} else if (mut & 65608) {
-			if (len > 0) {
-				array.shift();
-			} else {
-				cs = VoidMod;
-			}
-		} else if (mut & 131201) {
-			value = array[i];
-			array[i] = array[j];
-			array[j] = value;
-		} else if (mut & 262186) {
-			array.unshift(cs.value);
-		}
-		return cs;
-	}
-	function applyFilterMutation(callback, items, seed, k, len, cs) {
-		var i, j, m, n, item, args,
-			found, value, csval,
-			mut = cs.mod & 524032;
-		if (mut & 291) {
-			i = cs.i1;
-			value = cs.value;
-			found = callback(value);
-			if (found) {
-				if (seed.length > 0) {
-					for (j = i, n = k.length; j < n; j++) {
-						m = k[j];
-						if (m !== -1) {
-							seed.splice(m, 0, value);
-							break;
+				scope: {
+					for (i = 0, ilen = cs.length; i < ilen; i++) {
+						c = cs[i];
+						if (seed) {
+							if (c.mod & 32) {
+								if (c.mod & 4) {
+									for (j = 0, jlen = c.value.length; j < jlen; j++) {
+										if (!callback(c.value[j])) {
+											return false;
+										}
+									}
+								} else {
+									if (!callback(c.value)) {
+										return false;
+									}
+								}
+							}
+						} else {
+							if (c.mod & 64) {
+								break scope;
+							}
 						}
 					}
-					k.splice(i, 0, m);
-					cs = { mod: 291, i1: m, value: value };
+					return true;
+				}
+			}
+		}
+		for (i = 0; i < len; i++) {
+			if (!callback(items[i], i)) {
+				return false;
+			}
+		}
+		return true;
+	}, Void, 2);
+}
+
+/**
+ * @template T
+ * @this {IEnumerable<T>}
+ * @param {function(T,number=): boolean} callback 
+ * @returns {IEnumerable<T>}
+ */
+function filter(callback) {
+	var src = this,
+		k = null,
+		node = new Enumerable(),
+		pure = callback.length === 1;
+	return Enumerable.setup(node, src, /** @param {Array<T>} seed */ function (seed) {
+		var i, j, item, mut,
+			cs = src.cs, changed,
+			items = src.get(),
+			len = items.length;
+		if (seed === Void) {
+			k = new Array(len);
+			seed = new Array(len);
+		} else if (pure && cs !== null) {
+			mut = cs.mod & 524032;
+			if (cs.mod & 128) {
+				// # Todo
+			} else {
+				if (cs.mod === 524288) {
+					node.cs = cs;
+					node.flag &= ~8192;
 				} else {
-					m = seed.length;
-					seed[m] = value;
-					k.splice(i, 0, m);
-					cs = { mod: 291, i1: m, value: value };
-				}
-				for (i++; i < len; i++) {
-					if (k[i] !== -1) {
-						k[i]++;
+					if (src.flag & 4096) {
+						node.flag |= 4096;
+						node.cs = cs = applyFilterMutation(callback, items, seed, k, len, cs);
+						if (cs.mod !== 524288) {
+							node.flag |= 8192;
+						} else {
+							node.flag &= ~8192;
+						}
+					} else {
+						node.flag &= ~4096;
+						j = cs.value.length;
+						node.cs = new Array(j);
+						for (i = 0; i < j; i++) {
+							node.cs[i] = cs = applyFilterMutation(callback, items, seed, k, len, src.cs[i]);
+							if (cs.mod !== 524288) {
+								changed = true;
+							}
+						}
+						if (changed) {
+							node.flag |= 8192;
+						} else {
+							node.flag &= ~8192;
+						}
 					}
 				}
-			} else {
-				k.splice(i, 0, -1);
-				cs = VoidMod;
+				return seed;
 			}
-		} else if (mut & 551) {
-			i = cs.i1;
-			n = k.length;
-			value = cs.value;
-			if (len > 0 && i < n) {
-				for (j = i; j < n && k[j] === -1; j++) { }
-				if (j >= n) {
-					j = seed.length;
+		}
+		for (i = 0, j = 0; i < len; i++) {
+			item = items[i];
+			if (callback(item, i)) {
+				k[i] = j;
+				seed[j++] = item;
+			} else {
+				k[i] = -1;
+			}
+		}
+		k.length = len;
+		seed.length = j;
+		node.cs = null;
+		node.flag |= 8192;
+		return seed;
+	});
+}
+
+/**
+ * @template T
+ * @this {IEnumerable<T>}
+ * @param {function(T,number=): boolean} callback 
+ * @returns {function(): T}
+ */
+function find(callback) {
+	var src = this,
+		i = -1,
+		pure = callback.length === 1;
+	return tie(src, /** @param {number=} seed */ function (seed) {
+		var item,
+			cs = src.cs,
+			items = src.get(),
+			len = items.length;
+		if (pure && seed !== Void && cs !== null) {
+			i = getIndex(src.flag, cs, callback, true, i, len, false);
+			if (i !== -2) {
+				return i < 0 ? void 0 : items[i];
+			}
+		}
+		for (i = 0; i < len; i++) {
+			item = items[i];
+			if (callback(item, i)) {
+				return item;
+			}
+		}
+		i = -1;
+		return void 0;
+	}, Void, 2);
+}
+/**
+ * @template T
+ * @this {IEnumerable<T>}
+ * @param {function(T,number=): boolean} callback 
+ * @param {number=} index 
+ * @returns {function(): number}
+ */
+function findIndex(callback, index) {
+	var src = this,
+		index = -1,
+		pure = callback.length === 1 && arguments.length === 1;
+	return tie(src, /** @param {number} seed */ function (seed) {
+		var i, cs,
+			items = src.get(),
+			len = items.length;
+		if (pure && seed !== Void) {
+			cs = src.cs;
+			if (cs !== null) {
+				i = getIndex(src.flag, cs, callback, true, index, len, false);
+				if (i !== -2) {
+					return index = i;
+				}
+			}
+		}
+		for (i = 0; i < len; i++) {
+			if (callback(items[i], i)) {
+				return index = i;
+			}
+		}
+		return index = -1;
+	}, Void, 2);
+}
+/**
+ * @template T
+ * @this {IEnumerable<T>}
+ * @param {function(T,number=): void} callback 
+ * @returns {void}
+ */
+function forEach(callback) {
+	var src = this,
+		node = new Enumerable(),
+		c = [],
+		clen = 0,
+		roots = [];
+	cleanup(function () {
+		/** @type {number} */
+		var i;
+		for (i = 0; i < clen; i++) {
+			roots[i].dispose();
+		}
+	});
+	Enumerable.setup(node, src, /** @param {{}} seed */ function (seed) {
+		var i, j, cs, loop,
+			temps, found,
+			cmin, cmax, umin, umax, ulen,
+			smin, smax, temp,
+			u = src.get(),
+			ulen = u.length,
+			remap = seed !== Void,
+			mapper = function () {
+				callback(u[j], j);
+			}
+		cs = src.cs;
+		if (remap && cs !== null) {
+			if (src.flag & 4096) {
+				node.flag |= 4096;
+				node.cs = applyRootMutation(callback, c, null, roots, clen, cs);
+			} else {
+				node.flag &= ~4096;
+				j = cs.length;
+				node.cs = new Array(j);
+				for (i = 0; i < j; i++) {
+					node.cs[i] = applyRootMutation(callback, c, null, roots, clen, cs[i]);
+				}
+			}
+		} else {
+			node.cs = null;
+			umax = u.length - 1;
+			if (umax < 0) {
+				if (clen > 0) {
+					for (i = 0; i < clen; i++) {
+						roots[i].dispose();
+					}
+				}
+			} else if (clen === 0) {
+				for (j = 0; j <= umax; j++) {
+					c[j] = u[j];
+					roots[j] = root(mapper);
+				}
+			} else {
+				loop = true;
+				temps = new Array(umax);
+				found = new Array(umax);
+				cmin = 0;
+				umin = 0;
+				cmax = clen - 1;
+				patch: for (; loop;) {
+					loop = false;
+					for (; c[cmin] === u[umin]; cmin++, umin++) {
+						if (cmin > cmax || umin > umax) {
+							break patch;
+						}
+					}
+					for (; c[cmax] === u[umax]; cmax--, umax--) {
+						temp = roots[cmax];
+						found[umax] = true;
+						temps[umax] = temp;
+						if (cmin > cmax || umin > umax) {
+							break patch;
+						}
+					}
+					for (; c[cmax] === u[umin]; cmax--, umin++) {
+						temp = roots[cmax];
+						temp[umin] = true;
+						temp[umin] = temp;
+						seed[umin] = temp.val;
+						if (cmin > cmax || umin > umax) {
+							break patch;
+						}
+						loop = true;
+					}
+					for (; c[cmin] === u[umax]; cmin++, umax--) {
+						temp = roots[cmin];
+						temp[umax] = true;
+						temp[umax] = temp;
+						if (cmin > cmax || umin > umax) {
+							break patch;
+						}
+						loop = true;
+					}
+				}
+				if (umin > umax) {
+					for (; cmin < cmax; cmax--) {
+						roots[cmin].dispose();
+					}
+				} else if (cmin > cmax) {
+					for (j = umin; j <= umax; j++) {
+						c[j] = u[j];
+						roots[j] = root(mapper);
+					}
 				} else {
-					j = k[j];
-				}
-			} else {
-				j = seed.length;
-			}
-			args = [i, 0];
-			for (i = 0, m = 2, n = value.length; i < n; i++) {
-				args[m++] = -1;
-			}
-			k.splice.apply(k, args);
-			csval = [];
-			args[0] = j;
-			for (i = cs.i1, m = 2, n = i + n; i < n; i++) {
-				item = items[i];
-				if (callback(item)) {
-					k[i] = j++;
-					args[m] = item;
-					csval[m++ - 2] = item;
-				}
-			}
-			n = csval.length;
-			if (n > 0) {
-				args.length = n + 2;
-				for (i = cs.i1 + value.length; i < len; i++) {
-					if (k[i] !== -1) {
-						k[i] += n;
+					smin = umin;
+					smax = umax;
+					outer: for (i = cmin; i <= cmax; i++) {
+						for (j = umin; j <= umax; j++) {
+							if (c[i] === u[j]) {
+								found[j] = true;
+								temps[j] = roots[i];
+								for (j = umin; j < umax && found[j]; j++, umin++) { }
+								for (j = umax; j > umin && found[j]; j--, umax--) { }
+								continue outer;
+							}
+						}
+						roots[i].dispose();
+					}
+					for (j = smin; j <= smax; j++) {
+						if (found[j]) {
+							temp = temps[j];
+							roots[j] = temp;
+						} else {
+							c[j] = u[j];
+							roots[j] = root(mapper);
+						}
 					}
 				}
-				seed.splice.apply(seed, args);
-				cs = { mod: 551, i1: j - n, value: csval };
+			}
+		}
+		clen = c.length = roots.length = ulen;
+	});
+}
+/**
+ * @template T
+ * @this {IEnumerable<T>}
+ * @param {T} valueToFind 
+ * @param {number=} fromIndex 
+ * @returns {function(): boolean}
+ */
+function includes(valueToFind, fromIndex) {
+	var src = this,
+		i = -1,
+		pure = arguments.length === 1;
+	return tie(src, /** @param {boolean} seed */ function (seed) {
+		var cs = src.cs,
+			items = src.get(),
+			len = items.length;
+		if (pure && seed !== Void && cs !== null) {
+			i = getIndex(src.flag, cs, valueToFind, false, seed, i, len, false);
+			if (i !== -2) {
+				return i !== -1;
+			}
+		}
+		for (i = fromIndex === void 0 ? 0 : fromIndex; i < len; i++) {
+			if (valueToFind === items[i]) {
+				return true;
+			}
+		}
+		i = -1;
+		return false;
+	}, Void, 2);
+}
+/**
+ * @template T
+ * @this {IEnumerable<T>}
+ * @param {T} searchElement 
+ * @param {number=} fromIndex 
+ * @returns {function(): number}
+ */
+function indexOf(searchElement, fromIndex) {
+	var src = this,
+		i = -1,
+		pure = arguments.length === 1;
+	return tie(src, /** @param {number} seed */ function (seed) {
+		var item,
+			cs = src.cs,
+			items = src.get(),
+			len = items.length;
+		if (pure && seed !== Void && cs !== null) {
+			i = getIndex(src.flag, cs, searchElement, false, i, len, false);
+			if (i !== -2) {
+				return i;
+			}
+		}
+		for (i = fromIndex === void 0 ? 0 : fromIndex; i < len; i++) {
+			item = items[i];
+			if (searchElement === items[i]) {
+				return i;
+			}
+		}
+		return -1;
+	}, Void, 2);
+}
+/**
+ * @this {IEnumerable<T>}
+ * @param {string=} separator 
+ * @returns {function(): string}
+ */
+function join(separator) {
+	var src = this;
+	return tie(src, function () {
+		return src.get().join(separator);
+	}, void 0, 2);
+}
+/**
+ * @template T
+ * @this {IEnumerable<T>}
+ * @param {T} searchElement 
+ * @param {number=} fromIndex 
+ * @returns {function(): number}
+ */
+function lastIndexOf(searchElement, fromIndex) {
+	var src = this,
+		i = -1,
+		pure = arguments.length === 1;
+	return tie(src, function (seed) {
+		var cs = src.cs,
+			items = src.get(),
+			len = items.length;
+		if (pure && seed !== Void && cs !== null) {
+			i = getIndex(src.flag, cs, searchElement, false, i, len, true);
+			if (i !== -2) {
+				return i;
+			}
+		}
+		for (i = fromIndex === void 0 ? len - 1 : fromIndex; i >= 0; i--) {
+			if (searchElement === items[i]) {
+				return i;
+			}
+		}
+		return i = -1;
+	}, Void, 2);
+}
+/**
+ * @template T,U
+ * @this {IEnumerable<T>}
+ * @param {function(T,number): U} callback 
+ * @returns {IEnumerable<U>}
+ */
+function map(callback) {
+	var src = this,
+		node = new Enumerable(),
+		c = [],
+		clen = 0,
+		roots = [];
+	node.roots = roots;
+	node.flag |= 8192;
+	cleanup(function () {
+		for (var i = 0; i < clen; i++) {
+			roots[i].dispose();
+		}
+	});
+	return Enumerable.setup(node, src, function (seed) {
+		var i, j, cs, loop,
+			temps, found,
+			cmin, cmax, umin, umax, ulen,
+			smin, smax, temp,
+			u = src.get(),
+			ulen = u.length,
+			remap = seed !== Void,
+			mapper = function () {
+				return seed[j] = callback(u[j], j);
+			}
+		cs = src.cs;
+		if (remap && cs !== null) {
+			if (src.flag & 4096) {
+				node.flag |= 4096;
+				node.cs = applyRootMutation(callback, c, seed, roots, clen, cs);
 			} else {
-				cs = VoidMod;
-			}
-		} else if (mut & 1153) {
-			i = cs.i1;
-			j = cs.i2;
-			m = j > i ? 1 : -1;
-			item = k[i];
-			for (; i !== j; i += m) {
-				k[i] = k[i + m];
-			}
-			k[j] = item;
-		} else if (mut & 4146) {
-			found = callback(cs.value);
-			j = seed.length;
-			n = k.length;
-			if (found) {
-				k[n] = j;
-				seed[j] = cs.value;
-				if (j !== cs.i1) {
-					cs = { mod: 4146, i1: j, value: cs.value };
+				node.flag &= ~4096;
+				j = cs.length;
+				node.cs = new Array(j);
+				for (i = 0; i < j; i++) {
+					node.cs[i] = applyRootMutation(callback, c, seed, roots, clen, cs[i]);
 				}
-			} else {
-				k[n] = -1;
-				cs = VoidMod;
 			}
-		} else if (mut & 2128) {
-			i = k.pop();
-			if (i !== -1) {
-				seed.pop();
-			} else {
-				cs = VoidMod;
+		} else {
+			node.cs = null;
+			umax = u.length - 1;
+			if (!remap) {
+				seed = new Array(umax + 1);
 			}
-		} else if (mut & 8257) {
-			i = cs.i1;
-			j = k[i];
-			removeAt(k, i);
-			if (j !== -1) {
-				for (i++; i < len; i++) {
-					if (k[i] !== -1) {
-						k[i]--;
+			if (umax < 0) {
+				if (clen > 0) {
+					for (i = 0; i < clen; i++) {
+						roots[i].dispose();
 					}
 				}
-				removeAt(seed, j);
-				if (i !== j) {
-					cs = { mod: 8257, i1: j };
+			} else if (clen === 0) {
+				for (j = 0; j <= umax; j++) {
+					c[j] = u[j];
+					roots[j] = root(mapper);
 				}
 			} else {
-				cs = VoidMod;
+				loop = true;
+				temps = new Array(umax);
+				found = new Array(umax);
+				cmin = 0;
+				umin = 0;
+				cmax = clen - 1;
+				patch: for (; loop;) {
+					loop = false;
+					for (; c[cmin] === u[umin]; cmin++, umin++) {
+						if (cmin > cmax || umin > umax) {
+							break patch;
+						}
+					}
+					for (; c[cmax] === u[umax]; cmax--, umax--) {
+						temp = roots[cmax];
+						found[umax] = true;
+						temps[umax] = temp;
+						seed[umax] = temp.val;
+						if (cmin > cmax || umin > umax) {
+							break patch;
+						}
+					}
+					for (; c[cmax] === u[umin]; cmax--, umin++) {
+						temp = roots[cmax];
+						temp[umin] = true;
+						temp[umin] = temp;
+						seed[umin] = temp.val;
+						if (cmin > cmax || umin > umax) {
+							break patch;
+						}
+						loop = true;
+					}
+					for (; c[cmin] === u[umax]; cmin++, umax--) {
+						temp = roots[cmin];
+						temp[umax] = true;
+						temp[umax] = temp;
+						seed[umax] = temp.val;
+						if (cmin > cmax || umin > umax) {
+							break patch;
+						}
+						loop = true;
+					}
+				}
+				if (umin > umax) {
+					for (; cmin < cmax; cmax--) {
+						roots[cmin].dispose();
+					}
+				} else if (cmin > cmax) {
+					for (j = umin; j <= umax; j++) {
+						c[j] = u[j];
+						roots[j] = root(mapper);
+					}
+				} else {
+					smin = umin;
+					smax = umax;
+					outer: for (i = cmin; i <= cmax; i++) {
+						for (j = umin; j <= umax; j++) {
+							if (c[i] === u[j]) {
+								found[j] = true;
+								temps[j] = roots[i];
+								for (j = umin; j < umax && found[j]; j++, umin++) { }
+								for (j = umax; j > umin && found[j]; j--, umax--) { }
+								continue outer;
+							}
+						}
+						roots[i].dispose();
+					}
+					for (j = smin; j <= smax; j++) {
+						if (found[j]) {
+							temp = temps[j];
+							roots[j] = temp;
+							seed[j] = temp.val;
+						} else {
+							c[j] = u[j];
+							roots[j] = root(mapper);
+						}
+					}
+				}
 			}
-		} else if (mut & 16453) {
+		}
+		clen = c.length = seed.length = roots.length = ulen;
+		return seed;
+	});
+}
+/**
+ * @template T,U
+ * @this {IEnumerable<T>}
+ * @param {function(U,T,number): U} callback 
+ * @param {U=} initialValue 
+ * @returns {function(): U}
+ */
+function reduce(callback, initialValue) {
+	var src = this,
+		copy = copyValue(initialValue),
+		skip = arguments.length === 1;
+	return tie(src, function () {
+		var i, result,
+			items = src.get(),
+			len = items.length;
+		if (skip) {
+			i = 1;
+			result = items[0];
+		} else {
+			i = 0;
+			result = copy();
+		}
+		for (; i < len; i++) {
+			result = callback(result, items[i], i);
+		}
+		return result;
+	}, void 0, 2);
+}
+/**
+ * @template T,U
+ * @this {IEnumerable<T>}
+ * @param {function(U,T,number): U} callback 
+ * @param {U=} initialValue 
+ * @returns {function(): U}
+ */
+function reduceRight(callback, initialValue) {
+	var src = this,
+		copy = copyValue(initialValue),
+		skip = arguments.length === 1;
+	return tie(src, function (seed) {
+		var i, result,
+			items = src.get(),
+			len = items.length;
+		if (skip) {
+			i = len - 2;
+			result = items[len - 1];
+		} else {
+			i = len - 1;
+			result = copy();
+		}
+		for (; i >= 0; i--) {
+			result = callback(result, items[i], i);
+		}
+		return result;
+	}, Void, 2);
+}
+/**
+ * @template T
+ * @this {IEnumerable<T>}
+ * @returns {IEnumerable<T>}
+ */
+function reverse() {
+	var src = this,
+		node = new Enumerable();
+	node.flag |= 8192;
+	return Enumerable.setup(node, src, /** @param {T[]} seed */ function (seed) {
+		var i,
+			cs = src.cs,
+			items = src.get(),
+			len = items.length;
+		if (seed === Void) {
+			seed = new Array(len);
+		} else if (cs !== null) {
+			if (src.flag & 4096) {
+				node.flag |= 4096;
+				node.cs = applyReverseMutation(seed, cs);
+			} else {
+				node.flag &= ~4096;
+				node.cs = new Array(cs.length);
+				for (i = 0, len = cs.length; i < len; i++) {
+					node.cs[i] = applyReverseMutation(seed, cs[i]);
+				}
+			}
+			return seed;
+		}
+		node.cs = null;
+		seed.length = len;
+		for (var i = len - 1, j = 0; i >= 0; i--, j++) {
+			seed[j] = items[i];
+		}
+		return seed;
+
+	});
+}
+/**
+ * @template T
+ * @this {IEnumerable<T>}
+ * @param {number} start 
+ * @param {number} end 
+ * @returns {IEnumerable<T>}
+ */
+function slice(start, end) {
+	var src = this,
+		node = new Enumerable();
+	return Enumerable.setup(node, src, /** @param {T[]} seed */ function (seed) {
+		var i,
+			cs = src.cs,
+			items = src.get();
+		if (start !== void 0) {
+			if (start < 0) {
+				if (-1 * start < items.length) {
+					start = items.length + start;
+				} else {
+					start = 0;
+				}
+			} else {
+				if (start < items.length) {
+					start = start;
+				} else {
+					start = 0;
+				}
+			}
+		} else {
+			start = 0;
+		}
+		if (end !== void 0) {
+			if (end < 0) {
+				if (-1 * end < items.length && items.length + end > start) {
+					end = items.length + end;
+				} else {
+					end = items.length;
+				}
+			} else {
+				if (end > start && end < items.length) {
+					end = end;
+				} else {
+					end = items.length;
+				}
+			}
+		} else {
+			end = items.length;
+		}
+		if (seed === Void) {
+			seed = new Array(end - start);
+		} else if (cs !== null) {
+			if (src.flag & 4096) {
+				// # Todo
+			} else {
+				// # Todo
+			}
+		}
+		node.flag |= 8192;
+		seed.length = end - start;
+		for (i = 0; start < end; i++, start++) {
+			seed[i] = items[start];
+		}
+		return seed;
+	});
+}
+/**
+ * @template T
+ * @this {IEnumerable<T>}
+ * @param {function(T,number): boolean} callback 
+ * @returns {function(): boolean}
+ */
+function some(callback) {
+	var src = this,
+		index = -1,
+		pure = callback.length === 1;
+	return tie(src, /** @param {boolean} seed */ function (seed) {
+		var i,
+			cs = src.cs,
+			items = src.get(),
+			len = items.length;
+		if (pure && seed !== Void && cs !== null) {
+			i = getIndex(src.flag, cs, callback, true, index, len, false);
+			if (i !== -2) {
+				return (index = i) !== -1;
+			}
+		}
+		for (i = 0; i < len; i++) {
+			if (callback(items[i], i)) {
+				index = i;
+				return true;
+			}
+		}
+		index = -1;
+		return false;
+	}, Void, 2);
+}
+/**
+ * @template T
+ * @this {IEnumerable<T>}
+ * @param {function(T,T): number} compareFunction 
+ * @returns {IEnumerable<T>}
+ */
+function sort(compareFunction) {
+	var src = this,
+		node = new Enumerable(8192);
+	return Enumerable.setup(node, this, function () {
+		var items = src.get();
+		var newItems = items.slice();
+		newItems.sort(compareFunction);
+		return newItems;
+	});
+}
+
+
+//#endregion
+
+//#region 2.3.2 List
+
+/**
+ * @template T
+ * @constructor
+ * @extends Data<Array<T>>
+ * @implements {IEnumerable<T>}
+ * @param {Array<T>} val 
+ */
+function List(val) {
+	Data.call(this, val);
+	/**
+	 * @type {Changeset<T>}
+	 */
+	this.cs = null;
+	/**
+	 * @type {Changeset<T>}
+	 */
+	this.pcs = null;
+}
+
+List.prototype.every = every;
+
+List.prototype.filter = filter;
+
+List.prototype.find = find;
+
+List.prototype.findIndex = findIndex;
+
+List.prototype.forEach = forEach;
+
+List.prototype.includes = includes;
+
+List.prototype.indexOf = indexOf;
+
+List.prototype.join = join;
+
+List.prototype.lastIndexOf = lastIndexOf;
+
+List.prototype.map = map;
+
+List.prototype.reduce = reduce;
+
+List.prototype.reduceRight = reduceRight;
+
+List.prototype.reverse = reverse;
+
+List.prototype.slice = slice;
+
+List.prototype.some = some;
+
+List.prototype.sort = sort;
+
+/**
+ * @public
+ * @returns {Array<T>}
+ */
+List.prototype.get = function () {
+	if (Listener !== null) {
+		logRead(this, Listener);
+	}
+	return this.val;
+}
+
+/**
+ * @public
+ * @param {Array<T>} next 
+ * @returns {Array<T>}
+ */
+List.prototype.set = function (next) {
+	return logWrite(this, next);
+}
+
+/**
+ * @returns {void}
+ */
+List.prototype.update = function () {
+	var i;
+	var len;
+	var flag = this.flag;
+	if (this.pval !== Void) {
+		this.cs = null;
+		this.val = this.pval;
+		this.pval = Void;
+	} else {
+		this.cs = this.pcs;
+		this.pcs = null;
+		if (flag & 4096) {
+			this.cs = applyMutation(this.val, this.cs);
+		}
+		else {
+			for (i = 0, len = this.cs.length; i < len; i++) {
+				this.cs[i] = applyMutation(this.val, this.cs[i]);
+			}
+		}
+	}
+	if (flag & 512) {
+		setComputationsStale(this.log, Root.time);
+	}
+}
+
+/**
+ * 
+ * @param {number} index 
+ * @param {T} item 
+ * @returns {void}
+ */
+List.prototype.insertAt = function (index, item) {
+	logMutate(this, { mod: 291, i1: index, value: item });
+}
+
+/**
+ * 
+ * @param {number} index 
+ * @param {Array<T>} items 
+ */
+List.prototype.insertRange = function (index, items) {
+	logMutate(this, { mod: 551, i1: index, value: items });
+}
+
+/**
+ * 
+ * @param {number} from 
+ * @param {number} to 
+ */
+List.prototype.move = function (from, to) {
+	logMutate(this, { mod: 1153, i1: from, i2: to });
+}
+
+/**
+ * @returns {void}
+ */
+List.prototype.pop = function () {
+	logMutate(this, { mod: 2128 });
+}
+
+/**
+ * 
+ * @param {T} item 
+ */
+List.prototype.push = function (item) {
+	logMutate(this, { mod: 4146, value: item });
+}
+
+/**
+ * 
+ * @param {number} index 
+ */
+List.prototype.removeAt = function (index) {
+	logMutate(this, { mod: 8257, i1: index });
+}
+
+/**
+ * 
+ * @param {number} index 
+ * @param {number} count 
+ */
+List.prototype.removeRange = function (index, count) {
+	logMutate(this, { mod: 16453, i1: index, i2: count });
+}
+
+/**
+ * 
+ * @param {number} index 
+ * @param {T} item 
+ */
+List.prototype.replace = function (index, item) {
+	logMutate(this, { mod: 32867, i1: index, value: item });
+}
+
+/**
+ * 
+ */
+List.prototype.shift = function () {
+	logMutate(this, { mod: 65608 });
+}
+
+/**
+ * 
+ * @param {number} i1 
+ * @param {number} i2 
+ * @returns {void}
+ */
+List.prototype.swap = function (i1, i2) {
+	logMutate(this, { mod: 131201, i1: i1, i2: i2 });
+}
+
+/**
+ * 
+ * @param {T} item 
+ * @returns {void}
+ */
+List.prototype.unshift = function (item) {
+	logMutate(this, { mod: 262186, value: item });
+}
+
+//#endregion
+
+//#region 2.3.3 Enumerable
+
+/**
+ * 
+ * @template T
+ * @constructor
+ * @extends Computation<Array<T>>
+ * @implements {IEnumerable<T>}
+ */
+function Enumerable() {
+	Computation.call(this, new Log());
+	/**
+	 * @type {Changeset<T>}
+	 */
+	this.cs = null;
+	/**
+	 * @type {Array<Computation>|null}
+	 */
+	this.roots = null;
+}
+
+Enumerable.prototype.every = every;
+
+Enumerable.prototype.filter = filter;
+
+Enumerable.prototype.find = find;
+
+Enumerable.prototype.findIndex = findIndex;
+
+Enumerable.prototype.forEach = forEach;
+
+Enumerable.prototype.includes = includes;
+
+Enumerable.prototype.indexOf = indexOf;
+
+Enumerable.prototype.join = join;
+
+Enumerable.prototype.lastIndexOf = lastIndexOf;
+
+Enumerable.prototype.map = map;
+
+Enumerable.prototype.reduce = reduce;
+
+Enumerable.prototype.reduceRight = reduceRight;
+
+Enumerable.prototype.reverse = reverse;
+
+Enumerable.prototype.slice = slice;
+
+Enumerable.prototype.some = some;
+
+Enumerable.prototype.sort = sort;
+
+/**
+ * @public
+ * @static
+ * @template T
+ * @param {Enumerable<T>} node 
+ * @param {Signal} source 
+ * @param {function(T): T} fn 
+ * @returns {Enumerable<T>}
+ */
+Enumerable.setup = function (node, source, fn) {
+	var clock = Root,
+		owner = Owner;
+	logRead(source, node);
+	sealNode(node, owner, fn, setupNode(node, fn, Void, 16), 0);
+	if (State === 1) {
+		finishToplevelExecution(clock);
+	}
+	return node;
+}
+
+/**
+ * @public
+ * @returns {Array<T>}
+ */
+Enumerable.prototype.get = function () {
+	/**
+	 * @type {number}
+	 */
+	var flag;
+	if (Listener !== null) {
+		flag = this.flag;
+		if (flag & 2048) {
+			if (State === 8) {
+				applyUpstreamUpdates(this);
+			}
+		}
+		if (this.age === Root.time) {
+			if (flag & 128) {
+				throw new Error('Circular dependency');
+			} else if (flag & 64) {
+				this.update();
+			}
+		}
+		logRead(this, Listener);
+	}
+	return this.val;
+}
+
+/**
+ * @returns {void}
+ */
+Enumerable.prototype.update = function () {
+	var flag = this.flag,
+		owner = Owner,
+		listener = Listener;
+	cleanupNode(this, false);
+	Owner = this;
+	Listener = null;
+	this.flag &= ~64;
+	this.flag |= 128;
+	this.val = this.fn(this.val);
+	if ((flag & 514) === 514) {
+		if (flag & 8192) {
+			setComputationsStale(this.log, Root.time);
+		}
+	}
+	this.flag &= ~128;
+	Owner = owner;
+	Listener = listener;
+}
+
+/**
+ * @returns {void}
+ */
+Enumerable.prototype.dispose = function () {
+	if (State & 33) {
+		this.fn = null;
+		this.log = null;
+		cleanupNode(this, true);
+	} else {
+		Root.disposes.add(this);
+	}
+}
+
+//#endregion
+
+//#endregion
+
+//#region 2.4 System variables
+
+//#region 2.4.1 Enums
+
+
+
+/**
+ * @const
+ * @enum {number}
+ */
+var Mod = {
+	Index: 1,
+	Value: 2,
+	Range: 4,
+	Head: 8,
+	Tail: 16,
+	Add: 32,
+	Delete: 64,
+	Reorder: 128,
+	InsertAt: 291,
+	InsertRange: 551,
+	Move: 1153,
+	Pop: 2128,
+	Push: 4146,
+	RemoveAt: 8257,
+	RemoveRange: 16453,
+	Replace: 32867,
+	Shift: 65608,
+	Swap: 131201,
+	Unshift: 262186,
+	Void: 524288,
+	Type: 524032,
+};
+
+//#endregion
+
+//#region 2.4.2 Variables
+
+
+/**
+ * @const 
+ * @type {Changeset<undefined>}
+ */
+var PopMod = { mod: 2128 };
+/**
+ * @const
+ * @type {Changeset<undefined>}
+ */
+var ShiftMod = { mod: 65608 };
+/**
+ * @const
+ * @type {Changeset<undefined>}
+ */
+var VoidMod = { mod: 524288 };
+
+//#endregion
+
+//#endregion
+
+//#region 2.5 Internal functionality
+
+/**
+ * @template T
+ * @param {List<T>} node 
+ * @param {Changeset<T>} cs 
+ * @returns {void}
+ */
+function logMutate(node, cs) {
+	/**
+	 * @type {Queue<Data>}
+	 */
+	var changes = Root.changes;
+	if (State !== 1) {
+		if (node.pval !== Void) {
+			throw new Error('Conflicting changes');
+		}
+		if (node.pcs === null) {
+			node.pcs = cs;
+			node.flag |= 4096;
+			changes.add(node);
+		} else {
+			if (node.flag & 4096) {
+				node.flag &= ~4096;
+				node.pcs = [node.pcs, cs];
+			} else {
+				node.pcs[node.pcs.length] = cs;
+			}
+		}
+	} else {
+		node.pcs = cs;
+		node.flag |= 4096;
+		if (node.flag & 512) {
+			changes.add(node);
+			execute();
+		} else {
+			node.update();
+		}
+	}
+}
+
+/**
+ * @template T
+ * @param {Array<T>} array 
+ * @param {Changeset<T>} cs 
+ * @returns {void}
+ */
+function applyMutation(array, cs) {
+	var i, j, k, args, value,
+		len = array.length,
+		mod = cs.mod,
+		mut = mod & 524032;
+	if (mod & 1) {
+		cs.i1 = actualIndex(len, cs.i1);
+	}
+	if (mod & 128) {
+		cs.i2 = actualIndex(len, cs.i2);
+		i = cs.i1;
+		j = cs.i2;
+		if (i !== j) {
+			if (i === len) {
+				i = --cs.i1;
+			}
+			if (j === len) {
+				j = --cs.i2;
+			}
+		} else {
+			cs = VoidMod;
+			return cs;
+		}
+	}
+	if (mut & 291) {
+		i = cs.i1;
+		if (len === i) {
+			array.push(cs.value);
+			cs.mod = 4146;
+		} else if (i === 0) {
+			array.unshift(cs.value);
+			cs.mod = 262186;
+		} else {
+			array.splice(cs.i1, 0, cs.value);
+		}
+	} else if (mut & 551) {
+		args = [cs.i1, 0];
+		value = cs.value;
+		for (i = 0; i < value.length; i++) {
+			args[i + 2] = value[i];
+		}
+		array.splice.apply(array, args);
+	} else if (mut & 1153) {
+		k = j > i ? 1 : -1;
+		args = array[i];
+		for (; i !== j; i += k) {
+			array[i] = array[i + k];
+		}
+		array[j] = args;
+	} else if (mut & 2128) {
+		if (len > 0) {
+			array.length--;
+		} else {
+			cs = VoidMod;
+		}
+	} else if (mut & 4146) {
+		array[len] = cs.value;
+	} else if (mut & 8257) {
+		if (len > 0) {
 			i = cs.i1;
-			m = 0;
-			j = -1;
-			n = i + cs.i2;
-			for (; i < n; i++) {
+			if (len === i) {
+				array.pop();
+				cs = PopMod;
+			} else if (i === 0) {
+				array.shift();
+				cs = ShiftMod;
+			} else {
+				removeAt(array, i);
+			}
+		} else {
+			cs = VoidMod;
+		}
+	} else if (mut & 16453) {
+		if (cs.i1 < len) {
+			if (cs.i1 + cs.i2 > len) {
+				cs.i2 = len - cs.i1;
+			}
+			array.splice(cs.i1, cs.i2);
+		} else {
+			cs = VoidMod;
+		}
+	} else if (mut & 32867) {
+		array[cs.i1] = cs.value;
+	} else if (mut & 65608) {
+		if (len > 0) {
+			array.shift();
+		} else {
+			cs = VoidMod;
+		}
+	} else if (mut & 131201) {
+		value = array[i];
+		array[i] = array[j];
+		array[j] = value;
+	} else if (mut & 262186) {
+		array.unshift(cs.value);
+	}
+	return cs;
+}
+
+/**
+ * @template T
+ * @param {function(T): boolean} callback 
+ * @param {Array<T>} items 
+ * @param {Array<T>} seed 
+ * @param {Array<number>} k 
+ * @param {number} len 
+ * @param {Changeset<T>} cs 
+ * @returns 
+ */
+function applyFilterMutation(callback, items, seed, k, len, cs) {
+	var i, j, m, n, item, args,
+		found, value, csval,
+		mut = cs.mod & 524032;
+	if (mut & 291) {
+		i = cs.i1;
+		value = cs.value;
+		found = callback(value);
+		if (found) {
+			if (seed.length > 0) {
+				for (j = i, n = k.length; j < n; j++) {
+					m = k[j];
+					if (m !== -1) {
+						seed.splice(m, 0, value);
+						break;
+					}
+				}
+				k.splice(i, 0, m);
+				cs = { mod: 291, i1: m, value: value };
+			} else {
+				m = seed.length;
+				seed[m] = value;
+				k.splice(i, 0, m);
+				cs = { mod: 291, i1: m, value: value };
+			}
+			for (i++; i < len; i++) {
 				if (k[i] !== -1) {
-					if (j === -1) {
-						j = k[i];
-					}
-					m++;
+					k[i]++;
 				}
 			}
-			k.splice(cs.i1, cs.i2);
-			if (m > 0) {
-				for (i = cs.i1; i < len; i++) {
-					if (k[i] !== -1) {
-						k[i] -= n;
-					}
-				}
-				seed.splice(j, m);
-				cs = { mod: 16453, i1: j, i2: m };
-			} else {
-				cs = VoidMod;
-			}
-		} else if (mut & 32867) {
-			i = cs.i1;
-			n = k.length;
+		} else {
+			k.splice(i, 0, -1);
+			cs = VoidMod;
+		}
+	} else if (mut & 551) {
+		i = cs.i1;
+		n = k.length;
+		value = cs.value;
+		if (len > 0 && i < n) {
 			for (j = i; j < n && k[j] === -1; j++) { }
 			if (j >= n) {
 				j = seed.length;
 			} else {
 				j = k[j];
 			}
-			found = callback(cs.value);
-			if (found) {
-				seed[j] = cs.value;
-				cs = { mod: 32867, i1: j, value: cs.value };
-			} else {
-				cs = VoidMod;
-			}
-		} else if (mut & 65608) {
-			j = k.shift();
-			if (j !== -1) {
-				for (i = 1; i < len; i++) {
-					if (k[i] !== -1) {
-						k[i]--;
-					}
-				}
-				seed.shift();
-			} else {
-				cs = VoidMod;
-			}
-		} else if (mut & 262186) {
-			found = callback(cs.value);
-			if (found) {
-				k.unshift(0);
-				for (i = 1; i < len; i++) {
-					if (k[i] !== -1) {
-						k[i]++;
-					}
-				}
-				seed.unshift(cs.value);
-			} else {
-				k.unshift(-1);
-				cs = VoidMod;
-			}
+		} else {
+			j = seed.length;
 		}
-		return cs;
-	}
-	function applyRootMutation(callback, items, seed, roots, len, cs) {
-		var i, j, k, len, item, node, value,
-			itemArgs, nodeArgs, newVals,
-			mut = cs.mod & 524032,
-			mapper = function () {
-				return callback(item, j);
-			}
-		if (mut & 291) {
-			j = cs.i1;
-			item = cs.value;
-			node = root(mapper);
-			items.splice(j, 0, item);
-			roots.splice(j, 0, node);
-			if (seed !== null) {
-				seed.splice(j, 0, item);
-			}
-			cs = { mod: 291, i1: j, value: node.val };
-		} else if (mut & 551) {
-			value = cs.value;
-			len = value.length;
-			itemArgs = [cs.i1, 0],
-				nodeArgs = [cs.i1, 0],
-				newVals = new Array(len);
-			seedArgs;
-			if (seed !== null) {
-				seedArgs = [cs.i1, 0];
-			}
-			for (j = 0; j < len; j++) {
-				j = cs.i1 + j;
-				itemArgs[j + 2] = item = value[j];
-				nodeArgs[j + 2] = node = root(mapper);
-				newVals[j] = node.val;
-				if (seed !== null) {
-					seedArgs[j + 2] = node.val;
-				}
-			}
-			items.splice.apply(items, itemArgs);
-			roots.splice.apply(roots, nodeArgs);
-			if (seed !== null) {
-				seed.splice.apply(seed, seedArgs);
-			}
-			cs = { mod: 551, i1: cs.i1, value: newVals };
-		} else if (mut & 1153) {
-			i = cs.i1;
-			j = cs.i2;
-			k = j > i ? 1 : -1;
+		args = [i, 0];
+		for (i = 0, m = 2, n = value.length; i < n; i++) {
+			args[m++] = -1;
+		}
+		k.splice.apply(k, args);
+		csval = [];
+		args[0] = j;
+		for (i = cs.i1, m = 2, n = i + n; i < n; i++) {
 			item = items[i];
-			node = roots[i];
-			if (seed !== null) {
-				value = seed[i];
+			if (callback(item)) {
+				k[i] = j++;
+				args[m] = item;
+				csval[m++ - 2] = item;
 			}
-			for (; i !== j; i += k) {
-				items[i] = items[i + k];
-				roots[i] = roots[i + k];
-				if (seed !== null) {
-					seed[i] = seed[i + k];
+		}
+		n = csval.length;
+		if (n > 0) {
+			args.length = n + 2;
+			for (i = cs.i1 + value.length; i < len; i++) {
+				if (k[i] !== -1) {
+					k[i] += n;
 				}
 			}
-			items[j] = item;
-			roots[j] = node;
-			if (seed !== null) {
-				seed[j] = value;
+			seed.splice.apply(seed, args);
+			cs = { mod: 551, i1: j - n, value: csval };
+		} else {
+			cs = VoidMod;
+		}
+	} else if (mut & 1153) {
+		i = cs.i1;
+		j = cs.i2;
+		m = j > i ? 1 : -1;
+		item = k[i];
+		for (; i !== j; i += m) {
+			k[i] = k[i + m];
+		}
+		k[j] = item;
+	} else if (mut & 4146) {
+		found = callback(cs.value);
+		j = seed.length;
+		n = k.length;
+		if (found) {
+			k[n] = j;
+			seed[j] = cs.value;
+			if (j !== cs.i1) {
+				cs = { mod: 4146, i1: j, value: cs.value };
 			}
-		} else if (mut & 8257) {
-			j = cs.i1;
-			removeAt(items, j);
+		} else {
+			k[n] = -1;
+			cs = VoidMod;
+		}
+	} else if (mut & 2128) {
+		i = k.pop();
+		if (i !== -1) {
+			seed.pop();
+		} else {
+			cs = VoidMod;
+		}
+	} else if (mut & 8257) {
+		i = cs.i1;
+		j = k[i];
+		removeAt(k, i);
+		if (j !== -1) {
+			for (i++; i < len; i++) {
+				if (k[i] !== -1) {
+					k[i]--;
+				}
+			}
+			removeAt(seed, j);
+			if (i !== j) {
+				cs = { mod: 8257, i1: j };
+			}
+		} else {
+			cs = VoidMod;
+		}
+	} else if (mut & 16453) {
+		i = cs.i1;
+		m = 0;
+		j = -1;
+		n = i + cs.i2;
+		for (; i < n; i++) {
+			if (k[i] !== -1) {
+				if (j === -1) {
+					j = k[i];
+				}
+				m++;
+			}
+		}
+		k.splice(cs.i1, cs.i2);
+		if (m > 0) {
+			for (i = cs.i1; i < len; i++) {
+				if (k[i] !== -1) {
+					k[i] -= n;
+				}
+			}
+			seed.splice(j, m);
+			cs = { mod: 16453, i1: j, i2: m };
+		} else {
+			cs = VoidMod;
+		}
+	} else if (mut & 32867) {
+		i = cs.i1;
+		n = k.length;
+		for (j = i; j < n && k[j] === -1; j++) { }
+		if (j >= n) {
+			j = seed.length;
+		} else {
+			j = k[j];
+		}
+		found = callback(cs.value);
+		if (found) {
+			seed[j] = cs.value;
+			cs = { mod: 32867, i1: j, value: cs.value };
+		} else {
+			cs = VoidMod;
+		}
+	} else if (mut & 65608) {
+		j = k.shift();
+		if (j !== -1) {
+			for (i = 1; i < len; i++) {
+				if (k[i] !== -1) {
+					k[i]--;
+				}
+			}
+			seed.shift();
+		} else {
+			cs = VoidMod;
+		}
+	} else if (mut & 262186) {
+		found = callback(cs.value);
+		if (found) {
+			k.unshift(0);
+			for (i = 1; i < len; i++) {
+				if (k[i] !== -1) {
+					k[i]++;
+				}
+			}
+			seed.unshift(cs.value);
+		} else {
+			k.unshift(-1);
+			cs = VoidMod;
+		}
+	}
+	return cs;
+}
+
+/**
+ * @template T,U
+ * @param {function(T,number): U} callback 
+ * @param {Array<T>} items 
+ * @param {Array<U>} seed
+ * @param {Array<Computation>} roots 
+ * @param {number} len 
+ * @param {Changeset<T>} cs 
+ * @returns {Changeset<T>}
+ */
+function applyRootMutation(callback, items, seed, roots, len, cs) {
+	var i, j, k, item, node, value,
+		itemArgs, nodeArgs, seedArgs, newVals,
+		mut = cs.mod & 524032,
+		mapper = function () {
+			return callback(item, j);
+		}
+	if (mut & 291) {
+		j = cs.i1;
+		item = cs.value;
+		node = root(mapper);
+		items.splice(j, 0, item);
+		roots.splice(j, 0, node);
+		if (seed !== null) {
+			seed.splice(j, 0, item);
+		}
+		cs = { mod: 291, i1: j, value: node.val };
+	} else if (mut & 551) {
+		value = cs.value;
+		len = value.length;
+		itemArgs = [cs.i1, 0],
+			nodeArgs = [cs.i1, 0],
+			newVals = new Array(len);
+		if (seed !== null) {
+			seedArgs = [cs.i1, 0];
+		}
+		for (j = 0; j < len; j++) {
+			j = cs.i1 + j;
+			itemArgs[j + 2] = item = value[j];
+			nodeArgs[j + 2] = node = root(mapper);
+			newVals[j] = node.val;
+			if (seed !== null) {
+				seedArgs[j + 2] = node.val;
+			}
+		}
+		items.splice.apply(items, itemArgs);
+		roots.splice.apply(roots, nodeArgs);
+		if (seed !== null) {
+			seed.splice.apply(seed, seedArgs);
+		}
+		cs = { mod: 551, i1: cs.i1, value: newVals };
+	} else if (mut & 1153) {
+		i = cs.i1;
+		j = cs.i2;
+		k = j > i ? 1 : -1;
+		item = items[i];
+		node = roots[i];
+		if (seed !== null) {
+			value = seed[i];
+		}
+		for (; i !== j; i += k) {
+			items[i] = items[i + k];
+			roots[i] = roots[i + k];
+			if (seed !== null) {
+				seed[i] = seed[i + k];
+			}
+		}
+		items[j] = item;
+		roots[j] = node;
+		if (seed !== null) {
+			seed[j] = value;
+		}
+	} else if (mut & 8257) {
+		j = cs.i1;
+		removeAt(items, j);
+		roots[j].dispose();
+		removeAt(roots, j);
+		if (seed !== null) {
+			removeAt(seed, j);
+		}
+	} else if (mut & 16453) {
+		for (j = cs.i1, len = cs.i2; len >= 0; j++, len--) {
 			roots[j].dispose();
-			removeAt(roots, j);
-			if (seed !== null) {
-				removeAt(seed, j);
-			}
-		} else if (mut & 16453) {
-			for (j = cs.i1, len = cs.i2; len >= 0; j++, len--) {
-				roots[j].dispose();
-			}
-			items.splice(cs.i1, cs.i2);
-			roots.splice(cs.i1, cs.i2);
-			if (seed !== null) {
-				seed.splice(cs.i1, cs.i2);
-			}
-		} else if (mut & 32867) {
-			j = cs.i1;
-			roots[j].dispose();
-			node = root(mapper);
-			items[j] = cs.value;
-			roots[j] = node;
-			if (seed !== null) {
-				seed[j] = node.val;
-			}
-		} else if (mut & 65608) {
-			roots[0].dispose();
-			items.shift();
-			roots.shift();
-			if (seed !== null) {
-				seed.shift();
-			}
-		} else if (mut & 131201) {
-			i = cs.i1;
-			j = cs.i2;
-			value = items[i];
-			items[i] = items[j];
-			items[j] = items[i];
-			node = roots[i];
-			roots[i] = roots[j];
-			roots[j] = node;
-			if (seed !== null) {
-				value = seed[i];
-				seed[i] = seed[j];
-				seed[j] = value;
-			}
-		} else if (mut & 262186) {
+		}
+		items.splice(cs.i1, cs.i2);
+		roots.splice(cs.i1, cs.i2);
+		if (seed !== null) {
+			seed.splice(cs.i1, cs.i2);
+		}
+	} else if (mut & 32867) {
+		j = cs.i1;
+		roots[j].dispose();
+		node = root(mapper);
+		items[j] = cs.value;
+		roots[j] = node;
+		if (seed !== null) {
+			seed[j] = node.val;
+		}
+	} else if (mut & 65608) {
+		roots[0].dispose();
+		items.shift();
+		roots.shift();
+		if (seed !== null) {
+			seed.shift();
+		}
+	} else if (mut & 131201) {
+		i = cs.i1;
+		j = cs.i2;
+		value = items[i];
+		items[i] = items[j];
+		items[j] = items[i];
+		node = roots[i];
+		roots[i] = roots[j];
+		roots[j] = node;
+		if (seed !== null) {
+			value = seed[i];
+			seed[i] = seed[j];
+			seed[j] = value;
+		}
+	} else if (mut & 262186) {
+		j = 0;
+		node = root(mapper)
+		items.unshift(cs.value);
+		roots.unshift(node);
+		if (seed !== null) {
+			seed.unshift(node.val);
+		}
+		cs = { mod: 262186, value: node.val };
+	}
+	return cs;
+}
+
+/**
+ * @template T
+ * @param {Array<T>} array 
+ * @param {Changeset<T>} cs 
+ * @returns {Changeset<T>}
+ */
+function applyReverseMutation(array, cs) {
+	var i, j, k, value, args,
+		len = array.length,
+		type = cs.mod & 524032;
+	if (type & 291) {
+		value = cs.value;
+		i = len - cs.i1;
+		array.splice(i, 0, value);
+		cs = { mod: 291, i1: i, value: value };
+	} else if (type & 551) {
+		i = cs.i1;
+		i = len - i;
+		args = [i, 0];
+		value = cs.value;
+		for (j = 2, i = value.length - 1; i >= 0; i--) {
+			args[j++] = value[i];
+		}
+		array.splice.apply(array, args);
+		cs = { mod: 551, i1: i, value: value };
+	} else if (type & 1153) {
+		i = len - 1 - cs.i1;
+		if (len === cs.i2) {
 			j = 0;
-			node = root(mapper)
-			items.unshift(cs.value);
-			roots.unshift(node);
-			if (seed !== null) {
-				seed.unshift(node.val);
-			}
-			cs = { mod: 262186, value: node.val };
-		}
-		return cs;
-	}
-	function applyReverseMutation(array, cs) {
-		var i, j, k, value, args,
-			len = array.length,
-			type = cs.mod & 524032;
-		if (type & 291) {
-			value = cs.value;
-			i = len - cs.i1;
-			array.splice(i, 0, value);
-			cs = { mod: 291, i1: i, value: value };
-		} else if (type & 551) {
-			i = cs.i1;
-			i = len - i;
-			args = [i, 0];
-			value = cs.value;
-			for (j = 2, i = value.length - 1; i >= 0; i--) {
-				args[j++] = value[i];
-			}
-			array.splice.apply(array, args);
-			cs = { mod: 551, i1: i, value: value };
-		} else if (type & 1153) {
-			i = len - 1 - cs.i1;
-			if (len === cs.i2) {
-				j = 0;
-			} else {
-				j = len - 1 - cs.i2;
-			}
-			k = j > i ? 1 : -1;
-			value = array[i];
-			for (; i !== j; i += k) {
-				array[i] = array[i + k];
-			}
-			array[j] = value;
-			cs = { mod: 1153, i1: i, i2: j };
-		} else if (type & 2128) {
-			array.shift();
-			cs = { mod: 65608 }
-		} else if (type & 4146) {
-			array.unshift(cs.value);
-			cs = { mod: 262186, value: cs.value };
-		} else if (type & 8257) {
-			i = len - 1 - cs.i1;
-			removeAt(array, i)
-			cs = { mod: 8257, i1: i };
-		} else if (type & 16453) {
-			i = len - cs.i1 - cs.i2;
-			array.splice(i, cs.i2);
-			cs = { mod: 16453, i1: i, i2: cs.i2 };
-		} else if (type & 32867) {
-			i = len - 1 - cs.i1;
-			array[i] = cs.value;
-			cs = { mod: 32867, i1: i, value: cs.value };
-		} else if (type & 65608) {
-			array.length--;
-			cs = { mod: 2128 };
-		} else if (type & 131201) {
-			i = len - 1 - cs.i1;
+		} else {
 			j = len - 1 - cs.i2;
-			value = array[i];
-			array[i] = array[j];
-			array[j] = value;
-			cs = { mod: 131201, i1: i, i2: j };
-		} else if (type & 262186) {
-			array[len] = cs.value;
-			cs = { mod: 4146, value: cs.value };
 		}
-		return cs;
+		k = j > i ? 1 : -1;
+		value = array[i];
+		for (; i !== j; i += k) {
+			array[i] = array[i + k];
+		}
+		array[j] = value;
+		cs = { mod: 1153, i1: i, i2: j };
+	} else if (type & 2128) {
+		array.shift();
+		cs = { mod: 65608 }
+	} else if (type & 4146) {
+		array.unshift(cs.value);
+		cs = { mod: 262186, value: cs.value };
+	} else if (type & 8257) {
+		i = len - 1 - cs.i1;
+		removeAt(array, i)
+		cs = { mod: 8257, i1: i };
+	} else if (type & 16453) {
+		i = len - cs.i1 - cs.i2;
+		array.splice(i, cs.i2);
+		cs = { mod: 16453, i1: i, i2: cs.i2 };
+	} else if (type & 32867) {
+		i = len - 1 - cs.i1;
+		array[i] = cs.value;
+		cs = { mod: 32867, i1: i, value: cs.value };
+	} else if (type & 65608) {
+		array.length--;
+		cs = { mod: 2128 };
+	} else if (type & 131201) {
+		i = len - 1 - cs.i1;
+		j = len - 1 - cs.i2;
+		value = array[i];
+		array[i] = array[j];
+		array[j] = value;
+		cs = { mod: 131201, i1: i, i2: j };
+	} else if (type & 262186) {
+		array[len] = cs.value;
+		cs = { mod: 4146, value: cs.value };
 	}
-	function indexOf(flag, cs, item, call, index, length, last) {
-		var mod, type, i, len, c;
-		if (cs !== null) {
-			if (flag & 4096) {
-				mod = cs.mod;
-				type = mod & 524032;
-				if (index === -1) {
-					if (mod & 32) {
-						if (mod & 4) {
-							count = cs.i2;
-							for (i = cs.i1; count >= 0; count--) {
-								if (call ? item(cs.value[i]) : cs.value[i] === item) {
-									return i;
-								}
+	return cs;
+}
+
+/**
+ * @template T
+ * @param {number} flag 
+ * @param {Array<Changeset<T>>|Changeset<T>} cs 
+ * @param {T|function(T): boolean} item 
+ * @param {boolean} call 
+ * @param {number} index 
+ * @param {number} length 
+ * @param {boolean} last 
+ * @returns {number}
+ */
+function getIndex(flag, cs, item, call, index, length, last) {
+	/**
+	 * @type {number}
+	 */
+	var i; 
+	/**
+	 * @type {number}
+	 */
+	var len; 
+	/**
+	 * @type {number}
+	 */
+	var mod;
+	/**
+	 * @type {number}
+	 */
+	var mut;
+	/**
+	 * @type {Changeset<T>}
+	 */
+	var c;
+	/**
+	 * @type {number}
+	 */
+	var count;
+	if (cs !== null) {
+		if (flag & 4096) {
+			mod = /** @type {Changeset<T>} */(cs).mod;
+			mut = mod & 524032;
+			if (index === -1) {
+				if (mod & 32) {
+					if (mod & 4) {
+						count = /** @type {number} */(/** @type {Changeset<T>} */(cs).i2);
+						for (i = /** @type {number} */(/** @type {Changeset<T>} */(cs).i1); count >= 0; count--) {
+							if (call ? item(cs.value[i]) : cs.value[i] === item) {
+								return i;
 							}
-							return -1;
-						} else {
-							if (call ? item(cs.value) : cs.value === item) {
-								if (type & 262186) {
-									return 0;
-								} else if (type & 4146) {
-									return length - 1;
-								} else {
-									return cs.i1;
-								}
-							}
-							return -1;
 						}
+						return -1;
 					} else {
-						return index;
-					}
-				} else {
-					if (type & 4146) {
-						if (last) {
-							if (call ? item(cs.value) : cs.value === item) {
+						if (call ? item(cs.value) : cs.value === item) {
+							if (mut & 262186) {
+								return 0;
+							} else if (mut & 4146) {
 								return length - 1;
 							} else {
-								return index;
+								return /** @type {number} */(cs.i1);
 							}
+						}
+						return -1;
+					}
+				} else {
+					return index;
+				}
+			} else {
+				if (mut & 4146) {
+					if (last) {
+						if (call ? item(cs.value) : cs.value === item) {
+							return length - 1;
 						} else {
 							return index;
-						}
-					} else if (type & 2128) {
-						if (index === length - 1) {
-							return -1;
-						} else {
-							return index;
-						}
-					} else if (type & 65608) {
-						if (index !== 0) {
-							return index;
-						}
-					} else if (type & 262186) {
-						if (last) {
-							return index;
-						} else {
-							if (call ? item(cs.value) : cs.value === item) {
-								return 0;
-							} else {
-								return index;
-							}
 						}
 					} else {
-						if (type & 1) {
-							if (last) {
-								if (index > cs.i1) {
-									return index;
-								}
-							} else {
-								if (index < cs.i1) {
-									return index;
-								}
+						return index;
+					}
+				} else if (mut & 2128) {
+					if (index === length - 1) {
+						return -1;
+					} else {
+						return index;
+					}
+				} else if (mut & 65608) {
+					if (index !== 0) {
+						return index;
+					}
+				} else if (mut & 262186) {
+					if (last) {
+						return index;
+					} else {
+						if (call ? item(cs.value) : cs.value === item) {
+							return 0;
+						} else {
+							return index;
+						}
+					}
+				} else {
+					if (mut & 1) {
+						if (last) {
+							if (index > cs.i1) {
+								return index;
+							}
+						} else {
+							if (index < cs.i1) {
+								return index;
 							}
 						}
 					}
 				}
+			}
+		} else {
+			if (index === -1) {
+				scope: {
+					for (i = 0, len = cs.length; i < len; i++) {
+						if (cs[i].mod & 32) {
+							break scope;
+						}
+					}
+					return index;
+				}
 			} else {
-				if (index === -1) {
-					scope: {
-						for (i = 0, len = cs.length; i < len; i++) {
-							if (cs[i].mod & 32) {
+				scope: {
+					for (i = 0, len = cs.length; i < len; i++) {
+						c = cs[i];
+						mod = c.mod;
+						if (mod & 16) {
+							if (index === length - 1) {
 								break scope;
 							}
-						}
-						return index;
-					}
-				} else {
-					scope: {
-						for (i = 0, len = cs.length; i < len; i++) {
-							c = cs[i];
-							mod = c.mod;
-							if (mod & 16) {
-								if (index === length - 1) {
-									break scope;
-								}
-							} else if (mod & 1) {
-								if (index >= c.i1) {
-									break scope;
-								}
-							} else {
+						} else if (mod & 1) {
+							if (index >= c.i1) {
 								break scope;
 							}
+						} else {
+							break scope;
 						}
-						return index;
 					}
+					return index;
 				}
 			}
 		}
-		return -2;
 	}
-	function actualIndex(len, i) {
+	return -2;
+}
+
+/**
+ * 
+ * @param {number} len 
+ * @param {number} i 
+ * @returns {number}
+ */
+function actualIndex(len, i) {
+	if (i < 0) {
+		i = len + i;
 		if (i < 0) {
-			i = len + i;
-			if (i < 0) {
-				i = 0;
-			} else if (i > len) {
-				i = len;
-			}
+			i = 0;
 		} else if (i > len) {
 			i = len;
 		}
-		return i;
+	} else if (i > len) {
+		i = len;
 	}
-	function removeAt(array, i) {
-		var len = array.length;
-		if (len > 0) {
-			if (i < len) {
-				for (; i < len; i++) {
-					array[i] = array[i + 1];
-				}
+	return i;
+}
+
+/**
+ * 
+ * @param {Array} array 
+ * @param {number} i 
+ * @returns {void}
+ */
+function removeAt(array, i) {
+	/**
+	 * @type {number}
+	 */
+	var len = array.length;
+	if (len > 0) {
+		if (i < len) {
+			for (; i < len; i++) {
+				array[i] = array[i + 1];
 			}
-			array.length--;
 		}
+		array.length--;
 	}
-	function copyValue(value) {
-		if (value === null || typeof value !== 'object') {
-			return function () { return value; }
+}
+
+/**
+ * @template T
+ * @param {T} value 
+ * @returns {function(): T} 
+ */
+function copyValue(value) {
+	if (value === null || typeof value !== 'object') {
+		return function () { return value; }
+	} else {
+		if (Array.isArray(value)) {
+			return function () { return value.slice(); }
 		} else {
-			if (Array.isArray(value)) {
-				return function () { return value.slice(); }
-			} else {
-				return function () {
-					var key, result = {};
-					for (key in value) {
-						result[key] = value[key];
-					}
-					return result;
+			return function () {
+				var key, result = {};
+				for (key in value) {
+					result[key] = value[key];
 				}
+				return result;
 			}
 		}
 	}
-	export {
-	  data,
-	  value,
-	  list,
-	  fn,
-	  on,
-	  run,
-	  tie,
-	  cleanup,
-	  freeze,
-	  root,
-	  sample,
-	  Flag,
-	  Mod,
-	  Void,
-	  Data,
-	  Value,
-	  List,
-	  Computation,
-	  Enumerable,
-	}
+}
+
+//#endregion
+
+//#endregion
+
+//#region 3. System exports
+
+export {
+  data,
+  value,
+  list,
+  fn,
+  on,
+  run,
+  tie,
+  cleanup,
+  freeze,
+  root,
+  sample,
+  Flag,
+  Mod,
+  Void,
+  Data,
+  Value,
+  List,
+  Computation,
+  Enumerable,
+}
+
+//#endregion

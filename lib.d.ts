@@ -151,7 +151,7 @@ export interface IEnumerable<T = unknown> extends Signal<T[]> {
 	 * @param callback Predicate function to evaluate against each element
 	 * @returns 
 	 */
-	find(callback: (element: T, index?: number) => boolean): () => T;
+	find(callback: (element: T, index?: number) => boolean): () => (T | undefined);
 	/**
 	 * Searches the *first* index that meet the condition, otherwise -1
 	 * @param callback Predicate function to evaluate against each element
@@ -345,7 +345,7 @@ export function list<T>(val: T[]): List<T>;
  * @param seed Initial value passed to `f`
  * @param flags Flags to override. Possible values are `Flag.Wait` and `Flag.Dynamic`.
  */
-export function on<T>(src: (() => any) | (() => any)[], f: (seed: T) => T, seed?: T, flags?: number, dispose?: () => void): () => T;
+export function on<T>(src: (() => any) | (() => any)[], f: (seed: T) => T, seed?: T, flags?: number, disposer?: () => void): () => T;
 
 /**
  * `fn` creates a dynamic computation node.
@@ -355,7 +355,7 @@ export function on<T>(src: (() => any) | (() => any)[], f: (seed: T) => T, seed?
  * @param seed Initial value passed to `f`
  * @param flags Flags to override. Possible value is `Flag.Static`.
  */
-export function fn<T>(f: (seed: T) => T, seed?: T, flags?: number, dispose?: () => void): () => T;
+export function fn<T>(f: (seed: T) => T, seed?: T, flags?: number, disposer?: () => void): () => T;
 
 /**
  * `tie` creates a static computation node and returns a procedural function. 
@@ -384,7 +384,7 @@ export function fn<T>(f: (seed: T) => T, seed?: T, flags?: number, dispose?: () 
  * @param seed Initial value passed to `f`
  * @param flags Flags to override. Possible values are `Flag.Wait` and `Flag.Dynamic`.
  */
-export function tie<T>(src: (() => any) | (() => any)[], f: (seed: T) => T, seed?: T, flags?: number, dispose?: () => void): void;
+export function tie<T>(src: (() => any) | (() => any)[], f: (seed: T) => T, seed?: T, flags?: number, disposer?: () => void): void;
 
 /**
  * `run` creates a dynamic computation node and returns a procedural function.
@@ -394,7 +394,7 @@ export function tie<T>(src: (() => any) | (() => any)[], f: (seed: T) => T, seed
  * @param seed Initial value passed to `f`
  * @param flags Flags to override. Possible value is `Flag.Static`.
  */
-export function run<T>(f: (seed: T) => T, seed?: T, flags?: number, dispose?: () => void): void;
+export function run<T>(f: (seed: T) => T, seed?: T, flags?: number, disposer?: () => void): void;
 
 /**
  * `cleanup` accepts a function that is run each time a computation
@@ -542,10 +542,6 @@ export interface ComputationProto<T = unknown> extends Computation<T> {
 
 export interface ComputationConstructor {
 	new(log: Log | null): Computation<T>;
-	/**
-	 * 
-	 */
-	make: <T>(log?: boolean) => Computation<T>;
 	/**
 	 * 
 	 */

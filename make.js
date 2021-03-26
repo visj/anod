@@ -14,6 +14,17 @@ String.prototype.trimExcludes = function () {
 }
 
 /**
+ * 
+ * @returns {string}
+ */
+ String.prototype.trimModule = function () {
+	return this
+		.split(/\/\*\s*@module\s*\*\/[ \t]*/g)
+		.filter((_, i) => i % 2 === 0)
+		.join('');
+}
+
+/**
  *  
  * @returns {string}
  */
@@ -123,7 +134,6 @@ function nodeModuleExport(_, match) {
 
 	const anod = require(srcFile);
 
-	file = file.trimComments();
 	file = file.replaceEnum(anod.Flag, 'Flag');
 	file = file.replaceEnum(anod.Mod, 'Mod');
 	file = file.replaceEnum(anod.System, 'System');
@@ -135,18 +145,22 @@ function nodeModuleExport(_, match) {
 		iife(
 			file
 				.replaceExports(browserExport)
+				.trimModule()
+				.trimComments()
 				.trimEmptyLines()
 		);
 
 	const cjs =
 		file
 			.replaceExports(nodeExport)
+			.trimModule()
+			.trimComments()
 			.trimEmptyLines();
 
 	const mjs =
 		file
 			.replaceExports(nodeModuleExport)
-			.trimEmptyLines();
+			// .trimEmptyLines();
 
 	if (!fs.existsSync(dist)) {
 		fs.mkdirSync(dist);

@@ -1,0 +1,1 @@
+closure-compiler --compilation_level ADVANCED --js closure.js --js dist/anod.mjs --js_output_file bundle.js;
