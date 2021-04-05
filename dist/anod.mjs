@@ -35,7 +35,7 @@
  * @interface
  * @template T
  */
-function Signal() { }
+function Signal() {}
 
 /**
  * @type {T}
@@ -45,7 +45,7 @@ Signal.prototype.val;
 /**
  * @type {Log<Computation>}
  */
- Signal.prototype.log;
+Signal.prototype.log;
 
 /**
  * @type {number}
@@ -55,12 +55,12 @@ Signal.prototype.flag;
 /**
  * @returns {T}
  */
-Signal.prototype.get = function () { }
+Signal.prototype.get = function () {}
 
 /**
  * @returns {void}
  */
-Signal.prototype.update = function() { }
+Signal.prototype.update = function () {}
 
 /**
  * @typedef {Signal|function(): *}
@@ -120,7 +120,7 @@ function run(f, seed, flags, disposer) {
 	 */
 	var node = new Computation(new Log());
 	Computation.setup(node, f, seed, 32 | flags, disposer);
-	return function () { return node.get(); }
+	return function () {return node.get();}
 }
 
 /**
@@ -150,7 +150,7 @@ function tie(src, f, seed, flags, disposer) {
 		logSource(node, src);
 		seed = Computation.setup(node, f, seed, 16 | flags, disposer);
 	}
-	return function () { return node.get(); }
+	return function () {return node.get();}
 }
 
 /**
@@ -252,7 +252,7 @@ function freeze(f) {
 function root(f) {
 	/** 
 	 * @type {T}
-	  */
+		*/
 	var val;
 	/** 
 	 * @type {Computation<T>} 
@@ -584,9 +584,7 @@ Computation.prototype.update = function () {
  */
 Computation.prototype.dispose = function () {
 	if (State & 33) {
-		this.fn = null;
-		this.log = null;
-		cleanupNode(this, true);
+		disposeNode(this);
 	} else {
 		Root.disposes.add(this);
 	}
@@ -796,7 +794,11 @@ function sealNode(node, owner, fn, val, flags, disposer) {
 			owner.owned[owner.owned.length] = node;
 		}
 		if (owner.flag & 2050) {
-			logPendingOwner(owner);
+			node.owner = owner;
+			node.flag |= 2048;
+			if (node.owned !== null) {
+				logPendingOwner(node);
+			}
 		}
 	}
 }
@@ -1099,10 +1101,7 @@ function tick(clock) {
 		queue = clock.disposes;
 		State = 32;
 		for (j = 0; j < queue.len; j++) {
-			node = /** @type {Queue<Computation>} */(queue).items[j];
-			node.fn = null;
-			node.log = null;
-			cleanupNode(node, true);
+			disposeNode(/** @type {Queue<Computation>} */(queue).items[i]);
 		}
 		queue.len = 0;
 		if (i++ > 1e5) {
@@ -1398,6 +1397,15 @@ function cleanupSource(source, slot) {
 	}
 }
 
+/**
+ * @param {Computation} node
+ */
+function disposeNode(node) {
+	node.fn = null;
+	node.log = null;
+	cleanupNode(node, true);
+}
+
 //#endregion
 
 //#endregion
@@ -1411,7 +1419,7 @@ function cleanupSource(source, slot) {
  * @record
  * @template T
  */
-function Changeset() { }
+function Changeset() {}
 
 /**
  * @type {number}
@@ -1438,7 +1446,7 @@ Changeset.prototype.value;
  * @template T
  * @extends {Signal<Array<T>>}
  */
-function IEnumerable() { }
+function IEnumerable() {}
 
 /**
  * @type {Changeset<T>|Array<Changeset<T>>}
@@ -1450,21 +1458,21 @@ IEnumerable.prototype.cs;
  * @param {function(T,number=): boolean} callback
  * @returns {function(): boolean} 
  */
-IEnumerable.prototype.every = function (callback) { }
+IEnumerable.prototype.every = function (callback) {}
 
 /**
  * 
  * @param {function(T,number=): boolean} callback 
  * @returns {IEnumerable<T>}
  */
-IEnumerable.prototype.filter = function (callback) { }
+IEnumerable.prototype.filter = function (callback) {}
 
 /**
  * 
  * @param {function(T,number=): boolean} callback 
  * @returns {function(): (T|undefined)}
  */
-IEnumerable.prototype.find = function (callback) { }
+IEnumerable.prototype.find = function (callback) {}
 
 /**
  * 
@@ -1472,14 +1480,14 @@ IEnumerable.prototype.find = function (callback) { }
  * @param {number=} index
  * @returns {function(): number}
  */
-IEnumerable.prototype.findIndex = function (callback, index) { }
+IEnumerable.prototype.findIndex = function (callback, index) {}
 
 /**
  * 
  * @param {function(T,number=): void} callback
  * @returns {void} 
  */
-IEnumerable.prototype.forEach = function (callback) { }
+IEnumerable.prototype.forEach = function (callback) {}
 
 /**
  * 
@@ -1487,7 +1495,7 @@ IEnumerable.prototype.forEach = function (callback) { }
  * @param {number=} fromIndex 
  * @returns {function(): boolean}
  */
-IEnumerable.prototype.includes = function (valueToFind, fromIndex) { }
+IEnumerable.prototype.includes = function (valueToFind, fromIndex) {}
 
 /**
  * 
@@ -1495,14 +1503,14 @@ IEnumerable.prototype.includes = function (valueToFind, fromIndex) { }
  * @param {number=} fromIndex 
  * @returns {function(): number}
  */
-IEnumerable.prototype.indexOf = function (searchElement, fromIndex) { }
+IEnumerable.prototype.indexOf = function (searchElement, fromIndex) {}
 
 /**
  * 
  * @param {string=} separator 
  * @returns {function(): string}
  */
-IEnumerable.prototype.join = function (separator) { }
+IEnumerable.prototype.join = function (separator) {}
 
 /**
  * 
@@ -1510,55 +1518,55 @@ IEnumerable.prototype.join = function (separator) { }
  * @param {number=} fromIndex 
  * @returns {function(): number}
  */
-IEnumerable.prototype.lastIndexOf = function (searchElement, fromIndex) { }
+IEnumerable.prototype.lastIndexOf = function (searchElement, fromIndex) {}
 
 /**
  * @template U
  * @param {function(T,number=): U} callback 
  * @returns {IEnumerable<U>}
  */
-IEnumerable.prototype.map = function (callback) { }
+IEnumerable.prototype.map = function (callback) {}
 
 /**
  * @template U
  * @param {function(U,T,number=): U} callback
  * @returns {function(): U} 
  */
-IEnumerable.prototype.reduce = function(callback) { }
+IEnumerable.prototype.reduce = function (callback) {}
 
 /**
  * @template U
  * @param {function(U,T,number=): U} callback
  * @returns {function(): U} 
  */
- IEnumerable.prototype.reduceRight = function(callback) { }
+IEnumerable.prototype.reduceRight = function (callback) {}
 
- /**
-	* @returns {IEnumerable<T>}
-  */
- IEnumerable.prototype.reverse = function() { }
+/**
+ * @returns {IEnumerable<T>}
+ */
+IEnumerable.prototype.reverse = function () {}
 
- /**
-	* 
-	* @param {number=} start 
-	* @param {number=} end 
-	* @returns {IEnumerable<T>}
-	*/
- IEnumerable.prototype.slice = function(start, end) { }
+/**
+ * 
+ * @param {number=} start 
+ * @param {number=} end 
+ * @returns {IEnumerable<T>}
+ */
+IEnumerable.prototype.slice = function (start, end) {}
 
- /**
-	* 
-	* @param {function(T,number=): boolean} callback
-	* @returns {function(): boolean} 
-	*/
- IEnumerable.prototype.some = function(callback) { }
+/**
+ * 
+ * @param {function(T,number=): boolean} callback
+ * @returns {function(): boolean} 
+ */
+IEnumerable.prototype.some = function (callback) {}
 
- /**
-	* 
-	* @param {function(T,T): number} compareFunction
-	* @returns {IEnumerable<T>} 
-	*/
- IEnumerable.prototype.sort = function(compareFunction) { }
+/**
+ * 
+ * @param {function(T,T): number} compareFunction
+ * @returns {IEnumerable<T>} 
+ */
+IEnumerable.prototype.sort = function (compareFunction) {}
 
 /* @module */
 
@@ -1718,7 +1726,7 @@ function filter(callback) {
 			/**
 			 * @type {number}
 			 */
-			var i; 
+			var i;
 			/**
 			 * @type {number}
 			 */
@@ -1757,7 +1765,14 @@ function filter(callback) {
 					} else {
 						if (src.flag & 4096) {
 							node.flag |= 4096;
-							node.cs = cs = applyFilterMutation(callback, items, /** @type {Array<T>} */(seed), k, len, /** @type {Changeset<T>} */(cs));
+							node.cs = cs = applyFilterMutation(
+								callback,
+								items,
+								/** @type {Array<T>} */(seed),
+								k,
+								len,
+								/** @type {Changeset<T>} */(cs)
+							);
 							if (cs.mod !== 524288) {
 								node.flag |= 8192;
 							} else {
@@ -1768,7 +1783,14 @@ function filter(callback) {
 							j = cs.value.length;
 							node.cs = new Array(j);
 							for (i = 0; i < j; i++) {
-								node.cs[i] = cs = applyFilterMutation(callback, items, /** @type {Array<T>} */(seed), k, len, /** @type {Array<Changeset<T>>} */(src.cs)[i]);
+								node.cs[i] = cs = applyFilterMutation(
+									callback,
+									items,
+									/** @type {Array<T>} */(seed),
+									k,
+									len,
+									/** @type {Array<Changeset<T>>} */(src.cs)[i]
+								);
 								if (cs.mod !== 524288) {
 									changed = true;
 								}
@@ -1870,7 +1892,11 @@ function findIndex(callback, index) {
 	/**
 	 * @type {boolean}
 	 */
-	var pure = callback.length === 1 && arguments.length === 1;
+	var indexed = arguments.length !== 1;
+	/**
+	 * @type {boolean}
+	 */
+	var pure = callback.length === 1 && !indexed;
 	return /** @type {function(): number} */(
 		tie(src, /** @param {Object|number} seed */ function (seed) {
 			/**
@@ -1895,7 +1921,7 @@ function findIndex(callback, index) {
 					return i;
 				}
 			}
-			for (i = 0; i < len; i++) {
+			for (i = indexed ? /** @type {number} */(index) : 0; i < len; i++) {
 				if (callback(items[i], i)) {
 					return i;
 				}
@@ -2095,8 +2121,8 @@ function forEach(callback) {
 							if (c[i] === u[j]) {
 								found[j] = true;
 								temps[j] = roots[i];
-								for (j = umin; j < umax && found[j]; j++, umin++) { }
-								for (j = umax; j > umin && found[j]; j--, umax--) { }
+								for (j = umin; j < umax && found[j]; j++, umin++) {}
+								for (j = umax; j > umin && found[j]; j--, umax--) {}
 								continue outer;
 							}
 						}
@@ -2484,8 +2510,8 @@ function map(callback) {
 								if (c[i] === u[j]) {
 									found[j] = true;
 									temps[j] = roots[i];
-									for (j = umin; j < umax && found[j]; j++, umin++) { }
-									for (j = umax; j > umin && found[j]; j--, umax--) { }
+									for (j = umin; j < umax && found[j]; j++, umin++) {}
+									for (j = umax; j > umin && found[j]; j--, umax--) {}
 									continue outer;
 								}
 							}
@@ -2921,7 +2947,7 @@ List.prototype.update = function () {
  * @returns {void}
  */
 List.prototype.insertAt = function (index, item) {
-	logMutate(this, { mod: 291, i1: index, value: item });
+	logMutate(this, {mod: 291, i1: index, value: item});
 }
 
 /**
@@ -2931,7 +2957,7 @@ List.prototype.insertAt = function (index, item) {
  * @returns {void}
  */
 List.prototype.insertRange = function (index, items) {
-	logMutate(this, { mod: 551, i1: index, value: items });
+	logMutate(this, {mod: 551, i1: index, value: items});
 }
 
 /**
@@ -2941,14 +2967,14 @@ List.prototype.insertRange = function (index, items) {
  * @returns {void} 
  */
 List.prototype.move = function (from, to) {
-	logMutate(this, { mod: 1153, i1: from, i2: to });
+	logMutate(this, {mod: 1153, i1: from, i2: to});
 }
 
 /**
  * @returns {void}
  */
 List.prototype.pop = function () {
-	logMutate(this, { mod: 2128 });
+	logMutate(this, {mod: 2128});
 }
 
 /**
@@ -2957,7 +2983,7 @@ List.prototype.pop = function () {
  * @returns {void}
  */
 List.prototype.push = function (item) {
-	logMutate(this, { mod: 4146, value: item });
+	logMutate(this, {mod: 4146, value: item});
 }
 
 /**
@@ -2966,7 +2992,7 @@ List.prototype.push = function (item) {
  * @returns {void}
  */
 List.prototype.removeAt = function (index) {
-	logMutate(this, { mod: 8257, i1: index });
+	logMutate(this, {mod: 8257, i1: index});
 }
 
 /**
@@ -2976,7 +3002,7 @@ List.prototype.removeAt = function (index) {
  * @returns {void}
  */
 List.prototype.removeRange = function (index, count) {
-	logMutate(this, { mod: 16453, i1: index, i2: count });
+	logMutate(this, {mod: 16453, i1: index, i2: count});
 }
 
 /**
@@ -2986,14 +3012,14 @@ List.prototype.removeRange = function (index, count) {
  * @returns {void}
  */
 List.prototype.replace = function (index, item) {
-	logMutate(this, { mod: 32867, i1: index, value: item });
+	logMutate(this, {mod: 32867, i1: index, value: item});
 }
 
 /**
  * @returns {void}
  */
 List.prototype.shift = function () {
-	logMutate(this, { mod: 65608 });
+	logMutate(this, {mod: 65608});
 }
 
 /**
@@ -3003,7 +3029,7 @@ List.prototype.shift = function () {
  * @returns {void}
  */
 List.prototype.swap = function (i1, i2) {
-	logMutate(this, { mod: 131201, i1: i1, i2: i2 });
+	logMutate(this, {mod: 131201, i1: i1, i2: i2});
 }
 
 /**
@@ -3012,7 +3038,7 @@ List.prototype.swap = function (i1, i2) {
  * @returns {void}
  */
 List.prototype.unshift = function (item) {
-	logMutate(this, { mod: 262186, value: item });
+	logMutate(this, {mod: 262186, value: item});
 }
 
 //#endregion
@@ -3162,9 +3188,7 @@ Enumerable.prototype.update = function () {
  */
 Enumerable.prototype.dispose = function () {
 	if (State & 33) {
-		this.fn = null;
-		this.log = null;
-		cleanupNode(this, true);
+		disposeNode(this);
 	} else {
 		Root.disposes.add(this);
 	}
@@ -3217,17 +3241,17 @@ var Mod = {
  * @const 
  * @type {Changeset<undefined>}
  */
-var PopMod = { mod: 2128 };
+var PopMod = {mod: 2128};
 /**
  * @const
  * @type {Changeset<undefined>}
  */
-var ShiftMod = { mod: 65608 };
+var ShiftMod = {mod: 65608};
 /**
  * @const
  * @type {Changeset<undefined>}
  */
-var VoidMod = { mod: 524288 };
+var VoidMod = {mod: 524288};
 
 //#endregion
 
@@ -3479,12 +3503,12 @@ function applyFilterMutation(callback, items, seed, k, len, cs) {
 					}
 				}
 				k.splice(i, 0, m);
-				cs = { mod: 291, i1: m, value: item };
+				cs = {mod: 291, i1: m, value: item};
 			} else {
 				m = seed.length;
 				seed[m] = item;
 				k.splice(i, 0, m);
-				cs = { mod: 291, i1: m, value: item };
+				cs = {mod: 291, i1: m, value: item};
 			}
 			for (i++; i < len; i++) {
 				if (k[i] !== -1) {
@@ -3500,7 +3524,7 @@ function applyFilterMutation(callback, items, seed, k, len, cs) {
 		n = k.length;
 		vals = /** @type {Array<T>} */(cs.value);
 		if (len > 0 && i < n) {
-			for (j = i; j < n && k[j] === -1; j++) { }
+			for (j = i; j < n && k[j] === -1; j++) {}
 			if (j >= n) {
 				j = seed.length;
 			} else {
@@ -3536,7 +3560,7 @@ function applyFilterMutation(callback, items, seed, k, len, cs) {
 				}
 			}
 			seed.splice.apply(seed, sArgs);
-			cs = { mod: 551, i1: j - n, value: csVals };
+			cs = {mod: 551, i1: j - n, value: csVals};
 		} else {
 			cs = VoidMod;
 		}
@@ -3557,7 +3581,7 @@ function applyFilterMutation(callback, items, seed, k, len, cs) {
 			k[n] = j;
 			seed[j] = /** @type {T} */(cs.value);
 			if (j !== cs.i1) {
-				cs = { mod: 4146, i1: j, value: cs.value };
+				cs = {mod: 4146, i1: j, value: cs.value};
 			}
 		} else {
 			k[n] = -1;
@@ -3582,7 +3606,7 @@ function applyFilterMutation(callback, items, seed, k, len, cs) {
 			}
 			removeAt(seed, j);
 			if (i !== j) {
-				cs = { mod: 8257, i1: j };
+				cs = {mod: 8257, i1: j};
 			}
 		} else {
 			cs = VoidMod;
@@ -3608,14 +3632,14 @@ function applyFilterMutation(callback, items, seed, k, len, cs) {
 				}
 			}
 			seed.splice(j, m);
-			cs = { mod: 16453, i1: j, i2: m };
+			cs = {mod: 16453, i1: j, i2: m};
 		} else {
 			cs = VoidMod;
 		}
 	} else if (mut & 32867) {
 		i = /** @type {number} */(cs.i1);
 		n = k.length;
-		for (j = i; j < n && k[j] === -1; j++) { }
+		for (j = i; j < n && k[j] === -1; j++) {}
 		if (j >= n) {
 			j = seed.length;
 		} else {
@@ -3624,7 +3648,7 @@ function applyFilterMutation(callback, items, seed, k, len, cs) {
 		found = callback(cs.value);
 		if (found) {
 			seed[j] = cs.value;
-			cs = { mod: 32867, i1: j, value: cs.value };
+			cs = {mod: 32867, i1: j, value: cs.value};
 		} else {
 			cs = VoidMod;
 		}
@@ -3729,7 +3753,7 @@ function applyRootMutation(callback, items, seed, roots, len, cs) {
 		if (seed !== null) {
 			seed.splice(j, 0, node.val);
 		}
-		cs = { mod: 291, i1: j, value: node.val };
+		cs = {mod: 291, i1: j, value: node.val};
 	} else if (mut & 551) {
 		i = /** @type {number} */(cs.i1);
 		value = /** @type {Array<T>} */(cs.value);
@@ -3754,7 +3778,7 @@ function applyRootMutation(callback, items, seed, roots, len, cs) {
 		if (seed !== null) {
 			seed.splice.apply(seed, seedArgs);
 		}
-		cs = { mod: 551, i1: i, value: newVals };
+		cs = {mod: 551, i1: i, value: newVals};
 	} else if (mut & 1153) {
 		i = /** @type {number} */(cs.i1);
 		j = /** @type {number} */(cs.i2);
@@ -3833,7 +3857,7 @@ function applyRootMutation(callback, items, seed, roots, len, cs) {
 		if (seed !== null) {
 			seed.unshift(node.val);
 		}
-		cs = { mod: 262186, value: node.val };
+		cs = {mod: 262186, value: node.val};
 	}
 	return cs;
 }
@@ -3881,7 +3905,7 @@ function applyReverseMutation(array, cs) {
 		item = /** @type {T} */(cs.value);
 		i = len - /** @type {number} */(cs.i1);
 		array.splice(i, 0, item);
-		cs = { mod: 291, i1: i, value: item };
+		cs = {mod: 291, i1: i, value: item};
 	} else if (mut & 551) {
 		i = /** @type {number} */(cs.i1);
 		i = len - i;
@@ -3891,7 +3915,7 @@ function applyReverseMutation(array, cs) {
 			args[j++] = value[i];
 		}
 		array.splice.apply(array, args);
-		cs = { mod: 551, i1: i, value: value };
+		cs = {mod: 551, i1: i, value: value};
 	} else if (mut & 1153) {
 		i = len - 1 - /** @type {number} */(cs.i1);
 		if (len === cs.i2) {
@@ -3905,39 +3929,39 @@ function applyReverseMutation(array, cs) {
 			array[i] = array[i + k];
 		}
 		array[j] = value;
-		cs = { mod: 1153, i1: i, i2: j };
+		cs = {mod: 1153, i1: i, i2: j};
 	} else if (mut & 2128) {
 		array.shift();
-		cs = { mod: 65608 }
+		cs = {mod: 65608}
 	} else if (mut & 4146) {
 		item = /** @type {T} */(cs.value);
 		array.unshift(item);
-		cs = { mod: 262186, value: item };
+		cs = {mod: 262186, value: item};
 	} else if (mut & 8257) {
 		i = len - 1 - /** @type {number} */(cs.i1);
 		removeAt(array, i)
-		cs = { mod: 8257, i1: i };
+		cs = {mod: 8257, i1: i};
 	} else if (mut & 16453) {
 		i = len - /** @type {number} */(cs.i1) - /** @type {number} */(cs.i2);
 		array.splice(i, cs.i2);
-		cs = { mod: 16453, i1: i, i2: cs.i2 };
+		cs = {mod: 16453, i1: i, i2: cs.i2};
 	} else if (mut & 32867) {
 		i = len - 1 - /** @type {number} */(cs.i1);
 		array[i] = cs.value;
-		cs = { mod: 32867, i1: i, value: cs.value };
+		cs = {mod: 32867, i1: i, value: cs.value};
 	} else if (mut & 65608) {
 		array.length--;
-		cs = { mod: 2128 };
+		cs = {mod: 2128};
 	} else if (mut & 131201) {
 		i = len - 1 - cs.i1;
 		j = len - 1 - cs.i2;
 		value = array[i];
 		array[i] = array[j];
 		array[j] = value;
-		cs = { mod: 131201, i1: i, i2: j };
+		cs = {mod: 131201, i1: i, i2: j};
 	} else if (mut & 262186) {
 		array[len] = cs.value;
-		cs = { mod: 4146, value: cs.value };
+		cs = {mod: 4146, value: cs.value};
 	}
 	return cs;
 }
@@ -4135,10 +4159,10 @@ function removeAt(array, i) {
  */
 function copyValue(value) {
 	if (value === null || typeof value !== 'object') {
-		return function () { return value; }
+		return function () {return value;}
 	} else {
 		if (Array.isArray(value)) {
-			return function () { return value.slice(); }
+			return function () {return value.slice();}
 		} else {
 			return function () {
 				/**

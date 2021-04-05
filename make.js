@@ -77,7 +77,7 @@ String.prototype.trimBits = function () {
  * @returns {string}
  */
 String.prototype.trimEmptyLines = function () {
-	return this.split('\n').filter(x => x.trim() !== '').join('\n\t');
+	return this.split('\n').filter(x => x.trim() !== '').join('\n');
 }
 
 String.prototype.replaceExports = function (callback) {
