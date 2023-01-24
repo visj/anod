@@ -1,0 +1,24 @@
+Apple M1 Pro 16 GB
+
+createDataSignals               53.6          0
+createComputations0to1          11.2          0
+createComputations1to1          74.8          0
+createComputations2to1          60.4          0
+createComputations4to1          64.9          0
+createComputations1000to1       79.0          0
+createComputations1to2          78.2          0
+createComputations1to4         161.7          0
+createComputations1to8         125.3          0
+createComputations1to1000      164.7          0
+---
+updateComputations1to1         141.6          0
+updateComputations2to1         103.2          0
+updateComputations4to1          80.2          0
+updateComputations1000to1      112.1          0
+updateComputations1to2         143.7          0
+updateComputations1to4         146.2          0
+updateComputations1to1000      130.6          0
+---
+create total: 874
+update total: 858
+total: 1731 [1689,1815]

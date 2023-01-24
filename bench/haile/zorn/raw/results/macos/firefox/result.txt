@@ -1,0 +1,22 @@
+createDataSignals              106.0          0
+createComputations0to1          51.0          0
+createComputations1to1         247.0          0
+createComputations2to1         209.0          0
+createComputations4to1         176.0          0
+createComputations1000to1       82.0          0
+createComputations1to2         296.0          0
+createComputations1to4         321.0          0
+createComputations1to8         283.0          0
+createComputations1to1000      258.0          0
+---
+updateComputations1to1         644.0          0
+updateComputations2to1         419.0          0
+updateComputations4to1         299.0          0
+updateComputations1000to1      453.0          0
+updateComputations1to2         529.0          0
+updateComputations1to4         496.0          0
+updateComputations1to1000      420.0          0
+---
+create total: 2029
+update total: 3260
+total: 5289

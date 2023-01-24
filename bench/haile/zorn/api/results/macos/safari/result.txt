@@ -1,0 +1,28 @@
+createDataSignals               32.0          0
+createComputations0to1          98.0          0
+createComputations1to1         247.0          0
+createComputations2to1         146.0          0
+createComputations4to1         108.0          0
+createComputations1000to1       54.0          0
+createComputations1to2         239.0          0
+createComputations1to4         232.0          0
+createComputations1to8         232.0          0
+createComputations1to1000      208.0          0
+---
+readToplevelSignal              11.0          0
+readWatchedSignal               51.0          0
+sampleNoSignal                  22.0          0
+sampleToplevelSignal            31.0          0
+sampleWatchedSignal             31.0          0
+---
+updateComputations1to1         800.0          0
+updateComputations2to1         498.0          0
+updateComputations4to1         337.0          0
+updateComputations1000to1      451.0          0
+updateComputations1to2         615.0          0
+updateComputations1to4         545.0          0
+updateComputations1to1000      421.0          0
+---
+create total                   1596.0          0
+update total                   3667.0          0
+total                          5263.0          0
