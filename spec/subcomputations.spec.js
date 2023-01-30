@@ -105,15 +105,19 @@ describe("S() with subcomputations", function () {
                 var a = S.data(1),
                     c,
                     b = S(function () {
+                        console.log("b");
                         c = S(function () {
+                            console.log('c');
                             return a();
                         });
                         a();
                         return { c : c };
                     }),
                     d = S(function () {
+                        console.log('d');
                         c();
                         var e = S(function () {
+                            console.log('e');
                             return a();
                         });
                         return { e : e };

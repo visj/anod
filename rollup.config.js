@@ -12,7 +12,7 @@ export default {
             format: 'esm',
         },
         {
-            file: 'dist/zorn.iife.js',
+            file: 'dist/zorn.js',
             format: 'iife',
             name: 'Zorn',
         }
@@ -20,7 +20,7 @@ export default {
     plugins: [
         esbuild({
             minify: process.env.NODE_ENV === 'production',
-            target: 'es2015',
+            target: 'ES2015',
         }),
     ],
 }

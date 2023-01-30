@@ -20,8 +20,15 @@ describe("Computations which modify data", function () {
                 a = S.data(false),
                 b = S.data(0),
                 db,
-                c = S(function () { if (a()) { seq += "c"; b(1); a(false); } }),
-                d = S(function () { if (a()) { seq += "d"; db = b(); } });
+                c = S(function () { if (a()) { 
+                    seq += "c"; 
+                    b(1); 
+                    a(false); 
+                } }),
+                d = S(function () { if (a()) { 
+                    seq += "d"; 
+                    db = b(); 
+                } });
             
             b(0);
             seq = "";

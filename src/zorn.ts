@@ -1,466 +1,410 @@
-export interface S {
-    // Computation root
-    root<T>(fn : (dispose? : () => void) => T) : T;
-
-    // Computation constructors
-    <T>(fn : () => T) : () => T;
-    <T>(fn : (v : T) => T, seed : T) : () => T;
-    on<T>(ev : () => any, fn : () => T) : () => T;
-    on<T>(ev : () => any, fn : (v : T) => T, seed : T, onchanges?: boolean) : () => T;
-    effect<T>(fn : () => T) : void;
-    effect<T>(fn : (v : T) => T, seed : T) : void;
-
-    // Data signal constructors
-    data<T>(value : T) : DataSignal<T>;
-    value<T>(value : T, eq? : (a : T, b : T) => boolean) : DataSignal<T>;
-
-    // Batching changes
-    freeze<T>(fn : () => T) : T;
-
-    // Sampling a signal
-    sample<T>(fn : () => T) : T;
-
-    // Freeing external resources
-    cleanup(fn : (final : boolean) => any) : void;
-
-    // experimental - methods for creating new kinds of bindings
-    isFrozen() : boolean;
-    isListening() : boolean;
-    makeDataNode<T>(value : T) : IDataNode<T>;
-    makeComputationNode<T, S>(fn : (val : S) => T, seed : S, orphan : boolean, sample : true) : { node : INode<T> | null, value : T };
-    makeComputationNode<T, S>(fn : (val : T | S) => T, seed : S, orphan : boolean, sample : boolean) : { node : INode<T> | null, value : T };
-    disposeNode(node : INode<any>) : void;
-}
-
 export interface DataSignal<T> {
-    () : T;
-    (val : T) : T;
+    (): T;
+    (val: T): T;
 }
 
 // Public interface
-var S = <S>function S<T>(fn : (v : T | undefined) => T, value? : T) : () => T {
+export function S<T>(fn: (v: T) => T, value: T): () => T {
+    var node = new Computation(fn, value);
 
-    if (Owner === null) console.warn("computations created without a root or parent will never be disposed");
-
-    var { node, value: _value } = makeComputationNode(fn, value, false, false);
-
-    if (node === null) {
-        return function computation() { return _value; }
-    } else {
-        return function computation() {
-            return node!.current();
-        }
+    return function computation() {
+        return node.get();
     }
 };
 
-// compatibility with commonjs systems that expect default export to be at require('s.js').default rather than just require('s-js')
-Object.defineProperty(S, 'default', { value : S });
-
-export default S;
-
-S.root = function root<T>(fn : (dispose : () => void) => T) : T {
-    var owner      = Owner,
-        disposer   = fn.length === 0 ? null : function _dispose() {
-            if (root === null) {
-                // nothing to dispose
-            } else if (RunningClock !== null) {
-                RootClock.disposes.add(root);
+export function root<T>(fn: (dispose: () => void) => T): T {
+    var owner = Owner,
+        orphan = fn.length === 0,
+        root = orphan ? null : new Root(),
+        result: T = undefined!,
+        disposer = orphan ? null : function _dispose() {
+            if (Stage) {
+                root!.update(0);
             } else {
-                dispose(root);
+                Disposes.add(root!);
             }
-        },
-        root       = disposer === null ? UNOWNED : getCandidateNode(),
-        result     : T;
-
+        };
     Owner = root;
 
-    try {
-        result = disposer === null ? (fn as any)() : fn(disposer);
-    } finally {
+    if (Stage === Stages.Idle) {
+        try {
+            result = fn(disposer!);
+        } finally {
+            Owner = owner;
+        }
+    } else {
+        result = fn(disposer!);
         Owner = owner;
-    }
-
-    if (disposer !== null && recycleOrClaimNode(root, null as any, undefined, true)) {
-        root = null!;
     }
 
     return result;
 };
 
-S.on = function on<T>(ev : () => any, fn : (v? : T) => T, seed? : T, onchanges? : boolean) {
+export function on<T>(ev: () => any, fn: (v?: T) => T, seed?: T, onchanges?: boolean) {
     if (Array.isArray(ev)) ev = callAll(ev);
     onchanges = !!onchanges;
 
     return S(on, seed);
-    
-    function on(value : T | undefined) {
-        var listener = Listener;
-        ev(); 
+
+    function on(value: T | undefined) {
+        var running = Listener;
+        ev();
         if (onchanges) onchanges = false;
         else {
             Listener = null;
             value = fn(value);
-            Listener = listener;
-        } 
+            Listener = running;
+        }
         return value;
     }
 };
 
-function callAll(ss : (() => any)[]) {
+function callAll(ss: (() => any)[]) {
     return function all() {
         for (var i = 0; i < ss.length; i++) ss[i]();
     }
 }
 
-S.effect = function effect<T>(fn : (v : T | undefined) => T, value? : T) : void {
-    makeComputationNode(fn, value, false, false);
+export function effect<T>(fn: (v: T) => T, value?: T): void {
+    new Computation(fn, value!);
 }
 
-S.data = function data<T>(value : T) : (value? : T) => T {
-    var node = new DataNode(value);
+export function data<T>(value: T): (value?: T) => T {
+    var node = new Data(value);
 
-    return function data(value? : T) : T {
+    return function data(value?: T): T {
         if (arguments.length === 0) {
-            return node.current();
+            return node.get();
         } else {
-            return node.next(value);
+            return node.set(value!);
         }
     }
 };
 
-S.value = function value<T>(current : T, eq? : (a : T, b : T) => boolean) : DataSignal<T> {
-    var node  = new DataNode(current),
-        age   = -1;
-    return function value(update? : T) {
+export function value<T>(current: T, eq?: (a: T, b: T) => boolean): DataSignal<T> {
+    var node = data(current),
+        age = -1;
+    return function value(update?: T) {
         if (arguments.length === 0) {
-            return node.current();
+            return node();
         } else {
             var same = eq ? eq(current, update!) : current === update;
             if (!same) {
-                var time = RootClock.time;
-                if (age === time) 
+                var time = Time;
+                if (age === time)
                     throw new Error("conflicting values: " + update + " is not the same as " + current);
                 age = time;
                 current = update!;
-                node.next(update!);
+                node(update!);
             }
             return update!;
         }
     }
 };
 
-S.freeze = function freeze<T>(fn : () => T) : T {
-    var result : T = undefined!;
-    
-    if (RunningClock !== null) {
-        result = fn();
-    } else {
-        RunningClock = RootClock;
-        RunningClock.changes.reset();
+export function freeze<T>(fn: () => T): T {
+    var result: T = undefined!;
 
+    if (Stage === Stages.Idle) {
+        Stage = Stages.Started;
+        reset();
         try {
             result = fn();
             event();
         } finally {
-            RunningClock = null;
+            Stage = Stages.Idle;
         }
+    } else {
+        result = fn();
     }
-        
+
     return result;
 };
 
-S.sample = function sample<T>(fn : () => T) : T {
-    var result : T,
+export function sample<T>(fn: () => T): T {
+    var result: T,
         listener = Listener;
-    
-    Listener = null;
-    result = fn();
-    Listener = listener;
-    
+
+    if (listener !== null) {
+        Listener = null;
+        result = fn();
+        Listener = listener;
+    } else {
+        result = fn();
+    }
     return result;
 }
 
-S.cleanup = function cleanup(fn : (final : boolean) => void) : void {
-    if (Owner === null) console.warn("cleanups created without a root or parent will never be run");
-    else if (Owner.cleanups === null) Owner.cleanups = [fn];
-    else Owner.cleanups.push(fn);
-};
-
-// experimental : exposing node constructors and some state
-S.makeDataNode = function makeDataNode(value) { 
-    return new DataNode(value); 
-};
-
-export interface IClock {
-    time() : number;
+export function cleanup(fn: (final: boolean) => void): void {
+    var owner = Owner;
+    if (owner !== null) {
+        if (owner.cleanups === null) {
+            owner.cleanups = [fn];
+        } else {
+            owner.cleanups.push(fn);
+        }
+    }
 }
 
-interface INode<T> {
-    clock() : IClock;
-    current() : T;
+const enum State {
+    None = 0,
+    Stale = 1,
+    Running = 2,
+    Disposed = 4,
+    Notified = 8,
+    Changed = 16,
 }
 
-interface IDataNode<T> extends INode<T> {
-    next(value : T) : T;
+const enum Stages {
+    Idle = 0,
+    Started = 1,
+    Disposes = 1,
+    Changes = 2,
+    Computes = 2,
+    Updates = 4,
 }
 
-export { INode as Node, IDataNode as DataNode, IClock as Clock };
+interface Signal {
+    state: State;
+    update(): void;
+}
 
-S.makeComputationNode = makeComputationNode;
-S.disposeNode = function disposeNode(node : ComputationNode) {
-    if (RunningClock !== null) {
-        RootClock.disposes.add(node);
+interface Scope {
+    owned: Computation[] | null;
+    cleanups: ((final: boolean) => void)[] | null;
+}
+
+interface Send extends Signal {
+    node1: Receive | null;
+    node1slot: number;
+    nodes: Receive[] | null;
+    nodeslots: number[] | null;
+}
+
+interface Receive extends Scope, Send {
+    age: number;
+    source1: Send | null;
+    source1slot: number;
+    sources: Send[] | null;
+    sourceslots: number[] | null;
+}
+
+interface Data<T = any> extends Send {
+    value: T;
+    pending: T | {};
+
+    get(): T;
+    set(value: T): T;
+}
+
+interface DataConstructor {
+    prototype: Data;
+    new <T>(value: T): Data<T>;
+}
+
+export var Data = (function <T>(this: Data<T>, value: T) {
+    this.state = State.None;
+    this.value = value;
+    this.pending = nil;
+    this.node1 = null;
+    this.node1slot = -1;
+    this.nodes = null;
+    this.nodeslots = null;
+}) as Function as DataConstructor;
+
+Data.prototype.get = function () {
+    if (Listener !== null) {
+        logRead(this, Listener);
+    }
+    return this.value;
+}
+
+Data.prototype.set = function <T>(value: T) {
+    if (Stage === Stages.Idle) {
+        if (this.node1 !== null || this.nodes !== null) {
+            this.pending = value;
+            this.state = State.Stale;
+            reset();
+            Changes.add(this);
+            event();
+        } else {
+            this.value = value;
+        }
+    } else { // not batching, respond to change now
+        if (this.pending !== nil) { // value has already been set once, check for conflicts
+            if (value !== this.pending) {
+                throw new Error("conflicting changes: " + value + " !== " + this.pending);
+            }
+        } else { // add to list of changes
+            this.pending = value;
+            this.state = State.Stale;
+            Changes.add(this);
+        }
+    }
+    return value!;
+}
+
+Data.prototype.update = function () {
+    this.value = this.pending;
+    this.pending = nil;
+}
+
+interface Root extends Signal, Scope { }
+
+interface RootConstructor {
+    prototype: Root;
+    new(): Root;
+}
+
+export var Root = (function (this: Root) {
+    this.state = State.None;
+    this.owned = null;
+    this.cleanups = null;
+}) as Function as RootConstructor;
+
+Root.prototype.update = function () {
+    runCleanups(this, true);
+}
+
+interface Computation<T = any> extends Receive {
+    fn: ((v: T) => T) | null;
+    value: T;
+    get(): T;
+}
+
+interface ComputationConstructor {
+    prototype: Computation;
+    new <T>(fn: (seed: T) => T, value: T): Computation<T>;
+}
+
+export var Computation = (function <T>(this: Computation<T>, fn: (seed: T) => T, value: T) {
+    this.fn = fn;
+    this.age = 0;
+    this.state = State.None;
+    this.node1 = null;
+    this.node1slot = -1;
+    this.nodes = null;
+    this.nodeslots = null;
+    this.source1 = null;
+    this.source1slot = 0;
+    this.sources = null;
+    this.sourceslots = null;
+    this.owned = null;
+    this.cleanups = null;
+
+    var owner = Owner,
+        listener = Listener;
+
+    Owner = Listener = this;
+
+    if (Stage === Stages.Idle) {
+        reset();
+        Stage = Stages.Started;
+        try {
+            this.value = this.fn!(value);
+            if (Changes.count > 0 || Disposes.count > 0) {
+                exec();
+            }
+        } finally {
+            Owner = Listener = null;
+            Stage = Stages.Idle;
+        }
     } else {
-        dispose(node);
+        this.value = this.fn!(this.value);
     }
-};
 
-S.isFrozen = function isFrozen() { 
-    return RunningClock !== null; 
-};
-
-S.isListening = function isListening() { 
-    return Listener !== null; 
-};
-
-// Internal implementation
-
-/// Graph classes and operations
-class Clock {
-    time      = 0;
-
-    changes   = new Queue<DataNode>(); // batched changes to data nodes
-    updates   = new Queue<ComputationNode>(); // computations to update
-    disposes  = new Queue<ComputationNode>(); // disposals to run after current batch of updates finishes
-}
-
-var RootClockProxy = {
-    time: function () { return RootClock.time; }
-};
-
-class DataNode {
-    pending = NOTPENDING as any;   
-    log     = null as Log | null;
-    
-    constructor(
-        public value : any
-    ) { }
-
-    current() {
-        if (Listener !== null) {
-            logDataRead(this);
+    if (owner !== null) {
+        if (owner.owned === null) {
+            owner.owned = [this];
+        } else {
+            owner.owned.push(this);
         }
-        return this.value;
     }
+    Owner = owner;
+    Listener = listener;
+}) as Function as ComputationConstructor;
 
-    next(value : any) {
-        if (RunningClock !== null) {
-            if (this.pending !== NOTPENDING) { // value has already been set once, check for conflicts
-                if (value !== this.pending) {
-                    throw new Error("conflicting changes: " + value + " !== " + this.pending);
-                }
-            } else { // add to list of changes
-                this.pending = value;
-                RootClock.changes.add(this);
-            }
-        } else { // not batching, respond to change now
-            if (this.log !== null) {
-                this.pending = value;
-                RootClock.changes.add(this);
-                event();
-            } else {
-                this.value = value;
+Computation.prototype.get = function () {
+    if (Listener !== null) {
+        if (this.age === Time) {
+            if ((this.state & State.Running) !== 0) {
+                throw new Error("circular dependency");
+            } else if ((this.state & State.Stale) !== 0) {
+                this.update();
             }
         }
-        return value!;
+        logRead(this, Listener);
     }
 
-    clock() {
-        return RootClockProxy;
-    }
+    return this.value;
 }
 
-class ComputationNode {
-    fn        = null as ((v : any) => any) | null;
-    value     = undefined as any;
-    age       = -1
-    state     = CURRENT;
-    source1   = null as null | Log;
-    source1slot = 0;
-    sources   = null as null | Log[];
-    sourceslots = null as null | number[];
-    log       = null as Log | null;
-    owned     = null as ComputationNode[] | null;
-    cleanups  = null as (((final : boolean) => void)[]) | null;
-    
-    constructor() { }
+Computation.prototype.update = function () {
+    var owner = Owner,
+        listener = Listener;
 
-    current() {
-        if (Listener !== null) {
-            if (this.age === RootClock.time) {
-                if (this.state === RUNNING) throw new Error("circular dependency");
-                else updateNode(this); // checks for state === STALE internally, so don't need to check here
-            }
-            logComputationRead(this);
-        }
+    Owner = Listener = this;
 
-        return this.value;
-    }
-
-    clock() {
-        return RootClockProxy;
-    }
-}
-
-class Log {
-    node1 = null as null | ComputationNode;
-    node1slot = 0;
-    nodes = null as null | ComputationNode[];
-    nodeslots = null as null | number[];
-}
-    
-class Queue<T> {
-    items = [] as T[];
-    count = 0;
-    
-    reset() {
-        this.count = 0;
-    }
-    
-    add(item : T) {
-        this.items[this.count++] = item;
-    }
-    
-    run(fn : (item : T) => void) {
-        var items = this.items;
-        for (var i = 0; i < this.count; i++) {
-            fn(items[i]!);
-            items[i] = null!;
-        }
-        this.count = 0;
-    }
-}
-
-// Constants
-var NOTPENDING = {},
-    CURRENT    = 0,
-    STALE      = 1,
-    RUNNING    = 2,
-    UNOWNED    = new ComputationNode();
-
-// "Globals" used to keep track of current system state
-var RootClock    = new Clock(),
-    RunningClock = null as Clock | null, // currently running clock 
-    Listener     = null as ComputationNode | null, // currently listening computation
-    Owner        = null as ComputationNode | null, // owner for new computations
-    LastNode     = null as ComputationNode | null; // cached unused node, for re-use
-
-// Functions
-var makeComputationNodeResult = { node : null as null | ComputationNode, value : undefined as any };
-function makeComputationNode<T>(fn : (v : T | undefined) => T, value : T | undefined, orphan : boolean, sample : boolean) : { node: ComputationNode | null, value : T } {
-    var node     = getCandidateNode(),
-        owner    = Owner,
-        listener = Listener,
-        toplevel = RunningClock === null;
-        
-    Owner = node;
-    Listener = sample ? null : node;
-
-    if (toplevel) {
-        value = execToplevelComputation(fn, value);
-    } else {
-        value = fn(value);
-    } 
+    this.state |= State.Running;
+    cleanupReceiver(this, false);
+    this.value = this.fn!(this.value);
+    this.state &= ~(State.Stale | State.Running);
 
     Owner = owner;
     Listener = listener;
-
-    var recycled = recycleOrClaimNode(node, fn, value, orphan);
-
-    if (toplevel) finishToplevelComputation(owner, listener);
-
-    makeComputationNodeResult.node = recycled ? null : node;
-    makeComputationNodeResult.value =  value!;
-
-    return makeComputationNodeResult;
 }
 
-function execToplevelComputation<T>(fn : (v : T | undefined) => T, value : T | undefined) {
-    RunningClock = RootClock;
-    RootClock.changes.reset();
-    RootClock.updates.reset();
+interface Queue {
+    items: Array<Signal | null>;
+    count: number;
 
-    try {
-        return fn(value);
-    } finally {
-        Owner = Listener = RunningClock = null;
+    add(item: Signal): void;
+    run(): void;
+}
+
+interface QueueConstructor {
+    prototype: Queue;
+    new(): Queue;
+}
+
+var Queue = (function (this: Queue) {
+    this.items = [];
+    this.count = 0;
+}) as Function as QueueConstructor;
+
+Queue.prototype.add = function (item: Signal) {
+    this.items[this.count++] = item;
+}
+
+Queue.prototype.run = function () {
+    var items = this.items;
+    for (var i = 0; i < this.count; ++i) {
+        items[i]!.update();
+        items[i] = null;
     }
+    this.count = 0;
 }
 
-function finishToplevelComputation(owner : ComputationNode | null, listener : ComputationNode | null) {
-    if (RootClock.changes.count > 0 || RootClock.updates.count > 0) {
-        RootClock.time++;
-        try {
-            run(RootClock);
-        } finally {
-            RunningClock = null;
-            Owner = owner;
-            Listener = listener;
-        }
-    }
+// Constants
+var nil = {};
+var Time = 0;
+var Stage = Stages.Idle;
+var Changes = new Queue();
+var Computes = new Queue();
+var Updates = new Queue();
+var Disposes = new Queue();
+var Owner = null as Root | null;
+var Listener = null as Computation | null;
+
+function reset() {
+    Changes.count = Computes.count = Updates.count = Disposes.count = 0;
 }
 
-function getCandidateNode() {
-    var node = LastNode;
-    if (node === null) node = new ComputationNode();
-    else LastNode = null;
-    return node;
-}
-
-function recycleOrClaimNode<T>(node : ComputationNode, fn : (v : T | undefined) => T, value : T, orphan : boolean) {
-    var _owner = orphan || Owner === null || Owner === UNOWNED ? null : Owner,
-        recycle = node.source1 === null && (node.owned === null && node.cleanups === null || _owner !== null),
-        i : number;
-
-    if (recycle) {
-        LastNode = node;
-
-        if (_owner !== null) {
-            if (node.owned !== null) {
-                if (_owner.owned === null) _owner.owned = node.owned;
-                else for (i = 0; i < node.owned.length; i++) {
-                    _owner.owned.push(node.owned[i]);
-                }
-                node.owned = null;
-            }
-
-            if (node.cleanups !== null) {
-                if (_owner.cleanups === null) _owner.cleanups = node.cleanups;
-                else for (i = 0; i < node.cleanups.length; i++) {
-                    _owner.cleanups.push(node.cleanups[i]);
-                }
-                node.cleanups = null;
-            }
-        }
-    } else {      
-        node.fn = fn;
-        node.value = value;
-        node.age = RootClock.time;
-
-        if (_owner !== null) {
-            if (_owner.owned === null) _owner.owned = [node];
-            else _owner.owned.push(node);
-        }
-    }
-
-    return recycle;
-}
-
-function logRead(from : Log) {
-    var to = Listener!,
-        fromslot : number,
+// Functions
+function logRead(from: Send, to: Receive) {
+    var fromslot: number,
         toslot = to.source1 === null ? -1 : to.sources === null ? 0 : to.sources.length;
-        
+
     if (from.node1 === null) {
         from.node1 = to;
         from.node1slot = toslot;
@@ -474,7 +418,6 @@ function logRead(from : Log) {
         from.nodes.push(to);
         from.nodeslots!.push(toslot);
     }
-
     if (to.source1 === null) {
         to.source1 = from;
         to.source1slot = fromslot;
@@ -487,150 +430,182 @@ function logRead(from : Log) {
     }
 }
 
-function logDataRead(data : DataNode) {
-    if (data.log === null) data.log = new Log();
-    logRead(data.log);
-}
-
-function logComputationRead(node : ComputationNode) {
-    if (node.log === null) node.log = new Log();
-    logRead(node.log);
-}
-
 function event() {
     // b/c we might be under a top level S.root(), have to preserve current root
     var owner = Owner;
-    RootClock.updates.reset();
-    RootClock.time++;
     try {
-        run(RootClock);
+        exec();
     } finally {
-        RunningClock = Listener = null;
         Owner = owner;
+        Listener = null;
+        Stage = Stages.Idle;
     }
 }
 
-function run(clock : Clock) {
-    var running = RunningClock,
-        count = 0;
-        
-    RunningClock = clock;
-
-    clock.disposes.reset();
-    
-    // for each batch ...
-    while (clock.changes.count !== 0 || clock.updates.count !== 0 || clock.disposes.count !== 0) {
-        if (count > 0) // don't tick on first run, or else we expire already scheduled updates
-            clock.time++;
-
-        clock.changes.run(applyDataChange);
-        clock.updates.run(updateNode);
-        clock.disposes.run(dispose);
-
-        // if there are still changes after excessive batches, assume runaway            
-        if (count++ > 1e5) {
-            throw new Error("Runaway clock detected");
+function exec() {
+    var cycle = 0,
+        changes = Changes,
+        computes = Computes,
+        updates = Updates,
+        disposes = Disposes;
+    do {
+        Time++;
+        disposes.run();
+        changes.run();
+        computes.run();
+        updates.run();
+        if (cycle++ > 1e5) {
+            throw new Error("Cycle overflow");
         }
+    } while (changes.count > 0 || disposes.count > 0);
+    Stage = Stages.Idle;
+}
+
+/*
+    Clock.stage = Stage.Disposes;
+        for (i = 0; i < disposed.count; i++) {
+            disposed.items[i]!.dispose();
+            disposed.items[i] = null;
+        }
+        disposed.count = 0;
+        for (i = 0; i < changed.count; i++) {
+            node = changed.items[i]! as Item;
+            changed.items[i] = null;
+            node.update();
+            if (node.state & State.Changed) {
+                staleSource(node);
+            }
+        }
+        changed.count = 0;
+
+        while (RunningDisposes.count !== 0 || RunningUpdates.count !== 0) {
+            for (i = 0; i < RunningDisposes.count; i++) {
+                node = RunningDisposes.items[i]! as Item;
+                RunningDisposes.items[i] = null;
+                node.age = time;
+                node.state = State.Current;
+                node.dispose();
+                if (node.owned !== null) {
+                    for (j = 0; j < node.owned.length; j++) {
+                        RunningDisposes.add(node.owned[j]!);
+                    }
+                    node.owned = null;
+                }
+            }
+            RunningDisposes.count = 0;
+            for (i = 0; i < RunningUpdates.count; i++) {
+                data = RunningUpdates.items[i]! as Item;
+                RunningUpdates.items[i] = null;
+                if (data.state & State.Stale) {
+                    data.update();
+                    if (!(data.state & State.Notified)) {
+                        node = data.node1!;
+                        if (node !== null && node.age < time) {
+                            PendingUpdates.add(node);
+                        }
+                        node = data.nodes;
+                        if (node !== null) {
+                            for (j = 0; j < node.length; j++) {
+                                child = node[j]!;
+                                if (child !== null && child.age < time) {
+                                    PendingUpdates.add(child);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            RunningUpdates.count = 0;
+            for (i = 0; i < PendingUpdates.count; i++) {
+                data = PendingUpdates.items[i]! as Item;
+                PendingUpdates.items[i] = null;
+                if (data.age < time) {
+                    data.age = time;
+                    data.state |= State.Stale | State.Notified;
+                    RunningUpdates.add(data);
+                    if (data.owned !== null) {
+                        for (j = 0; j < data.owned.length; j++) {
+                            child = data.owned[j];
+                            RunningDisposes.add(child);
+                        }
+                    }
+                    node = data.node1;
+                    if (node !== null && node.age < time) {
+                        PendingUpdates.add(node);
+                    }
+                    node = data.nodes;
+                    if (node !== null) {
+                        for (j = 0; j < node.length; j++) {
+                            child = node[j]!;
+                            if (child !== null && child.age < time) {
+                                PendingUpdates.add(child);
+                            }
+                        }
+                    }
+                }
+            }
+            PendingUpdates.count = 0;
+        }
+*/
+
+function sendStaleSource(source: Send, time: number) {
+    if (source.node1 !== null) {
+        receiveStaleSource(source.node1, time);
     }
-
-    RunningClock = running;
-}
-
-function applyDataChange(data : DataNode) {
-    data.value = data.pending;
-    data.pending = NOTPENDING;
-    if (data.log) markComputationsStale(data.log);
-}
-
-function markComputationsStale(log : Log) {
-    var node1     = log.node1,
-        nodes     = log.nodes;
-
-    // mark all downstream nodes stale which haven't been already
-    if (node1 !== null) markNodeStale(node1);
+    var nodes = source.nodes;
     if (nodes !== null) {
-        for (var i = 0, len = nodes.length; i < len; i++) {
-            markNodeStale(nodes[i]);
+        var i = 0,
+            ln = nodes.length;
+        for (; i < ln; i++) {
+            receiveStaleSource(nodes[i], time);
         }
     }
 }
 
-function markNodeStale(node : ComputationNode) {
-    var time = RootClock.time;
-    if (node.age < time) {
-        node.age = time;
-        node.state = STALE;
-        RootClock.updates.add(node);
-        if (node.owned !== null) markOwnedNodesForDisposal(node.owned);
-        if (node.log !== null) markComputationsStale(node.log);
+function cleanupRoot(node: Root, final: boolean) {
+    var i = 0,
+        ln = 0,
+        owned = node.owned,
+        cleanups = node.cleanups;
+    if (owned !== null) {
+        ln = owned.length;
+        for (; i < ln; i++) {
+            cleanupReceiver(owned[i], true);
+        }
+        node.owned = null;
     }
-}
-
-function markOwnedNodesForDisposal(owned : ComputationNode[]) {
-    for (var i = 0; i < owned.length; i++) {
-        var child = owned[i];
-        child.age = RootClock.time;
-        child.state = CURRENT;
-        if (child.owned !== null) markOwnedNodesForDisposal(child.owned);
-    }
-}
-
-function updateNode(node : ComputationNode) {
-    if (node.state === STALE) {
-        var owner = Owner,
-            listener = Listener;
-    
-        Owner = Listener = node;
-    
-        node.state = RUNNING;
-        cleanup(node, false);
-        node.value = node.fn!(node.value);
-        node.state = CURRENT;
-        
-        Owner = owner;
-        Listener = listener;
-    }
-}
-    
-function cleanup(node : ComputationNode, final : boolean) {
-    var source1     = node.source1,
-        sources     = node.sources,
-        sourceslots = node.sourceslots,
-        cleanups    = node.cleanups,
-        owned       = node.owned,
-        i           : number,
-        len         : number;
-        
     if (cleanups !== null) {
-        for (i = 0; i < cleanups.length; i++) {
+        ln = cleanups.length;
+        for (; i < ln; i++) {
             cleanups[i](final);
         }
         node.cleanups = null;
     }
-    
-    if (owned !== null) {
-        for (i = 0; i < owned.length; i++) {
-            dispose(owned[i]);
-        }
-        node.owned = null;
-    }
-    
+}
+
+function cleanupReceiver(node: Receive, final: boolean) {
+    var ln = 0,
+        source1 = node.source1,
+        sources = node.sources,
+        sourceslots = node.sourceslots!;
+    cleanupRoot(node, final);
     if (source1 !== null) {
-        cleanupSource(source1, node.source1slot);
+        cleanupSender(source1, node.source1slot);
         node.source1 = null;
     }
     if (sources !== null) {
-        for (i = 0, len = sources.length; i < len; i++) {
-            cleanupSource(sources.pop()!, sourceslots!.pop()!);
+        ln = sources.length;
+        for (; ln--;) {
+            cleanupSender(sources.pop()!, sourceslots.pop()!);
         }
     }
 }
 
-function cleanupSource(source : Log, slot : number) {
+function cleanupSender(source: Send, slot: number) {
     var nodes = source.nodes!,
         nodeslots = source.nodeslots!,
-        last : ComputationNode,
-        lastslot : number;
+        last: Receive,
+        lastslot: number;
     if (slot === -1) {
         source.node1 = null;
     } else {
@@ -646,10 +621,4 @@ function cleanupSource(source : Log, slot : number) {
             }
         }
     }
-}
-    
-function dispose(node : ComputationNode) {
-    node.fn  = null;
-    node.log = null;
-    cleanup(node, true);
-}
+}   

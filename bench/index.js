@@ -1,5 +1,5 @@
-const { exec } = require('child_process');
-const { parseArgs } = require('util');
+import { exec } from 'child_process';
+import { parseArgs } from 'util';
 
 const {
     values: { target, name, framework, benchmark } 
@@ -31,7 +31,7 @@ switch (name) {
     case "haile": 
         switch (target) {
             case "node":
-                exec(`node --allow-natives-syntax ./bench/${name}/${framework}/${benchmark}/index.js`, (err, stdout, stderr) => {
+                exec(`node --allow-natives-syntax ./bench/${name}/${framework}/${benchmark}/index.cjs`, (err, stdout, stderr) => {
                     if (err) {
                         console.error(err);
                     }

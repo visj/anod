@@ -1,0 +1,2 @@
+isArray:  – 142 (index.js, line 67)
+typeof:   – 114 (index.js, line 79)

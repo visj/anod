@@ -1,6 +1,6 @@
 /* globals describe, it, expect */
 describe("S.sample(...)", function () {
-    it("avoids a depdendency", function () {
+    it("avoids a dedendency", function () {
         S.root(function () {
             var a = S.data(1),
                 b = S.data(2),
@@ -12,7 +12,7 @@ describe("S.sample(...)", function () {
             
             b(4);
             
-            expect(d).toBe(1);
+            expect(d).toBe(1, "derp");
             
             a(5);
             c(6);

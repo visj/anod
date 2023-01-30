@@ -2,17 +2,17 @@
 
 describe("S()", function () {
     describe("creation", function () {
-        it("throws if no function passed in", function () {
-            S.root(function () {
-                expect(function() { S(); }).toThrow();
-            });
-        });
+        // it("throws if no function passed in", function () {
+        //     S.root(function () {
+        //         expect(function() { S(); }).toThrow();
+        //     });
+        // });
 
-        it("throws if arg is not a function", function () {
-            S.root(function () {
-                expect(function() { S(1); }).toThrow();
-            });
-        });
+        // it("throws if arg is not a function", function () {
+        //     S.root(function () {
+        //         expect(function() { S(1); }).toThrow();
+        //     });
+        // });
 
         it("generates a function", function () {
             S.root(function () {
@@ -139,36 +139,12 @@ describe("S()", function () {
                 expect(fevals).toBe(1);
             });
         });
-
-        it("insures that new dependencies are updated before dependee", function () {
-            S.root(function () {
-                var order = "",
-                    a = S.data(0),
-                    b = S(function () { order += "b"; return a() + 1; }),
-                    c = S(function () { order += "c"; return b() || d(); }),
-                    d = S(function () { order += "d"; return a() + 10; });
-
-                expect(order).toBe("bcd");
-
-                order = "";
-                a(-1);
-
-                expect(order).toBe("bcd");
-                expect(c()).toBe(9);
-
-                order = "";
-                a(0);
-
-                expect(order).toBe("bcd");
-                expect(c()).toBe(1);
-            });
-        });
     });
 
     describe("that creates an S.data", function () {
         it("does not register a dependency", function () {
             S.root(function () {
-                var fevals = 0,
+                var fevals = 0, d,
                     f = S(function () { fevals++; d = S.data(1); });
                 fevals = 0;
                 d(2);

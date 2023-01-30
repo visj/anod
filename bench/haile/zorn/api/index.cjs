@@ -21,7 +21,7 @@ var getHeapUsage = tryDefine(['%CollectHeapUsage()'], zero);
 var collectGarbage = tryDefine(['%CollectGarbage(null)'], zero);
 var optimizeFunctionOnNextCall = tryDefine(['fn', '%OptimizeFunctionOnNextCall(fn)'], zero);
 
-var S = typeof window !== 'undefined' ? S : require('../S');
+var S = typeof window !== 'undefined' ? Zorn : require('../../../../dist/zorn.cjs');
 
 var now = typeof process === 'undefined' ? browserNow : nodeNow;
 
@@ -109,10 +109,10 @@ function run(fn, n, scount) {
         sources = createDataSignals(scount, []);
 
         for (var i = 0; i < scount; i++) {
-            sources[i].current();
-            sources[i].current();
-            optimizeFunctionOnNextCall(sources[i].current);
-            sources[i].current();
+            sources[i].get();
+            sources[i].get();
+            optimizeFunctionOnNextCall(sources[i].get);
+            sources[i].get();
         }
 
         // start GC clean
@@ -138,21 +138,21 @@ function run(fn, n, scount) {
 
 function createDataSignals(n, sources) {
     for (var i = 0; i < n; i++) {
-        sources[i] = S.makeDataNode(i);
+        sources[i] = new S.Data(i);
     }
     return sources;
 }
 
 function readToplevelSignal(n, sources) {
     for (var i = 0; i < n; i++) {
-        sideEffect += sources[i].current()
+        sideEffect += sources[i].get()
     }
 }
 
 function readWatchedSignal(n, sources) {
     S.effect(function () {
         for (var i = 0; i < n; i++) {
-            sideEffect += sources[i].current()
+            sideEffect += sources[i].get()
         }
     });
 }
@@ -167,7 +167,7 @@ function sampleNoSignal(n, sources) {
 }
 
 function sampleToplevelSignal(n, sources) {
-    var fn = () => sources[i].current();
+    var fn = () => sources[i].get();
     for (var i = 0; i < n; i++) {
         sideEffect += S.sample(fn);
     }
@@ -175,7 +175,7 @@ function sampleToplevelSignal(n, sources) {
 
 function sampleWatchedSignal(n, sources) {
     S.effect(function () {
-        var fn = () => sources[i].current();
+        var fn = () => sources[i].get();
         for (var i = 0; i < n; i++) {
             sideEffect += S.sample(fn);
         }
@@ -297,26 +297,26 @@ function createComputation0(i) {
 }
 
 function createComputation1(s1) {
-    S.effect(() => sideEffect += s1.current());
+    S.effect(() => sideEffect += s1.get());
 }
 
 function createComputation2(s1, s2) {
-    S.effect(() => sideEffect += s1.current() + s2.current());
+    S.effect(() => sideEffect += s1.get() + s2.get());
 }
 
 function createComputation4(s1, s2, s3, s4) {
-    S.effect(() => sideEffect += s1.current() + s2.current() + s3.current() + s4.current());
+    S.effect(() => sideEffect += s1.get() + s2.get() + s3.get() + s4.get());
 }
 
 function createComputation8(s1, s2, s3, s4, s5, s6, s7, s8) {
-    S.effect(() => sideEffect += s1.current() + s2.current() + s3.current() + s4.current() + s5.current() + s6.current() + s7.current() + s8.current());
+    S.effect(() => sideEffect += s1.get() + s2.get() + s3.get() + s4.get() + s5.get() + s6.get() + s7.get() + s8.get());
 }
 
 function createComputation1000(ss, offset) {
     S.effect(() => {
         var sum = 0;
         for (var i = 0; i < 1000; i++) {
-            sum += ss[offset + i].current();
+            sum += ss[offset + i].get();
         }
         sideEffect += sum;
     }, undefined);
@@ -324,18 +324,18 @@ function createComputation1000(ss, offset) {
 
 function updateComputations1to1(n, sources) {
     var s1 = sources[0],
-        c = S.effect(() => s1.current());
+        c = S.effect(() => s1.get());
     for (var i = 0; i < n; i++) {
-        s1.next(i);
+        s1.set(i);
     }
 }
 
 function updateComputations2to1(n, sources) {
     var s1 = sources[0],
         s2 = sources[1],
-        c = S.effect(() => s1.current() + s2.current());
+        c = S.effect(() => s1.get() + s2.get());
     for (var i = 0; i < n; i++) {
-        s1.next(i);
+        s1.set(i);
     }
 }
 
@@ -344,9 +344,9 @@ function updateComputations4to1(n, sources) {
         s2 = sources[1],
         s3 = sources[2],
         s4 = sources[3],
-        c = S.effect(() => s1.current() + s2.current() + s3.current() + s4.current());
+        c = S.effect(() => s1.get() + s2.get() + s3.get() + s4.get());
     for (var i = 0; i < n; i++) {
-        s1.next(i);
+        s1.set(i);
     }
 }
 
@@ -355,42 +355,42 @@ function updateComputations1000to1(n, sources) {
         c = S.effect(() => {
             var sum = 0;
             for (var i = 0; i < 1000; i++) {
-                sum += sources[i].current();
+                sum += sources[i].get();
             }
             return sum;
         }, undefined);
     for (var i = 0; i < n; i++) {
-        s1.next(i);
+        s1.set(i);
     }
 }
 
 function updateComputations1to2(n, sources) {
     var s1 = sources[0],
-        c1 = S.effect(() => s1.current()),
-        c2 = S.effect(() => s1.current());
+        c1 = S.effect(() => s1.get()),
+        c2 = S.effect(() => s1.get());
     for (var i = 0; i < n / 2; i++) {
-        s1.next(i);
+        s1.set(i);
     }
 }
 
 function updateComputations1to4(n, sources) {
     var s1 = sources[0],
-        c1 = S.effect(() => s1.current()),
-        c2 = S.effect(() => s1.current()),
-        c3 = S.effect(() => s1.current()),
-        c4 = S.effect(() => s1.current());
+        c1 = S.effect(() => s1.get()),
+        c2 = S.effect(() => s1.get()),
+        c3 = S.effect(() => s1.get()),
+        c4 = S.effect(() => s1.get());
     for (var i = 0; i < n / 4; i++) {
-        s1.next(i);
+        s1.set(i);
     }
 }
 
 function updateComputations1to1000(n, sources) {
     var s1 = sources[0];
     for (var i = 0; i < 1000; i++) {
-        S.effect(() => s1.current());
+        S.effect(() => s1.get());
     }
     for (var i = 0; i < n / 1000; i++) {
-        s1.next(i);
+        s1.set(i);
     }
 }
 
