@@ -113,7 +113,7 @@ function run(fn, n, scount) {
 
 function createDataSignals(n, sources) {
     for (var i = 0; i < n; i++) {
-        sources[i] = Zorn.data(i);
+        sources[i] = new Zorn.Data(i);
     }
     return sources;
 }
@@ -229,38 +229,40 @@ function createComputations1000to1(n, sources) {
 }
 
 function createComputation0(i) {
-    Zorn.effect(function () { return i; });
+    new Zorn.Computation(function () { return i; }, 0, 16);
 }
 
 function createComputation1(s1) {
-    Zorn.effect(function () { return s1.val; });
+    new Zorn.Computation(function () { 
+        return s1.val; 
+    }, 0, 16);
 }
 
 function createComputation2(s1, s2) {
-    Zorn.effect(function () { return s1.val + s2.val; });
+    new Zorn.Computation(function () { return s1.val + s2.val; }, 0, 16);
 }
 
 function createComputation4(s1, s2, s3, s4) {
-    Zorn.effect(function () { return s1.val + s2.val + s3.val + s4.val; });
+    new Zorn.Computation(function () { return s1.val + s2.val + s3.val + s4.val; }, 0, 16);
 }
 
 function createComputation8(s1, s2, s3, s4, s5, s6, s7, s8) {
-    Zorn.effect(function () { return s1.val + s2.val + s3.val + s4.val + s5.val + s6.val + s7.val + s8.val; });
+    new Zorn.Computation(function () { return s1.val + s2.val + s3.val + s4.val + s5.val + s6.val + s7.val + s8.val; }, 0, 16);
 }
 
 function createComputation1000(ss, offset) {
-    Zorn.effect(function () {
+    new Zorn.Computation(function () {
         var sum = 0;
         for (var i = 0; i < 1000; i++) {
             sum += ss[offset + i].val;
         }
         return sum;
-    });
+    }, 0, 16);
 }
 
 function updateComputations1to1(n, sources) {
     var s1 = sources[0],
-        c = Zorn.effect(function () { return s1.val; });
+        c = new Zorn.Computation(function () { return s1.val; }, 0, 16);
     for (var i = 0; i < n; i++) {
         s1.val = i;
     }
@@ -269,7 +271,7 @@ function updateComputations1to1(n, sources) {
 function updateComputations2to1(n, sources) {
     var s1 = sources[0],
         s2 = sources[1],
-        c = Zorn.effect(function () { return s1.val + s2.val; });
+        c = new Zorn.Computation(function () { return s1.val + s2.val; }, 0, 16);
     for (var i = 0; i < n; i++) {
         s1.val = i;
     }
@@ -280,7 +282,7 @@ function updateComputations4to1(n, sources) {
         s2 = sources[1],
         s3 = sources[2],
         s4 = sources[3],
-        c = Zorn.effect(function () { return s1.val + s2.val + s3.val + s4.val; });
+        c = new Zorn.Computation(function () { return s1.val + s2.val + s3.val + s4.val; }, 0, 16);
     for (var i = 0; i < n; i++) {
         s1.val = i;
     }
@@ -288,13 +290,13 @@ function updateComputations4to1(n, sources) {
 
 function updateComputations1000to1(n, sources) {
     var s1 = sources[0],
-        c = Zorn.effect(function () {
+        c = new Zorn.Computation(function () {
             var sum = 0;
             for (var i = 0; i < 1000; i++) {
                 sum += sources[i].val;
             }
             return sum;
-        });
+        }, 0, 16);
     for (var i = 0; i < n; i++) {
         s1.val = i;
     }
@@ -302,8 +304,8 @@ function updateComputations1000to1(n, sources) {
 
 function updateComputations1to2(n, sources) {
     var s1 = sources[0],
-        c1 = Zorn.effect(function () { return s1.val; }),
-        c2 = Zorn.effect(function () { return s1.val; });
+        c1 = new Zorn.Computation(function () { return s1.val; }, 0, 16),
+        c2 = new Zorn.Computation(function () { return s1.val; }, 0, 16);
     for (var i = 0; i < n / 2; i++) {
         s1.val = i;
     }
@@ -311,10 +313,10 @@ function updateComputations1to2(n, sources) {
 
 function updateComputations1to4(n, sources) {
     var s1 = sources[0],
-        c1 = Zorn.effect(function () { return s1.val; }),
-        c2 = Zorn.effect(function () { return s1.val; }),
-        c3 = Zorn.effect(function () { return s1.val; }),
-        c4 = Zorn.effect(function () { return s1.val; });
+        c1 = new Zorn.Computation(function () { return s1.val; }, 0, 16),
+        c2 = new Zorn.Computation(function () { return s1.val; }, 0, 16),
+        c3 = new Zorn.Computation(function () { return s1.val; }, 0, 16),
+        c4 = new Zorn.Computation(function () { return s1.val; }, 0, 16);
     for (var i = 0; i < n / 4; i++) {
         s1.val = i;
     }
@@ -323,7 +325,7 @@ function updateComputations1to4(n, sources) {
 function updateComputations1to1000(n, sources) {
     var s1 = sources[0];
     for (var i = 0; i < 1000; i++) {
-        Zorn.effect(function () { return s1.val; });
+        new Zorn.Computation(function () { return s1.val; }, 0, 16);
     }
     for (var i = 0; i < n / 1000; i++) {
         s1.val = i;

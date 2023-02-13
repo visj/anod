@@ -7,19 +7,44 @@ import kleur from 'kleur';
 import * as reactively from '@reactively/core';
 import * as cellx from 'cellx';
 import * as Sjs from 's-js';
-import * as solid from './solid-js-baseline.js';
+import * as solid from './solid-js-baseline.mjs';
 import * as preact from '@preact/signals-core';
 import * as maverick from '@maverick-js/signals';
 import * as usignal from "usignal";
 import Table from 'cli-table';
 import * as zorn from "../../dist/zorn.mjs";
 
-const BATCHED = true;
+const BATCHED = false;
 const RUNS_PER_TIER = 150;
 const LAYER_TIERS = [10, 100, 500, 1000, 2000, 2500];
 
-const med = (array) =>
-  array.sort((a, b) => (a - b < 0 ? 1 : -1))[Math.floor(array.length / 2)] || 0;
+function zero() {
+  return 0;
+}
+
+/**
+* 
+* @param {string[]} def 
+* @param {function(): any} fallback 
+* @returns {function(): any}
+* @returns 
+*/
+function tryDefine(def, fallback) {
+  try {
+      return new Function(...def);
+  } catch (_) {
+      return fallback;
+  }
+}
+
+var getHeapUsage = tryDefine(['%CollectHeapUsage()'], zero);
+var collectGarbage = tryDefine(['%CollectGarbage(null)'], zero);
+var optimizeFunctionOnNextCall = tryDefine(['fn', '%OptimizeFunctionOnNextCall(fn)'], zero);
+
+const med = (array) => {
+  return array.reduce((a, b) => a + b, 0) / array.length;
+}
+  // array.sort((a, b) => (a - b < 0 ? 1 : -1))[Math.floor(array.length / 2)] || 0;
 
 const SOLUTIONS = {
   10: [2, 4, -2, -3],
@@ -41,15 +66,33 @@ const isSolution = (layers, answer) => answer.every((_, i) => SOLUTIONS[layers][
 async function main() {
   const report = {};
   report.maverick = { fn: runMaverick, runs: [], avg: [] };
-  report.zorn = { fn: runZorn, runs: [] };
+  report.zornStatic = { fn: runZornStatic, runs: [] };
   report.solid = { fn: runSolid, runs: [] };
   report.usignal = { fn: runUsignal, runs: [] };
   report.S = { fn: runS, runs: [] };
+  report.zorn = { fn: runZorn, runs: [] };
   // Has no way to dispose so can't consider it feature comparable.
   report.reactively = { fn: runReactively, runs: [], avg: [] };
   // These libraries are not comparable in terms of features.
   report['preact/signals'] = { fn: runPreact, runs: [] };
   report.cellx = { fn: runCellx, runs: [] };
+  // warm up first
+  for (const lib of Object.keys(report)) {
+    const current = report[lib];
+
+    for (let i = 0; i < LAYER_TIERS.length; i += 1) {
+      let layers = LAYER_TIERS[i];
+      const runs = [];
+      rand++;
+      for (let j = 0; j < RUNS_PER_TIER; j += 1) {
+        runs.push(await start(current.fn, layers));
+      }
+      // Give cellx time to release its global pendingCells array
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      //current.runs[i] = med(runs) * 1000;
+      collectGarbage();
+    }
+  }
 
   for (const lib of Object.keys(report)) {
     const current = report[lib];
@@ -63,8 +106,9 @@ async function main() {
       }
       // Give cellx time to release its global pendingCells array
       await new Promise((resolve) => setTimeout(resolve, 0));
-
+      
       current.runs[i] = med(runs) * 1000;
+      collectGarbage();
     }
   }
 
@@ -218,7 +262,7 @@ function runMaverick(layers, done) {
 function runS(layers, done) {
   const S = Sjs.default;
 
-  S.root(() => {
+  S.root((dispose) => {
     const start = {
       a: S.data(1),
       b: S.data(2),
@@ -261,20 +305,18 @@ function runS(layers, done) {
 
     const solution = [end.a(), end.b(), end.c(), end.d()];
     const endTime = performance.now() - startTime;
-
+    dispose();
     done(isSolution(layers, solution) ? endTime : -1);
   });
 }
 
 function runZorn(layers, done) {
-  const S = zorn.default;
-
-  S.root(() => {
+  var node = zorn.root(function() {
     const start = {
-      a: S.data(1),
-      b: S.data(2),
-      c: S.data(3),
-      d: S.data(4),
+      a: new zorn.Data(1),
+      b: new zorn.Data(2),
+      c: new zorn.Data(3),
+      d: new zorn.Data(4),
     };
 
     let layer = start;
@@ -282,10 +324,10 @@ function runZorn(layers, done) {
     for (let i = layers; i--;) {
       layer = ((m) => {
         return {
-          a: S(() => rand % 2 ? m.b() : m.c()),
-          b: S(() => m.a() - m.c()),
-          c: S(() => m.b() + m.d()),
-          d: S(() => m.c()),
+          a: new zorn.Computation(() => rand % 2 ? m.b.val : m.c.val),
+          b: new zorn.Computation(() => m.a.val - m.c.val),
+          c: new zorn.Computation(() => m.b.val + m.d.val),
+          d: new zorn.Computation(() => m.c.val),
         };
       })(layer);
     }
@@ -294,27 +336,80 @@ function runZorn(layers, done) {
 
     const end = layer;
     if (BATCHED) {
-      S.freeze(() => {
-        start.a(4);
-        start.b(3);
-        start.c(2);
-        start.d(1);
-      })
+      zorn.freeze(() => {
+        start.a.val = 4;
+        start.b.val = 3;
+        start.c.val = 2;
+        start.d.val = 1;
+      });
     } else {
-      start.a(4);
-      end.a(), end.b(), end.c(), end.d();
-      start.b(3);
-      end.a(), end.b(), end.c(), end.d();
-      start.c(2);
-      end.a(), end.b(), end.c(), end.d();
-      start.d(1);
+      start.a.val = 4;
+      end.a.val, end.b.val, end.c.val, end.d.val;
+      start.b.val = 3;
+      end.a.val, end.b.val, end.c.val, end.d.val;
+      start.c.val = 2;
+      end.a.val, end.b.val, end.c.val, end.d.val;
+      start.d.val = 1;
     }
 
-    const solution = [end.a(), end.b(), end.c(), end.d()];
+    const solution = [end.a.val, end.b.val, end.c.val, end.d.val];
     const endTime = performance.now() - startTime;
-
-    done(isSolution(layers, solution) ? endTime : -1);
+    return isSolution(layers, solution) ? endTime : -1;
   });
+  var result = node.val;
+  zorn.dispose(node);
+  done(result);
+}
+
+function runZornStatic(layers, done) {
+  var node = zorn.root(function() {
+    const start = {
+      a: new zorn.Data(1),
+      b: new zorn.Data(2),
+      c: new zorn.Data(3),
+      d: new zorn.Data(4),
+    };
+
+    let layer = start;
+
+    for (let i = layers; i--;) {
+      layer = ((m) => {
+        return {
+          a: new zorn.Computation(() => rand % 2 ? m.b.val : m.c.val, 0, 16),
+          b: new zorn.Computation(() => m.a.val - m.c.val, 0, 16),
+          c: new zorn.Computation(() => m.b.val + m.d.val, 0, 16),
+          d: new zorn.Computation(() => m.c.val, 0, 16),
+        };
+      })(layer);
+    }
+
+    const startTime = performance.now();
+
+    const end = layer;
+    if (BATCHED) {
+      zorn.freeze(() => {
+        start.a.val = 4;
+        start.b.val = 3;
+        start.c.val = 2;
+        start.d.val = 1;
+      });
+    } else {
+      start.a.val = 4;
+      end.a.val, end.b.val, end.c.val, end.d.val;
+      start.b.val = 3;
+      end.a.val, end.b.val, end.c.val, end.d.val;
+      start.c.val = 2;
+      end.a.val, end.b.val, end.c.val, end.d.val;
+      start.d.val = 1;
+    }
+
+    const solution = [end.a.val, end.b.val, end.c.val, end.d.val];
+    const endTime = performance.now() - startTime;
+    return isSolution(layers, solution) ? endTime : -1;
+  });
+  var result = node.val;
+  zorn.dispose(node);
+  done(result);
 }
 
 /**

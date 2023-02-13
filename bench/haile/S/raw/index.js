@@ -21,7 +21,7 @@ var getHeapUsage = tryDefine(['%CollectHeapUsage()'], zero);
 var collectGarbage = tryDefine(['%CollectGarbage(null)'], zero);
 var optimizeFunctionOnNextCall = tryDefine(['fn', '%OptimizeFunctionOnNextCall(fn)'], zero);
 
-var S = typeof window !== 'undefined' ? S : require('../S.cjs');
+var S = typeof window !== 'undefined' ? S : require('../S.js');
 
 var now = typeof process === 'undefined' ? browserNow : nodeNow;
 

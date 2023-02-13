@@ -1,142 +1,193 @@
-export interface DataSignal<T> {
-    (): T;
-    (val: T): T;
+type Val<T = any> = Func<T> | Signal<T>;
+
+type Call<T> = () => T;
+
+interface Func<T = any> {
+    readonly val: T;
 }
 
-// Public interface
-export function S<T>(fn: (v: T) => T, value: T): () => T {
-    var node = new Computation(fn, value);
+interface Signal<T = any> {
+    val: T;
+}
 
-    return function computation() {
-        return node.get();
+export { Val, Func, Signal, root, dispose, compute, effect, on, data, value, owner, listener, freeze, peek, cleanup, Data, Value, Computation };
+
+function owner() {
+    return OWNER;
+}
+
+function listener() {
+    return LISTENER;
+}
+
+function dispose(val: Val) {
+    var node = val as Send | Owner;
+    if ((node.state & (State.Dispose | State.Disposed)) === 0) {
+        if (STAGE === Stage.Idle) {
+            node.dispose(TIME);
+        } else {
+            node.state |= State.Dispose;
+            DISPOSES.add(node);
+        }
     }
-};
+}
 
-export function root<T>(fn: (dispose: () => void) => T): T {
-    var owner = Owner,
-        orphan = fn.length === 0,
-        root = orphan ? null : new Root(),
-        result: T = undefined!,
-        disposer = orphan ? null : function _dispose() {
-            if (Stage) {
-                root!.update(0);
-            } else {
-                Disposes.add(root!);
-            }
-        };
-    Owner = root;
+function bind<S extends Source | Source[], T>(src: S, fn: (src: SourceVal<S>, seed: T, prev?: SourceVal<S>) => T, seed?: T, state?: State): Func<T> {
+    return new Computation(function(val: T) {
 
-    if (Stage === Stages.Idle) {
+    }, seed, state);
+}
+
+function compute<T>(fn: (seed: T) => T, seed?: T, state?: State): Func<T> {
+    return new Computation(fn, seed, state);
+}
+
+function effect<T>(fn: (seed: T) => T, seed?: T, state?: State): void {
+    new Computation(fn, seed, state);
+}
+
+function root<T>(fn: () => T): Val<T> {
+    var node = new Owner();
+    var owner = OWNER;
+    var listener = LISTENER;
+    OWNER = node;
+    LISTENER = null;
+    if (STAGE === Stage.Idle) {
         try {
-            result = fn(disposer!);
+            node.value = fn();
         } finally {
-            Owner = owner;
+            OWNER = owner;
+            LISTENER = listener;
         }
     } else {
-        result = fn(disposer!);
-        Owner = owner;
+        node.value = fn();
+        OWNER = owner;
+        LISTENER = listener;
     }
-
-    return result;
+    return node;
 };
 
-export function on<T>(ev: () => any, fn: (v?: T) => T, seed?: T, onchanges?: boolean) {
-    if (Array.isArray(ev)) ev = callAll(ev);
-    onchanges = !!onchanges;
+type Source<T = any> = Func<T> | Call<T>;
 
-    return S(on, seed);
+type SourceVal<T> =
+    T extends Func<infer U> ? U :
+    T extends [infer Head, ...infer Tail] ? [SourceVal<Head>, ...SourceVal<Tail>] :
+    T extends readonly [infer Head, ...infer Tail] ? [SourceVal<Head>, ...SourceVal<Tail>] :
+    T extends Array<infer U> ? Array<SourceVal<U>> : any;
 
-    function on(value: T | undefined) {
-        var running = Listener;
-        ev();
-        if (onchanges) onchanges = false;
-        else {
-            Listener = null;
-            value = fn(value);
-            Listener = running;
+function on<S1 extends Source, T>(
+    src: [S1],
+    fn: (
+        src: [SourceVal<S1>],
+        seed?: T,
+        prev?: [SourceVal<S1>]
+    ) => T,
+    seed?: T,
+    onchanges?: boolean
+): Func<T>;
+
+function on<S1 extends Source, S2 extends Source, T>(
+    src: [S1, S2],
+    fn: (
+        src: [SourceVal<S1>, SourceVal<S2>],
+        seed?: T,
+        prev?: [SourceVal<S1>, SourceVal<S2>]
+    ) => T,
+    seed?: T,
+    onchanges?: boolean
+): Func<T>;
+
+function on<S1 extends Source, S2 extends Source, S3 extends Source, T>(
+    src: [S1, S2, S3],
+    fn: (
+        src: [SourceVal<S1>, SourceVal<S2>, SourceVal<S3>],
+        seed?: T,
+        prev?: [SourceVal<S1>, SourceVal<S2>, SourceVal<S3>]
+    ) => T,
+    seed?: T,
+    onchanges?: boolean
+): Func<T>;
+
+function on<S1 extends Source, S2 extends Source, S3 extends Source, S4 extends Source, T>(
+    src: [S1, S2, S3, S4],
+    fn: (
+        src: [SourceVal<S1>, SourceVal<S2>, SourceVal<S3>, SourceVal<S4>],
+        seed?: T,
+        prev?: [SourceVal<S1>, SourceVal<S2>, SourceVal<S3>, SourceVal<S4>]
+    ) => T,
+    seed?: T,
+    onchanges?: boolean
+): Func<T>;
+
+function on<S extends Source | Source[] | readonly Source[], T>(
+    src: S,
+    fn: (src: SourceVal<S>, seed?: T, prev?: SourceVal<S>) => T,
+    seed?: T,
+    onchanges?: boolean
+): Func<T>;
+
+function on<S extends Source | Source[] | readonly Source[], T>(
+    src: S,
+    fn: (src: SourceVal<S>, seed?: T, prev?: SourceVal<S>) => T,
+    seed?: T,
+    onchanges?: boolean
+): Func<T> {
+    return compute(singleSource(0, src as Source, fn, onchanges), seed) as any;
+};
+
+function singleSource<S, T>(type: JsType, src: Source<S>, fn: (src: S, seed?: T, prev?: S) => T, onchanges?: boolean) {
+    var prev: S;
+    return function (value: T) {
+        var s = (src as Call<S>)();
+        if (onchanges) {
+            onchanges = false;
+        } else {
+            var running = LISTENER;
+            LISTENER = null;
+            value = fn(s, value, prev);
+            LISTENER = running;
         }
+        prev = s;
         return value;
     }
-};
-
-function callAll(ss: (() => any)[]) {
-    return function all() {
-        for (var i = 0; i < ss.length; i++) ss[i]();
-    }
 }
 
-export function effect<T>(fn: (v: T) => T, value?: T): void {
-    new Computation(fn, value!);
-}
-
-export function data<T>(value: T): (value?: T) => T {
-    var node = new Data(value);
-
-    return function data(value?: T): T {
-        if (arguments.length === 0) {
-            return node.get();
-        } else {
-            return node.set(value!);
-        }
-    }
+function data<T>(value: T): Signal<T> {
+    return new Data(value);
 };
 
-export function value<T>(current: T, eq?: (a: T, b: T) => boolean): DataSignal<T> {
-    var node = data(current),
-        age = -1;
-    return function value(update?: T) {
-        if (arguments.length === 0) {
-            return node();
-        } else {
-            var same = eq ? eq(current, update!) : current === update;
-            if (!same) {
-                var time = Time;
-                if (age === time)
-                    throw new Error("conflicting values: " + update + " is not the same as " + current);
-                age = time;
-                current = update!;
-                node(update!);
-            }
-            return update!;
-        }
-    }
+function value<T>(value: T, eq?: (a: T, b: T) => boolean): Signal<T> {
+    return new Value(value, eq);
 };
 
-export function freeze<T>(fn: () => T): T {
-    var result: T = undefined!;
+function freeze<T>(fn: () => T): T {
+    var result: T;
 
-    if (Stage === Stages.Idle) {
-        Stage = Stages.Started;
+    if (STAGE === Stage.Idle) {
         reset();
+        STAGE = Stage.Started;
         try {
             result = fn();
             event();
         } finally {
-            Stage = Stages.Idle;
+            STAGE = Stage.Idle;
         }
     } else {
         result = fn();
     }
-
     return result;
 };
 
-export function sample<T>(fn: () => T): T {
-    var result: T,
-        listener = Listener;
-
-    if (listener !== null) {
-        Listener = null;
-        result = fn();
-        Listener = listener;
-    } else {
-        result = fn();
-    }
+function peek<T>(fn: Val<T> | Call<T>): T {
+    var listener = LISTENER;
+    LISTENER = null;
+    var result = isFunction(fn) ? fn() : fn.val;
+    LISTENER = listener;
     return result;
 }
 
-export function cleanup(fn: (final: boolean) => void): void {
-    var owner = Owner;
+function cleanup(fn: Cleanup): void {
+    var owner = OWNER;
     if (owner !== null) {
         if (owner.cleanups === null) {
             owner.cleanups = [fn];
@@ -148,14 +199,17 @@ export function cleanup(fn: (final: boolean) => void): void {
 
 const enum State {
     None = 0,
-    Stale = 1,
-    Running = 2,
-    Disposed = 4,
-    Notified = 8,
-    Changed = 16,
+    Defer = 8,
+    Static = 16,
+    Update = 32,
+    Dispose = 64,
+    Updated = 128,
+    Disposed = 256,
+    Compute = 512,
+    Send = 1024,
 }
 
-const enum Stages {
+const enum Stage {
     Idle = 0,
     Started = 1,
     Disposes = 1,
@@ -164,155 +218,31 @@ const enum Stages {
     Updates = 4,
 }
 
-interface Signal {
+interface Respond {
     state: State;
-    update(): void;
+    dispose(time: number): void;
 }
 
-interface Scope {
-    owned: Computation[] | null;
-    cleanups: ((final: boolean) => void)[] | null;
-}
+declare class Respond { }
 
-interface Send extends Signal {
+declare class Send extends Respond { }
+
+interface Send<T = any> extends Respond {
+    value: T;
     node1: Receive | null;
     node1slot: number;
     nodes: Receive[] | null;
     nodeslots: number[] | null;
+    update(): void;
 }
 
-interface Receive extends Scope, Send {
-    age: number;
-    source1: Send | null;
-    source1slot: number;
-    sources: Send[] | null;
-    sourceslots: number[] | null;
-}
-
-interface Data<T = any> extends Send {
-    value: T;
-    pending: T | {};
-
-    get(): T;
-    set(value: T): T;
-}
-
-interface DataConstructor {
-    prototype: Data;
-    new <T>(value: T): Data<T>;
-}
-
-export var Data = (function <T>(this: Data<T>, value: T) {
-    this.state = State.None;
-    this.value = value;
-    this.pending = nil;
+function Send<T = any>(this: Send<T>, owner: Owner | null, state?: State, value?: T) {
+    this.state = State.None | state!;
+    this.value = value as T;
     this.node1 = null;
     this.node1slot = -1;
     this.nodes = null;
     this.nodeslots = null;
-}) as Function as DataConstructor;
-
-Data.prototype.get = function () {
-    if (Listener !== null) {
-        logRead(this, Listener);
-    }
-    return this.value;
-}
-
-Data.prototype.set = function <T>(value: T) {
-    if (Stage === Stages.Idle) {
-        if (this.node1 !== null || this.nodes !== null) {
-            this.pending = value;
-            this.state = State.Stale;
-            reset();
-            Changes.add(this);
-            event();
-        } else {
-            this.value = value;
-        }
-    } else { // not batching, respond to change now
-        if (this.pending !== nil) { // value has already been set once, check for conflicts
-            if (value !== this.pending) {
-                throw new Error("conflicting changes: " + value + " !== " + this.pending);
-            }
-        } else { // add to list of changes
-            this.pending = value;
-            this.state = State.Stale;
-            Changes.add(this);
-        }
-    }
-    return value!;
-}
-
-Data.prototype.update = function () {
-    this.value = this.pending;
-    this.pending = nil;
-}
-
-interface Root extends Signal, Scope { }
-
-interface RootConstructor {
-    prototype: Root;
-    new(): Root;
-}
-
-export var Root = (function (this: Root) {
-    this.state = State.None;
-    this.owned = null;
-    this.cleanups = null;
-}) as Function as RootConstructor;
-
-Root.prototype.update = function () {
-    runCleanups(this, true);
-}
-
-interface Computation<T = any> extends Receive {
-    fn: ((v: T) => T) | null;
-    value: T;
-    get(): T;
-}
-
-interface ComputationConstructor {
-    prototype: Computation;
-    new <T>(fn: (seed: T) => T, value: T): Computation<T>;
-}
-
-export var Computation = (function <T>(this: Computation<T>, fn: (seed: T) => T, value: T) {
-    this.fn = fn;
-    this.age = 0;
-    this.state = State.None;
-    this.node1 = null;
-    this.node1slot = -1;
-    this.nodes = null;
-    this.nodeslots = null;
-    this.source1 = null;
-    this.source1slot = 0;
-    this.sources = null;
-    this.sourceslots = null;
-    this.owned = null;
-    this.cleanups = null;
-
-    var owner = Owner,
-        listener = Listener;
-
-    Owner = Listener = this;
-
-    if (Stage === Stages.Idle) {
-        reset();
-        Stage = Stages.Started;
-        try {
-            this.value = this.fn!(value);
-            if (Changes.count > 0 || Disposes.count > 0) {
-                exec();
-            }
-        } finally {
-            Owner = Listener = null;
-            Stage = Stages.Idle;
-        }
-    } else {
-        this.value = this.fn!(this.value);
-    }
-
     if (owner !== null) {
         if (owner.owned === null) {
             owner.owned = [this];
@@ -320,90 +250,369 @@ export var Computation = (function <T>(this: Computation<T>, fn: (seed: T) => T,
             owner.owned.push(this);
         }
     }
-    Owner = owner;
-    Listener = listener;
-}) as Function as ComputationConstructor;
+}
 
-Computation.prototype.get = function () {
-    if (Listener !== null) {
-        if (this.age === Time) {
-            if ((this.state & State.Running) !== 0) {
-                throw new Error("circular dependency");
-            } else if ((this.state & State.Stale) !== 0) {
-                this.update();
+function sendUpdate<T>(node: Send<T>, time: number) {
+    var node1 = node.node1;
+    var nodes = node.nodes;
+    if (node1 !== null) {
+        receiveUpdate(node1, time)
+    }
+    if (nodes !== null) {
+        var ln = nodes.length;
+        for (var i = 0; i < ln; i++) {
+            receiveUpdate(nodes[i], time);
+        }
+    }
+}
+
+function disposeSender<T>(node: Send<T>) {
+    node.state = State.Disposed;
+    node.value = void 0 as T;
+    node.node1 = null;
+    node.nodes = null;
+    node.nodeslots = null;
+    cleanupSender(node);
+}
+
+type Cleanup = (final: boolean) => void;
+
+declare class Owner<T = any> extends Respond { }
+
+interface Owner<T = any> extends Respond, Func<T> {
+    value: T;
+    owned: Send[] | null;
+    cleanups: Cleanup[] | null;
+}
+
+function Owner<T>(this: Owner<T>) {
+    this.state = State.None;
+    this.value = void 0 as T;
+    this.owned = null;
+    this.cleanups = null;
+}
+
+function disposeOwner(this: Owner, time: number) {
+    this.state = State.Disposed;
+    this.value = void 0;
+    var i: number;
+    var ln: number;
+    var owned = this.owned;
+    var cleanups = this.cleanups;
+    if (owned !== null && (ln = owned.length) !== 0) {
+        for (i = 0; i < ln; i++) {
+            owned[i].dispose(time);
+        }
+    }
+    this.owned = null;
+    if (cleanups !== null && (ln = cleanups.length) !== 0) {
+        for (i = 0; i < ln; i++) {
+            cleanups[i](true);
+        }
+    }
+    this.cleanups = null;
+};
+
+Object.defineProperty(Owner.prototype, "val", { get: function <T>(this: Owner<T>) { return this.value; } });
+
+Owner.prototype.dispose = disposeOwner;
+
+declare class Receive<T = any> extends Send<T> { }
+
+interface Receive<T = any> extends Send<T>, Owner<T> {
+    age: number;
+    source1: Send | null;
+    source1slot: number;
+    sources: Send[] | null;
+    sourceslots: number[] | null;
+}
+
+function receiveUpdate<T>(node: Receive<T>, time: number) {
+    var ln: number;
+    if (node.age < time) {
+        if (node.owned !== null && (ln = node.owned.length) !== 0) {
+            for (; ln-- !== 0;) {
+                node.owned.pop()!.dispose(time);
             }
         }
-        logRead(this, Listener);
+        node.age = time;
+        node.state |= State.Update;
+        EFFECTS.add(node);
+        if ((node.state & State.Send) !== 0) {
+            sendUpdate(node, time);
+        }
     }
+}
 
+function Receive<T>(this: Receive<T>, owner: Owner | null, state?: State, value?: T) {
+    Send.call(this, owner, state, value);
+    this.age = 0;
+    this.source1 = null;
+    this.source1slot = 0;
+    this.sources = null;
+    this.sourceslots = null;
+}
+
+interface Data<T = any> extends Send<T>, Signal<T> {
+    pending: T | {};
+}
+
+declare class Data<T = any> extends Send<T> {
+
+    constructor(value: T);
+}
+
+function Data<T>(this: Data<T>, value: T) {
+    Send.call(this, OWNER, State.None, value);
+    this.pending = NULL;
+}
+
+function getData<T>(this: Data<T>) {
+    if ((this.state & (State.Dispose | State.Disposed)) === 0) {
+        if (LISTENER !== null) {
+            logRead(this, LISTENER);
+        }
+    }
     return this.value;
 }
 
-Computation.prototype.update = function () {
-    var owner = Owner,
-        listener = Listener;
-
-    Owner = Listener = this;
-
-    this.state |= State.Running;
-    cleanupReceiver(this, false);
-    this.value = this.fn!(this.value);
-    this.state &= ~(State.Stale | State.Running);
-
-    Owner = owner;
-    Listener = listener;
+function setData<T>(this: Data<T>, value: T) {
+    var state = this.state;
+    if ((state & (State.Dispose | State.Disposed)) === 0) {
+        if (STAGE === Stage.Idle) {
+            if ((state & State.Send) !== 0) {
+                reset();
+                this.pending = value;
+                this.state |= State.Update;
+                CHANGES.add(this);
+                event();
+            } else {
+                this.value = value;
+            }
+        } else {
+            if (this.pending === NULL) {
+                this.pending = value;
+                this.state |= State.Update;
+                CHANGES.add(this);
+            } else if (value !== this.pending) {
+                throw new Error("conflicting changes: " + value + " !== " + this.pending);
+            }
+        }
+    }
+    return value!;
 }
 
-interface Queue {
-    items: Array<Signal | null>;
+function updateData<T>(this: Data<T>) {
+    this.value = this.pending as T;
+    this.pending = NULL;
+    this.state &= ~State.Update;
+    if ((this.state & State.Send) !== 0) {
+        sendUpdate(this, TIME);
+    }
+}
+
+function disposeData<T>(this: Data<T>) {
+    disposeSender(this);
+    this.pending = void 0 as T;
+}
+
+Object.defineProperty(Data.prototype, "val", { get: getData, set: setData });
+
+Data.prototype.update = updateData;
+
+Data.prototype.dispose = disposeData;
+
+interface Value<T = any> extends Data<T> {
+    eq: (a: T, b: T) => boolean;
+}
+
+declare class Value<T = any> extends Data<T> {
+    eq: (a: T, b: T) => boolean;
+
+    constructor(value: T, eq?: (a: T, b: T) => boolean);
+}
+
+function Value<T>(this: Value<T>, value: T, eq?: (a: T, b: T) => boolean) {
+    Data.call(this, value);
+    this.eq = eq || Equals;
+}
+
+function setValue<T>(this: Value<T>, value: T): T {
+    if ((this.state & (State.Dispose | State.Disposed)) === 0 && !this.eq(this.value, value)) {
+        setData.call(this, value);
+    }
+    return value;
+}
+
+Object.defineProperty(Value.prototype, "val", { get: getData, set: setValue });
+
+Value.prototype.update = updateData;
+
+Value.prototype.dispose = function <T>(this: Value<T>) {
+    this.eq = null!;
+    disposeData.call(this);
+}
+
+declare class Computation<T = any> extends Receive<T> {
+
+    public readonly val: T;
+
+    public constructor(fn: (seed: T) => T, seed?: T, state?: State);
+}
+
+interface Computation<T = any> extends Receive<T>, Owner<T> {
+    fn: ((v: T) => T);
+}
+
+function Computation<T>(
+    this: Computation<T>,
+    fn: (seed: T) => T,
+    value: T,
+    state?: State,
+) {
+    var owner = OWNER;
+    var listener = LISTENER;
+    Receive.call(this, owner, state);
+    this.fn = fn;
+    this.owned = null;
+    this.cleanups = null;
+
+    OWNER = LISTENER = this;
+
+    if (STAGE === Stage.Idle) {
+        reset();
+        STAGE = Stage.Started;
+        try {
+            this.value = fn(value);
+            if (CHANGES.count > 0 || DISPOSES.count > 0) {
+                start();
+            }
+        } finally {
+            STAGE = Stage.Idle;
+            OWNER = LISTENER = null;
+        }
+    } else {
+        this.value = fn(value);
+    }
+    OWNER = owner;
+    LISTENER = listener;
+}
+
+Object.defineProperty(Computation.prototype, "val", {
+    get: function <T>(this: Computation<T>) {
+        var state = this.state;
+        if ((state & (State.Dispose | State.Disposed)) === 0 && STAGE !== Stage.Idle) {
+            if (this.age === TIME) {
+                if ((state & State.Updated) !== 0) {
+                    throw new Error("circular dependency");
+                }
+                this.update();
+            }
+            if (LISTENER !== null) {
+                logRead(this, LISTENER);
+            }
+        }
+        return this.value;
+    }
+});
+
+Computation.prototype.update = function <T>(this: Computation<T>) {
+    if ((this.state & State.Update) !== 0) {
+        var owner = OWNER;
+        var listener = LISTENER;
+        OWNER = LISTENER = null;
+        if (this.cleanups !== null) {
+            var ln = this.cleanups.length;
+            for (; ln-- !== 0;) {
+                this.cleanups.pop()!(false);
+            }
+        }
+        if ((this.state & State.Static) === 0) {
+            cleanupReceiver(this);
+        }
+        OWNER = this;
+        LISTENER = (this.state & State.Static) !== 0 ? null : this;
+        this.state |= State.Updated;
+        this.value = this.fn!(this.value);
+        this.state &= ~(State.Update | State.Updated);
+
+        OWNER = owner;
+        LISTENER = listener;
+    }
+};
+
+Computation.prototype.dispose = function <T>(this: Computation<T>, time: number) {
+    this.fn = null!;
+    this.age = time;
+    disposeOwner.call(this, time);
+    disposeSender(this);
+    cleanupReceiver(this);
+}
+
+declare class Queue<T> {
+    mode: Stage;
+    items: Array<T | null>;
     count: number;
 
-    add(item: Signal): void;
-    run(): void;
+    constructor(mode: Stage);
+
+    add(item: T): void;
+    run(time: number): void;
 }
 
-interface QueueConstructor {
-    prototype: Queue;
-    new(): Queue;
-}
-
-var Queue = (function (this: Queue) {
+function Queue<T>(this: Queue<T>, mode: Stage) {
+    this.mode = mode;
     this.items = [];
     this.count = 0;
-}) as Function as QueueConstructor;
+}
 
-Queue.prototype.add = function (item: Signal) {
+Queue.prototype.add = function <T>(this: Queue<T>, item: T) {
     this.items[this.count++] = item;
 }
 
-Queue.prototype.run = function () {
-    var items = this.items;
+Queue.prototype.run = function (this: Queue<Send>, time: number) {
+    STAGE = this.mode;
     for (var i = 0; i < this.count; ++i) {
-        items[i]!.update();
-        items[i] = null;
+        var item = this.items[i]!;
+        if ((item.state & State.Update) !== 0) {
+            item.update();
+        } else if ((item.state & State.Dispose) !== 0) {
+            item.dispose(time)
+        }
+        this.items[i] = null;
     }
     this.count = 0;
 }
 
 // Constants
-var nil = {};
-var Time = 0;
-var Stage = Stages.Idle;
-var Changes = new Queue();
-var Computes = new Queue();
-var Updates = new Queue();
-var Disposes = new Queue();
-var Owner = null as Root | null;
-var Listener = null as Computation | null;
+var NULL = {};
+var TIME = 0;
+var STAGE = Stage.Idle;
+var DISPOSES = new Queue<Send | Owner>(Stage.Disposes);
+var CHANGES = new Queue<Send>(Stage.Changes);
+var COMPUTES = new Queue<Send>(Stage.Computes);
+var EFFECTS = new Queue<Send>(Stage.Updates);
+var OWNER = null as Owner | null;
+var LISTENER = null as Receive | null;
+
+function Equals<T>(a: T, b: T) {
+    return a === b;
+}
+
+function isFunction(fn: any): fn is (...args: any[]) => any {
+    return typeof fn === "function";
+}
 
 function reset() {
-    Changes.count = Computes.count = Updates.count = Disposes.count = 0;
+    DISPOSES.count = CHANGES.count = COMPUTES.count = EFFECTS.count = 0;
 }
+
 
 // Functions
 function logRead(from: Send, to: Receive) {
-    var fromslot: number,
-        toslot = to.source1 === null ? -1 : to.sources === null ? 0 : to.sources.length;
+    from.state |= State.Send;
+    var fromslot: number;
+    var toslot = to.source1 === null ? -1 : to.sources === null ? 0 : to.sources.length;
 
     if (from.node1 === null) {
         from.node1 = to;
@@ -431,194 +640,105 @@ function logRead(from: Send, to: Receive) {
 }
 
 function event() {
-    // b/c we might be under a top level S.root(), have to preserve current root
-    var owner = Owner;
+    var owner = OWNER;
     try {
-        exec();
+        start();
     } finally {
-        Owner = owner;
-        Listener = null;
-        Stage = Stages.Idle;
+        STAGE = Stage.Idle;
+        OWNER = owner;
+        LISTENER = null;
     }
 }
 
-function exec() {
-    var cycle = 0,
-        changes = Changes,
-        computes = Computes,
-        updates = Updates,
-        disposes = Disposes;
+function start() {
+    var time,
+        cycle = 0,
+        disposes = DISPOSES,
+        changes = CHANGES,
+        computes = COMPUTES,
+        effects = EFFECTS;
     do {
-        Time++;
-        disposes.run();
-        changes.run();
-        computes.run();
-        updates.run();
+        time = ++TIME;
+        disposes.run(time);
+        changes.run(time);
+        computes.run(time);
+        effects.run(time);
         if (cycle++ > 1e5) {
             throw new Error("Cycle overflow");
         }
-    } while (changes.count > 0 || disposes.count > 0);
-    Stage = Stages.Idle;
+    } while (changes.count > 0 || disposes.count > 0 || computes.count !== 0 || effects.count !== 0);
 }
 
-/*
-    Clock.stage = Stage.Disposes;
-        for (i = 0; i < disposed.count; i++) {
-            disposed.items[i]!.dispose();
-            disposed.items[i] = null;
-        }
-        disposed.count = 0;
-        for (i = 0; i < changed.count; i++) {
-            node = changed.items[i]! as Item;
-            changed.items[i] = null;
-            node.update();
-            if (node.state & State.Changed) {
-                staleSource(node);
-            }
-        }
-        changed.count = 0;
-
-        while (RunningDisposes.count !== 0 || RunningUpdates.count !== 0) {
-            for (i = 0; i < RunningDisposes.count; i++) {
-                node = RunningDisposes.items[i]! as Item;
-                RunningDisposes.items[i] = null;
-                node.age = time;
-                node.state = State.Current;
-                node.dispose();
-                if (node.owned !== null) {
-                    for (j = 0; j < node.owned.length; j++) {
-                        RunningDisposes.add(node.owned[j]!);
-                    }
-                    node.owned = null;
-                }
-            }
-            RunningDisposes.count = 0;
-            for (i = 0; i < RunningUpdates.count; i++) {
-                data = RunningUpdates.items[i]! as Item;
-                RunningUpdates.items[i] = null;
-                if (data.state & State.Stale) {
-                    data.update();
-                    if (!(data.state & State.Notified)) {
-                        node = data.node1!;
-                        if (node !== null && node.age < time) {
-                            PendingUpdates.add(node);
-                        }
-                        node = data.nodes;
-                        if (node !== null) {
-                            for (j = 0; j < node.length; j++) {
-                                child = node[j]!;
-                                if (child !== null && child.age < time) {
-                                    PendingUpdates.add(child);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            RunningUpdates.count = 0;
-            for (i = 0; i < PendingUpdates.count; i++) {
-                data = PendingUpdates.items[i]! as Item;
-                PendingUpdates.items[i] = null;
-                if (data.age < time) {
-                    data.age = time;
-                    data.state |= State.Stale | State.Notified;
-                    RunningUpdates.add(data);
-                    if (data.owned !== null) {
-                        for (j = 0; j < data.owned.length; j++) {
-                            child = data.owned[j];
-                            RunningDisposes.add(child);
-                        }
-                    }
-                    node = data.node1;
-                    if (node !== null && node.age < time) {
-                        PendingUpdates.add(node);
-                    }
-                    node = data.nodes;
-                    if (node !== null) {
-                        for (j = 0; j < node.length; j++) {
-                            child = node[j]!;
-                            if (child !== null && child.age < time) {
-                                PendingUpdates.add(child);
-                            }
-                        }
-                    }
-                }
-            }
-            PendingUpdates.count = 0;
-        }
-*/
-
-function sendStaleSource(source: Send, time: number) {
-    if (source.node1 !== null) {
-        receiveStaleSource(source.node1, time);
-    }
-    var nodes = source.nodes;
-    if (nodes !== null) {
-        var i = 0,
-            ln = nodes.length;
-        for (; i < ln; i++) {
-            receiveStaleSource(nodes[i], time);
-        }
-    }
-}
-
-function cleanupRoot(node: Root, final: boolean) {
-    var i = 0,
-        ln = 0,
-        owned = node.owned,
-        cleanups = node.cleanups;
-    if (owned !== null) {
-        ln = owned.length;
-        for (; i < ln; i++) {
-            cleanupReceiver(owned[i], true);
-        }
-        node.owned = null;
-    }
-    if (cleanups !== null) {
-        ln = cleanups.length;
-        for (; i < ln; i++) {
-            cleanups[i](final);
-        }
-        node.cleanups = null;
-    }
-}
-
-function cleanupReceiver(node: Receive, final: boolean) {
-    var ln = 0,
-        source1 = node.source1,
-        sources = node.sources,
-        sourceslots = node.sourceslots!;
-    cleanupRoot(node, final);
-    if (source1 !== null) {
-        cleanupSender(source1, node.source1slot);
+function cleanupReceiver(node: Receive) {
+    if (node.source1 !== null) {
+        forgetReceiver(node.source1, node.source1slot);
         node.source1 = null;
     }
+    var sources = node.sources;
     if (sources !== null) {
-        ln = sources.length;
-        for (; ln--;) {
-            cleanupSender(sources.pop()!, sourceslots.pop()!);
+        var ln = sources.length;
+        var sourceslots = node.sourceslots!;
+        for (; ln-- !== 0;) {
+            forgetReceiver(sources.pop()!, sourceslots.pop()!);
         }
     }
 }
 
-function cleanupSender(source: Send, slot: number) {
-    var nodes = source.nodes!,
-        nodeslots = source.nodeslots!,
-        last: Receive,
-        lastslot: number;
-    if (slot === -1) {
-        source.node1 = null;
-    } else {
-        last = nodes.pop()!;
-        lastslot = nodeslots.pop()!;
-        if (slot !== nodes.length) {
-            nodes[slot] = last;
-            nodeslots[slot] = lastslot;
-            if (lastslot === -1) {
-                last.source1slot = slot;
-            } else {
-                last.sourceslots![lastslot] = slot;
+function forgetReceiver(source: Send, slot: number) {
+    if ((source.state & (State.Dispose | State.Disposed)) === 0) {
+        if (slot === -1) {
+            source.node1 = null;
+        } else {
+            var nodes = source.nodes!;
+            var nodeslots = source.nodeslots!;
+            var last = nodes.pop()!;
+            var lastslot = nodeslots.pop()!;
+            if (slot !== nodes.length) {
+                nodes[slot] = last;
+                nodeslots[slot] = lastslot;
+                if (lastslot === -1) {
+                    last.source1slot = slot;
+                } else {
+                    last.sourceslots![lastslot] = slot;
+                }
             }
         }
     }
-}   
+}
+
+function cleanupSender(send: Send) {
+    if (send.node1 !== null) {
+        forgetSender(send.node1, send.node1slot);
+        send.node1 = null;
+    }
+    var nodes = send.nodes;
+    if (nodes !== null) {
+        var ln = nodes.length;
+        var nodeslots = send.nodeslots!;
+        for (; ln-- !== 0;) {
+            forgetSender(nodes.pop()!, nodeslots.pop()!);
+        }
+    }
+}
+
+function forgetSender(node: Receive, slot: number) {
+    if ((node.state & (State.Dispose | State.Disposed)) === 0) {
+        if (slot === -1) {
+            node.source1 = null;
+        } else {
+            var sources = node.sources!;
+            var sourceslots = node.sourceslots!;
+            var last = sources.pop()!;
+            var lastslot = sourceslots.pop()!;
+            if (slot !== sources.length) {
+                sources[slot] = last;
+                sourceslots[slot] = lastslot;
+                if (lastslot === -1) {
+                    last.node1slot = slot;
+                } else {
+                    last.nodeslots![lastslot] = slot;
+                }
+            }
+        }
+    }
+}
