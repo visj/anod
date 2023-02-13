@@ -1,4 +1,4 @@
-var { root, effect, data, freeze } = require('../dist/zorn.cjs');
+var { root, effect, data, freeze } = require('./helper/zorn');;
 var assert = require('assert');
 
 describe("data", function () {

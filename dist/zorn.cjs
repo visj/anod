@@ -1,531 +1,546 @@
 'use strict';
 
+var Opt = ({
+    Defer: 8 ,
+    Static: 16
+});
+function nil() {
+    return NIL;
+}
 function owner() {
-  return OWNER;
+    return OWNER;
 }
 function listener() {
-  return LISTENER;
+    return LISTENER;
 }
-function dispose(val) {
-  var node = val;
-  if ((node.state & (State.Dispose | State.Disposed)) === 0) {
-    if (STAGE === Stage.Idle) {
-      node.dispose(TIME);
-    } else {
-      node.state |= State.Dispose;
-      DISPOSES.add(node);
+function dispose(node) {
+    if ((node._state & (64  | 256 )) === 0) {
+        if (STAGE === 0 ) {
+            node._dispose(TIME);
+        }
+        else {
+            node._state |= 64 ;
+            DISPOSES.add(node);
+        }
     }
-  }
 }
-function compute(fn, seed, state) {
-  return new Computation(fn, seed, state);
+function bind(src, fn) {
+    var prev = NIL;
+    var ln;
+    var next;
+    var defer;
+    var holder;
+    var isArray = Array.isArray(src);
+    if (isArray) {
+        ln = (src).length;
+        prev = new Array(ln);
+        next = new Array(ln);
+    }
+    return function (seed) {
+        if (defer === void 0) {
+            LISTENER = (OWNER);
+            LISTENER._state |= 16 ;
+            defer = (LISTENER._state & 8 ) !== 0;
+        }
+        if (isArray) {
+            for (var i = 0; i < ln; i++) {
+                next[i] = (src)[i].val;
+            }
+        } else {
+            next = (src).val;
+        }
+        LISTENER = null;
+        if (defer) {
+            defer = false;
+        } else {
+            seed = fn(next, seed, prev);
+        }
+        holder = next;
+        next = prev;
+        prev = holder;
+        return seed;
+    };
 }
-function effect(fn, seed, state) {
-  new Computation(fn, seed, state);
+function compute(fn, seed, opt) {
+    return new Computation(fn, seed, opt);
+}
+function effect(fn, seed, opt) {
+    new Computation(fn, seed, opt);
 }
 function root(fn) {
-  var node = new Owner();
-  var owner2 = OWNER;
-  var listener2 = LISTENER;
-  OWNER = node;
-  LISTENER = null;
-  if (STAGE === Stage.Idle) {
-    try {
-      node.value = fn();
-    } finally {
-      OWNER = owner2;
-      LISTENER = listener2;
+    var node = new Owner();
+    var owner = OWNER;
+    var listener = LISTENER;
+    OWNER = node;
+    LISTENER = null;
+    if (STAGE === 0 ) {
+        try {
+            node._value = fn();
+        }
+        finally {
+            OWNER = owner;
+            LISTENER = listener;
+        }
     }
-  } else {
-    node.value = fn();
-    OWNER = owner2;
-    LISTENER = listener2;
-  }
-  return node;
-}
-function on(src, fn, seed, onchanges) {
-  return compute(singleSource(0, src, fn, onchanges), seed);
-}
-function singleSource(type, src, fn, onchanges) {
-  var prev;
-  return function(value2) {
-    var s = src();
-    if (onchanges) {
-      onchanges = false;
-    } else {
-      var running = LISTENER;
-      LISTENER = null;
-      value2 = fn(s, value2, prev);
-      LISTENER = running;
+    else {
+        node._value = fn();
+        OWNER = owner;
+        LISTENER = listener;
     }
-    prev = s;
-    return value2;
-  };
+    return node;
 }
-function data(value2) {
-  return new Data(value2);
+function data(value) {
+    return new Data(value);
 }
-function value(value2, eq) {
-  return new Value(value2, eq);
+function value(value, eq) {
+    return new Value(value, eq);
 }
 function freeze(fn) {
-  var result;
-  if (STAGE === Stage.Idle) {
-    reset();
-    STAGE = Stage.Started;
-    try {
-      result = fn();
-      event();
-    } finally {
-      STAGE = Stage.Idle;
+    var result;
+    if (STAGE === 0 ) {
+        reset();
+        STAGE = 1 ;
+        try {
+            result = fn();
+            exec();
+        }
+        finally {
+            STAGE = 0 ;
+        }
     }
-  } else {
-    result = fn();
-  }
-  return result;
+    else {
+        result = fn();
+    }
+    return result;
 }
 function peek(fn) {
-  var listener2 = LISTENER;
-  LISTENER = null;
-  var result = isFunction(fn) ? fn() : fn.val;
-  LISTENER = listener2;
-  return result;
+    var listener = LISTENER;
+    LISTENER = null;
+    var result = isFunction(fn) ? (fn)() : (fn).val;
+    LISTENER = listener;
+    return result;
 }
 function cleanup(fn) {
-  var owner2 = OWNER;
-  if (owner2 !== null) {
-    if (owner2.cleanups === null) {
-      owner2.cleanups = [fn];
-    } else {
-      owner2.cleanups.push(fn);
+    var owner = OWNER;
+    if (owner !== null) {
+        if (owner._cleanups === null) {
+            owner._cleanups = [fn];
+        }
+        else {
+            owner._cleanups.push(fn);
+        }
     }
-  }
 }
-var State = /* @__PURE__ */ ((State2) => {
-  State2[State2["None"] = 0] = "None";
-  State2[State2["Defer"] = 8] = "Defer";
-  State2[State2["Static"] = 16] = "Static";
-  State2[State2["Update"] = 32] = "Update";
-  State2[State2["Dispose"] = 64] = "Dispose";
-  State2[State2["Updated"] = 128] = "Updated";
-  State2[State2["Disposed"] = 256] = "Disposed";
-  State2[State2["Compute"] = 512] = "Compute";
-  State2[State2["Send"] = 1024] = "Send";
-  return State2;
-})(State || {});
-var Stage = /* @__PURE__ */ ((Stage2) => {
-  Stage2[Stage2["Idle"] = 0] = "Idle";
-  Stage2[Stage2["Started"] = 1] = "Started";
-  Stage2[Stage2["Disposes"] = 1] = "Disposes";
-  Stage2[Stage2["Changes"] = 2] = "Changes";
-  Stage2[Stage2["Computes"] = 2] = "Computes";
-  Stage2[Stage2["Updates"] = 4] = "Updates";
-  return Stage2;
-})(Stage || {});
-function Send(owner2, state, value2) {
-  this.state = 0 /* None */ | state;
-  this.value = value2;
-  this.node1 = null;
-  this.node1slot = -1;
-  this.nodes = null;
-  this.nodeslots = null;
-  if (owner2 !== null) {
-    if (owner2.owned === null) {
-      owner2.owned = [this];
-    } else {
-      owner2.owned.push(this);
+function setVal(obj, config) {
+    Object.defineProperty(obj, "val", config);
+}
+function Send(owner, state, value) {
+    this._state = 0  | state;
+    this._value = value;
+    this._node1 = null;
+    this._node1slot = -1;
+    this._nodes = null;
+    this._nodeslots = null;
+    if (owner !== null) {
+        if (owner._owned === null) {
+            owner._owned = [this];
+        }
+        else {
+            owner._owned.push(this);
+        }
     }
-  }
 }
 function sendUpdate(node, time) {
-  var node1 = node.node1;
-  var nodes = node.nodes;
-  if (node1 !== null) {
-    receiveUpdate(node1, time);
-  }
-  if (nodes !== null) {
-    var ln = nodes.length;
-    for (var i = 0; i < ln; i++) {
-      receiveUpdate(nodes[i], time);
+    var node1 = node._node1;
+    var nodes = node._nodes;
+    if (node1 !== null) {
+        receiveUpdate(node1, time);
     }
-  }
+    if (nodes !== null) {
+        var ln = nodes.length;
+        for (var i = 0; i < ln; i++) {
+            receiveUpdate(nodes[i], time);
+        }
+    }
 }
 function disposeSender(node) {
-  node.state = 256 /* Disposed */;
-  node.value = void 0;
-  node.node1 = null;
-  node.nodes = null;
-  node.nodeslots = null;
-  cleanupSender(node);
+    node._state = 256 ;
+    node._value = void 0;
+    node._node1 = null;
+    node._nodes = null;
+    node._nodeslots = null;
+    cleanupSender(node);
 }
 function Owner() {
-  this.state = 0 /* None */;
-  this.value = void 0;
-  this.owned = null;
-  this.cleanups = null;
+    this._state = 0 ;
+    this._value = (void 0);
+    this._owned = null;
+    this._cleanups = null;
 }
 function disposeOwner(time) {
-  this.state = 256 /* Disposed */;
-  this.value = void 0;
-  var i;
-  var ln;
-  var owned = this.owned;
-  var cleanups = this.cleanups;
-  if (owned !== null && (ln = owned.length) !== 0) {
-    for (i = 0; i < ln; i++) {
-      owned[i].dispose(time);
+    this._state = 256 ;
+    this._value = (void 0);
+    var i;
+    var ln;
+    var owned = this._owned;
+    var cleanups = this._cleanups;
+    if (owned !== null && (ln = owned.length) !== 0) {
+        for (i = 0; i < ln; i++) {
+            owned[i]._dispose(time);
+        }
     }
-  }
-  this.owned = null;
-  if (cleanups !== null && (ln = cleanups.length) !== 0) {
-    for (i = 0; i < ln; i++) {
-      cleanups[i](true);
+    this._owned = null;
+    if (cleanups !== null && (ln = cleanups.length) !== 0) {
+        for (i = 0; i < ln; i++) {
+            cleanups[i](true);
+        }
     }
-  }
-  this.cleanups = null;
+    this._cleanups = null;
 }
-Object.defineProperty(Owner.prototype, "val", { get: function() {
-  return this.value;
-} });
-Owner.prototype.dispose = disposeOwner;
+setVal(Owner.prototype, {
+    get: function () {
+        return this._value;
+    }
+});
+Owner.prototype._update = NoOp;
+Owner.prototype._dispose = disposeOwner;
 function receiveUpdate(node, time) {
-  var ln;
-  if (node.age < time) {
-    if (node.owned !== null && (ln = node.owned.length) !== 0) {
-      for (; ln-- !== 0; ) {
-        node.owned.pop().dispose(time);
-      }
+    var  ln;
+    if (node._age < time) {
+        if (node._owned !== null && (ln = node._owned.length) !== 0) {
+            for (; ln-- !== 0;) {
+                node._owned.pop()._dispose(time);
+            }
+        }
+        node._age = time;
+        node._state |= 32 ;
+        EFFECTS.add(node);
+        if ((node._state & 1024 ) !== 0) {
+            sendUpdate(node, time);
+        }
     }
-    node.age = time;
-    node.state |= 32 /* Update */;
-    EFFECTS.add(node);
-    if ((node.state & 1024 /* Send */) !== 0) {
-      sendUpdate(node, time);
-    }
-  }
 }
-function Receive(owner2, state, value2) {
-  Send.call(this, owner2, state, value2);
-  this.age = 0;
-  this.source1 = null;
-  this.source1slot = 0;
-  this.sources = null;
-  this.sourceslots = null;
+function Receive(owner, state, value) {
+    Send.call(this, owner, state, value);
+    this._age = 0;
+    this._source1 = null;
+    this._source1slot = 0;
+    this._sources = null;
+    this._sourceslots = null;
+    this._owned = null;
+    this._cleanups = null;
 }
-function Data(value2) {
-  Send.call(this, OWNER, 0 /* None */, value2);
-  this.pending = NULL;
+function Data(value) {
+    Send.call(this, OWNER, 0 , value);
+    this._pending = NIL;
 }
 function getData() {
-  if ((this.state & (64 /* Dispose */ | 256 /* Disposed */)) === 0) {
-    if (LISTENER !== null) {
-      logRead(this, LISTENER);
+    if ((this._state & (64  | 256 )) === 0) {
+        if (LISTENER !== null) {
+            logRead(this, LISTENER);
+        }
     }
-  }
-  return this.value;
+    return this._value;
 }
-function setData(value2) {
-  var state = this.state;
-  if ((state & (64 /* Dispose */ | 256 /* Disposed */)) === 0) {
-    if (STAGE === 0 /* Idle */) {
-      if ((state & 1024 /* Send */) !== 0) {
-        reset();
-        this.pending = value2;
-        this.state |= 32 /* Update */;
-        CHANGES.add(this);
-        event();
-      } else {
-        this.value = value2;
-      }
-    } else {
-      if (this.pending === NULL) {
-        this.pending = value2;
-        this.state |= 32 /* Update */;
-        CHANGES.add(this);
-      } else if (value2 !== this.pending) {
-        throw new Error("conflicting changes: " + value2 + " !== " + this.pending);
-      }
+function setData(value) {
+    var state = this._state;
+    if ((state & (64  | 256 )) === 0) {
+        if (STAGE === 0 ) {
+            if ((state & 1024 ) !== 0) {
+                reset();
+                this._pending = value;
+                this._state |= 32 ;
+                CHANGES.add(this);
+                exec();
+            }
+            else {
+                this._value = value;
+            }
+        }
+        else {
+            if (this._pending === NIL) {
+                this._pending = value;
+                this._state |= 32 ;
+                CHANGES.add(this);
+            }
+            else if (value !== this._pending) {
+                throw new Error("conflicting changes: " + value + " !== " + this._pending);
+            }
+        }
     }
-  }
-  return value2;
+    return value;
 }
 function updateData() {
-  this.value = this.pending;
-  this.pending = NULL;
-  this.state &= ~32 /* Update */;
-  if ((this.state & 1024 /* Send */) !== 0) {
-    sendUpdate(this, TIME);
-  }
+    this._value = this._pending;
+    this._pending = NIL;
+    this._state &= ~32 ;
+    if ((this._state & 1024 ) !== 0) {
+        sendUpdate(this, TIME);
+    }
 }
 function disposeData() {
-  disposeSender(this);
-  this.pending = void 0;
+    disposeSender(this);
+    this._pending = void 0;
 }
-Object.defineProperty(Data.prototype, "val", { get: getData, set: setData });
-Data.prototype.update = updateData;
-Data.prototype.dispose = disposeData;
-function Value(value2, eq) {
-  Data.call(this, value2);
-  this.eq = eq || Equals;
+setVal(Data.prototype, { get: getData, set: setData });
+Data.prototype._update = updateData;
+Data.prototype._dispose = disposeData;
+function Value(value, eq) {
+    Data.call(this, value);
+    this.eq = eq || Equals;
 }
-function setValue(value2) {
-  if ((this.state & (64 /* Dispose */ | 256 /* Disposed */)) === 0 && !this.eq(this.value, value2)) {
-    setData.call(this, value2);
-  }
-  return value2;
-}
-Object.defineProperty(Value.prototype, "val", { get: getData, set: setValue });
-Value.prototype.update = updateData;
-Value.prototype.dispose = function() {
-  this.eq = null;
-  disposeData.call(this);
-};
-function Computation(fn, value2, state) {
-  var owner2 = OWNER;
-  var listener2 = LISTENER;
-  Receive.call(this, owner2, state);
-  this.fn = fn;
-  this.owned = null;
-  this.cleanups = null;
-  OWNER = LISTENER = this;
-  if (STAGE === 0 /* Idle */) {
-    reset();
-    STAGE = 1 /* Started */;
-    try {
-      this.value = fn(value2);
-      if (CHANGES.count > 0 || DISPOSES.count > 0) {
-        start();
-      }
-    } finally {
-      STAGE = 0 /* Idle */;
-      OWNER = LISTENER = null;
+function setValue(value) {
+    if ((this._state & (64  | 256 )) === 0 && !this.eq(this._value, value)) {
+        setData.call(this, value);
     }
-  } else {
-    this.value = fn(value2);
-  }
-  OWNER = owner2;
-  LISTENER = listener2;
+    return value;
 }
-Object.defineProperty(Computation.prototype, "val", {
-  get: function() {
-    var state = this.state;
-    if ((state & (64 /* Dispose */ | 256 /* Disposed */)) === 0 && STAGE !== 0 /* Idle */) {
-      if (this.age === TIME) {
-        if ((state & 128 /* Updated */) !== 0) {
-          throw new Error("circular dependency");
+setVal(Value.prototype, { get: getData, set: setValue });
+Value.prototype._update = updateData;
+Value.prototype._dispose = function () {
+    this.eq = null;
+    disposeData.call(this);
+};
+function Computation(fn, value, state) {
+    var owner = OWNER;
+    var listener = LISTENER;
+    Receive.call(this, owner, state);
+    this._fn = fn;
+    OWNER = LISTENER = this;
+    if (STAGE === 0 ) {
+        reset();
+        STAGE = 1 ;
+        try {
+            this._value = fn(value);
+            if (CHANGES._count > 0 || DISPOSES._count > 0) {
+                start();
+            }
         }
-        this.update();
-      }
-      if (LISTENER !== null) {
-        logRead(this, LISTENER);
-      }
+        finally {
+            STAGE = 0 ;
+            OWNER = LISTENER = null;
+        }
     }
-    return this.value;
-  }
+    else {
+        this._value = fn(value);
+    }
+    OWNER = owner;
+    LISTENER = listener;
+}setVal(Computation.prototype, {
+    get: function () {
+        var state = this._state;
+        if ((state & (64  | 256 )) === 0 && STAGE !== 0 ) {
+            if (this._age === TIME) {
+                if ((state & 128 ) !== 0) {
+                    throw new Error("circular dependency");
+                }
+                this._update();
+            }
+            if (LISTENER !== null) {
+                logRead(this, LISTENER);
+            }
+        }
+        return this._value;
+    }
 });
-Computation.prototype.update = function() {
-  if ((this.state & 32 /* Update */) !== 0) {
-    var owner2 = OWNER;
-    var listener2 = LISTENER;
-    OWNER = LISTENER = null;
-    if (this.cleanups !== null) {
-      var ln = this.cleanups.length;
-      for (; ln-- !== 0; ) {
-        this.cleanups.pop()(false);
-      }
+Computation.prototype._update = function () {
+    if ((this._state & 32 ) !== 0) {
+        var owner = OWNER;
+        var listener = LISTENER;
+        OWNER = LISTENER = null;
+        if (this._cleanups !== null) {
+            var ln = this._cleanups.length;
+            for (; ln-- !== 0;) {
+                this._cleanups.pop()(false);
+            }
+        }
+        if ((this._state & 16 ) === 0) {
+            cleanupReceiver(this);
+        }
+        OWNER = this;
+        LISTENER = (this._state & 16 ) !== 0 ? null : this;
+        this._state |= 128 ;
+        this._value = this._fn(this._value);
+        this._state &= ~(32  | 128 );
+        OWNER = owner;
+        LISTENER = listener;
     }
-    if ((this.state & 16 /* Static */) === 0) {
-      cleanupReceiver(this);
-    }
-    OWNER = this;
-    LISTENER = (this.state & 16 /* Static */) !== 0 ? null : this;
-    this.state |= 128 /* Updated */;
-    this.value = this.fn(this.value);
-    this.state &= ~(32 /* Update */ | 128 /* Updated */);
-    OWNER = owner2;
-    LISTENER = listener2;
-  }
 };
-Computation.prototype.dispose = function(time) {
-  this.fn = null;
-  this.age = time;
-  disposeOwner.call(this, time);
-  disposeSender(this);
-  cleanupReceiver(this);
+Computation.prototype._dispose = function (time) {
+    this._fn = null;
+    this._age = time;
+    disposeOwner.call(this, time);
+    disposeSender(this);
+    cleanupReceiver(this);
 };
 function Queue(mode) {
-  this.mode = mode;
-  this.items = [];
-  this.count = 0;
+    this._mode = mode;
+    this._items = [];
+    this._count = 0;
 }
-Queue.prototype.add = function(item) {
-  this.items[this.count++] = item;
+Queue.prototype.add = function (item) {
+    this._items[this._count++] = item;
 };
-Queue.prototype.run = function(time) {
-  STAGE = this.mode;
-  for (var i = 0; i < this.count; ++i) {
-    var item = this.items[i];
-    if ((item.state & 32 /* Update */) !== 0) {
-      item.update();
-    } else if ((item.state & 64 /* Dispose */) !== 0) {
-      item.dispose(time);
+Queue.prototype.run = function (time) {
+    STAGE = this._mode;
+    for (var i = 0; i < this._count; ++i) {
+        var item = (this._items[i]);
+        if ((item._state & 32 ) !== 0) {
+            item._update();
+        } else if ((item._state & 64 ) !== 0) {
+            item._dispose(time);
+        }
+        this._items[i] = null;
     }
-    this.items[i] = null;
-  }
-  this.count = 0;
+    this._count = 0;
 };
-var NULL = {};
+var NIL = ({});
 var TIME = 0;
-var STAGE = 0 /* Idle */;
-var DISPOSES = new Queue(1 /* Disposes */);
-var CHANGES = new Queue(2 /* Changes */);
-var COMPUTES = new Queue(2 /* Computes */);
-var EFFECTS = new Queue(4 /* Updates */);
+var STAGE = 0 ;
+var DISPOSES = new Queue(1 );
+var CHANGES = new Queue(2 );
+var COMPUTES = new Queue(2 );
+var EFFECTS = new Queue(4 );
 var OWNER = null;
 var LISTENER = null;
 function Equals(a, b) {
-  return a === b;
+    return a === b;
 }
+function NoOp() { }
 function isFunction(fn) {
-  return typeof fn === "function";
+    return typeof fn === "function";
 }
 function reset() {
-  DISPOSES.count = CHANGES.count = COMPUTES.count = EFFECTS.count = 0;
+    DISPOSES._count = CHANGES._count = COMPUTES._count = EFFECTS._count = 0;
 }
 function logRead(from, to) {
-  from.state |= 1024 /* Send */;
-  var fromslot;
-  var toslot = to.source1 === null ? -1 : to.sources === null ? 0 : to.sources.length;
-  if (from.node1 === null) {
-    from.node1 = to;
-    from.node1slot = toslot;
-    fromslot = -1;
-  } else if (from.nodes === null) {
-    from.nodes = [to];
-    from.nodeslots = [toslot];
-    fromslot = 0;
-  } else {
-    fromslot = from.nodes.length;
-    from.nodes.push(to);
-    from.nodeslots.push(toslot);
-  }
-  if (to.source1 === null) {
-    to.source1 = from;
-    to.source1slot = fromslot;
-  } else if (to.sources === null) {
-    to.sources = [from];
-    to.sourceslots = [fromslot];
-  } else {
-    to.sources.push(from);
-    to.sourceslots.push(fromslot);
-  }
+    from._state |= 1024 ;
+    var fromslot;
+    var toslot = to._source1 === null ? -1 : to._sources === null ? 0 : to._sources.length;
+    if (from._node1 === null) {
+        from._node1 = to;
+        from._node1slot = toslot;
+        fromslot = -1;
+    }
+    else if (from._nodes === null) {
+        from._nodes = [to];
+        from._nodeslots = [toslot];
+        fromslot = 0;
+    }
+    else {
+        fromslot = from._nodes.length;
+        from._nodes.push(to);
+        from._nodeslots.push(toslot);
+    }
+    if (to._source1 === null) {
+        to._source1 = from;
+        to._source1slot = fromslot;
+    }
+    else if (to._sources === null) {
+        to._sources = [from];
+        to._sourceslots = [fromslot];
+    }
+    else {
+        to._sources.push(from);
+        to._sourceslots.push(fromslot);
+    }
 }
-function event() {
-  var owner2 = OWNER;
-  try {
-    start();
-  } finally {
-    STAGE = 0 /* Idle */;
-    OWNER = owner2;
-    LISTENER = null;
-  }
+function exec() {
+    var owner = OWNER;
+    try {
+        start();
+    }
+    finally {
+        STAGE = 0 ;
+        OWNER = owner;
+        LISTENER = null;
+    }
 }
 function start() {
-  var time, cycle = 0, disposes = DISPOSES, changes = CHANGES, computes = COMPUTES, effects = EFFECTS;
-  do {
-    time = ++TIME;
-    disposes.run(time);
-    changes.run(time);
-    computes.run(time);
-    effects.run(time);
-    if (cycle++ > 1e5) {
-      throw new Error("Cycle overflow");
-    }
-  } while (changes.count > 0 || disposes.count > 0 || computes.count !== 0 || effects.count !== 0);
+    var time, cycle = 0, disposes = DISPOSES, changes = CHANGES, computes = COMPUTES, effects = EFFECTS;
+    do {
+        time = ++TIME;
+        disposes.run(time);
+        changes.run(time);
+        computes.run(time);
+        effects.run(time);
+        if (cycle++ > 1e5) {
+            throw new Error("Cycle overflow");
+        }
+    } while (changes._count > 0 || disposes._count > 0 || computes._count !== 0 || effects._count !== 0);
 }
 function cleanupReceiver(node) {
-  if (node.source1 !== null) {
-    forgetReceiver(node.source1, node.source1slot);
-    node.source1 = null;
-  }
-  var sources = node.sources;
-  if (sources !== null) {
-    var ln = sources.length;
-    var sourceslots = node.sourceslots;
-    for (; ln-- !== 0; ) {
-      forgetReceiver(sources.pop(), sourceslots.pop());
+    if (node._source1 !== null) {
+        forgetReceiver(node._source1, node._source1slot);
+        node._source1 = null;
     }
-  }
+    var sources = node._sources;
+    if (sources !== null) {
+        var ln = sources.length;
+        var sourceslots = node._sourceslots;
+        for (; ln-- !== 0;) {
+            forgetReceiver(sources.pop(), sourceslots.pop());
+        }
+    }
 }
 function forgetReceiver(source, slot) {
-  if ((source.state & (64 /* Dispose */ | 256 /* Disposed */)) === 0) {
-    if (slot === -1) {
-      source.node1 = null;
-    } else {
-      var nodes = source.nodes;
-      var nodeslots = source.nodeslots;
-      var last = nodes.pop();
-      var lastslot = nodeslots.pop();
-      if (slot !== nodes.length) {
-        nodes[slot] = last;
-        nodeslots[slot] = lastslot;
-        if (lastslot === -1) {
-          last.source1slot = slot;
-        } else {
-          last.sourceslots[lastslot] = slot;
+    if ((source._state & (64  | 256 )) === 0) {
+        if (slot === -1) {
+            source._node1 = null;
         }
-      }
+        else {
+            var nodes = source._nodes;
+            var nodeslots = source._nodeslots;
+            var last = nodes.pop();
+            var lastslot = nodeslots.pop();
+            if (slot !== nodes.length) {
+                nodes[slot] = last;
+                nodeslots[slot] = lastslot;
+                if (lastslot === -1) {
+                    last._source1slot = slot;
+                }
+                else {
+                    last._sourceslots[lastslot] = slot;
+                }
+            }
+        }
     }
-  }
 }
 function cleanupSender(send) {
-  if (send.node1 !== null) {
-    forgetSender(send.node1, send.node1slot);
-    send.node1 = null;
-  }
-  var nodes = send.nodes;
-  if (nodes !== null) {
-    var ln = nodes.length;
-    var nodeslots = send.nodeslots;
-    for (; ln-- !== 0; ) {
-      forgetSender(nodes.pop(), nodeslots.pop());
+    if (send._node1 !== null) {
+        forgetSender(send._node1, send._node1slot);
+        send._node1 = null;
     }
-  }
+    var nodes = send._nodes;
+    if (nodes !== null) {
+        var ln = nodes.length;
+        var nodeslots = send._nodeslots;
+        for (; ln-- !== 0;) {
+            forgetSender(nodes.pop(), nodeslots.pop());
+        }
+    }
 }
 function forgetSender(node, slot) {
-  if ((node.state & (64 /* Dispose */ | 256 /* Disposed */)) === 0) {
-    if (slot === -1) {
-      node.source1 = null;
-    } else {
-      var sources = node.sources;
-      var sourceslots = node.sourceslots;
-      var last = sources.pop();
-      var lastslot = sourceslots.pop();
-      if (slot !== sources.length) {
-        sources[slot] = last;
-        sourceslots[slot] = lastslot;
-        if (lastslot === -1) {
-          last.node1slot = slot;
-        } else {
-          last.nodeslots[lastslot] = slot;
+    if ((node._state & (64  | 256 )) === 0) {
+        if (slot === -1) {
+            node._source1 = null;
         }
-      }
+        else {
+            var sources = node._sources;
+            var sourceslots = node._sourceslots;
+            var last = sources.pop();
+            var lastslot = sourceslots.pop();
+            if (slot !== sources.length) {
+                sources[slot] = last;
+                sourceslots[slot] = lastslot;
+                if (lastslot === -1) {
+                    last._node1slot = slot;
+                }
+                else {
+                    last._nodeslots[lastslot] = slot;
+                }
+            }
+        }
     }
-  }
 }
-
-exports.Computation = Computation;
-exports.Data = Data;
-exports.Value = Value;
-exports.cleanup = cleanup;
-exports.compute = compute;
-exports.data = data;
-exports.dispose = dispose;
-exports.effect = effect;
-exports.freeze = freeze;
-exports.listener = listener;
-exports.on = on;
-exports.owner = owner;
-exports.peek = peek;
-exports.root = root;
-exports.value = value;
+export { Opt, root, dispose, compute, effect, bind, data, value, nil, owner, listener, freeze, peek, cleanup, Data, Value, Computation };
