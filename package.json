@@ -2,9 +2,10 @@
   "name": "zorn",
   "version": "0.1.0",
   "description": "",
+  "type": "module",
   "main": "dist/zorn.cjs",
   "module": "dist/zorn.mjs",
-  "types": "dist/zorn.d.ts",
+  "types": "lib.d.ts",
   "devDependencies": {
     "@preact/signals-core": "^1.2.3",
     "@rollup/plugin-typescript": "^11.0.0",
@@ -22,7 +23,6 @@
     "usignal": "^0.8.10"
   },
   "scripts": {
-    "build": "tsc && rollup -c",
     "test": "mocha"
   },
   "keywords": [

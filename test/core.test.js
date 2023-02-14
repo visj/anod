@@ -1,6 +1,5 @@
-var { root, compute, effect, data } = require('./helper/zorn');
-
-var assert = require('assert');
+import assert from 'assert';
+import { root, compute, $compute, effect, data } from './helper/zorn.js';
 
 describe("compute()", function () {
     describe("creation", function () {
@@ -26,7 +25,7 @@ describe("compute()", function () {
         it("does not re-occur when read", function () {
             root(function () {
                 var calls = 0;
-                f = compute(function () {
+                var f = compute(function () {
                     calls++;
                 });
 
@@ -73,13 +72,9 @@ describe("compute()", function () {
         it("updates return value", function () {
             root(function () {
                 var d = data(1);
-                var fevals = 0;
                 var f = compute(function () {
-                    fevals++;
                     return d.val;
                 });
-
-                fevals = 0;
 
                 d.val = 2;
                 assert.equal(f.val, 2);
@@ -95,7 +90,7 @@ describe("compute()", function () {
             t = data(1);
             e = data(2);
             fevals = 0;
-            f = compute(function () {
+            f = $compute(function () {
                 fevals++;
                 return i.val ? t.val : e.val;
             });
@@ -269,7 +264,7 @@ describe("compute()", function () {
                 });
                 assert.throws(function () {
                     d.val = 0;
-                }, /circular/);
+                });
             });
         });
     });

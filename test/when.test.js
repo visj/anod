@@ -1,8 +1,7 @@
-var { root, compute, Opt, effect, data, value, freeze, bind } = require('./helper/zorn');;
+import assert from 'assert';
+import { root, val, compute, effect, $effect, data, when } from './helper/zorn.js';
 
-var assert = require('assert');
-
-describe("bind(...)", function () {
+describe("when(...)", function () {
     it("registers a dependency", function () {
         root(function () {
             var d = data(1);
@@ -10,7 +9,7 @@ describe("bind(...)", function () {
             function counter() {
                 count++;
             }
-            effect(bind(d, function () { counter(); }));
+            effect(when(d, function () { counter(); }));
 
             assert.equal(count, 1);
 
@@ -28,10 +27,10 @@ describe("bind(...)", function () {
             function counter() {
                 count++;
             }
-            effect(bind(d2, function () {
+            effect(when(d2, function () {
                 counter();
                 return d1.val;
-            }))
+            }));
 
             assert.equal(count, 1);
 
@@ -50,7 +49,7 @@ describe("bind(...)", function () {
             function counter() {
                 count++;
             }
-            effect(bind([a, b, c], function () { counter(); }));
+            effect(when([a, b, c], function () { counter(); }));
 
             assert.equal(count, 1);
 
@@ -65,7 +64,8 @@ describe("bind(...)", function () {
     it("modifies its accumulator when reducing", function () {
         root(function () {
             var a = data(1);
-            var c = compute(bind(a, function (v, sum) {
+
+            var c = compute(when(a, function (v, sum) {
                 return v + sum;
             }), 0);
 
@@ -85,9 +85,9 @@ describe("bind(...)", function () {
     it("suppresses initial run when onchanges is true", function () {
         root(function () {
             var a = data(1);
-            var c = compute(bind(a, function (val) { 
+            var c = compute(when(a, function (val) { 
                 return val * 2;
-            }), 0, Opt.Defer);
+            }, true), 0);
 
             assert.equal(c.val, 0);
 
@@ -95,5 +95,32 @@ describe("bind(...)", function () {
 
             assert.equal(c.val, 4);
         });
-    })
+    });
+
+    it("allows conditional dependencies", function () {
+        root(function () {
+            var a = data(1);
+            var b = data(2);
+            var c = data(3);
+            var count = 0;
+            function counter() {
+                count++;
+            }
+            $effect(when(val(function() {
+                if (a.val < 2) {
+                    b.val;
+                } else {
+                    c.val;
+                }
+            }), counter));
+
+            assert.equal(count, 1);
+            c.val = 4;
+            assert.equal(count, 1);
+            a.val = 2;
+            assert.equal(count, 2);
+            a.val = 3;
+            assert.equal(count, 3);
+        });
+    });
 });

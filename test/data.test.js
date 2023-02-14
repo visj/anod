@@ -1,5 +1,5 @@
-var { root, effect, data, freeze } = require('./helper/zorn');;
-var assert = require('assert');
+import assert from 'assert';
+import { root, effect, data, freeze } from './helper/zorn.js';
 
 describe("data", function () {
     it("takes and returns an initial value", function () {
@@ -32,7 +32,7 @@ describe("data", function () {
             d.val = 2;
             assert.throws(function () {
                 d.val = 3;
-            }, /conflict/);
+            }, /Zorn: Conflict/);
         });
     });
 
@@ -54,7 +54,7 @@ describe("data", function () {
                 d.val = 2;
                 assert.throws(function () {
                     d.val = 3;
-                }, /conflict/);
+                }, /Zorn: Conflict/);
             });
         });
     });

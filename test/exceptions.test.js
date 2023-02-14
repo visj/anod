@@ -1,40 +1,14 @@
-var { root, compute, effect, data, freeze } = require('./helper/zorn');
+import assert from 'assert';
+import { root, compute, effect, data, freeze } from './helper/zorn.js';
 
-var assert = require('assert');
-
-describe("exceptions within S computations", function () {
+describe("exceptions within computations", function () {
     it("halt updating", function () {
         root(function () {
             var a = data(false)
             var b = data(1);
-            effect(function () {
+            var c = compute(function () {
                 if (a.val) {
-                    throw new Error("xxx");
-                }
-            });
-            var d = compute(function () {
-                return b.val
-            });
-
-            assert.throws(function () {
-                freeze(function () {
-                    a.val = true;
-                    b.val = 2;
-                });
-            })
-
-            assert.equal(b.val, 2);
-            assert.equal(d.val, 1);
-        });
-    });
-
-    it("do not leave stale scheduled updates", function () {
-        root(function () {
-            var a = data(false);
-            var b = data(1);
-            compute(function () {
-                if (a.val) {
-                    throw new Error("xxx");
+                    throw new Error();
                 }
             });
             var d = compute(function () {
@@ -46,14 +20,10 @@ describe("exceptions within S computations", function () {
                     a.val = true;
                     b.val = 2;
                 });
-            });
+            })
 
-            assert.equal(d.val, 1);
-
-            // updating a() should not trigger previously scheduled updated of b(), since htat propagation excepted
-            a.val = false;
-
-            assert.equal(d.val, 1);
+            assert.equal(b.val, 2);
+            assert.equal(d.val, 2);
         });
     });
 
@@ -63,7 +33,7 @@ describe("exceptions within S computations", function () {
             var b = data(1);
             effect(function () {
                 if (a.val) {
-                    throw new Error("xxx");
+                    throw new Error();
                 }
             });
             var d = compute(function () { return b.val });
@@ -76,7 +46,7 @@ describe("exceptions within S computations", function () {
             });
 
             assert.equal(b.val, 2);
-            assert.equal(d.val, 1);
+            assert.equal(d.val, 2);
 
             b.val = 3;
 

@@ -1,5 +1,5 @@
-var { root, compute, effect, data, dispose } = require('./helper/zorn');
-var assert = require('assert');
+import assert from 'assert';
+import { root, compute, effect, data, dispose } from './helper/zorn.js';
 
 describe("root(dispose)", function () {
 	it("disables updates and sets computation's value to undefined", function () {

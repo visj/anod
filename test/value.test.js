@@ -1,5 +1,5 @@
-var { root, compute, data, value, freeze, on, sample, effect } = require('./helper/zorn');;
-var assert = require('assert');
+import assert from 'assert';
+import { root, compute, value } from './helper/zorn.js';
 
 describe("value", function () {
     it("takes and returns an initial value", function () {

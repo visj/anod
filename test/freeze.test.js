@@ -1,5 +1,5 @@
-var { root, compute, data, value, freeze, on, sample, effect } = require ('./helper/zorn');
-var assert = require('assert');
+import assert from 'assert';
+import { root, compute, data, freeze } from './helper/zorn.js';
 
 describe("freeze", function () {
 	it("batches changes until end", function () {

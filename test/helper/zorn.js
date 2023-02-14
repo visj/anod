@@ -1,3 +1,1 @@
-var zorn = require('../../dist/zorn.min.cjs');
-
-module.exports = zorn;
+export * from '../../dist/zorn.mjs';

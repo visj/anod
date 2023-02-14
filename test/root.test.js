@@ -1,5 +1,5 @@
-var { root, compute, effect, data } = require('./helper/zorn');;
-var assert = require('assert');
+import assert from 'assert';
+import { root, compute, effect, data } from './helper/zorn.js';
 
 describe("root()", function () {
     it("allows subcomputations to escape their parents", function () {

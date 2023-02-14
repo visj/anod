@@ -21,7 +21,7 @@ var getHeapUsage = tryDefine(['%CollectHeapUsage()'], zero);
 var collectGarbage = tryDefine(['%CollectGarbage(null)'], zero);
 var optimizeFunctionOnNextCall = tryDefine(['fn', '%OptimizeFunctionOnNextCall(fn)'], zero);
 
-var Zorn = typeof window !== 'undefined' ? Zorn : require('../../../../dist/zorn.cjs');
+var Preact = typeof window !== 'undefined' ? Preact : require('../../../../dist/zorn.cjs');
 
 var now = typeof process === 'undefined' ? browserNow : nodeNow;
 
@@ -90,9 +90,9 @@ function run(fn, n, scount) {
     fn(n / 100, sources);
     sources = createDataSignals(scount, []);
     for (var i = 0; i < scount; i++) {
-        sources[i].val;
-        sources[i].val;
-        sources[i].val;
+        sources[i].value;
+        sources[i].value;
+        sources[i].value;
     }
 
     // start GC clean
@@ -113,7 +113,7 @@ function run(fn, n, scount) {
 
 function createDataSignals(n, sources) {
     for (var i = 0; i < n; i++) {
-        sources[i] = new Zorn.Data(i);
+        sources[i] = Preact.signal(i);
     }
     return sources;
 }
@@ -229,51 +229,51 @@ function createComputations1000to1(n, sources) {
 }
 
 function createComputation0(i) {
-    new Zorn.Computation(function () { return i; }, 0, 1);
+    Preact.effect(function () { return i; });
 }
 
 function createComputation1(s1) {
-    new Zorn.Computation(function () { 
-        return s1.val; 
-    }, 0, 1);
+    Preact.effect(function () { 
+        return s1.value; 
+    });
 }
 
 function createComputation2(s1, s2) {
-    new Zorn.Computation(function () { return s1.val + s2.val; }, 0, 1);
+    Preact.effect(function () { return s1.value + s2.value; });
 }
 
 function createComputation4(s1, s2, s3, s4) {
-    new Zorn.Computation(function () { return s1.val + s2.val + s3.val + s4.val; }, 0, 1);
+    Preact.effect(function () { return s1.value + s2.value + s3.value + s4.value; });
 }
 
 function createComputation8(s1, s2, s3, s4, s5, s6, s7, s8) {
-    new Zorn.Computation(function () { return s1.val + s2.val + s3.val + s4.val + s5.val + s6.val + s7.val + s8.val; }, 0, 1);
+    Preact.effect(function () { return s1.value + s2.value + s3.value + s4.value + s5.value + s6.value + s7.value + s8.value; });
 }
 
 function createComputation1000(ss, offset) {
-    new Zorn.Computation(function () {
+    Preact.effect(function () {
         var sum = 0;
         for (var i = 0; i < 1000; i++) {
-            sum += ss[offset + i].val;
+            sum += ss[offset + i].value;
         }
         return sum;
-    }, 0, 1);
+    });
 }
 
 function updateComputations1to1(n, sources) {
     var s1 = sources[0],
-        c = new Zorn.Computation(function () { return s1.val; }, 0, 1);
+        c = Preact.effect(function () { return s1.value; });
     for (var i = 0; i < n; i++) {
-        s1.val = i;
+        s1.value = i;
     }
 }
 
 function updateComputations2to1(n, sources) {
     var s1 = sources[0],
         s2 = sources[1],
-        c = new Zorn.Computation(function () { return s1.val + s2.val; }, 0, 1);
+        c = Preact.effect(function () { return s1.value + s2.value; });
     for (var i = 0; i < n; i++) {
-        s1.val = i;
+        s1.value = i;
     }
 }
 
@@ -282,53 +282,53 @@ function updateComputations4to1(n, sources) {
         s2 = sources[1],
         s3 = sources[2],
         s4 = sources[3],
-        c = new Zorn.Computation(function () { return s1.val + s2.val + s3.val + s4.val; }, 0, 1);
+        c = Preact.effect(function () { return s1.value + s2.value + s3.value + s4.value; });
     for (var i = 0; i < n; i++) {
-        s1.val = i;
+        s1.value = i;
     }
 }
 
 function updateComputations1000to1(n, sources) {
     var s1 = sources[0],
-        c = new Zorn.Computation(function () {
+        c = Preact.effect(function () {
             var sum = 0;
             for (var i = 0; i < 1000; i++) {
-                sum += sources[i].val;
+                sum += sources[i].value;
             }
             return sum;
-        }, 0, 1);
+        });
     for (var i = 0; i < n; i++) {
-        s1.val = i;
+        s1.value = i;
     }
 }
 
 function updateComputations1to2(n, sources) {
     var s1 = sources[0],
-        c1 = new Zorn.Computation(function () { return s1.val; }, 0, 1),
-        c2 = new Zorn.Computation(function () { return s1.val; }, 0, 1);
+        c1 = Preact.effect(function () { return s1.value; }),
+        c2 = Preact.effect(function () { return s1.value; });
     for (var i = 0; i < n / 2; i++) {
-        s1.val = i;
+        s1.value = i;
     }
 }
 
 function updateComputations1to4(n, sources) {
     var s1 = sources[0],
-        c1 = new Zorn.Computation(function () { return s1.val; }, 0, 1),
-        c2 = new Zorn.Computation(function () { return s1.val; }, 0, 1),
-        c3 = new Zorn.Computation(function () { return s1.val; }, 0, 1),
-        c4 = new Zorn.Computation(function () { return s1.val; }, 0, 1);
+        c1 = Preact.effect(function () { return s1.value; }),
+        c2 = Preact.effect(function () { return s1.value; }),
+        c3 = Preact.effect(function () { return s1.value; }),
+        c4 = Preact.effect(function () { return s1.value; });
     for (var i = 0; i < n / 4; i++) {
-        s1.val = i;
+        s1.value = i;
     }
 }
 
 function updateComputations1to1000(n, sources) {
     var s1 = sources[0];
     for (var i = 0; i < 1000; i++) {
-        new Zorn.Computation(function () { return s1.val; }, 0, 1);
+        Preact.effect(function () { return s1.value; });
     }
     for (var i = 0; i < n / 1000; i++) {
-        s1.val = i;
+        s1.value = i;
     }
 }
 

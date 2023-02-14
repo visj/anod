@@ -1,6 +1,5 @@
-var { root, compute, effect, data } = require('./helper/zorn');;
-
-var assert = require('assert');
+import assert from 'assert';
+import { root, compute, effect, data } from './helper/zorn.js';
 
 describe("Computations which modify data", function () {
     it("freeze data while executing computation", function () {

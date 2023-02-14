@@ -1,9 +1,3 @@
-'use strict';
-
-var Opt = ({
-    Defer: 8 ,
-    Static: 16
-});
 function nil() {
     return NIL;
 }
@@ -13,23 +7,30 @@ function owner() {
 function listener() {
     return LISTENER;
 }
+function Val(fn) {
+    this._fn = fn;
+}
+setValProto(Val.prototype, {
+    get: function () { return this._fn(); }
+});
+function val(fn) {
+    return new Val(fn);
+}
 function dispose(node) {
-    if ((node._state & (64  | 256 )) === 0) {
-        if (STAGE === 0 ) {
+    var state = node._state;
+    if ((state & 6) === 0) {
+        if (STAGE === 0) {
             node._dispose(TIME);
-        }
-        else {
-            node._state |= 64 ;
-            DISPOSES.add(node);
+        } else {
+            node._state = (state & ~16) | 4;
+            DISPOSES.add((node));
         }
     }
 }
-function bind(src, fn) {
-    var prev = NIL;
+function when(src, fn, defer) {
+    var prev;
     var ln;
     var next;
-    var defer;
-    var holder;
     var isArray = Array.isArray(src);
     if (isArray) {
         ln = (src).length;
@@ -37,11 +38,6 @@ function bind(src, fn) {
         next = new Array(ln);
     }
     return function (seed) {
-        if (defer === void 0) {
-            LISTENER = (OWNER);
-            LISTENER._state |= 16 ;
-            defer = (LISTENER._state & 8 ) !== 0;
-        }
         if (isArray) {
             for (var i = 0; i < ln; i++) {
                 next[i] = (src)[i].val;
@@ -49,23 +45,29 @@ function bind(src, fn) {
         } else {
             next = (src).val;
         }
-        LISTENER = null;
         if (defer) {
             defer = false;
         } else {
+            LISTENER = null;
             seed = fn(next, seed, prev);
         }
-        holder = next;
+        var temp = next;
         next = prev;
-        prev = holder;
+        prev = temp;
         return seed;
     };
 }
-function compute(fn, seed, opt) {
-    return new Computation(fn, seed, opt);
+function compute(fn, seed, eq) {
+    return new Computation(fn, seed, 64 | 1, eq);
 }
-function effect(fn, seed, opt) {
-    new Computation(fn, seed, opt);
+function $compute(fn, seed, eq) {
+    return new Computation(fn, seed, 64, eq);
+}
+function effect(fn, seed) {
+    new Computation(fn, seed, 1);
+}
+function $effect(fn, seed) {
+    new Computation(fn, seed, 0);
 }
 function root(fn) {
     var node = new Owner();
@@ -73,16 +75,14 @@ function root(fn) {
     var listener = LISTENER;
     OWNER = node;
     LISTENER = null;
-    if (STAGE === 0 ) {
+    if (STAGE === 0) {
         try {
             node._value = fn();
-        }
-        finally {
+        } finally {
             OWNER = owner;
             LISTENER = listener;
         }
-    }
-    else {
+    } else {
         node._value = fn();
         OWNER = owner;
         LISTENER = listener;
@@ -97,26 +97,24 @@ function value(value, eq) {
 }
 function freeze(fn) {
     var result;
-    if (STAGE === 0 ) {
+    if (STAGE === 0) {
         reset();
-        STAGE = 1 ;
+        STAGE = 1;
         try {
             result = fn();
             exec();
+        } finally {
+            STAGE = 0;
         }
-        finally {
-            STAGE = 0 ;
-        }
-    }
-    else {
+    } else {
         result = fn();
     }
     return result;
 }
-function peek(fn) {
+function peek(node) {
     var listener = LISTENER;
     LISTENER = null;
-    var result = isFunction(fn) ? (fn)() : (fn).val;
+    var result = node.val;
     LISTENER = listener;
     return result;
 }
@@ -125,17 +123,26 @@ function cleanup(fn) {
     if (owner !== null) {
         if (owner._cleanups === null) {
             owner._cleanups = [fn];
-        }
-        else {
+        } else {
             owner._cleanups.push(fn);
         }
     }
 }
-function setVal(obj, config) {
+function recover(fn) {
+    var owner = OWNER;
+    if (owner !== null) {
+        if (owner._recovers === null) {
+            owner._recovers = [fn];
+        } else {
+            owner._recovers.push(fn);
+        }
+    }
+}
+function setValProto(obj, config) {
     Object.defineProperty(obj, "val", config);
 }
 function Send(owner, state, value) {
-    this._state = 0  | state;
+    this._state = 0 | state;
     this._value = value;
     this._node1 = null;
     this._node1slot = -1;
@@ -144,27 +151,26 @@ function Send(owner, state, value) {
     if (owner !== null) {
         if (owner._owned === null) {
             owner._owned = [this];
-        }
-        else {
+        } else {
             owner._owned.push(this);
         }
     }
 }
 function sendUpdate(node, time) {
+    var ln;
     var node1 = node._node1;
     var nodes = node._nodes;
     if (node1 !== null) {
         receiveUpdate(node1, time);
     }
-    if (nodes !== null) {
-        var ln = nodes.length;
+    if (nodes !== null && (ln = nodes.length) > 0) {
         for (var i = 0; i < ln; i++) {
             receiveUpdate(nodes[i], time);
         }
     }
 }
 function disposeSender(node) {
-    node._state = 256 ;
+    node._state = 2;
     node._value = void 0;
     node._node1 = null;
     node._nodes = null;
@@ -172,13 +178,14 @@ function disposeSender(node) {
     cleanupSender(node);
 }
 function Owner() {
-    this._state = 0 ;
+    this._state = 0;
     this._value = (void 0);
     this._owned = null;
     this._cleanups = null;
+    this._recovers = null;
 }
 function disposeOwner(time) {
-    this._state = 256 ;
+    this._state = 2;
     this._value = (void 0);
     var i;
     var ln;
@@ -197,26 +204,42 @@ function disposeOwner(time) {
     }
     this._cleanups = null;
 }
-setVal(Owner.prototype, {
+setValProto(Owner.prototype, {
     get: function () {
         return this._value;
     }
 });
-Owner.prototype._update = NoOp;
+Owner.prototype._update = function () { };
 Owner.prototype._dispose = disposeOwner;
 function receiveUpdate(node, time) {
-    var  ln;
-    if (node._age < time) {
-        if (node._owned !== null && (ln = node._owned.length) !== 0) {
-            for (; ln-- !== 0;) {
-                node._owned.pop()._dispose(time);
-            }
-        }
+    var state = node._state;
+    if ((state & 6) === 0 && node._age < time) {
         node._age = time;
-        node._state |= 32 ;
-        EFFECTS.add(node);
-        if ((node._state & 1024 ) !== 0) {
+        node._state |= 16;
+        if ((state & 64) !== 0) {
+            COMPUTES.add(node);
+        } else {
+            EFFECTS.add(node);
+        }
+        if (node._owned !== null) {
+            receiveDispose(node._owned, time);
+        }
+        if ((state & 32) !== 0) {
             sendUpdate(node, time);
+        }
+    }
+}
+function receiveDispose(nodes, time) {
+    var ln = nodes.length;
+    for (var i = 0; i < ln; i++) {
+        var node = nodes[i];
+        node._age = time;
+        node._state = 4;
+        DISPOSES.add(node);
+        var owned = node._owned;
+        if (owned !== null) {
+            receiveDispose(owned, time);
+            owned.length = 0;
         }
     }
 }
@@ -229,13 +252,14 @@ function Receive(owner, state, value) {
     this._sourceslots = null;
     this._owned = null;
     this._cleanups = null;
+    this._recovers = null;
 }
 function Data(value) {
-    Send.call(this, OWNER, 0 , value);
+    Send.call(this, OWNER, 0, value);
     this._pending = NIL;
 }
 function getData() {
-    if ((this._state & (64  | 256 )) === 0) {
+    if ((this._state & 6) === 0) {
         if (LISTENER !== null) {
             logRead(this, LISTENER);
         }
@@ -244,97 +268,103 @@ function getData() {
 }
 function setData(value) {
     var state = this._state;
-    if ((state & (64  | 256 )) === 0) {
-        if (STAGE === 0 ) {
-            if ((state & 1024 ) !== 0) {
+    if ((state & 6) === 0) {
+        if (STAGE === 0) {
+            if ((state & 32) !== 0) {
                 reset();
-                this._pending = value;
-                this._state |= 32 ;
-                CHANGES.add(this);
+                this._value = value;
+                sendUpdate(this, TIME + 1);
                 exec();
-            }
-            else {
+            } else {
                 this._value = value;
             }
-        }
-        else {
+        } else {
             if (this._pending === NIL) {
                 this._pending = value;
-                this._state |= 32 ;
+                this._state |= 16;
                 CHANGES.add(this);
-            }
-            else if (value !== this._pending) {
-                throw new Error("conflicting changes: " + value + " !== " + this._pending);
+            } else if (value !== this._pending) {
+                throw new Error("Zorn: Conflict");
             }
         }
     }
     return value;
 }
-function updateData() {
+function updateData(time) {
     this._value = this._pending;
     this._pending = NIL;
-    this._state &= ~32 ;
-    if ((this._state & 1024 ) !== 0) {
-        sendUpdate(this, TIME);
+    this._state &= ~16;
+    if ((this._state & 32) !== 0) {
+        sendUpdate(this, time);
     }
 }
 function disposeData() {
     disposeSender(this);
     this._pending = void 0;
 }
-setVal(Data.prototype, { get: getData, set: setData });
+setValProto(Data.prototype, { get: getData, set: setData });
 Data.prototype._update = updateData;
 Data.prototype._dispose = disposeData;
 function Value(value, eq) {
     Data.call(this, value);
-    this.eq = eq || Equals;
+    this._eq = eq;
 }
 function setValue(value) {
-    if ((this._state & (64  | 256 )) === 0 && !this.eq(this._value, value)) {
-        setData.call(this, value);
+    if ((this._state & 6) === 0) {
+        if (this._eq === void 0 ? value !== this._value : !this._eq(value, this._value)) {
+            setData.call(this, value);
+        }
     }
     return value;
 }
-setVal(Value.prototype, { get: getData, set: setValue });
+setValProto(Value.prototype, { get: getData, set: setValue });
 Value.prototype._update = updateData;
 Value.prototype._dispose = function () {
-    this.eq = null;
+    this._eq = null;
     disposeData.call(this);
 };
-function Computation(fn, value, state) {
+function Computation(fn, value, state, eq) {
     var owner = OWNER;
     var listener = LISTENER;
     Receive.call(this, owner, state);
-    this._fn = fn;
-    OWNER = LISTENER = this;
-    if (STAGE === 0 ) {
-        reset();
-        STAGE = 1 ;
-        try {
-            this._value = fn(value);
-            if (CHANGES._count > 0 || DISPOSES._count > 0) {
-                start();
-            }
-        }
-        finally {
-            STAGE = 0 ;
-            OWNER = LISTENER = null;
+    this._eq = void 0;
+    if (eq !== void 0) {
+        if (eq === false) {
+            this._state &= ~64;
+        } else {
+            this._eq = (eq);
         }
     }
-    else {
+    this._fn = fn;
+    OWNER = LISTENER = this;
+    if (STAGE === 0) {
+        reset();
+        STAGE = 1;
+        try {
+            this._value = fn(value);
+            if (CHANGES._count !== 0 || DISPOSES._count !== 0) {
+                start();
+            }
+        } finally {
+            STAGE = 0;
+            OWNER = LISTENER = null;
+        }
+    } else {
         this._value = fn(value);
     }
     OWNER = owner;
     LISTENER = listener;
-}setVal(Computation.prototype, {
+};
+setValProto(Computation.prototype, {
     get: function () {
         var state = this._state;
-        if ((state & (64  | 256 )) === 0 && STAGE !== 0 ) {
+        if ((state & 6) === 0 && STAGE !== 0) {
             if (this._age === TIME) {
-                if ((state & 128 ) !== 0) {
-                    throw new Error("circular dependency");
+                if ((state & 8) !== 0) {
+                    throw new Error();
+                } else if ((state & 16) !== 0) {
+                    this._update(this._age);
                 }
-                this._update();
             }
             if (LISTENER !== null) {
                 logRead(this, LISTENER);
@@ -343,28 +373,43 @@ function Computation(fn, value, state) {
         return this._value;
     }
 });
-Computation.prototype._update = function () {
-    if ((this._state & 32 ) !== 0) {
-        var owner = OWNER;
-        var listener = LISTENER;
-        OWNER = LISTENER = null;
-        if (this._cleanups !== null) {
-            var ln = this._cleanups.length;
-            for (; ln-- !== 0;) {
-                this._cleanups.pop()(false);
-            }
+Computation.prototype._update = function (time) {
+    var i;
+    var ln;
+    var owner = OWNER;
+    var listener = LISTENER;
+    OWNER = LISTENER = null;
+    var state = this._state;
+    var cleanups = this._cleanups;
+    if (cleanups !== null && (ln = cleanups.length) !== 0) {
+        for (i = 0; i < ln; i++) {
+            cleanups[i](false);
         }
-        if ((this._state & 16 ) === 0) {
-            cleanupReceiver(this);
-        }
-        OWNER = this;
-        LISTENER = (this._state & 16 ) !== 0 ? null : this;
-        this._state |= 128 ;
-        this._value = this._fn(this._value);
-        this._state &= ~(32  | 128 );
-        OWNER = owner;
-        LISTENER = listener;
+        cleanups.length = 0;
     }
+    if ((state & 1) === 0) {
+        cleanupReceiver(this);
+    }
+    OWNER = this;
+    LISTENER = (state & 1) !== 0 ? null : this;
+    this._state |= 8;
+    var recovers = this._recovers;
+    if (recovers !== null) {
+        try {
+            this._value = this._fn(this._value);
+        } catch (err) {
+            ln = recovers.length;
+            for (i = 0; i < ln; i++) {
+                recovers[i](err);
+            }
+            recovers.length = 0;
+        }
+    } else {
+        this._value = this._fn(this._value);
+    }
+    this._state &= ~24;
+    OWNER = owner;
+    LISTENER = listener;
 };
 Computation.prototype._dispose = function (time) {
     this._fn = null;
@@ -373,8 +418,8 @@ Computation.prototype._dispose = function (time) {
     disposeSender(this);
     cleanupReceiver(this);
 };
-function Queue(mode) {
-    this._mode = mode;
+function Queue(stage) {
+    this._stage = stage;
     this._items = [];
     this._count = 0;
 }
@@ -382,52 +427,56 @@ Queue.prototype.add = function (item) {
     this._items[this._count++] = item;
 };
 Queue.prototype.run = function (time) {
-    STAGE = this._mode;
-    for (var i = 0; i < this._count; ++i) {
+    STAGE = this._stage;
+    var error = 0;
+    for (var i = 0; i < this._count; i++) {
         var item = (this._items[i]);
-        if ((item._state & 32 ) !== 0) {
-            item._update();
-        } else if ((item._state & 64 ) !== 0) {
-            item._dispose(time);
+        var state = item._state;
+        if ((state & (16 | 4)) !== 0) {
+            try {
+                if ((state & 16) !== 0) {
+                    item._update(time);
+                } else {
+                    item._dispose(time);
+                }
+            } catch(err) {
+                error = 1;
+                if ((state & 16) !== 0) {
+                    item._value = err;
+                    item._state |= 128;
+                }
+            }
         }
         this._items[i] = null;
     }
     this._count = 0;
+    return error;
 };
 var NIL = ({});
 var TIME = 0;
-var STAGE = 0 ;
-var DISPOSES = new Queue(1 );
-var CHANGES = new Queue(2 );
-var COMPUTES = new Queue(2 );
-var EFFECTS = new Queue(4 );
+var STAGE = 0;
+var DISPOSES = new Queue(2);
+var CHANGES = new Queue(3);
+var COMPUTES = new Queue(4);
+var EFFECTS = new Queue(5);
 var OWNER = null;
 var LISTENER = null;
-function Equals(a, b) {
-    return a === b;
-}
-function NoOp() { }
-function isFunction(fn) {
-    return typeof fn === "function";
-}
 function reset() {
     DISPOSES._count = CHANGES._count = COMPUTES._count = EFFECTS._count = 0;
 }
 function logRead(from, to) {
-    from._state |= 1024 ;
+    from._state |= 32;
     var fromslot;
     var toslot = to._source1 === null ? -1 : to._sources === null ? 0 : to._sources.length;
     if (from._node1 === null) {
         from._node1 = to;
         from._node1slot = toslot;
         fromslot = -1;
-    }
-    else if (from._nodes === null) {
+    } else if (from._nodes === null) {
         from._nodes = [to];
         from._nodeslots = [toslot];
         fromslot = 0;
-    }
-    else {
+    } else {
         fromslot = from._nodes.length;
         from._nodes.push(to);
         from._nodeslots.push(toslot);
@@ -435,12 +484,10 @@ function logRead(from, to) {
     if (to._source1 === null) {
         to._source1 = from;
         to._source1slot = fromslot;
-    }
-    else if (to._sources === null) {
+    } else if (to._sources === null) {
         to._sources = [from];
         to._sourceslots = [fromslot];
-    }
-    else {
+    } else {
         to._sources.push(from);
         to._sourceslots.push(fromslot);
     }
@@ -449,48 +496,67 @@ function exec() {
     var owner = OWNER;
     try {
         start();
-    }
-    finally {
-        STAGE = 0 ;
+    } finally {
+        STAGE = 0;
         OWNER = owner;
         LISTENER = null;
     }
 }
 function start() {
-    var time, cycle = 0, disposes = DISPOSES, changes = CHANGES, computes = COMPUTES, effects = EFFECTS;
+    var time;
+    var cycle = 0;
+    var errors = 0;
+    var disposes = DISPOSES;
+    var changes = CHANGES;
+    var computes = COMPUTES;
+    var effects = EFFECTS;
     do {
         time = ++TIME;
-        disposes.run(time);
-        changes.run(time);
-        computes.run(time);
-        effects.run(time);
-        if (cycle++ > 1e5) {
-            throw new Error("Cycle overflow");
+        if (disposes._count !== 0) {
+            errors += disposes.run(time);
         }
-    } while (changes._count > 0 || disposes._count > 0 || computes._count !== 0 || effects._count !== 0);
+        if (changes._count !== 0) {
+            errors += changes.run(time);
+        }
+        if (disposes._count !== 0) {
+            errors += disposes.run(time);
+        }
+        if (computes._count !== 0) {
+            errors += computes.run(time);
+        }
+        if (effects._count !== 0) {
+            errors += effects.run(time);
+        }
+        if (errors !== 0) {
+            throw new Error("Zorn: Error");
+        }
+        if (cycle++ > 1e5) {
+            throw new Error("Zorn: Cycle");
+        }
+    } while (changes._count !== 0 || disposes._count !== 0 || computes._count !== 0 || effects._count !== 0);
 }
 function cleanupReceiver(node) {
-    if (node._source1 !== null) {
-        forgetReceiver(node._source1, node._source1slot);
+    var ln;
+    var source1 = node._source1;
+    var sources = node._sources;
+    if (source1 !== null) {
+        forgetReceiver(source1, node._source1slot);
         node._source1 = null;
     }
-    var sources = node._sources;
-    if (sources !== null) {
-        var ln = sources.length;
+    if (sources !== null && (ln = sources.length) !== 0) {
         var sourceslots = node._sourceslots;
         for (; ln-- !== 0;) {
             forgetReceiver(sources.pop(), sourceslots.pop());
         }
     }
 }
-function forgetReceiver(source, slot) {
-    if ((source._state & (64  | 256 )) === 0) {
+function forgetReceiver(send, slot) {
+    if ((send._state & 6) === 0) {
         if (slot === -1) {
-            source._node1 = null;
-        }
-        else {
-            var nodes = source._nodes;
-            var nodeslots = source._nodeslots;
+            send._node1 = null;
+        } else {
+            var nodes = send._nodes;
+            var nodeslots = send._nodeslots;
             var last = nodes.pop();
             var lastslot = nodeslots.pop();
             if (slot !== nodes.length) {
@@ -498,8 +564,7 @@ function forgetReceiver(source, slot) {
                 nodeslots[slot] = lastslot;
                 if (lastslot === -1) {
                     last._source1slot = slot;
-                }
-                else {
+                } else {
                     last._sourceslots[lastslot] = slot;
                 }
             }
@@ -507,27 +572,27 @@ function forgetReceiver(source, slot) {
     }
 }
 function cleanupSender(send) {
-    if (send._node1 !== null) {
-        forgetSender(send._node1, send._node1slot);
+    var ln;
+    var node1 = send._node1;
+    var nodes = send._nodes;
+    if (node1 !== null) {
+        forgetSender(node1, send._node1slot);
         send._node1 = null;
     }
-    var nodes = send._nodes;
-    if (nodes !== null) {
-        var ln = nodes.length;
+    if (nodes !== null && (ln = nodes.length) !== 0) {
         var nodeslots = send._nodeslots;
         for (; ln-- !== 0;) {
             forgetSender(nodes.pop(), nodeslots.pop());
         }
     }
 }
-function forgetSender(node, slot) {
-    if ((node._state & (64  | 256 )) === 0) {
+function forgetSender(receive, slot) {
+    if ((receive._state & 6) === 0) {
         if (slot === -1) {
-            node._source1 = null;
-        }
-        else {
-            var sources = node._sources;
-            var sourceslots = node._sourceslots;
+            receive._source1 = null;
+        } else {
+            var sources = receive._sources;
+            var sourceslots = receive._sourceslots;
             var last = sources.pop();
             var lastslot = sourceslots.pop();
             if (slot !== sources.length) {
@@ -535,12 +600,16 @@ function forgetSender(node, slot) {
                 sourceslots[slot] = lastslot;
                 if (lastslot === -1) {
                     last._node1slot = slot;
-                }
-                else {
+                } else {
                     last._nodeslots[lastslot] = slot;
                 }
             }
         }
     }
 }
-module.exports = { Opt, root, dispose, compute, effect, bind, data, value, nil, owner, listener, freeze, peek, cleanup, Data, Value, Computation };
+export {
+    root, dispose, val, owner, listener,
+    compute, $compute, effect, $effect, when,
+    data, value, nil, freeze, recover,
+    peek, cleanup, Data, Value, Computation
+};

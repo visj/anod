@@ -1,6 +1,5 @@
-var { root, compute, effect, data, dispose } = require('./helper/zorn');;
-
-var assert = require('assert');
+import assert from 'assert';
+import { root, compute, effect, data, dispose } from './helper/zorn.js';
 
 describe("compute() with subcomputations", function () {
 
@@ -74,17 +73,6 @@ describe("compute() with subcomputations", function () {
                 assert.equal(innerCount, 2);
             });
         });
-
-        // it("disposes old child when updated", function () {
-        //     root(function () {
-        //         init();
-        //         // re-evalue parent, thereby disposing stale g, which we've stored at h
-        //         d.val = 2;
-        //         e.val = 3;
-        //         // h is now disposed
-        //         assert.equal(h.val, void 0);
-        //     });
-        // });
 
         it("disposes child when it is disposed", function () {
             var owner = root(function () {
