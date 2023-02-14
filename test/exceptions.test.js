@@ -1,12 +1,12 @@
 import assert from 'assert';
-import { root, compute, effect, data, freeze } from './helper/zorn.js';
+import { root, compute, data, freeze } from './helper/zorn.js';
 
 describe("exceptions within computations", function () {
     it("halt updating", function () {
         root(function () {
             var a = data(false)
             var b = data(1);
-            var c = compute(function () {
+            compute(function () {
                 if (a.val) {
                     throw new Error();
                 }
@@ -31,7 +31,7 @@ describe("exceptions within computations", function () {
         root(function () {
             var a = data(false);
             var b = data(1);
-            effect(function () {
+            compute(function () {
                 if (a.val) {
                     throw new Error();
                 }

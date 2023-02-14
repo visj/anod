@@ -23,7 +23,7 @@ function dispose(node) {
             node._dispose(TIME);
         } else {
             node._state = (state & ~16) | 4;
-            DISPOSES.add((node));
+            DISPOSES._add((node));
         }
     }
 }
@@ -58,16 +58,10 @@ function when(src, fn, defer) {
     };
 }
 function compute(fn, seed, eq) {
-    return new Computation(fn, seed, 64 | 1, eq);
+    return new Computation(fn, seed, 1, eq);
 }
 function $compute(fn, seed, eq) {
-    return new Computation(fn, seed, 64, eq);
-}
-function effect(fn, seed) {
-    new Computation(fn, seed, 1);
-}
-function $effect(fn, seed) {
-    new Computation(fn, seed, 0);
+    return new Computation(fn, seed, 0, eq);
 }
 function root(fn) {
     var node = new Owner();
@@ -217,9 +211,9 @@ function receiveUpdate(node, time) {
         node._age = time;
         node._state |= 16;
         if ((state & 64) !== 0) {
-            COMPUTES.add(node);
+            COMPUTES._add(node);
         } else {
-            EFFECTS.add(node);
+            EFFECTS._add(node);
         }
         if (node._owned !== null) {
             receiveDispose(node._owned, time);
@@ -235,7 +229,7 @@ function receiveDispose(nodes, time) {
         var node = nodes[i];
         node._age = time;
         node._state = 4;
-        DISPOSES.add(node);
+        DISPOSES._add(node);
         var owned = node._owned;
         if (owned !== null) {
             receiveDispose(owned, time);
@@ -282,7 +276,7 @@ function setData(value) {
             if (this._pending === NIL) {
                 this._pending = value;
                 this._state |= 16;
-                CHANGES.add(this);
+                CHANGES._add(this);
             } else if (value !== this._pending) {
                 throw new Error("Zorn: Conflict");
             }
@@ -423,10 +417,10 @@ function Queue(stage) {
     this._items = [];
     this._count = 0;
 }
-Queue.prototype.add = function (item) {
+Queue.prototype._add = function (item) {
     this._items[this._count++] = item;
 };
-Queue.prototype.run = function (time) {
+Queue.prototype._run = function (time) {
     STAGE = this._stage;
     var error = 0;
     for (var i = 0; i < this._count; i++) {
@@ -513,19 +507,19 @@ function start() {
     do {
         time = ++TIME;
         if (disposes._count !== 0) {
-            errors += disposes.run(time);
+            errors += disposes._run(time);
         }
         if (changes._count !== 0) {
-            errors += changes.run(time);
+            errors += changes._run(time);
         }
         if (disposes._count !== 0) {
-            errors += disposes.run(time);
+            errors += disposes._run(time);
         }
         if (computes._count !== 0) {
-            errors += computes.run(time);
+            errors += computes._run(time);
         }
         if (effects._count !== 0) {
-            errors += effects.run(time);
+            errors += effects._run(time);
         }
         if (errors !== 0) {
             throw new Error("Zorn: Error");
@@ -609,7 +603,7 @@ function forgetSender(receive, slot) {
 }
 export {
     root, dispose, val, owner, listener,
-    compute, $compute, effect, $effect, when,
+    compute, $compute, when,
     data, value, nil, freeze, recover,
     peek, cleanup, Data, Value, Computation
 };

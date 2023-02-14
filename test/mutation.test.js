@@ -1,5 +1,5 @@
 import assert from 'assert';
-import { root, compute, effect, data } from './helper/zorn.js';
+import { root, compute, data } from './helper/zorn.js';
 
 describe("Computations which modify data", function () {
     it("freeze data while executing computation", function () {
@@ -7,7 +7,7 @@ describe("Computations which modify data", function () {
             var a = data(false);
             var b = data(0);
             var cb;
-            effect(function () {
+            compute(function () {
                 if (a.val) {
                     b.val = 1;
                     cb = b.val;
@@ -29,14 +29,14 @@ describe("Computations which modify data", function () {
             var a = data(false);
             var b = data(0);
             var db;
-            effect(function () {
+            compute(function () {
                 if (a.val) {
                     seq += "c";
                     b.val = 1;
                     a.val = false;
                 }
             });
-            effect(function () {
+            compute(function () {
                 if (a.val) {
                     seq += "d";
                     db = b.val;
@@ -58,7 +58,7 @@ describe("Computations which modify data", function () {
             var seq = "";
             var a = data(0);
 
-            effect(function () {
+            compute(function () {
                 seq += a.val;
                 if (a.val < 10) {
                     a.val++;

@@ -1,5 +1,5 @@
 import assert from 'assert';
-import { root, effect, data, freeze } from './helper/zorn.js';
+import { root, compute, data, freeze } from './helper/zorn.js';
 
 describe("data", function () {
     it("takes and returns an initial value", function () {
@@ -39,7 +39,7 @@ describe("data", function () {
     it("does not throw if set to the same value twice in a computation", function () {
         root(function () {
             var d = data(1);
-            effect(function () {
+            compute(function () {
                 d.val = 2;
                 d.val = 2;
             });
@@ -50,7 +50,7 @@ describe("data", function () {
     it("throws if set to two different values in a computation", function () {
         root(function () {
             var d = data(1);
-            effect(function () {
+            compute(function () {
                 d.val = 2;
                 assert.throws(function () {
                     d.val = 3;

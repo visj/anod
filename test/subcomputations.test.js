@@ -1,5 +1,5 @@
 import assert from 'assert';
-import { root, compute, effect, data, dispose } from './helper/zorn.js';
+import { root, compute, data, dispose } from './helper/zorn.js';
 
 describe("compute() with subcomputations", function () {
 
@@ -14,9 +14,9 @@ describe("compute() with subcomputations", function () {
             function innerCounter() {
                 innerCount++;
             }
-            effect(function () {
+            compute(function () {
                 outerCounter();
-                effect(function () {
+                compute(function () {
                     innerCounter();
                     return d.val;
                 });
@@ -46,7 +46,7 @@ describe("compute() with subcomputations", function () {
             innerCounter = function () {
                 innerCount++;
             }
-            effect(function () {
+            compute(function () {
                 outerCounter();
                 d.val;
                 g = compute(function () {
@@ -114,7 +114,7 @@ describe("compute() with subcomputations", function () {
             root(function () {
                 var a = data(1);
                 var c;
-                effect(function () {
+                compute(function () {
                     c = compute(function () {
                         return a.val;
                     });

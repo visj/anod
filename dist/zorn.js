@@ -24,7 +24,7 @@ var Zorn = (function() {
 	            node._dispose(TIME);
 	        } else {
 	            node._state = (state & ~16) | 4;
-	            DISPOSES.add((node));
+	            DISPOSES._add((node));
 	        }
 	    }
 	}
@@ -59,16 +59,10 @@ var Zorn = (function() {
 	    };
 	}
 	function compute(fn, seed, eq) {
-	    return new Computation(fn, seed, 64 | 1, eq);
+	    return new Computation(fn, seed, 1, eq);
 	}
 	function $compute(fn, seed, eq) {
-	    return new Computation(fn, seed, 64, eq);
-	}
-	function effect(fn, seed) {
-	    new Computation(fn, seed, 1);
-	}
-	function $effect(fn, seed) {
-	    new Computation(fn, seed, 0);
+	    return new Computation(fn, seed, 0, eq);
 	}
 	function root(fn) {
 	    var node = new Owner();
@@ -218,9 +212,9 @@ var Zorn = (function() {
 	        node._age = time;
 	        node._state |= 16;
 	        if ((state & 64) !== 0) {
-	            COMPUTES.add(node);
+	            COMPUTES._add(node);
 	        } else {
-	            EFFECTS.add(node);
+	            EFFECTS._add(node);
 	        }
 	        if (node._owned !== null) {
 	            receiveDispose(node._owned, time);
@@ -236,7 +230,7 @@ var Zorn = (function() {
 	        var node = nodes[i];
 	        node._age = time;
 	        node._state = 4;
-	        DISPOSES.add(node);
+	        DISPOSES._add(node);
 	        var owned = node._owned;
 	        if (owned !== null) {
 	            receiveDispose(owned, time);
@@ -283,7 +277,7 @@ var Zorn = (function() {
 	            if (this._pending === NIL) {
 	                this._pending = value;
 	                this._state |= 16;
-	                CHANGES.add(this);
+	                CHANGES._add(this);
 	            } else if (value !== this._pending) {
 	                throw new Error("Zorn: Conflict");
 	            }
@@ -424,10 +418,10 @@ var Zorn = (function() {
 	    this._items = [];
 	    this._count = 0;
 	}
-	Queue.prototype.add = function (item) {
+	Queue.prototype._add = function (item) {
 	    this._items[this._count++] = item;
 	};
-	Queue.prototype.run = function (time) {
+	Queue.prototype._run = function (time) {
 	    STAGE = this._stage;
 	    var error = 0;
 	    for (var i = 0; i < this._count; i++) {
@@ -514,19 +508,19 @@ var Zorn = (function() {
 	    do {
 	        time = ++TIME;
 	        if (disposes._count !== 0) {
-	            errors += disposes.run(time);
+	            errors += disposes._run(time);
 	        }
 	        if (changes._count !== 0) {
-	            errors += changes.run(time);
+	            errors += changes._run(time);
 	        }
 	        if (disposes._count !== 0) {
-	            errors += disposes.run(time);
+	            errors += disposes._run(time);
 	        }
 	        if (computes._count !== 0) {
-	            errors += computes.run(time);
+	            errors += computes._run(time);
 	        }
 	        if (effects._count !== 0) {
-	            errors += effects.run(time);
+	            errors += effects._run(time);
 	        }
 	        if (errors !== 0) {
 	            throw new Error("Zorn: Error");
@@ -608,5 +602,5 @@ var Zorn = (function() {
 	        }
 	    }
 	}
-	return { root: root, dispose: dispose, val: val, owner: owner, listener: listener, compute: compute, $compute: $compute, effect: effect, $effect: $effect, when: when, data: data, value: value, nil: nil, freeze: freeze, recover: recover, peek: peek, cleanup: cleanup, Data: Data, Value: Value, Computation: Computation };
+	return { root: root, dispose: dispose, val: val, owner: owner, listener: listener, compute: compute, $compute: $compute, when: when, data: data, value: value, nil: nil, freeze: freeze, recover: recover, peek: peek, cleanup: cleanup, Data: Data, Value: Value, Computation: Computation };
 })();

@@ -1,5 +1,5 @@
 import assert from 'assert';
-import { root, compute, effect, data } from './helper/zorn.js';
+import { root, compute, data } from './helper/zorn.js';
 
 describe("root()", function () {
     it("allows subcomputations to escape their parents", function () {
@@ -8,12 +8,12 @@ describe("root()", function () {
             var innerTrigger = data(null);
             var innerRuns = 0;
 
-            effect(function () {
+            compute(function () {
                 // register dependency to outer trigger
                 outerTrigger.val;
                 // inner computation
                 root(function () {
-                    effect(function () {
+                    compute(function () {
                         // register dependency on inner trigger
                         innerTrigger.val;
                         // count total runs
@@ -59,7 +59,7 @@ describe("root()", function () {
     it("persists through entire scope when used at top level", () => {
         root(() => {
             var s = data(1);
-            effect(function() { s.val; });
+            compute(function() { s.val; });
             s.val = 2;
             var c2 = compute(function(){ return s.val; });
             s.val = 3;

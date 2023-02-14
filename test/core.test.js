@@ -1,5 +1,5 @@
 import assert from 'assert';
-import { root, compute, $compute, effect, data } from './helper/zorn.js';
+import { root, compute, $compute, data } from './helper/zorn.js';
 
 describe("compute()", function () {
     describe("creation", function () {
@@ -41,7 +41,7 @@ describe("compute()", function () {
             root(function () {
                 var d = data(1);
                 var fevals = 0;
-                effect(function () {
+                compute(function () {
                     fevals++;
                     d.val;
                 });
@@ -57,7 +57,7 @@ describe("compute()", function () {
             root(function () {
                 var d = data(1);
                 var fevals = 0;
-                effect(function () {
+                compute(function () {
                     fevals++;
                     d.val;
                 });
@@ -140,7 +140,7 @@ describe("compute()", function () {
         it("does not register a dependency", function () {
             root(function () {
                 var fevals = 0, d;
-                effect(function () {
+                compute(function () {
                     fevals++;
                     d = data(1);
                 });
@@ -230,7 +230,7 @@ describe("compute()", function () {
             root(function () {
                 var d = data(1);
                 assert.throws(function () {
-                    effect(function () {
+                    compute(function () {
                         d.val;
                         d.val = 2;
                     });
@@ -246,7 +246,7 @@ describe("compute()", function () {
                 var f3 = compute(function () { return f2.val; });
 
                 assert.throws(function () {
-                    effect(function () {
+                    compute(function () {
                         f3.val;
                         d.val = 2;
                     });
@@ -312,7 +312,7 @@ describe("compute()", function () {
                 var f4 = compute(function () { return d.val; });
                 var f5 = compute(function () { return d.val; });
                 var gcount = 0;
-                effect(function () {
+                compute(function () {
                     gcount++;
                     return f1.val + f2.val + f3.val + f4.val + f5.val;
                 });
@@ -347,7 +347,7 @@ describe("compute()", function () {
                 var g3 = compute(function () { return f1.val + f2.val + f3.val; });
 
                 var hcount = 0;
-                effect(function () {
+                compute(function () {
                     hcount++;
                     g1.val + g2.val + g3.val;
                 });

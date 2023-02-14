@@ -1,5 +1,5 @@
 import assert from 'assert';
-import { root, val, compute, effect, $effect, data, when } from './helper/zorn.js';
+import { root, val, compute, $compute, data, when } from './helper/zorn.js';
 
 describe("when(...)", function () {
     it("registers a dependency", function () {
@@ -9,7 +9,7 @@ describe("when(...)", function () {
             function counter() {
                 count++;
             }
-            effect(when(d, function () { counter(); }));
+            compute(when(d, counter));
 
             assert.equal(count, 1);
 
@@ -27,7 +27,7 @@ describe("when(...)", function () {
             function counter() {
                 count++;
             }
-            effect(when(d2, function () {
+            compute(when(d2, function () {
                 counter();
                 return d1.val;
             }));
@@ -49,7 +49,7 @@ describe("when(...)", function () {
             function counter() {
                 count++;
             }
-            effect(when([a, b, c], function () { counter(); }));
+            compute(when([a, b, c], counter));
 
             assert.equal(count, 1);
 
@@ -106,7 +106,7 @@ describe("when(...)", function () {
             function counter() {
                 count++;
             }
-            $effect(when(val(function() {
+            $compute(when(val(function() {
                 if (a.val < 2) {
                     b.val;
                 } else {

@@ -1,5 +1,5 @@
 import assert from 'assert';
-import { root, val, effect, data, peek } from './helper/zorn.js';
+import { root, val, compute, data, peek } from './helper/zorn.js';
 
 describe("peek(...)", function () {
     it("avoids a dedendency", function () {
@@ -8,7 +8,7 @@ describe("peek(...)", function () {
             var b = data(2);
             var c = data(3);
             var d = 0;
-            effect(function () {
+            compute(function () {
                 d++;
                 a.val;
                 peek(b);

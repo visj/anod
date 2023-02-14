@@ -1,6 +1,6 @@
 import { 
     root, dispose, val, owner, listener,
-    compute, $compute, effect, $effect, when,
+    compute, $compute, when,
     data, value, nil, freeze, recover,
     peek, cleanup, Data, Value, Computation
 } from './zorn';
@@ -10,8 +10,6 @@ window["dispose"] = dispose;
 window["val"] = val;
 window["compute"] = compute;
 window["$compute"] = $compute;
-window["effect"] = effect;
-window["$effect"] = $effect;
 window["when"] = when;
 window["data"] = data;
 window["value"] = value;

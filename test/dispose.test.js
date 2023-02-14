@@ -1,5 +1,5 @@
 import assert from 'assert';
-import { root, compute, effect, data, dispose } from './helper/zorn.js';
+import { root, compute, data, dispose } from './helper/zorn.js';
 
 describe("root(dispose)", function () {
 	it("disables updates and sets computation's value to undefined", function () {
@@ -32,7 +32,7 @@ describe("root(dispose)", function () {
 		var owner = root(function () {
 			c = 0;
 			d = data(0);
-			effect(function () {
+			compute(function () {
 				c++;
 				if (d.val) {
 					dispose(owner);
@@ -53,10 +53,10 @@ describe("root(dispose)", function () {
 		var owner = root(function () {
 			c = 0;
 			d = data(0);
-			effect(function () {
+			compute(function () {
 				c++;
 				d.val;
-				effect(function () {
+				compute(function () {
 					if (d.val) {
 						dispose(owner);
 					}
