@@ -207,7 +207,7 @@ var Zorn = (function() {
 	Owner.prototype._dispose = disposeOwner;
 	function receiveUpdate(node) {
 	    var state = node._state;
-	    if ((state & 6) === 0) {
+	    if ((state & 6) === 0 && (state & 16) === 0) {
 	        node._state |= 16;
 	        if ((state & (128 | 32)) === 32) {
 	            PENDINGS._add(node);
@@ -318,11 +318,11 @@ var Zorn = (function() {
 	    var owner = OWNER;
 	    var listen = LISTEN;
 	    Receive.call(this, owner, state);
+	    this._fn = fn;
 	    this._eq = eq;
 	    if (eq === false) {
 	        this._state |= 128;
 	    }
-	    this._fn = fn;
 	    OWNER = this;
 	    LISTEN = true;
 	    if (STAGE === 0) {
@@ -377,7 +377,8 @@ var Zorn = (function() {
 	        cleanups.length = 0;
 	    }
 	    OWNER = this;
-	    if (LISTEN = (state & 1) === 0) {
+	    LISTEN = (state & 1) === 0
+	    if (LISTEN) {
 	        cleanupReceiver(this);
 	    }
 	    this._state |= 8;
@@ -494,8 +495,8 @@ var Zorn = (function() {
 	    var errors = 0;
 	    var disposes = DISPOSES;
 	    var changes = CHANGES;
-	    var computes = PENDINGS;
-	    var effects = UPDATES;
+	    var pendings = PENDINGS;
+	    var updates = UPDATES;
 	    do {
 	        if (disposes._count !== 0) {
 	            errors += disposes._run();
@@ -506,11 +507,11 @@ var Zorn = (function() {
 	        if (disposes._count !== 0) {
 	            errors += disposes._run();
 	        }
-	        if (computes._count !== 0) {
-	            errors += computes._run();
+	        if (pendings._count !== 0) {
+	            errors += pendings._run();
 	        }
-	        if (effects._count !== 0) {
-	            errors += effects._run();
+	        if (updates._count !== 0) {
+	            errors += updates._run();
 	        }
 	        if (errors !== 0) {
 	            throw new Error("Zorn: Error");
@@ -518,7 +519,7 @@ var Zorn = (function() {
 	        if (cycle++ > 1e5) {
 	            throw new Error("Zorn: Cycle");
 	        }
-	    } while (changes._count !== 0 || disposes._count !== 0 || computes._count !== 0 || effects._count !== 0);
+	    } while (changes._count !== 0 || disposes._count !== 0 || pendings._count !== 0 || updates._count !== 0);
 	}
 	function cleanupReceiver(node) {
 	    var ln;
