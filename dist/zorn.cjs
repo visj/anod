@@ -8,7 +8,17 @@ function Val(fn) {
     this._fn = fn;
 }
 setValProto(Val.prototype, {
-    get: function () { return this._fn(); }
+    get: function () {
+        return this._fn();
+    }
+}, {
+    get: function () {
+        var listen = LISTEN;
+        LISTEN = false;
+        var val = this._fn();
+        LISTEN = listen;
+        return val;
+    }
 });
 function val(fn) {
     return new Val(fn);
@@ -17,10 +27,10 @@ function dispose(node) {
     var state = node._state;
     if ((state & 6) === 0) {
         if (STAGE === 0) {
-            node._dispose(TIME);
+            node._dispose();
         } else {
             node._state = (state & ~16) | 4;
-            DISPOSES._add((node));
+            DISPOSES._add(node);
         }
     }
 }
@@ -70,13 +80,13 @@ function root(fn) {
     LISTEN = false;
     if (STAGE === 0) {
         try {
-            node._value = fn();
+            fn();
         } finally {
             OWNER = owner;
             LISTEN = listen;
         }
     } else {
-        node._value = fn();
+        fn();
         OWNER = owner;
         LISTEN = listen;
     }
@@ -104,13 +114,6 @@ function freeze(fn) {
     }
     return result;
 }
-function peek(node) {
-    var listen = LISTEN;
-    LISTEN = false;
-    var result = node.val;
-    LISTEN = listen;
-    return result;
-}
 function cleanup(fn) {
     var owner = OWNER;
     if (owner !== null) {
@@ -131,8 +134,11 @@ function recover(fn) {
         }
     }
 }
-function setValProto(obj, config) {
-    Object.defineProperty(obj, "val", config);
+function setValProto(obj, val, peek) {
+    Object.defineProperties(obj, { val: val, peek: peek });
+}
+function getValue() {
+    return this._value;
 }
 function Send(owner, state, value) {
     this._state = 0 | state;
@@ -149,16 +155,16 @@ function Send(owner, state, value) {
         }
     }
 }
-function sendUpdate(node, time) {
+function sendUpdate(node) {
     var ln;
     var node1 = node._node1;
     var nodes = node._nodes;
     if (node1 !== null) {
-        receiveUpdate(node1, time);
+        receiveUpdate(node1);
     }
     if (nodes !== null && (ln = nodes.length) > 0) {
         for (var i = 0; i < ln; i++) {
-            receiveUpdate(nodes[i], time);
+            receiveUpdate(nodes[i]);
         }
     }
 }
@@ -172,12 +178,11 @@ function disposeSender(node) {
 }
 function Owner() {
     this._state = 0;
-    this._value = (void 0);
     this._owned = null;
     this._cleanups = null;
     this._recovers = null;
 }
-function disposeOwner(time) {
+function disposeOwner() {
     this._state = 2;
     this._value = (void 0);
     var i;
@@ -186,7 +191,7 @@ function disposeOwner(time) {
     var cleanups = this._cleanups;
     if (owned !== null && (ln = owned.length) !== 0) {
         for (i = 0; i < ln; i++) {
-            owned[i]._dispose(time);
+            owned[i]._dispose();
         }
     }
     this._owned = null;
@@ -197,17 +202,11 @@ function disposeOwner(time) {
     }
     this._cleanups = null;
 }
-setValProto(Owner.prototype, {
-    get: function () {
-        return this._value;
-    }
-});
 Owner.prototype._update = function () { };
 Owner.prototype._dispose = disposeOwner;
-function receiveUpdate(node, time) {
+function receiveUpdate(node) {
     var state = node._state;
-    if ((state & 6) === 0 && node._age < time) {
-        node._age = time;
+    if ((state & 6) === 0) {
         node._state |= 16;
         if ((state & (128 | 32)) === 32) {
             PENDINGS._add(node);
@@ -215,30 +214,28 @@ function receiveUpdate(node, time) {
             UPDATES._add(node);
         }
         if (node._owned !== null) {
-            receiveDispose(node._owned, time);
+            receiveDispose(node._owned);
         }
         if ((state & 32) !== 0) {
-            sendUpdate(node, time);
+            sendUpdate(node);
         }
     }
 }
-function receiveDispose(nodes, time) {
+function receiveDispose(nodes) {
     var ln = nodes.length;
     for (var i = 0; i < ln; i++) {
         var node = nodes[i];
-        node._age = time;
         node._state = 4;
         DISPOSES._add(node);
         var owned = node._owned;
         if (owned !== null) {
-            receiveDispose(owned, time);
+            receiveDispose(owned);
             owned.length = 0;
         }
     }
 }
 function Receive(owner, state, value) {
     Send.call(this, owner, state, value);
-    this._age = 0;
     this._source1 = null;
     this._source1slot = 0;
     this._sources = null;
@@ -266,7 +263,7 @@ function setData(value) {
             if ((state & 32) !== 0) {
                 reset();
                 this._value = value;
-                sendUpdate(this, TIME + 1);
+                sendUpdate(this);
                 exec();
             } else {
                 this._value = value;
@@ -283,19 +280,19 @@ function setData(value) {
     }
     return value;
 }
-function updateData(time) {
+function updateData() {
     this._value = this._pending;
     this._pending = NIL;
     this._state &= ~16;
     if ((this._state & 32) !== 0) {
-        sendUpdate(this, time);
+        sendUpdate(this);
     }
 }
 function disposeData() {
     disposeSender(this);
     this._pending = void 0;
 }
-setValProto(Data.prototype, { get: getData, set: setData });
+setValProto(Data.prototype, { get: getData, set: setData }, { get: getValue });
 Data.prototype._update = updateData;
 Data.prototype._dispose = disposeData;
 function Value(value, eq) {
@@ -310,7 +307,7 @@ function setValue(value) {
     }
     return value;
 }
-setValProto(Value.prototype, { get: getData, set: setValue });
+setValProto(Value.prototype, { get: getData, set: setValue }, { get: getValue });
 Value.prototype._update = updateData;
 Value.prototype._dispose = function () {
     this._eq = null;
@@ -350,12 +347,11 @@ setValProto(Computation.prototype, {
     get: function () {
         var state = this._state;
         if ((state & 6) === 0 && STAGE !== 0) {
-            if (this._age === TIME) {
+            if ((state & 16) !== 0) {
                 if ((state & 8) !== 0) {
                     throw new Error();
-                } else if ((state & 16) !== 0) {
-                    this._update(this._age);
                 }
+                this._update();
             }
             if (LISTEN) {
                 logRead(this, (OWNER));
@@ -363,8 +359,8 @@ setValProto(Computation.prototype, {
         }
         return this._value;
     }
-});
-Computation.prototype._update = function (time) {
+}, { get: getValue });
+Computation.prototype._update = function () {
     var i;
     var ln;
     var owner = OWNER;
@@ -379,11 +375,10 @@ Computation.prototype._update = function (time) {
         }
         cleanups.length = 0;
     }
-    if ((state & 1) === 0) {
+    OWNER = this;
+    if (LISTEN = (state & 1) === 0) {
         cleanupReceiver(this);
     }
-    OWNER = this;
-    LISTEN = (state & 1) === 0;
     this._state |= 8;
     var recovers = this._recovers;
     if (recovers !== null) {
@@ -403,10 +398,9 @@ Computation.prototype._update = function (time) {
     OWNER = owner;
     LISTEN = listen;
 };
-Computation.prototype._dispose = function (time) {
+Computation.prototype._dispose = function () {
     this._fn = null;
-    this._age = time;
-    disposeOwner.call(this, time);
+    disposeOwner.call(this);
     disposeSender(this);
     cleanupReceiver(this);
 };
@@ -418,7 +412,7 @@ function Queue(stage) {
 Queue.prototype._add = function (item) {
     this._items[this._count++] = item;
 };
-Queue.prototype._run = function (time) {
+Queue.prototype._run = function () {
     STAGE = this._stage;
     var error = 0;
     for (var i = 0; i < this._count; i++) {
@@ -427,16 +421,17 @@ Queue.prototype._run = function (time) {
         if ((state & (16 | 4)) !== 0) {
             try {
                 if ((state & 16) !== 0) {
-                    item._update(time);
+                    item._update();
                 } else {
-                    item._dispose(time);
+                    item._dispose();
                 }
-            } catch(err) {
+            } catch (err) {
                 error = 1;
                 if ((state & 16) !== 0) {
                     item._value = err;
                     item._state |= 64;
                 }
+                item._state &= ~24;
             }
         }
         this._items[i] = null;
@@ -445,7 +440,6 @@ Queue.prototype._run = function (time) {
     return error;
 };
 var NIL = ({});
-var TIME = 0;
 var STAGE = 0;
 var DISPOSES = new Queue(2);
 var CHANGES = new Queue(3);
@@ -495,7 +489,6 @@ function exec() {
     }
 }
 function start() {
-    var time;
     var cycle = 0;
     var errors = 0;
     var disposes = DISPOSES;
@@ -503,21 +496,20 @@ function start() {
     var computes = PENDINGS;
     var effects = UPDATES;
     do {
-        time = ++TIME;
         if (disposes._count !== 0) {
-            errors += disposes._run(time);
+            errors += disposes._run();
         }
         if (changes._count !== 0) {
-            errors += changes._run(time);
+            errors += changes._run();
         }
         if (disposes._count !== 0) {
-            errors += disposes._run(time);
+            errors += disposes._run();
         }
         if (computes._count !== 0) {
-            errors += computes._run(time);
+            errors += computes._run();
         }
         if (effects._count !== 0) {
-            errors += effects._run(time);
+            errors += effects._run();
         }
         if (errors !== 0) {
             throw new Error("Zorn: Error");
@@ -603,5 +595,5 @@ module.exports = {
     root, dispose, val, owner,
     compute, $compute, when,
     data, value, nil, freeze, recover,
-    peek, cleanup, Data, Value, Computation
+    cleanup, Data, Value, Computation
 };

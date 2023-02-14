@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { Stage, State } from './src/lib.js';
+import { Stage, State } from './src/zorn.js';
 import { exec } from 'child_process';
 
 /**
@@ -26,6 +26,7 @@ var ImportRegex = /import\s*\{([\$\w\,\s]+)\s*\}\s*from\s*['"]([\w\.\/]+)['"];?/
 
 var code = fs.readFileSync(path.join(__dirname, 'src', 'zorn.js')).toString();
 
+code = code.split('/* START_OF_FILE */')[1];
 code = code.replace(CommentRegex, '');
 code = code.replace(ImportRegex, '');
 
@@ -47,7 +48,7 @@ fs.writeFileSync(path.join(__dirname, 'dist', 'zorn.mjs'), mjs);
 fs.writeFileSync(path.join(__dirname, 'dist', 'zorn.cjs'), cjs);
 
 if (process.argv.includes('--minify') || process.argv.includes('-m')) {
-    exec('closure-compiler -O=ADVANCED -W=VERBOSE --module_resolution=NODE --js src/lib.js --js src/zorn.js --js src/index.js', function (err, stdout, stderr) {
+    exec('closure-compiler -O=ADVANCED -W=VERBOSE --module_resolution=NODE --js src/zorn.js --js src/index.js', function (err, stdout, stderr) {
         if (err) {
             console.error(err);
             return;

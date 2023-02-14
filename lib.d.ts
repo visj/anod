@@ -1,13 +1,13 @@
-export class Scope<T = any> {
+export class Op { }
+
+export class Compute<T = any> extends Op {
     readonly val: T;
+    readonly peek: T;
 }
 
-export class Compute<T = any> {
-    readonly val: T;
-}
-
-export class Signal<T = any> {
+export class Signal<T = any> extends Op {
     val: T;
+    readonly peek: T;
 }
 
 export type Source<T = any> = Compute<T> | Signal<T>;
@@ -24,9 +24,7 @@ export function nil(): nil;
 
 export function val<T>(fn: () => T): Compute<T>;
 
-export function owner(): Scope | null;
-
-export function listener(): Compute | null;
+export function owner(): Op | null;
 
 export function dispose(val: Source): void;
 

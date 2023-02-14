@@ -1,7 +1,131 @@
-import {
-    Nil, Cleanup, Recover, Respond, Scope,
-    Compute, Signal, State, Stage, Source
-} from "./lib";
+/**
+ * @typedef {function(boolean): void}
+ */
+var Cleanup;
+
+/**
+ * @typedef {function(*): void}
+ */
+var Recover;
+
+/** 
+ * @abstract
+ * @constructor 
+ */
+function Nil() { }
+
+/**
+ * @interface
+ */
+function Op() { }
+
+/**
+ * @package
+ * @type {number}
+ */
+Op.prototype._state;
+
+/**
+ * @package
+ * @returns {void}
+ */
+Op.prototype._update = function () { }
+
+/**
+ * @package
+ * @returns {void}
+ */
+Op.prototype._dispose = function () { }
+
+/**
+ * @interface
+ * @template T
+ * @extends {Op}
+ */
+function React() { }
+
+/**
+ * @package
+ * @type {T}
+ */
+React.prototype._value;
+
+/**
+ * @template T
+ * @interface
+ * @extends {Op}
+ */
+function Scope() { }
+
+/**
+ * @package
+ * @type {?Array<!React>}
+ */
+Scope.prototype._owned;
+
+/**
+ * @package
+ * @type {?Array<!Cleanup>}
+ */
+Scope.prototype._cleanups;
+
+/**
+ * @package
+ * @type {?Array<!Recover>}
+ */
+Scope.prototype._recovers;
+
+/**
+ * @template T
+ * @interface
+ */
+function Signal() { }
+
+/**
+ * @public
+ * @export
+ * @type {T}
+ */
+Signal.prototype.val;
+
+/**
+ * @public
+ * @export
+ * @type {T}
+ */
+Signal.prototype.peek;
+
+/**
+ * @const 
+ * @enum {number}
+ */
+export var State = {
+    Static: 1,
+    DisposeFlags: 6,
+    Disposed: 2,
+    Dispose: 4,
+    UpdateFlags: 24,
+    Updated: 8,
+    Update: 16,
+    Send: 32,
+    Error: 64,
+    Respond: 128,
+}
+
+/**
+ * @const
+ * @enum
+ */
+export var Stage = {
+    Idle: 0,
+    Started: 1,
+    Disposes: 2,
+    Changes: 3,
+    Computes: 4,
+    Effects: 5,
+}
+
+/* START_OF_FILE */
 
 /**
  * 
@@ -22,7 +146,7 @@ function owner() {
 /**
  * @template T
  * @constructor
- * @implements {Compute<T>}
+ * @implements {Signal<T>}
  * @param {function(): T} fn
  */
 function Val(fn) {
@@ -35,38 +159,51 @@ setValProto(Val.prototype, {
      * @this {!Val<T>}
      * @returns {T}
      */
-    get: function () { return this._fn(); }
+    get: function () {
+        return this._fn();
+    }
+}, {
+    /**
+     * @template T 
+     * @this {!Val<T>}
+     * @returns {T}
+     */
+    get: function () {
+        var listen = LISTEN;
+        LISTEN = false;
+        var val = this._fn();
+        LISTEN = listen;
+        return val;
+    }
 });
 
 /**
  * @template T
  * @param {function(): T} fn 
- * @returns {!Compute<T>}
+ * @returns {!Signal<T>}
  */
 function val(fn) {
     return new Val(fn);
 }
 
 /**
- * 
- * @param {!Source} node 
- *
+ * @param {!Op} node 
  */
 function dispose(node) {
     var state = node._state;
     if ((state & State.DisposeFlags) === 0) {
         if (STAGE === Stage.Idle) {
-            node._dispose(TIME);
+            node._dispose();
         } else {
             node._state = (state & ~State.Update) | State.Dispose;
-            DISPOSES._add(/** @type {!Respond} */(node));
+            DISPOSES._add(node);
         }
     }
 }
 
 /**
  * @template S, T
- * @param {!Compute<S> | !Array<!Compute>} src 
+ * @param {!Signal<S> | !Array<!Signal>} src 
  * @param {function((S | !Array<S>), T, (S | undefined)): T} fn 
  * @param {boolean=} defer
  * @returns {function(T): T}
@@ -98,10 +235,10 @@ function when(src, fn, defer) {
     return function (seed) {
         if (isArray) {
             for (var i = 0; i < ln; i++) {
-                next[i] = /** @type {!Array<Compute>} */(src)[i].val;
+                next[i] = /** @type {!Array<!Signal>} */(src)[i].val;
             }
         } else {
-            next = /** @type {!Compute<S>} */(src).val;
+            next = /** @type {!Signal<S>} */(src).val;
         }
         if (defer) {
             defer = false;
@@ -123,7 +260,7 @@ function when(src, fn, defer) {
  * @param {function(T): T} fn 
  * @param {T=} seed 
  * @param {boolean | (function(T, T): boolean)=} eq
- * @returns {Computation<T>}
+ * @returns {!Signal<T>}
  */
 function compute(fn, seed, eq) {
     return new Computation(fn, seed, State.Static, eq);
@@ -134,7 +271,7 @@ function compute(fn, seed, eq) {
  * @param {function(T): T} fn 
  * @param {T=} seed 
  * @param {boolean | (function(T, T): boolean)=} eq
- * @returns {Computation<T>}
+ * @returns {!Signal<T>}
  */
 function $compute(fn, seed, eq) {
     return new Computation(fn, seed, 0, eq);
@@ -153,13 +290,13 @@ function root(fn) {
     LISTEN = false;
     if (STAGE === Stage.Idle) {
         try {
-            node._value = fn();
+            fn();
         } finally {
             OWNER = owner;
             LISTEN = listen;
         }
     } else {
-        node._value = fn();
+        fn();
         OWNER = owner;
         LISTEN = listen;
     }
@@ -208,20 +345,6 @@ function freeze(fn) {
 }
 
 /**
- * @template T
- * @param {Source} node 
- * @returns {T}
- */
-function peek(node) {
-    var listen = LISTEN;
-    LISTEN = false;
-    /** @const {T} */
-    var result = node.val;
-    LISTEN = listen;
-    return result;
-}
-
-/**
  * 
  * @param {Cleanup} fn 
  *
@@ -255,17 +378,27 @@ function recover(fn) {
 /**
  * @noinline
  * @param {Object} obj 
- * @param {!ObjectPropertyDescriptor<?Object>} config 
+ * @param {!ObjectPropertyDescriptor<?Object>} val 
+ * @param {!ObjectPropertyDescriptor<?Object>} peek
  */
-function setValProto(obj, config) {
-    Object.defineProperty(obj, "val", config);
+function setValProto(obj, val, peek) {
+    Object.defineProperties(obj, { val: val, peek: peek });
+}
+
+/**
+ * @template T
+ * @this {React}
+ * @returns {T}
+ */
+function getValue() {
+    return this._value;
 }
 
 /**
  * @template T
  * @abstract
  * @constructor
- * @implements {Respond<T>}
+ * @implements {React}
  * @param {Scope | null} owner 
  * @param {number | undefined} state 
  * @param {T} value 
@@ -313,20 +446,19 @@ function Send(owner, state, value) {
 /**
  * 
  * @param {!Send} node 
- * @param {number} time 
  *
  */
-function sendUpdate(node, time) {
+function sendUpdate(node) {
     /** @type {number} */
     var ln;
     var node1 = node._node1;
     var nodes = node._nodes;
     if (node1 !== null) {
-        receiveUpdate(node1, time);
+        receiveUpdate(node1);
     }
     if (nodes !== null && (ln = nodes.length) > 0) {
         for (var i = 0; i < ln; i++) {
-            receiveUpdate(nodes[i], time);
+            receiveUpdate(nodes[i]);
         }
     }
 }
@@ -358,12 +490,7 @@ function Owner() {
     this._state = 0;
     /**
      * @package
-     * @type {T}
-    */
-    this._value = /** @type {T} */(void 0);
-    /**
-     * @package
-     * @type {?Array<!Respond>}
+     * @type {?Array<!Op>}
      */
     this._owned = null;
     /**
@@ -381,9 +508,8 @@ function Owner() {
 /**
  * @template T 
  * @this {Scope<T>}
- * @param {number} time 
  */
-function disposeOwner(time) {
+function disposeOwner() {
     this._state = State.Disposed;
     this._value = /** @type {T} */(void 0);
     /** @type {number} */
@@ -394,7 +520,7 @@ function disposeOwner(time) {
     var cleanups = this._cleanups;
     if (owned !== null && (ln = owned.length) !== 0) {
         for (i = 0; i < ln; i++) {
-            owned[i]._dispose(time);
+            owned[i]._dispose();
         }
     }
     this._owned = null;
@@ -406,17 +532,6 @@ function disposeOwner(time) {
     this._cleanups = null;
 }
 
-setValProto(Owner.prototype, {
-    /**
-     * @template T
-     * @this {!Owner<T>}
-     * @returns {T}
-     */
-    get: function () {
-        return this._value;
-    }
-});
-
 Owner.prototype._update = function () { };
 
 Owner.prototype._dispose = disposeOwner;
@@ -424,12 +539,10 @@ Owner.prototype._dispose = disposeOwner;
 /**
  * 
  * @param {!Receive} node 
- * @param {number} time 
  */
-function receiveUpdate(node, time) {
+function receiveUpdate(node) {
     var state = node._state;
-    if ((state & State.DisposeFlags) === 0 && node._age < time) {
-        node._age = time;
+    if ((state & State.DisposeFlags) === 0) {
         node._state |= State.Update;
         if ((state & (State.Respond | State.Send)) === State.Send) {
             PENDINGS._add(node);
@@ -437,10 +550,10 @@ function receiveUpdate(node, time) {
             UPDATES._add(node);
         }
         if (node._owned !== null) {
-            receiveDispose(node._owned, time);
+            receiveDispose(node._owned);
         }
         if ((state & State.Send) !== 0) {
-            sendUpdate(node, time);
+            sendUpdate(node);
         }
     }
 }
@@ -448,18 +561,16 @@ function receiveUpdate(node, time) {
 /**
  * 
  * @param {!Array<!Receive>} nodes 
- * @param {number} time 
  */
-function receiveDispose(nodes, time) {
+function receiveDispose(nodes) {
     var ln = nodes.length;
     for (var i = 0; i < ln; i++) {
         var node = nodes[i];
-        node._age = time;
         node._state = State.Dispose;
         DISPOSES._add(node);
         var owned = node._owned;
         if (owned !== null) {
-            receiveDispose(owned, time);
+            receiveDispose(owned);
             owned.length = 0;
         }
     }
@@ -477,11 +588,6 @@ function receiveDispose(nodes, time) {
  */
 function Receive(owner, state, value) {
     Send.call(this, owner, state, value);
-    /**
-     * @package
-     * @type {number}
-     */
-    this._age = 0;
     /**
      * @package
      * @type {?Send}
@@ -504,7 +610,7 @@ function Receive(owner, state, value) {
     this._sourceslots = null;
     /**
      * @package
-     * @type {?Array<!Scope<*>>}
+     * @type {?Array<!React>}
      */
     this._owned = null;
     /**
@@ -561,7 +667,7 @@ function setData(value) {
             if ((state & State.Send) !== 0) {
                 reset();
                 this._value = value;
-                sendUpdate(this, TIME + 1);
+                sendUpdate(this);
                 exec();
             } else {
                 this._value = value;
@@ -582,15 +688,14 @@ function setData(value) {
 /**
  * @template T
  * @this {!Data<T>}
- * @param {number} time
  *
  */
-function updateData(time) {
+function updateData() {
     this._value = this._pending;
     this._pending = NIL;
     this._state &= ~State.Update;
     if ((this._state & State.Send) !== 0) {
-        sendUpdate(this, time);
+        sendUpdate(this);
     }
 }
 
@@ -604,7 +709,7 @@ function disposeData() {
     this._pending = void 0;
 }
 
-setValProto(Data.prototype, { get: getData, set: setData });
+setValProto(Data.prototype, { get: getData, set: setData }, { get: getValue });
 
 /**
  * @this {!Data<T>}
@@ -614,8 +719,6 @@ Data.prototype._update = updateData;
 
 /**
  * @this {!Data<T>}
- * @param {number} time
- *
  */
 Data.prototype._dispose = disposeData;
 
@@ -650,7 +753,7 @@ function setValue(value) {
     return value;
 }
 
-setValProto(Value.prototype, { get: getData, set: setValue });
+setValProto(Value.prototype, { get: getData, set: setValue }, { get: getValue });
 
 /**
  * @this {!Value<T>}
@@ -671,7 +774,7 @@ Value.prototype._dispose = function () {
  * @template T 
  * @constructor
  * @extends {Receive<T>}
- * @implements {Compute<T>}
+ * @implements {Signal<T>}
  * @param {function(T): T} fn 
  * @param {T} value 
  * @param {(function(T,T): boolean)|boolean=} eq
@@ -725,12 +828,11 @@ setValProto(Computation.prototype, {
     get: function () {
         var state = this._state;
         if ((state & State.DisposeFlags) === 0 && STAGE !== Stage.Idle) {
-            if (this._age === TIME) {
+            if ((state & State.Update) !== 0) {
                 if ((state & State.Updated) !== 0) {
                     throw new Error();
-                } else if ((state & State.Update) !== 0) {
-                    this._update(this._age);
                 }
+                this._update();
             }
             if (LISTEN) {
                 logRead(this, /** @type {!Receive} */(OWNER));
@@ -738,13 +840,12 @@ setValProto(Computation.prototype, {
         }
         return this._value;
     }
-});
+}, { get: getValue });
 
 /**
- * @param {number} time
  *
  */
-Computation.prototype._update = function (time) {
+Computation.prototype._update = function () {
     /** @type {number} */
     var i;
     /** @type {number} */
@@ -761,11 +862,10 @@ Computation.prototype._update = function (time) {
         }
         cleanups.length = 0;
     }
-    if ((state & State.Static) === 0) {
+    OWNER = this;
+    if (LISTEN = (state & State.Static) === 0) {
         cleanupReceiver(this);
     }
-    OWNER = this;
-    LISTEN = (state & State.Static) === 0;
     this._state |= State.Updated;
     var recovers = this._recovers;
     if (recovers !== null) {
@@ -788,13 +888,10 @@ Computation.prototype._update = function (time) {
 
 /**
  * 
- * @param {number} time
- * 
  */
-Computation.prototype._dispose = function (time) {
+Computation.prototype._dispose = function () {
     this._fn = null;
-    this._age = time;
-    disposeOwner.call(this, time);
+    disposeOwner.call(this);
     disposeSender(this);
     cleanupReceiver(this);
 };
@@ -811,7 +908,7 @@ function Queue(stage) {
     this._stage = stage;
     /**
      * @package
-     * @type {!Array<?Respond>}
+     * @type {!Array<?Op>}
      */
     this._items = [];
     /**
@@ -823,7 +920,7 @@ function Queue(stage) {
 
 /**
  * @package
- * @param {!Respond} item
+ * @param {!Op} item
  */
 Queue.prototype._add = function (item) {
     this._items[this._count++] = item;
@@ -831,10 +928,9 @@ Queue.prototype._add = function (item) {
 
 /**
  * @package
- * @param {number} time
  * @returns {number}
  */
-Queue.prototype._run = function (time) {
+Queue.prototype._run = function () {
     STAGE = this._stage;
     var error = 0;
     for (var i = 0; i < this._count; i++) {
@@ -843,16 +939,17 @@ Queue.prototype._run = function (time) {
         if ((state & (State.Update | State.Dispose)) !== 0) {
             try {
                 if ((state & State.Update) !== 0) {
-                    item._update(time);
+                    item._update();
                 } else {
-                    item._dispose(time);
+                    item._dispose();
                 }
-            } catch(err) {
+            } catch (err) {
                 error = 1;
                 if ((state & State.Update) !== 0) {
                     item._value = err;
                     item._state |= State.Error;
                 }
+                item._state &= ~State.UpdateFlags;
             }
         }
         this._items[i] = null;
@@ -866,10 +963,6 @@ Queue.prototype._run = function (time) {
  * @const {!Nil}
  */
 var NIL = /** @type {!Nil} */({});
-/**
- * @type {number}
- */
-var TIME = 0;
 /**
  * @type {number}
  */
@@ -959,8 +1052,6 @@ function exec() {
  *
  */
 function start() {
-    /** @type {number} */
-    var time;
     var cycle = 0;
     var errors = 0;
     var disposes = DISPOSES;
@@ -968,21 +1059,20 @@ function start() {
     var computes = PENDINGS;
     var effects = UPDATES;
     do {
-        time = ++TIME;
         if (disposes._count !== 0) {
-            errors += disposes._run(time);
+            errors += disposes._run();
         }
         if (changes._count !== 0) {
-            errors += changes._run(time);
+            errors += changes._run();
         }
         if (disposes._count !== 0) {
-            errors += disposes._run(time);
+            errors += disposes._run();
         }
         if (computes._count !== 0) {
-            errors += computes._run(time);
+            errors += computes._run();
         }
         if (effects._count !== 0) {
-            errors += effects._run(time);
+            errors += effects._run();
         }
         if (errors !== 0) {
             throw new Error("Zorn: Error");
@@ -1097,5 +1187,5 @@ export {
     root, dispose, val, owner,
     compute, $compute, when,
     data, value, nil, freeze, recover,
-    peek, cleanup, Data, Value, Computation
+    cleanup, Data, Value, Computation
 };
