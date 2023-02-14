@@ -4,9 +4,6 @@ function nil() {
 function owner() {
     return OWNER;
 }
-function listener() {
-    return LISTENER;
-}
 function Val(fn) {
     this._fn = fn;
 }
@@ -48,8 +45,10 @@ function when(src, fn, defer) {
         if (defer) {
             defer = false;
         } else {
-            LISTENER = null;
+            var listen = LISTEN;
+            LISTEN = false;
             seed = fn(next, seed, prev);
+            LISTEN = listen;
         }
         var temp = next;
         next = prev;
@@ -66,20 +65,20 @@ function $compute(fn, seed, eq) {
 function root(fn) {
     var node = new Owner();
     var owner = OWNER;
-    var listener = LISTENER;
+    var listen = LISTEN;
     OWNER = node;
-    LISTENER = null;
+    LISTEN = false;
     if (STAGE === 0) {
         try {
             node._value = fn();
         } finally {
             OWNER = owner;
-            LISTENER = listener;
+            LISTEN = listen;
         }
     } else {
         node._value = fn();
         OWNER = owner;
-        LISTENER = listener;
+        LISTEN = listen;
     }
     return node;
 }
@@ -106,10 +105,10 @@ function freeze(fn) {
     return result;
 }
 function peek(node) {
-    var listener = LISTENER;
-    LISTENER = null;
+    var listen = LISTEN;
+    LISTEN = false;
     var result = node.val;
-    LISTENER = listener;
+    LISTEN = listen;
     return result;
 }
 function cleanup(fn) {
@@ -254,8 +253,8 @@ function Data(value) {
 }
 function getData() {
     if ((this._state & 6) === 0) {
-        if (LISTENER !== null) {
-            logRead(this, LISTENER);
+        if (LISTEN) {
+            logRead(this, (OWNER));
         }
     }
     return this._value;
@@ -319,14 +318,15 @@ Value.prototype._dispose = function () {
 };
 function Computation(fn, value, state, eq) {
     var owner = OWNER;
-    var listener = LISTENER;
+    var listen = LISTEN;
     Receive.call(this, owner, state);
     this._eq = eq;
     if (eq === false) {
         this._state |= 128;
     }
     this._fn = fn;
-    OWNER = LISTENER = this;
+    OWNER = this;
+    LISTEN = true;
     if (STAGE === 0) {
         reset();
         STAGE = 1;
@@ -337,13 +337,14 @@ function Computation(fn, value, state, eq) {
             }
         } finally {
             STAGE = 0;
-            OWNER = LISTENER = null;
+            OWNER = null;
+            LISTEN = false;
         }
     } else {
         this._value = fn(value);
     }
     OWNER = owner;
-    LISTENER = listener;
+    LISTEN = listen;
 };
 setValProto(Computation.prototype, {
     get: function () {
@@ -356,8 +357,8 @@ setValProto(Computation.prototype, {
                     this._update(this._age);
                 }
             }
-            if (LISTENER !== null) {
-                logRead(this, LISTENER);
+            if (LISTEN) {
+                logRead(this, (OWNER));
             }
         }
         return this._value;
@@ -367,8 +368,9 @@ Computation.prototype._update = function (time) {
     var i;
     var ln;
     var owner = OWNER;
-    var listener = LISTENER;
-    OWNER = LISTENER = null;
+    var listen = LISTEN;
+    OWNER = null;
+    LISTEN = false;
     var state = this._state;
     var cleanups = this._cleanups;
     if (cleanups !== null && (ln = cleanups.length) !== 0) {
@@ -381,7 +383,7 @@ Computation.prototype._update = function (time) {
         cleanupReceiver(this);
     }
     OWNER = this;
-    LISTENER = (state & 1) !== 0 ? null : this;
+    LISTEN = (state & 1) === 0;
     this._state |= 8;
     var recovers = this._recovers;
     if (recovers !== null) {
@@ -399,7 +401,7 @@ Computation.prototype._update = function (time) {
     }
     this._state &= ~24;
     OWNER = owner;
-    LISTENER = listener;
+    LISTEN = listen;
 };
 Computation.prototype._dispose = function (time) {
     this._fn = null;
@@ -450,7 +452,7 @@ var CHANGES = new Queue(3);
 var PENDINGS = new Queue(4);
 var UPDATES = new Queue(5);
 var OWNER = null;
-var LISTENER = null;
+var LISTEN = false;
 function reset() {
     DISPOSES._count = CHANGES._count = PENDINGS._count = UPDATES._count = 0;
 }
@@ -489,7 +491,7 @@ function exec() {
     } finally {
         STAGE = 0;
         OWNER = owner;
-        LISTENER = null;
+        LISTEN = false;
     }
 }
 function start() {
@@ -598,7 +600,7 @@ function forgetSender(receive, slot) {
     }
 }
 export {
-    root, dispose, val, owner, listener,
+    root, dispose, val, owner,
     compute, $compute, when,
     data, value, nil, freeze, recover,
     peek, cleanup, Data, Value, Computation

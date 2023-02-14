@@ -20,14 +20,6 @@ function owner() {
 }
 
 /**
- * 
- * @returns {?Receive}
- */
-function listener() {
-    return LISTENER;
-}
-
-/**
  * @template T
  * @constructor
  * @implements {Compute<T>}
@@ -114,8 +106,10 @@ function when(src, fn, defer) {
         if (defer) {
             defer = false;
         } else {
-            LISTENER = null;
+            var listen = LISTEN;
+            LISTEN = false;
             seed = fn(next, seed, prev);
+            LISTEN = listen;
         }
         var temp = next;
         next = prev;
@@ -154,20 +148,20 @@ function $compute(fn, seed, eq) {
 function root(fn) {
     var node = new Owner();
     var owner = OWNER;
-    var listener = LISTENER;
+    var listen = LISTEN;
     OWNER = node;
-    LISTENER = null;
+    LISTEN = false;
     if (STAGE === Stage.Idle) {
         try {
             node._value = fn();
         } finally {
             OWNER = owner;
-            LISTENER = listener;
+            LISTEN = listen;
         }
     } else {
         node._value = fn();
         OWNER = owner;
-        LISTENER = listener;
+        LISTEN = listen;
     }
     return node;
 }
@@ -219,18 +213,11 @@ function freeze(fn) {
  * @returns {T}
  */
 function peek(node) {
-    /**
-     * @const
-     * @type {?Receive}
-     */
-    var listener = LISTENER;
-    LISTENER = null;
-    /**
-     * @const
-     * @type {T}
-     */
+    var listen = LISTEN;
+    LISTEN = false;
+    /** @const {T} */
     var result = node.val;
-    LISTENER = listener;
+    LISTEN = listen;
     return result;
 }
 
@@ -554,8 +541,8 @@ function Data(value) {
  */
 function getData() {
     if ((this._state & State.DisposeFlags) === 0) {
-        if (LISTENER !== null) {
-            logRead(this, LISTENER);
+        if (LISTEN) {
+            logRead(this, /** @type {!Receive} */(OWNER));
         }
     }
     return this._value;
@@ -692,7 +679,7 @@ Value.prototype._dispose = function () {
  */
 function Computation(fn, value, state, eq) {
     var owner = OWNER;
-    var listener = LISTENER;
+    var listen = LISTEN;
     Receive.call(this, owner, state);
     /**
      * @package
@@ -707,7 +694,8 @@ function Computation(fn, value, state, eq) {
      * @type {?function(T): T}
      */
     this._fn = fn;
-    OWNER = LISTENER = this;
+    OWNER = this;
+    LISTEN = true;
     if (STAGE === Stage.Idle) {
         reset();
         STAGE = Stage.Started;
@@ -718,13 +706,14 @@ function Computation(fn, value, state, eq) {
             }
         } finally {
             STAGE = Stage.Idle;
-            OWNER = LISTENER = null;
+            OWNER = null;
+            LISTEN = false;
         }
     } else {
         this._value = fn(value);
     }
     OWNER = owner;
-    LISTENER = listener;
+    LISTEN = listen;
 };
 
 setValProto(Computation.prototype, {
@@ -743,8 +732,8 @@ setValProto(Computation.prototype, {
                     this._update(this._age);
                 }
             }
-            if (LISTENER !== null) {
-                logRead(this, LISTENER);
+            if (LISTEN) {
+                logRead(this, /** @type {!Receive} */(OWNER));
             }
         }
         return this._value;
@@ -761,8 +750,9 @@ Computation.prototype._update = function (time) {
     /** @type {number} */
     var ln;
     var owner = OWNER;
-    var listener = LISTENER;
-    OWNER = LISTENER = null;
+    var listen = LISTEN;
+    OWNER = null;
+    LISTEN = false;
     var state = this._state;
     var cleanups = this._cleanups;
     if (cleanups !== null && (ln = cleanups.length) !== 0) {
@@ -775,7 +765,7 @@ Computation.prototype._update = function (time) {
         cleanupReceiver(this);
     }
     OWNER = this;
-    LISTENER = (state & State.Static) !== 0 ? null : this;
+    LISTEN = (state & State.Static) === 0;
     this._state |= State.Updated;
     var recovers = this._recovers;
     if (recovers !== null) {
@@ -793,7 +783,7 @@ Computation.prototype._update = function (time) {
     }
     this._state &= ~State.UpdateFlags;
     OWNER = owner;
-    LISTENER = listener;
+    LISTEN = listen;
 };
 
 /**
@@ -908,10 +898,6 @@ var OWNER = null;
  * @type {boolean}
  */
 var LISTEN = false;
-/**
- * @type {Receive | null}
- */
-var LISTENER = null;
 
 /**
  *
@@ -965,7 +951,7 @@ function exec() {
     } finally {
         STAGE = Stage.Idle;
         OWNER = owner;
-        LISTENER = null;
+        LISTEN = false;
     }
 }
 
@@ -1108,7 +1094,7 @@ function forgetSender(receive, slot) {
 }
 
 export {
-    root, dispose, val, owner, listener,
+    root, dispose, val, owner,
     compute, $compute, when,
     data, value, nil, freeze, recover,
     peek, cleanup, Data, Value, Computation

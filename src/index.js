@@ -1,5 +1,5 @@
 import { 
-    root, dispose, val, owner, listener,
+    root, dispose, val, owner,
     compute, $compute, when,
     data, value, nil, freeze, recover,
     peek, cleanup, Data, Value, Computation
@@ -15,7 +15,6 @@ window["data"] = data;
 window["value"] = value;
 window["nil"] = nil;
 window["owner"] = owner;
-window["listener"] = listener;
 window["freeze"] = freeze;
 window["recover"] = recover;
 window["peek"] = peek;

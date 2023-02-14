@@ -5,9 +5,6 @@ var Zorn = (function() {
 	function owner() {
 	    return OWNER;
 	}
-	function listener() {
-	    return LISTENER;
-	}
 	function Val(fn) {
 	    this._fn = fn;
 	}
@@ -49,8 +46,10 @@ var Zorn = (function() {
 	        if (defer) {
 	            defer = false;
 	        } else {
-	            LISTENER = null;
+	            var listen = LISTEN;
+	            LISTEN = false;
 	            seed = fn(next, seed, prev);
+	            LISTEN = listen;
 	        }
 	        var temp = next;
 	        next = prev;
@@ -67,20 +66,20 @@ var Zorn = (function() {
 	function root(fn) {
 	    var node = new Owner();
 	    var owner = OWNER;
-	    var listener = LISTENER;
+	    var listen = LISTEN;
 	    OWNER = node;
-	    LISTENER = null;
+	    LISTEN = false;
 	    if (STAGE === 0) {
 	        try {
 	            node._value = fn();
 	        } finally {
 	            OWNER = owner;
-	            LISTENER = listener;
+	            LISTEN = listen;
 	        }
 	    } else {
 	        node._value = fn();
 	        OWNER = owner;
-	        LISTENER = listener;
+	        LISTEN = listen;
 	    }
 	    return node;
 	}
@@ -107,10 +106,10 @@ var Zorn = (function() {
 	    return result;
 	}
 	function peek(node) {
-	    var listener = LISTENER;
-	    LISTENER = null;
+	    var listen = LISTEN;
+	    LISTEN = false;
 	    var result = node.val;
-	    LISTENER = listener;
+	    LISTEN = listen;
 	    return result;
 	}
 	function cleanup(fn) {
@@ -255,8 +254,8 @@ var Zorn = (function() {
 	}
 	function getData() {
 	    if ((this._state & 6) === 0) {
-	        if (LISTENER !== null) {
-	            logRead(this, LISTENER);
+	        if (LISTEN) {
+	            logRead(this, (OWNER));
 	        }
 	    }
 	    return this._value;
@@ -320,14 +319,15 @@ var Zorn = (function() {
 	};
 	function Computation(fn, value, state, eq) {
 	    var owner = OWNER;
-	    var listener = LISTENER;
+	    var listen = LISTEN;
 	    Receive.call(this, owner, state);
 	    this._eq = eq;
 	    if (eq === false) {
 	        this._state |= 128;
 	    }
 	    this._fn = fn;
-	    OWNER = LISTENER = this;
+	    OWNER = this;
+	    LISTEN = true;
 	    if (STAGE === 0) {
 	        reset();
 	        STAGE = 1;
@@ -338,13 +338,14 @@ var Zorn = (function() {
 	            }
 	        } finally {
 	            STAGE = 0;
-	            OWNER = LISTENER = null;
+	            OWNER = null;
+	            LISTEN = false;
 	        }
 	    } else {
 	        this._value = fn(value);
 	    }
 	    OWNER = owner;
-	    LISTENER = listener;
+	    LISTEN = listen;
 	};
 	setValProto(Computation.prototype, {
 	    get: function () {
@@ -357,8 +358,8 @@ var Zorn = (function() {
 	                    this._update(this._age);
 	                }
 	            }
-	            if (LISTENER !== null) {
-	                logRead(this, LISTENER);
+	            if (LISTEN) {
+	                logRead(this, (OWNER));
 	            }
 	        }
 	        return this._value;
@@ -368,8 +369,9 @@ var Zorn = (function() {
 	    var i;
 	    var ln;
 	    var owner = OWNER;
-	    var listener = LISTENER;
-	    OWNER = LISTENER = null;
+	    var listen = LISTEN;
+	    OWNER = null;
+	    LISTEN = false;
 	    var state = this._state;
 	    var cleanups = this._cleanups;
 	    if (cleanups !== null && (ln = cleanups.length) !== 0) {
@@ -382,7 +384,7 @@ var Zorn = (function() {
 	        cleanupReceiver(this);
 	    }
 	    OWNER = this;
-	    LISTENER = (state & 1) !== 0 ? null : this;
+	    LISTEN = (state & 1) === 0;
 	    this._state |= 8;
 	    var recovers = this._recovers;
 	    if (recovers !== null) {
@@ -400,7 +402,7 @@ var Zorn = (function() {
 	    }
 	    this._state &= ~24;
 	    OWNER = owner;
-	    LISTENER = listener;
+	    LISTEN = listen;
 	};
 	Computation.prototype._dispose = function (time) {
 	    this._fn = null;
@@ -451,7 +453,7 @@ var Zorn = (function() {
 	var PENDINGS = new Queue(4);
 	var UPDATES = new Queue(5);
 	var OWNER = null;
-	var LISTENER = null;
+	var LISTEN = false;
 	function reset() {
 	    DISPOSES._count = CHANGES._count = PENDINGS._count = UPDATES._count = 0;
 	}
@@ -490,7 +492,7 @@ var Zorn = (function() {
 	    } finally {
 	        STAGE = 0;
 	        OWNER = owner;
-	        LISTENER = null;
+	        LISTEN = false;
 	    }
 	}
 	function start() {
@@ -598,5 +600,5 @@ var Zorn = (function() {
 	        }
 	    }
 	}
-	return { root: root, dispose: dispose, val: val, owner: owner, listener: listener, compute: compute, $compute: $compute, when: when, data: data, value: value, nil: nil, freeze: freeze, recover: recover, peek: peek, cleanup: cleanup, Data: Data, Value: Value, Computation: Computation };
+	return { root: root, dispose: dispose, val: val, owner: owner, compute: compute, $compute: $compute, when: when, data: data, value: value, nil: nil, freeze: freeze, recover: recover, peek: peek, cleanup: cleanup, Data: Data, Value: Value, Computation: Computation };
 })();
