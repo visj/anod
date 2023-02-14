@@ -444,10 +444,10 @@ function receiveUpdate(node, time) {
     if ((state & State.DisposeFlags) === 0 && node._age < time) {
         node._age = time;
         node._state |= State.Update;
-        if ((state & State.Compute) !== 0) {
-            COMPUTES._add(node);
+        if ((state & (State.Respond | State.Send)) === State.Send) {
+            PENDINGS._add(node);
         } else {
-            EFFECTS._add(node);
+            UPDATES._add(node);
         }
         if (node._owned !== null) {
             receiveDispose(node._owned, time);
@@ -696,15 +696,11 @@ function Computation(fn, value, state, eq) {
     Receive.call(this, owner, state);
     /**
      * @package
-     * @type {(function(T,T): boolean)|undefined}
+     * @type {(function(T,T): boolean)|boolean|undefined}
      */
-    this._eq = void 0;
-    if (eq !== void 0) {
-        if (eq === false) {
-            this._state &= ~State.Compute;
-        } else {
-            this._eq = /** @type {function(T,T): boolean} */(eq);
-        }
+    this._eq = eq;
+    if (eq === false) {
+        this._state |= State.Respond;
     }
     /**
      * @package
@@ -852,7 +848,7 @@ Queue.prototype._run = function (time) {
     STAGE = this._stage;
     var error = 0;
     for (var i = 0; i < this._count; i++) {
-        var item = /** @type {!Respond} */(this._items[i]);
+        var item = this._items[i];
         var state = item._state;
         if ((state & (State.Update | State.Dispose)) !== 0) {
             try {
@@ -899,15 +895,19 @@ var CHANGES = new Queue(Stage.Changes);
 /**
  * @const {!Queue}
  */
-var COMPUTES = new Queue(Stage.Computes);
+var PENDINGS = new Queue(Stage.Computes);
 /**
  * @const {!Queue}
  */
-var EFFECTS = new Queue(Stage.Effects);
+var UPDATES = new Queue(Stage.Effects);
 /**
  * @type {Scope | null}
  */
 var OWNER = null;
+/**
+ * @type {boolean}
+ */
+var LISTEN = false;
 /**
  * @type {Receive | null}
  */
@@ -917,7 +917,7 @@ var LISTENER = null;
  *
  */
 function reset() {
-    DISPOSES._count = CHANGES._count = COMPUTES._count = EFFECTS._count = 0;
+    DISPOSES._count = CHANGES._count = PENDINGS._count = UPDATES._count = 0;
 }
 
 /**
@@ -979,8 +979,8 @@ function start() {
     var errors = 0;
     var disposes = DISPOSES;
     var changes = CHANGES;
-    var computes = COMPUTES;
-    var effects = EFFECTS;
+    var computes = PENDINGS;
+    var effects = UPDATES;
     do {
         time = ++TIME;
         if (disposes._count !== 0) {

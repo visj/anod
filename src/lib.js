@@ -116,8 +116,8 @@ export var State = {
     Updated: 8,
     Update: 16,
     Send: 32,
-    Compute: 64,
-    Error: 128,
+    Error: 64,
+    Respond: 128,
 }
 
 /**

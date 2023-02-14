@@ -66,6 +66,7 @@ const isSolution = (layers, answer) => answer.every((_, i) => SOLUTIONS[layers][
 async function main() {
   const report = {};
   // report.maverick = { fn: runMaverick, runs: [], avg: [] };
+  report['preact/signals'] = { fn: runPreact, runs: [] };
   report.zornStatic = { fn: runZornStatic, runs: [] };
   // report.solid = { fn: runSolid, runs: [] };
   // report.usignal = { fn: runUsignal, runs: [] };
@@ -74,7 +75,6 @@ async function main() {
   // Has no way to dispose so can't consider it feature comparable.
   // report.reactively = { fn: runReactively, runs: [], avg: [] };
   // These libraries are not comparable in terms of features.
-  report['preact/signals'] = { fn: runPreact, runs: [] };
   // report.zornBind = { fn: runZornBind, runs: [] };
   // report.cellx = { fn: runCellx, runs: [] };
   // warm up first

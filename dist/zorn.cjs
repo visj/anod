@@ -210,10 +210,10 @@ function receiveUpdate(node, time) {
     if ((state & 6) === 0 && node._age < time) {
         node._age = time;
         node._state |= 16;
-        if ((state & 64) !== 0) {
-            COMPUTES._add(node);
+        if ((state & (128 | 32)) === 32) {
+            PENDINGS._add(node);
         } else {
-            EFFECTS._add(node);
+            UPDATES._add(node);
         }
         if (node._owned !== null) {
             receiveDispose(node._owned, time);
@@ -321,13 +321,9 @@ function Computation(fn, value, state, eq) {
     var owner = OWNER;
     var listener = LISTENER;
     Receive.call(this, owner, state);
-    this._eq = void 0;
-    if (eq !== void 0) {
-        if (eq === false) {
-            this._state &= ~64;
-        } else {
-            this._eq = (eq);
-        }
+    this._eq = eq;
+    if (eq === false) {
+        this._state |= 128;
     }
     this._fn = fn;
     OWNER = LISTENER = this;
@@ -424,7 +420,7 @@ Queue.prototype._run = function (time) {
     STAGE = this._stage;
     var error = 0;
     for (var i = 0; i < this._count; i++) {
-        var item = (this._items[i]);
+        var item = this._items[i];
         var state = item._state;
         if ((state & (16 | 4)) !== 0) {
             try {
@@ -437,7 +433,7 @@ Queue.prototype._run = function (time) {
                 error = 1;
                 if ((state & 16) !== 0) {
                     item._value = err;
-                    item._state |= 128;
+                    item._state |= 64;
                 }
             }
         }
@@ -451,12 +447,12 @@ var TIME = 0;
 var STAGE = 0;
 var DISPOSES = new Queue(2);
 var CHANGES = new Queue(3);
-var COMPUTES = new Queue(4);
-var EFFECTS = new Queue(5);
+var PENDINGS = new Queue(4);
+var UPDATES = new Queue(5);
 var OWNER = null;
 var LISTENER = null;
 function reset() {
-    DISPOSES._count = CHANGES._count = COMPUTES._count = EFFECTS._count = 0;
+    DISPOSES._count = CHANGES._count = PENDINGS._count = UPDATES._count = 0;
 }
 function logRead(from, to) {
     from._state |= 32;
@@ -502,8 +498,8 @@ function start() {
     var errors = 0;
     var disposes = DISPOSES;
     var changes = CHANGES;
-    var computes = COMPUTES;
-    var effects = EFFECTS;
+    var computes = PENDINGS;
+    var effects = UPDATES;
     do {
         time = ++TIME;
         if (disposes._count !== 0) {
