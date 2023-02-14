@@ -132,7 +132,7 @@ function when(src, fn, defer) {
  * @returns {Computation<T>}
  */
 function compute(fn, seed, eq) {
-    return new Computation(fn, seed, State.Compare | State.Static, eq);
+    return new Computation(fn, seed, State.Compute | State.Static, eq);
 }
 
 /**
@@ -143,7 +143,7 @@ function compute(fn, seed, eq) {
  * @returns {Computation<T>}
  */
 function $compute(fn, seed, eq) {
-    return new Computation(fn, seed, State.Compare, eq);
+    return new Computation(fn, seed, State.Compute, eq);
 }
 
 /**
@@ -464,7 +464,7 @@ function receiveUpdate(node, time) {
     if ((state & State.DisposeFlags) === 0 && node._age < time) {
         node._age = time;
         node._state |= State.Update;
-        if ((state & State.Compare) !== 0) {
+        if ((state & State.Compute) !== 0) {
             COMPUTES.add(node);
         } else {
             EFFECTS.add(node);
@@ -721,7 +721,7 @@ function Computation(fn, value, state, eq) {
     this._eq = void 0;
     if (eq !== void 0) {
         if (eq === false) {
-            this._state &= ~State.Compare;
+            this._state &= ~State.Compute;
         } else {
             this._eq = /** @type {function(T,T): boolean} */(eq);
         }
