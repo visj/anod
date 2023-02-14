@@ -4,74 +4,6 @@ function nil() {
 function owner() {
     return OWNER;
 }
-function Val(fn) {
-    this._fn = fn;
-}
-setValProto(Val.prototype, {
-    get: function () {
-        return this._fn();
-    }
-}, {
-    get: function () {
-        var listen = LISTEN;
-        LISTEN = false;
-        var val = this._fn();
-        LISTEN = listen;
-        return val;
-    }
-});
-function val(fn) {
-    return new Val(fn);
-}
-function dispose(node) {
-    var state = node._state;
-    if ((state & 6) === 0) {
-        if (STAGE === 0) {
-            node._dispose();
-        } else {
-            node._state = (state & ~16) | 4;
-            DISPOSES._add(node);
-        }
-    }
-}
-function when(src, fn, defer) {
-    var prev;
-    var ln;
-    var next;
-    var isArray = Array.isArray(src);
-    if (isArray) {
-        ln = (src).length;
-        prev = new Array(ln);
-        next = new Array(ln);
-    }
-    return function (seed) {
-        if (isArray) {
-            for (var i = 0; i < ln; i++) {
-                next[i] = (src)[i].val;
-            }
-        } else {
-            next = (src).val;
-        }
-        if (defer) {
-            defer = false;
-        } else {
-            var listen = LISTEN;
-            LISTEN = false;
-            seed = fn(next, seed, prev);
-            LISTEN = listen;
-        }
-        var temp = next;
-        next = prev;
-        prev = temp;
-        return seed;
-    };
-}
-function compute(fn, seed, eq) {
-    return new Computation(fn, seed, 1, eq);
-}
-function $compute(fn, seed, eq) {
-    return new Computation(fn, seed, 0, eq);
-}
 function root(fn) {
     var node = new Owner();
     var owner = OWNER;
@@ -92,11 +24,58 @@ function root(fn) {
     }
     return node;
 }
+function compute(fn, seed, eq) {
+    return new Computation(fn, seed, 1, eq);
+}
+function $compute(fn, seed, eq) {
+    return new Computation(fn, seed, 0, eq);
+}
+function when(src, fn, defer) {
+    var ln;
+    var srcVal;
+    var isArray = Array.isArray(src);
+    if (isArray) {
+        ln = src.length;
+        srcVal = new Array(ln);
+    }
+    return function (seed) {
+        if (isArray) {
+            for (var i = 0; i < ln; i++) {
+                srcVal[i] = src[i].val;
+            }
+        } else {
+            srcVal = src.val;
+        }
+        if (defer) {
+            defer = false;
+        } else {
+            var listen = LISTEN;
+            LISTEN = false;
+            seed = fn(srcVal, seed);
+            LISTEN = listen;
+        }
+        return seed;
+    };
+}
+function val(fn) {
+    return new Val(fn);
+}
 function data(value) {
     return new Data(value);
 }
 function value(value, eq) {
     return new Value(value, eq);
+}
+function dispose(node) {
+    var state = node._state;
+    if ((state & 6) === 0) {
+        if (STAGE === 0) {
+            node._dispose();
+        } else {
+            node._state = (state & ~16) | 4;
+            DISPOSES._add(node);
+        }
+    }
 }
 function freeze(fn) {
     var result;
@@ -134,6 +113,22 @@ function recover(fn) {
         }
     }
 }
+function Val(fn) {
+    this._fn = fn;
+}
+setValProto(Val.prototype, {
+    get: function () {
+        return this._fn();
+    }
+}, {
+    get: function () {
+        var listen = LISTEN;
+        LISTEN = false;
+        var val = this._fn();
+        LISTEN = listen;
+        return val;
+    }
+});
 function setValProto(obj, val, peek) {
     Object.defineProperties(obj, { val: val, peek: peek });
 }

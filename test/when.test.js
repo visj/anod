@@ -65,8 +65,8 @@ describe("when(...)", function () {
         root(function () {
             var a = data(1);
 
-            var c = compute(when(a, function (v, sum) {
-                return v + sum;
+            var c = compute(when(a, function (val, sum) {
+                return val + sum;
             }), 0);
 
             assert.equal(c.val, 1);
@@ -85,8 +85,8 @@ describe("when(...)", function () {
     it("suppresses initial run when onchanges is true", function () {
         root(function () {
             var a = data(1);
-            var c = compute(when(a, function (val) { 
-                return val * 2;
+            var c = compute(when(a, function () { 
+                return a.val * 2;
             }, true), 0);
 
             assert.equal(c.val, 0);
