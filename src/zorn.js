@@ -1190,13 +1190,16 @@ function forgetReceiver(send, slot) {
 function cleanupSender(send) {
     /** @type {number} */
     var ln;
+    /** @const {?Receive} */
     var node1 = send._node1;
+    /** @const {?Array<!Receive>} */
     var nodes = send._nodes;
     if (node1 !== null) {
         forgetSender(node1, send._node1slot);
         send._node1 = null;
     }
     if (nodes !== null && (ln = nodes.length) !== 0) {
+        /** @const {?Array<number>} */
         var nodeslots = send._nodeslots;
         for (; ln-- !== 0;) {
             forgetSender(nodes.pop(), nodeslots.pop());
@@ -1214,9 +1217,13 @@ function forgetSender(receive, slot) {
         if (slot === -1) {
             receive._source1 = null;
         } else {
+            /** @const {?Array<Send>} */
             var sources = receive._sources;
+            /** @const {?Array<number>} */
             var sourceslots = receive._sourceslots;
+            /** @const {Send} */
             var last = sources.pop();
+            /** @const {number} */
             var lastslot = sourceslots.pop();
             if (slot !== sources.length) {
                 sources[slot] = last;
