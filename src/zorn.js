@@ -654,7 +654,6 @@ function setData(value) {
 /**
  * @template T
  * @this {!Data<T>}
- *
  */
 function updateData() {
     this._value = this._pending;

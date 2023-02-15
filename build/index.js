@@ -103,7 +103,7 @@ function writeBundle(srcCode, mjs, cjs, iife) {
 
 function bundleMinify() {
     var src = path.join(root, 'src');
-    var cmd = `closure-compiler -O=ADVANCED -W=VERBOSE --externs=${path.join(root, 'externs', 'zorn.js')} --module_resolution=NODE --js ${path.join(src, 'zorn.js')} --js ${path.join(__dirname, 'src', 'browser.js')}`;
+    var cmd = `closure-compiler --language_out=ECMASCRIPT5 -O=ADVANCED -W=VERBOSE --externs=${path.join(root, 'externs', 'zorn.js')} --module_resolution=NODE --js ${path.join(src, 'zorn.js')} --js ${path.join(__dirname, 'src', 'browser.js')}`;
     exec(cmd, function (err, stdout, stderr) {
         if (err) {
             console.error(err);
