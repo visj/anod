@@ -1,11 +1,11 @@
 import assert from 'assert';
-import { root, compute, data, freeze } from './helper/zorn.js';
+import { root, compute, signal, batch } from './helper/zorn.js';
 
 describe("exceptions within computations", function () {
     it("halt updating", function () {
         root(function () {
-            var a = data(false)
-            var b = data(1);
+            var a = signal(false)
+            var b = signal(1);
             compute(function () {
                 if (a.val) {
                     throw new Error();
@@ -16,7 +16,7 @@ describe("exceptions within computations", function () {
             });
 
             assert.throws(function () {
-                freeze(function () {
+                batch(function () {
                     a.val = true;
                     b.val = 2;
                 });
@@ -29,8 +29,8 @@ describe("exceptions within computations", function () {
 
     it("leave non-excepted parts of dependency tree intact", function () {
         root(function () {
-            var a = data(false);
-            var b = data(1);
+            var a = signal(false);
+            var b = signal(1);
             compute(function () {
                 if (a.val) {
                     throw new Error();
@@ -39,7 +39,7 @@ describe("exceptions within computations", function () {
             var d = compute(function () { return b.val });
 
             assert.throws(function () {
-                freeze(function () {
+                batch(function () {
                     a.val = true;
                     b.val = 2;
                 });

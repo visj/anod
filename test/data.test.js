@@ -1,34 +1,34 @@
 import assert from 'assert';
-import { root, compute, data, freeze } from './helper/zorn.js';
+import { root, compute, signal, batch } from './helper/zorn.js';
 
 describe("data", function () {
     it("takes and returns an initial value", function () {
-        assert.equal(data(1).val, 1);
+        assert.equal(signal(1).val, 1);
     });
 
     it("can be set by passing in a new value", function () {
-        var d = data(1);
+        var d = signal(1);
         d.val = 2;
         assert.equal(d.val, 2);
     });
 
     it("returns value being set", function () {
-        var d = data(1);
+        var d = signal(1);
         assert.equal(d.val = 2, 2);
     });
 
-    it("does not throw if set to the same value twice in a freeze", function () {
-        var d = data(1);
-        freeze(function () {
+    it("does not throw if set to the same value twice in a batch", function () {
+        var d = signal(1);
+        batch(function () {
             d.val = 2;
             d.val = 2;
         });
         assert.equal(d.val, 2);
     });
 
-    it("throws if set to two different values in a freeze", function () {
-        var d = data(1);
-        freeze(function () {
+    it("throws if set to two different values in a batch", function () {
+        var d = signal(1);
+        batch(function () {
             d.val = 2;
             assert.throws(function () {
                 d.val = 3;
@@ -38,7 +38,7 @@ describe("data", function () {
 
     it("does not throw if set to the same value twice in a computation", function () {
         root(function () {
-            var d = data(1);
+            var d = signal(1);
             compute(function () {
                 d.val = 2;
                 d.val = 2;
@@ -49,7 +49,7 @@ describe("data", function () {
 
     it("throws if set to two different values in a computation", function () {
         root(function () {
-            var d = data(1);
+            var d = signal(1);
             compute(function () {
                 d.val = 2;
                 assert.throws(function () {

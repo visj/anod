@@ -3,9 +3,9 @@
   "version": "0.1.0",
   "description": "",
   "type": "module",
+  "types": "dist/zorn.d.ts",
   "main": "dist/zorn.min.cjs",
   "module": "dist/zorn.min.mjs",
-  "types": "lib.d.ts",
   "files": [
     "dist/*",
     "externs/*"

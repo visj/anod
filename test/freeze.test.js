@@ -1,11 +1,11 @@
 import assert from 'assert';
-import { root, compute, data, freeze } from './helper/zorn.js';
+import { root, compute, signal, batch } from './helper/zorn.js';
 
-describe("freeze", function () {
+describe("batch", function () {
 	it("batches changes until end", function () {
-		var d = data(1);
+		var d = signal(1);
 			
-		freeze(function () {
+		batch(function () {
 			d.val = 2;
 			assert.equal(d.val, 1);
 		});
@@ -15,12 +15,12 @@ describe("freeze", function () {
 	
 	it("halts propagation within its scope", function () {
         root(function () {
-			var d = data(1);
+			var d = signal(1);
 			var f = compute(function() { 
 				return d.val;
 			});
 				
-			freeze(function () {
+			batch(function () {
 				d.val = 2;
 				assert.equal(f.val, 1);
 			});

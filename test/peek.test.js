@@ -1,11 +1,11 @@
 import assert from 'assert';
-import { root, val, compute, data} from './helper/zorn.js';
+import { root, val, compute, signal } from './helper/zorn.js';
 
 describe("peek(...)", function () {
 
     it("returns the value of a data", function () {
         root(function() {
-            var d = data(1);
+            var d = signal(1);
             assert.equal(val(function() {
                 return d.val;
             }).peek, 1);
@@ -14,9 +14,9 @@ describe("peek(...)", function () {
 
     it("avoids a dedendency", function () {
         root(function () {
-            var a = data(1);
-            var b = data(2);
-            var c = data(3);
+            var a = signal(1);
+            var b = signal(2);
+            var c = signal(3);
             var d = 0;
             
             compute(function () {
@@ -41,9 +41,9 @@ describe("peek(...)", function () {
 
     it("can take computed values", function() {
         root(function () {
-            var a = data(1);
-            var b = data(2);
-            var c = data(3);
+            var a = signal(1);
+            var b = signal(2);
+            var c = signal(3);
             var d = 0;
             
             compute(function () {

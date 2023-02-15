@@ -1,5 +1,5 @@
 import assert from 'assert';
-import { root, compute, $compute, data } from './helper/zorn.js';
+import { root, compute, $compute, signal } from './helper/zorn.js';
 
 describe("compute()", function () {
     describe("creation", function () {
@@ -39,7 +39,7 @@ describe("compute()", function () {
     describe("with a dependency on an data", function () {
         it("updates when data is set", function () {
             root(function () {
-                var d = data(1);
+                var d = signal(1);
                 var fevals = 0;
                 compute(function () {
                     fevals++;
@@ -48,14 +48,14 @@ describe("compute()", function () {
 
                 fevals = 0;
 
-                d.val = 1;
+                d.val++;
                 assert.equal(fevals, 1);
             });
         });
 
         it("does not update when data is read", function () {
             root(function () {
-                var d = data(1);
+                var d = signal(1);
                 var fevals = 0;
                 compute(function () {
                     fevals++;
@@ -71,7 +71,7 @@ describe("compute()", function () {
 
         it("updates return value", function () {
             root(function () {
-                var d = data(1);
+                var d = signal(1);
                 var f = compute(function () {
                     return d.val;
                 });
@@ -86,9 +86,9 @@ describe("compute()", function () {
         var i, t, e, fevals, f;
 
         function init() {
-            i = data(true);
-            t = data(1);
-            e = data(2);
+            i = signal(true);
+            t = signal(1);
+            e = signal(2);
             fevals = 0;
             f = $compute(function () {
                 fevals++;
@@ -142,7 +142,7 @@ describe("compute()", function () {
                 var fevals = 0, d;
                 compute(function () {
                     fevals++;
-                    d = data(1);
+                    d = signal(1);
                 });
                 fevals = 0;
                 d.val = 2;
@@ -163,7 +163,7 @@ describe("compute()", function () {
     describe("with a seed", function () {
         it("reduces seed value", function () {
             root(function () {
-                var a = data(5);
+                var a = signal(5);
                 var f = compute(function (v) {
                     return v + a.val;
                 }, 5);
@@ -178,7 +178,7 @@ describe("compute()", function () {
         var d, fcount, f, gcount, g;
 
         function init() {
-            d = data(1);
+            d = signal(1);
             fcount = 0;
             f = compute(function () {
                 fcount++;
@@ -228,11 +228,11 @@ describe("compute()", function () {
     describe("with unending changes", function () {
         it("throws when continually setting a direct dependency", function () {
             root(function () {
-                var d = data(1);
+                var d = signal(1);
                 assert.throws(function () {
                     compute(function () {
                         d.val;
-                        d.val = 2;
+                        d.val++;
                     });
                 });
             });
@@ -240,7 +240,7 @@ describe("compute()", function () {
 
         it("throws when continually setting an indirect dependency", function () {
             root(function () {
-                var d = data(1);
+                var d = signal(1);
                 var f1 = compute(function () { return d.val; });
                 var f2 = compute(function () { return f1.val; });
                 var f3 = compute(function () { return f2.val; });
@@ -248,7 +248,7 @@ describe("compute()", function () {
                 assert.throws(function () {
                     compute(function () {
                         f3.val;
-                        d.val = 2;
+                        d.val++;
                     });
                 });
             });
@@ -258,7 +258,7 @@ describe("compute()", function () {
     describe("with circular dependencies", function () {
         it("throws when cycle created by modifying a branch", function () {
             root(function () {
-                var d = data(1);
+                var d = signal(1);
                 var f = compute(function () {
                     return f ? f.val : d.val;
                 });
@@ -282,13 +282,13 @@ describe("compute()", function () {
                 //     a1 
                 //
                 var seq = "";
-                var a1 = data(true);
+                var a1 = signal(0);
                 var b1 = compute(function () { a1.val; seq += "b1"; });
                 var b2 = compute(function () { a1.val; seq += "b2"; });
                 var c1 = compute(function () { b1.val, b2.val; seq += "c1"; });
 
                 seq = "";
-                a1.val = true;
+                a1.val++;
 
                 assert.equal(seq, "b1b2c1");
             });
@@ -305,7 +305,7 @@ describe("compute()", function () {
                 // +---+---+---+---+
                 //         v
                 //         g
-                var d = data(0);
+                var d = signal(0);
                 var f1 = compute(function () { return d.val; });
                 var f2 = compute(function () { return d.val; });
                 var f3 = compute(function () { return d.val; });
@@ -318,7 +318,7 @@ describe("compute()", function () {
                 });
 
                 gcount = 0;
-                d.val = 0;
+                d.val++;
                 assert.equal(gcount, 1);
             });
         });
@@ -338,7 +338,7 @@ describe("compute()", function () {
                 // +---+---+
                 //     v
                 //     h
-                var d = data(0);
+                var d = signal(0);
                 var f1 = compute(function () { return d.val; });
                 var f2 = compute(function () { return d.val; });
                 var f3 = compute(function () { return d.val; });
@@ -353,7 +353,7 @@ describe("compute()", function () {
                 });
 
                 hcount = 0;
-                d.val = 0;
+                d.val++;
                 assert.equal(hcount, 1);
             });
         });

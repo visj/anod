@@ -113,7 +113,7 @@ function run(fn, n, scount) {
 
 function createDataSignals(n, sources) {
     for (var i = 0; i < n; i++) {
-        sources[i] = Zorn.data(i);
+        sources[i] = Zorn.signal(i);
     }
     return sources;
 }

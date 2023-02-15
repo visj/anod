@@ -1,11 +1,11 @@
 import assert from 'assert';
-import { root, compute, data } from './helper/zorn.js';
+import { root, compute, signal } from './helper/zorn.js';
 
 describe("Computations which modify data", function () {
-    it("freeze data while executing computation", function () {
+    it("batch data while executing computation", function () {
         root(function () {
-            var a = data(false);
-            var b = data(0);
+            var a = signal(false);
+            var b = signal(0);
             var cb;
             compute(function () {
                 if (a.val) {
@@ -23,11 +23,11 @@ describe("Computations which modify data", function () {
         });
     });
 
-    it("freeze data while propagating", function () {
+    it("batch data while propagating", function () {
         root(function () {
             var seq = "";
-            var a = data(false);
-            var b = data(0);
+            var a = signal(false);
+            var b = signal(0);
             var db;
             compute(function () {
                 if (a.val) {
@@ -56,7 +56,7 @@ describe("Computations which modify data", function () {
     it("continue running until changes stop", function () {
         root(function () {
             var seq = "";
-            var a = data(0);
+            var a = signal(0);
 
             compute(function () {
                 seq += a.val;
@@ -83,8 +83,8 @@ describe("Computations which modify data", function () {
             //        a1
             //
             var seq = "",
-                a1 = data(0),
-                c1 = data(0),
+                a1 = signal(0),
+                c1 = signal(0),
                 b1 = compute(function () { a1.val; }),
                 b2 = compute(function () { c1.val = a1.val; }),
                 b3 = compute(function () { a1.val; }),

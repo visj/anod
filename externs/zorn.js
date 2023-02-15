@@ -7,7 +7,7 @@
  * @template T
  * @interface
  */
-function Signal() { }
+function Respond() { }
 
 /**
  * @public
@@ -15,11 +15,11 @@ function Signal() { }
  * @nocollapse
  * @throws {Error}
  */
-Signal.prototype.val;
+Respond.prototype.val;
 
 /**
  * @public
  * @type {T}
  * @nocollapse
  */
-Signal.prototype.peek;
+Respond.prototype.peek;

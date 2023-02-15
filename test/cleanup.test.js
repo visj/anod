@@ -1,9 +1,9 @@
 import assert from 'assert';
-import { root, dispose, cleanup, compute, data } from './helper/zorn.js';
+import { root, dispose, cleanup, compute, signal } from './helper/zorn.js';
 
 describe("cleanup", function () {
     it("is called when a computation is disposed", function () {
-        var d = data(1);
+        var d = signal(1);
         var called = false;
         compute(function () {
             d.val;
@@ -17,7 +17,7 @@ describe("cleanup", function () {
     });
 
     it("can be called from within a subcomputation", function () {
-        var d = data(1);
+        var d = signal(1);
         var called = false;
         compute(function () {
             d.val;
@@ -33,7 +33,7 @@ describe("cleanup", function () {
     });
 
     it("accepts multiple cleanup functions", function () {
-        var d = data(1);
+        var d = signal(1);
         var called = 0;
         compute(function () {
             d.val;
@@ -50,7 +50,7 @@ describe("cleanup", function () {
     });
 
     it("runs cleanups in order", function () {
-        var d = data(1);
+        var d = signal(1);
         var called = '';
         compute(function () {
             d.val;
@@ -78,7 +78,7 @@ describe("cleanup", function () {
     });
 
     it("is run only once when a computation is disposed", function () {
-        var d = data(1);
+        var d = signal(1);
         var called = 0;
         var node = root(function () {
 

@@ -1,69 +1,34 @@
-export class Op { }
+export class Scope { }
 
-export class Compute<T = any> extends Op {
-    readonly val: T;
-    readonly peek: T;
-}
-
-export class Signal<T = any> extends Op {
+export class Respond<T = any> extends Scope {
     val: T;
     readonly peek: T;
 }
-
-export type Source<T = any> = Compute<T> | Signal<T>;
-
-class Nil { }
-
-type nil = typeof Nil;
 
 export type Recover = (err: any) => void;
 
 export type Cleanup = (final: boolean) => void;
 
-export type Equals<T> = (a: T, b: T) => boolean;
+export type Compare<T> = false | ((a: T, b: T) => boolean);
 
-export function nil(): nil;
+export function peek<T>(fn: () => T): T;
 
-export function freeze<T>(fn: () => T): T;
+export function batch<T>(fn: () => T): T;
+
+export function stable(): void;
 
 export function cleanup(fn: Cleanup): void;
 
 export function recover(fn: Recover): void;
 
-export function val<T>(fn: () => T): Compute<T>;
+export function dispose(val: Scope): void;
 
-export function owner(): Op | null;
+export function root<T>(fn: () => T): Scope<T>;
 
-export function dispose(val: Op): void;
+export function val<T>(fn: () => T): Readonly<Respond<T>>;
 
-export function root<T>(fn: () => T): Source<T>;
+export function signal<T>(value: T, eq?: Compare<T>): Respond<T>;
 
-export function data<T>(value: T): Signal<T>;
+export function compute<T>(fn: (seed: T) => T, seed?: T, eq?: Compare<T>): Readonly<Respond<T>>;
 
-export function value<T>(value: T, eq?: Equals<T>): Signal<T>;
-
-export function compute<T>(fn: (seed: T) => T, seed?: T, eq?: false | Equals<T>): Compute<T>;
-
-export function $compute<T>(fn: (seed: T) => T, seed?: T, eq?: false | Equals<T>): Compute<T>;
-
-export type SourceVal<T> = T extends Source<infer U> ? U : T extends [infer Head, ...infer Tail] ? [SourceVal<Head>, ...SourceVal<Tail>] : T extends readonly [infer Head, ...infer Tail] ? [SourceVal<Head>, ...SourceVal<Tail>] : T extends Array<infer U> ? Array<SourceVal<U>> : any;
-
-export function when<S1 extends Source, T, Args>(src1: [S1], fn: (src1: [SourceVal<S1>], seed: T, args: Args) => T, defer?: boolean, args?: Args): (seed: T) => T;
-
-export function when<S1 extends Source, S2 extends Source, T, Args>(src1: [S1, S2], fn: (src1: [SourceVal<S1>, SourceVal<S2>], seed: T, args: Args) => T, defer?: boolean, args?: Args): (seed: T) => T;
-
-export function when<S1 extends Source, S2 extends Source, S3 extends Source, T, Args>(src1: [S1, S2, S3], fn: (src1: [SourceVal<S1>, SourceVal<S2>, SourceVal<S3>], seed: T, args: Args) => T, defer?: boolean, args?: Args): (seed: T) => T;
-
-export function when<S1 extends Source, S2 extends Source, S3 extends Source, S4 extends Source, T, Args>(src1: [S1, S2, S3, S4], fn: (src1: [SourceVal<S1>, SourceVal<S2>, SourceVal<S3>, SourceVal<S4>], seed: T, args: Args) => T, defer?: boolean, args?: Args): (seed: T) => T;
-
-export function when<S1 extends Source, S2 extends Source, S3 extends Source, S4 extends Source, S5 extends Source, T, Args>(src1: [S1, S2, S3, S4, S5], fn: (src1: [SourceVal<S1>, SourceVal<S2>, SourceVal<S3>, SourceVal<S4>, SourceVal<S5>], seed: T, args: Args) => T, defer?: boolean, args?: Args): (seed: T) => T;
-
-export function when<S1 extends Source, S2 extends Source, S3 extends Source, S4 extends Source, S5 extends Source, S6 extends Source, T, Args>(src1: [S1, S2, S3, S4, S5, S6], fn: (src1: [SourceVal<S1>, SourceVal<S2>, SourceVal<S3>, SourceVal<S4>, SourceVal<S5>, SourceVal<S6>], seed: T, args: Args) => T, defer?: boolean, args?: Args): (seed: T) => T;
-
-export function when<S1 extends Source, S2 extends Source, S3 extends Source, S4 extends Source, S5 extends Source, S6 extends Source, S7 extends Source, T, Args>(src1: [S1, S2, S3, S4, S5, S6, S7], fn: (src1: [SourceVal<S1>, SourceVal<S2>, SourceVal<S3>, SourceVal<S4>, SourceVal<S5>, SourceVal<S6>, SourceVal<S7>], seed: T, args: Args) => T, defer?: boolean, args?: Args): (seed: T) => T;
-
-export function when<S1 extends Source, S2 extends Source, S3 extends Source, S4 extends Source, S5 extends Source, S6 extends Source, S7 extends Source, S8 extends Source, T, Args>(src1: [S1, S2, S3, S4, S5, S6, S7, S8], fn: (src1: [SourceVal<S1>, SourceVal<S2>, SourceVal<S3>, SourceVal<S4>, SourceVal<S5>, SourceVal<S6>, SourceVal<S7>, SourceVal<S8>], seed: T, args: Args) => T, defer?: boolean, args?: Args): (seed: T) => T;
-
-export function when<S1 extends Source, S2 extends Source, S3 extends Source, S4 extends Source, S5 extends Source, S6 extends Source, S7 extends Source, S8 extends Source, S9 extends Source, T, Args>(src1: [S1, S2, S3, S4, S5, S6, S7, S8, S9], fn: (src1: [SourceVal<S1>, SourceVal<S2>, SourceVal<S3>, SourceVal<S4>, SourceVal<S5>, SourceVal<S6>, SourceVal<S7>, SourceVal<S8>, SourceVal<S9>], seed: T, args: Args) => T, defer?: boolean, args?: Args): (seed: T) => T;
-
-export function when<S extends Source | Source[] | readonly Source[], T, Args>(src: S, fn: (src: SourceVal<S>, seed: T, args: Args) => T, defer?: boolean, args?: Args): (seed: T) => T;
+export function $compute<T>(fn: (seed: T) => T, seed?: T, eq?: Compare<T>): Readonly<Respond<T>>;
