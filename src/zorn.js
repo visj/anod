@@ -206,13 +206,14 @@ function $compute(fn, seed, eq) {
 }
 
 /**
- * @template S,T
+ * @template S,T,P
  * @param {!Signal<S>|!Array<!Signal>} src
- * @param {function((S|!Array<S>), T): T} fn 
+ * @param {function((S|!Array<S>),T,P): T} fn 
  * @param {boolean=} defer
+ * @param {P=} args
  * @returns {function(T): T}
  */
-function when(src, fn, defer) {
+function when(src, fn, defer, args) {
     /** @type {number} */
     var ln;
     /** @type {S|!Array<S>} */
@@ -234,7 +235,7 @@ function when(src, fn, defer) {
         if (defer) {
             defer = false;
         } else {
-            seed = peek(fn, srcVal, seed);
+            seed = peek(fn, srcVal, seed, args);
         }
         return seed;
     };
@@ -284,16 +285,17 @@ function dispose(node) {
 }
 
 /**
- * @template P1,P2,T
+ * @template P1,P2,P3,T
  * @param {function(P1,P2): T} fn 
  * @param {P1=} arg1 
- * @param {P2=} arg2 
+ * @param {P2=} arg2
+ * @param {P3=} arg3
  * @returns {T}
  */
-function peek(fn, arg1, arg2) {
+function peek(fn, arg1, arg2, arg3) {
     var listen = LISTEN;
     LISTEN = false;
-    var result = fn(arg1, arg2);
+    var result = fn(arg1, arg2, arg3);
     LISTEN = listen;
     return result;
 }

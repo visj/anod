@@ -378,7 +378,7 @@ function runZornBind(layers, done) {
     for (let i = layers; i--;) {
       layer = ((m) => {
         return {
-          a: zorn.compute(zorn.when(rand % 2 ? m.b : m.c, (val) => val)),
+          a: zorn.$compute(zorn.when(zorn.val(function() { return rand % 2 ? m.b.val : m.c.val }), (val) => val)),
           b: zorn.compute(zorn.when([m.a, m.c], (val) => val[0] - val[1])),
           c: zorn.compute(zorn.when([m.b, m.d], (val) => val[0] + val[1])),
           d: zorn.compute(zorn.when(m.c, (val) => val)),
