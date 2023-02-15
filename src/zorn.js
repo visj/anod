@@ -480,7 +480,9 @@ function Send(owner, state, value, eq) {
 function send() {
     /** @type {number} */
     var ln;
+    /** @const {?Receive} */
     var node1 = this._node1;
+    /** @const {?Array<!Receive>} */
     var nodes = this._nodes;
     if (node1 !== null) {
         node1._recUpdate();
@@ -589,7 +591,9 @@ function disposeScope() {
     var i;
     /** @type {number} */
     var ln;
+    /** @const {?Array<!Respond>} */
     var owned = this._owned;
+    /** @const {?Array<Cleanup>} */
     var cleanups = this._cleanups;
     if (owned !== null && (ln = owned.length) !== 0) {
         for (i = 0; i < ln; i++) {
@@ -653,6 +657,7 @@ setValProto(
      * @returns {T}
      */
     function (value) {
+        /** @const {number} */
         var state = this._state;
         if ((state & State.DisposeFlags) === 0) {
             if (((state & State.Respond) !== 0) || ((state & State.Compare) === 0 ? value !== this._value : !this._eq(value, this._value))) {
@@ -728,7 +733,9 @@ Signal.prototype._send = send;
  * @param {number} state
  */
 function Computation(fn, value, state, eq) {
+    /** @const {?Scope} */
     var owner = OWNER;
+    /** @const {boolean} */
     var listen = LISTEN;
     Receive.call(this, owner, state, eq);
     /**
@@ -959,9 +966,12 @@ Queue.prototype._add = function (item) {
  */
 Queue.prototype._run = function () {
     STAGE = this._stage;
+    /** @type {number} */
     var error = 0;
     for (var i = 0; i < this._count; i++) {
+        /** @const {?Respond} */
         var item = this._items[i];
+        /** @const {number} */
         var state = item._state;
         if ((state & (State.Update | State.Dispose)) !== 0) {
             try {
@@ -1125,13 +1135,16 @@ function start() {
 function cleanupReceiver(node) {
     /** @type {number} */
     var ln;
+    /** @const {?Send} */
     var source1 = node._source1;
+    /** @const {?Array<!Send>} */
     var sources = node._sources;
     if (source1 !== null) {
         forgetReceiver(source1, node._source1slot);
         node._source1 = null;
     }
     if (sources !== null && (ln = sources.length) !== 0) {
+        /** @const {?Array<number>} */
         var sourceslots = node._sourceslots;
         for (; ln-- !== 0;) {
             forgetReceiver(sources.pop(), sourceslots.pop());
@@ -1149,9 +1162,13 @@ function forgetReceiver(send, slot) {
         if (slot === -1) {
             send._node1 = null;
         } else {
+            /** @const {?Array<Receive>} */
             var nodes = send._nodes;
+            /** @const {?Array<number>} */
             var nodeslots = send._nodeslots;
+            /** @const {Receive} */
             var last = nodes.pop();
+            /** @const {number} */
             var lastslot = nodeslots.pop();
             if (slot !== nodes.length) {
                 nodes[slot] = last;
