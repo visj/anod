@@ -1,5 +1,7 @@
 ##
 # Mac desktop service store files
 .DS_Store
-
+.vscode/
 /node_modules/
+dist/
+
