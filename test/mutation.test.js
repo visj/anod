@@ -82,14 +82,14 @@ describe("Computations which modify data", function () {
             //      \ | /
             //        a1
             //
-            var seq = "",
-                a1 = signal(0),
-                c1 = signal(0),
-                b1 = compute(function () { a1.val; }),
-                b2 = compute(function () { c1.val = a1.val; }),
-                b3 = compute(function () { a1.val; }),
-                d1 = compute(function () { b1.val; seq += "c4(" + c1.val + ")"; }),
-                d2 = compute(function () { b3.val; seq += "c5(" + c1.val + ")"; });
+            var seq = "";
+            var a1 = signal(0);
+            var c1 = signal(0);
+            var b1 = compute(function () { return a1.val; });
+            compute(function () { c1.val = a1.val; });
+            var b3 = compute(function () { return a1.val; });
+            compute(function () { seq += "c4(" + c1.val + ")"; return b1.val; });
+            compute(function () { seq += "c5(" + c1.val + ")"; return b3.val; });
 
             seq = "";
             a1.val = 1;

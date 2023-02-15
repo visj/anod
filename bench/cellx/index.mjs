@@ -327,10 +327,10 @@ function runZorn(layers, done) {
     for (let i = layers; i--;) {
       layer = ((m) => {
         return {
-          a: zorn.$compute(() => rand % 2 ? m.b.val : m.c.val),
-          b: zorn.compute(() => m.a.val - m.c.val),
-          c: zorn.compute(() => m.b.val + m.d.val),
-          d: zorn.compute(() => m.c.val),
+          a: zorn.$compute(() => rand % 2 ? m.b.val : m.c.val, 0, false),
+          b: zorn.compute(() => m.a.val - m.c.val, 0, false),
+          c: zorn.compute(() => m.b.val + m.d.val, 0, false),
+          d: zorn.compute(() => m.c.val, 0, false),
         };
       })(layer);
     }

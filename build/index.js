@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { Stage, State } from '../src/zorn.js';
+import { Stage, Opts } from '../src/zorn.js';
 import { exec } from 'child_process';
 
 /**
@@ -74,7 +74,7 @@ function bundle() {
         code = code.split('\n').filter(line => line.trim().length > 0).join('\n');
 
         code = inlineEnum(code, 'Stage', Stage);
-        code = inlineEnum(code, 'State', State);
+        code = inlineEnum(code, 'Opts', Opts);
 
         var mjs = code;
         var cjs = code.replace(ExportRegex, function (_, capture) {

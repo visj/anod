@@ -84,21 +84,32 @@ Respond.prototype.peek;
 Respond.prototype._recDispose = function () { };
 
 /**
+ * @package
+ * @returns {void}
+ */
+Respond.prototype._recMayDispose = function () { };
+
+/**
  * @const 
  * @enum {number}
  */
-export var State = {
+export var Opts = {
     Static: 1,
     DisposeFlags: 6,
     Disposed: 2,
     Dispose: 4,
-    UpdateFlags: 24,
-    Updated: 8,
-    Update: 16,
-    Send: 32,
-    Respond: 64,
-    Compare: 128,
-    Error: 256,
+    MaybeDispose: 8,
+    UpdateFlags: 48,
+    Updated: 16,
+    Update: 32,
+    MaybeUpdate: 64,
+    MaybeFlags: 72,
+    Cleared: 128,
+    StateFlags: 252,
+    Send: 256,
+    Respond: 512,
+    Compare: 1024,
+    Error: 2048,
 }
 
 /**
@@ -115,22 +126,22 @@ export var Stage = {
 }
 
 /**
- * @abstract
- * @returns {void}
- */
-Send.prototype._send = function () { };
-
-/**
  * @package
  * @returns {void}
  */
-Send.prototype._update = function () { }
+Send.prototype._update = function () { };
 
 /**
  * @abstract
  * @returns {void}
  */
 Receive.prototype._recUpdate = function () { };
+
+/**
+ * @abstract
+ * @returns {void}
+ */
+Receive.prototype._recMayUpdate = function () { };
 
 /* START_OF_FILE */
 
@@ -175,7 +186,7 @@ function root(fn) {
  * @returns {!Respond<T>}
  */
 function compute(fn, seed, eq) {
-    return new Computation(fn, seed, State.Static, eq);
+    return new Computation(fn, seed, Opts.Static, eq);
 }
 
 /**
@@ -218,11 +229,11 @@ function signal(value, eq) {
 function dispose(node) {
     /** @const {number} */
     var state = node._state;
-    if ((state & State.DisposeFlags) === 0) {
+    if ((state & Opts.DisposeFlags) === 0) {
         if (STAGE === Stage.Idle) {
             node._dispose();
         } else {
-            node._state = (state & ~State.Update) | State.Dispose;
+            node._state = (state & ~Opts.Update) | Opts.Dispose;
             DISPOSES._add(node);
         }
     }
@@ -273,7 +284,7 @@ function batch(fn) {
  */
 function stable() {
     if (LISTEN) {
-        OWNER._state |= State.Static;
+        OWNER._state |= Opts.Static;
     }
 }
 
@@ -349,73 +360,6 @@ function setOwner(owner, node) {
 
 /**
  * @struct
- * @package
- * @template T
- * @constructor
- * @implements {Respond<T>}
- * @param {function(): T} fn
- */
-function Value(fn) {
-    /**
-     * @package
-     * @type {number}
-     */
-    this._state = 0;
-    /**
-     * @package
-     * @type {?function(): T}
-     */
-    this._fn = fn;
-    /** @const {?Scope} */
-    var owner = OWNER;
-    if (owner !== null) {
-        setOwner(owner, this);
-    }
-}
-
-/**
- * @package
- * @this {!Value<T>}
- */
-Value.prototype._recDispose = recDispose;
-
-Value.prototype._dispose = function () {
-    this._fn = null;
-}
-
-setValProto(
-    Value.prototype,
-    /**
-     * @template T 
-     * @this {!Value<T>}
-     * @returns {T}
-     */
-    function () {
-        /** @type {T} */
-        var result;
-        /** @const {number} */
-        var state = this._state;
-        if ((state & State.DisposeFlags) === 0) {
-            result = this._fn();
-        } else if ((state & State.Dispose) !== 0) {
-            result = peek(/** @type {function(): T} */(this._fn));
-        }
-        return result;
-    },
-    /**
-     * @template T 
-     * @this {!Value<T>}
-     * @returns {T}
-     */
-    function () {
-        if ((this._state & State.Disposed) === 0) {
-            return peek(/** @type {function(): T} */(this._fn));
-        }
-    }
-);
-
-/**
- * @struct
  * @template T
  * @package
  * @abstract
@@ -423,10 +367,9 @@ setValProto(
  * @implements {Respond}
  * @param {?Scope} owner 
  * @param {number|undefined} state 
- * @param {T} value 
- * @param {(function(T,T): boolean)|boolean=} eq
+ * @param {T} value
  */
-function Send(owner, state, value, eq) {
+function Send(owner, state, value) {
     /**
      * @package
      * @type {number}
@@ -437,6 +380,11 @@ function Send(owner, state, value, eq) {
      * @type {T}
      */
     this._value = value;
+    /**
+     * @package
+     * @type {?Scope}
+     */
+    this._owner = owner;
     /**
      * @package
      * @type {?Receive}
@@ -457,33 +405,70 @@ function Send(owner, state, value, eq) {
      * @type {?Array<number>}
      */
     this._nodeslots = null;
-    /**
-     * @package
-     * @type {?function(T,T): boolean}
-     */
-    this._eq = null;
-    if (eq === false) {
-        this._state |= State.Respond;
-    } else if (eq !== void 0) {
-        this._state |= State.Compare;
-        this._eq = /** @type {function(T,T): boolean} */(eq);
-    }
     if (owner !== null) {
         setOwner(owner, this);
     }
 }
 
 /**
- * @package
- * @this {!Send} 
+ * 
+ * @param {!Respond} node 
  */
-function send() {
+function clearMaybe(node) {
+    if (((node._state & Opts.MaybeDispose) !== 0) && ((node._owner & Opts.MaybeFlags) !== 0)) {
+        clearMaybe(node._owner);
+    }
+    if ((node._state & (Opts.DisposeFlags | Opts.MaybeUpdate)) === Opts.MaybeUpdate) {
+        /** @type {?Send} */
+        var source1 = /** @type {!Receive} */(node)._source1;
+        if (source1 !== null && ((source1._state & Opts.MaybeFlags) !== 0)) {
+            clearMaybe(source1);
+        }
+        if ((node._state & Opts.Update) !== 0) {
+            return;
+        }
+        /** @type {number} */
+        var ln;
+        /** @const {?Array<!Send>} */
+        var sources = /** @type {!Receive} */(node)._sources;
+        if (sources !== null && (ln = sources.length) > 0) {
+            for (var i = 0; i < ln; i++) {
+                source1 = sources[i];
+                if ((source1._state & Opts.MaybeFlags) !== 0) {
+                    clearMaybe(sources[i]);
+                    if ((node._state & Opts.Update) !== 0) {
+                        return;
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * @package
+ * @param {!Send} node
+ */
+function disposeSend(node) {
+    node._state = Opts.Disposed;
+    node._value = void 0;
+    node._node1 = null;
+    node._nodes = null;
+    node._nodeslots = null;
+    cleanupSender(node);
+}
+
+/**
+ * @package
+ * @param {!Send} send
+ */
+function sendUpdate(send) {
     /** @type {number} */
     var ln;
     /** @const {?Receive} */
-    var node1 = this._node1;
+    var node1 = send._node1;
     /** @const {?Array<!Receive>} */
-    var nodes = this._nodes;
+    var nodes = send._nodes;
     if (node1 !== null) {
         node1._recUpdate();
     }
@@ -496,15 +481,47 @@ function send() {
 
 /**
  * @package
- * @param {!Send} node
+ * @param {!Send} send
  */
-function disposeSend(node) {
-    node._state = State.Disposed;
-    node._value = void 0;
-    node._node1 = null;
-    node._nodes = null;
-    node._nodeslots = null;
-    cleanupSender(node);
+function sendMayUpdate(send) {
+    /** @type {number} */
+    var ln;
+    /** @const {?Receive} */
+    var node1 = send._node1;
+    /** @const {?Array<!Receive>} */
+    var nodes = send._nodes;
+    if (node1 !== null) {
+        node1._recMayUpdate();
+    }
+    if (nodes !== null && (ln = nodes.length) > 0) {
+        for (var i = 0; i < ln; i++) {
+            nodes[i]._recMayUpdate();
+        }
+    }
+}
+
+/**
+ * @package
+ * @param {!Array<!Respond>} owned 
+ */
+function sendDispose(owned) {
+    /** @type {number} */
+    var ln = owned.length
+    for (; ln-- !== 0;) {
+        owned.pop()._recDispose();
+    }
+}
+
+/**
+ * @package
+ * @param {!Array<!Respond>} owned 
+ */
+function sendMayDispose(owned) {
+    /** @const {number} */
+    var ln = owned.length
+    for (var i = 0; i < ln; i++) {
+        owned[i]._recMayDispose();
+    }
 }
 
 /**
@@ -516,11 +533,10 @@ function disposeSend(node) {
  * @extends {Send<T>}
  * @param {?Scope} owner 
  * @param {number=} state 
- * @param {T=} value 
- * @param {(function(T,T): boolean)|boolean=} eq
+ * @param {T=} value
  */
-function Receive(owner, state, value, eq) {
-    Send.call(this, owner, state, value, eq);
+function Receive(owner, state, value) {
+    Send.call(this, owner, state, value);
     /**
      * @package
      * @type {?Send}
@@ -548,9 +564,20 @@ function Receive(owner, state, value, eq) {
  * @this {!Respond}
  */
 function recDispose() {
-    this._state = State.Dispose;
+    this._state = Opts.Dispose;
     DISPOSES._add(this);
 }
+
+/**
+ * @package
+ * @this {!Respond}
+ */
+function recMayDispose() {
+    if ((this._state & Opts.MaybeDispose) === 0) {
+        DISPOSES._add(this);
+    }
+    this._state |= Opts.MaybeDispose;
+};
 
 /**
  * @struct
@@ -586,7 +613,7 @@ function Owner() {
  * @this {!Scope}
  */
 function disposeScope() {
-    this._state = State.Disposed;
+    this._state = Opts.Disposed;
     /** @type {number} */
     var i;
     /** @type {number} */
@@ -617,6 +644,90 @@ Owner.prototype._dispose = disposeScope;
 
 /**
  * @struct
+ * @package
+ * @template T
+ * @constructor
+ * @implements {Respond<T>}
+ * @param {function(): T} fn
+ */
+function Value(fn) {
+    /**
+     * @package
+     * @type {number}
+     */
+    this._state = 0;
+    /**
+     * @package
+     * @type {?function(): T}
+     */
+    this._fn = fn;
+    /** @const {?Scope} */
+    var owner = OWNER;
+    if (owner !== null) {
+        setOwner(owner, this);
+    }
+}
+
+/**
+ * @package
+ * @this {!Value<T>}
+ */
+Value.prototype._dispose = function () {
+    this._fn = null;
+}
+
+/**
+ * @package
+ * @this {!Value<T>}
+ */
+Value.prototype._recDispose = recDispose;
+
+/**
+ * @package
+ * @this {!Value<T>}
+ */
+Value.prototype._recMayDispose = recMayDispose;
+
+setValProto(
+    Value.prototype,
+    /**
+     * @template T 
+     * @this {!Value<T>}
+     * @returns {T}
+     */
+    function () {
+        /** @type {T} */
+        var result;
+        /** @const {number} */
+        var state = this._state;
+        if ((state & Opts.DisposeFlags) === 0) {
+            if ((state & Opts.MaybeDispose) !== 0) {
+                clearMaybe(this);
+            }
+            if ((state & Opts.Disposed) === 0) {
+                result = this._fn();
+            } else {
+                result = peek(/** @type {function(): T} */(this._fn));
+            }
+        } else if ((state & Opts.Dispose) !== 0) {
+            result = peek(/** @type {function(): T} */(this._fn));
+        }
+        return result;
+    },
+    /**
+     * @template T 
+     * @this {!Value<T>}
+     * @returns {T}
+     */
+    function () {
+        if ((this._state & Opts.Disposed) === 0) {
+            return peek(/** @type {function(): T} */(this._fn));
+        }
+    }
+);
+
+/**
+ * @struct
  * @template T
  * @package
  * @constructor
@@ -626,12 +737,20 @@ Owner.prototype._dispose = disposeScope;
  * @implements {Respond<T>}
  */
 function Signal(value, eq) {
-    Send.call(this, OWNER, 0, value, eq);
+    Send.call(this, OWNER, 0, value);
     /**
      * @package
      * @type {T|Nil}
      */
     this._pending = NIL;
+    /**
+     * @package
+     * @type {(function(T,T): boolean)|boolean|undefined}
+     */
+    this._eq = eq;
+    if (eq !== void 0 && eq !== false) {
+        this._state |= Opts.Compare;
+    }
 }
 
 setValProto(
@@ -642,8 +761,18 @@ setValProto(
      * @returns {T}
      */
     function () {
-        if ((this._state & State.DisposeFlags) === 0) {
-            if (LISTEN) {
+        /** @const {number} */
+        var state = this._state;
+        if ((state & Opts.DisposeFlags) === 0) {
+            if ((state & Opts.MaybeDispose) !== 0) {
+                if ((state & Opts.Cleared) !== 0) {
+                    // cyclical ownership
+                    throw new Error();
+                }
+                this._state |= Opts.Cleared;
+                clearMaybe(this);
+            }
+            if ((state & Opts.DisposeFlags) === 0 && LISTEN) {
                 logRead(this, /** @type {!Receive} */(OWNER));
             }
         }
@@ -659,13 +788,13 @@ setValProto(
     function (value) {
         /** @const {number} */
         var state = this._state;
-        if ((state & State.DisposeFlags) === 0) {
-            if (((state & State.Respond) !== 0) || ((state & State.Compare) === 0 ? value !== this._value : !this._eq(value, this._value))) {
+        if ((state & Opts.DisposeFlags) === 0) {
+            if (this._eq === false || ((state & Opts.Compare) === 0 ? value !== this._value : !/** @type {function(T,T): boolean} */(this._eq)(value, this._value))) {
                 if (STAGE === Stage.Idle) {
-                    if ((state & State.Send) !== 0) {
+                    if ((state & Opts.Send) !== 0) {
                         reset();
                         this._value = value;
-                        this._send();
+                        sendUpdate(this);
                         exec();
                     } else {
                         this._value = value;
@@ -673,7 +802,7 @@ setValProto(
                 } else {
                     if (this._pending === NIL) {
                         this._pending = value;
-                        this._state |= State.Update;
+                        this._state |= Opts.Update;
                         CHANGES._add(this);
                     } else if (value !== this._pending) {
                         throw new Error("Zorn: Conflict");
@@ -692,9 +821,9 @@ setValProto(
 Signal.prototype._update = function () {
     this._value = this._pending;
     this._pending = NIL;
-    this._state &= ~State.Update;
-    if ((this._state & State.Send) !== 0) {
-        this._send();
+    this._state &= ~Opts.Update;
+    if ((this._state & Opts.Send) !== 0) {
+        sendUpdate(this);
     }
 };
 
@@ -717,7 +846,7 @@ Signal.prototype._recDispose = recDispose;
  * @package
  * @this {!Signal<T>}
  */
-Signal.prototype._send = send;
+Signal.prototype._recMayDispose = recMayDispose;
 
 /**
  * @struct
@@ -737,7 +866,7 @@ function Computation(fn, value, state, eq) {
     var owner = OWNER;
     /** @const {boolean} */
     var listen = LISTEN;
-    Receive.call(this, owner, state, eq);
+    Receive.call(this, owner, state, value);
     /**
      * @package
      * @type {?Array<!Respond>}
@@ -758,6 +887,17 @@ function Computation(fn, value, state, eq) {
      * @type {?function(T): T}
      */
     this._fn = fn;
+    /**
+     * @package
+     * @type {?function(T,T): boolean}
+     */
+    this._eq = null;
+    if (eq === false) {
+        this._state |= Opts.Respond;
+    } else if (eq !== void 0) {
+        this._state |= Opts.Compare;
+        this._eq = /** @type {function(T,T): boolean} */(eq);
+    }
     OWNER = this;
     LISTEN = true;
     if (STAGE === Stage.Idle) {
@@ -790,9 +930,21 @@ setValProto(
     function getComputation() {
         /** @const {number} */
         var state = this._state;
-        if ((state & State.DisposeFlags) === 0 && STAGE !== Stage.Idle) {
-            if ((state & State.Update) !== 0) {
-                if ((state & State.Updated) !== 0) {
+        if ((state & Opts.DisposeFlags) === 0 && STAGE !== Stage.Idle) {
+            if ((state & Opts.MaybeFlags) !== 0) {
+                if ((state & Opts.Cleared)) {
+                    // cyclical dependency
+                    throw new Error();
+                }
+                this._state |= Opts.Cleared;
+                clearMaybe(this);
+            }
+            if ((state & Opts.DisposeFlags) !== 0) {
+                return this._value;
+            }
+            if ((state & Opts.Update) !== 0) {
+                if ((state & Opts.Updated) !== 0) {
+                    // cyclical dependency
                     throw new Error();
                 }
                 this._update();
@@ -832,27 +984,17 @@ Computation.prototype._update = function () {
         cleanups.length = 0;
     }
     OWNER = this;
-    LISTEN = (state & State.Static) === 0
+    LISTEN = (state & Opts.Static) === 0
     if (LISTEN) {
         cleanupReceiver(this);
     }
-    this._state |= State.Updated;
-    /** @const {?Array<Recover>} */
-    var recovers = this._recovers;
-    if (recovers !== null) {
-        try {
-            this._value = this._fn(this._value);
-        } catch (err) {
-            ln = recovers.length;
-            for (i = 0; i < ln; i++) {
-                recovers[i](err);
-            }
-            recovers.length = 0;
-        }
-    } else {
-        this._value = this._fn(this._value);
+    var value = this._value;
+    this._state |= Opts.Updated;
+    this._value = this._fn(value);
+    if (((state & Opts.Respond) === 0) && ((state & Opts.Compare) === 0 ? value !== this._value : !this._eq(value, this._value))) {
+        sendUpdate(this);
     }
-    this._state &= ~State.UpdateFlags;
+    this._state &= ~Opts.StateFlags;
     OWNER = owner;
     LISTEN = listen;
 };
@@ -874,20 +1016,16 @@ Computation.prototype._dispose = function () {
  * @this {!Computation<T>}
  */
 Computation.prototype._recDispose = function () {
-    this._state = State.Dispose;
-    DISPOSES._add(this);
+    if ((this._state & Opts.MaybeDispose) === 0) {
+        DISPOSES._add(this);
+    }
+    this._state = Opts.Dispose;
     /** @const {?Array<!Respond>} */
     var owned = this._owned;
     if (owned !== null) {
-        recOwnedDisposed(owned);
+        sendDispose(owned);
     }
 }
-
-/**
- * @package
- * @this {!Computation<T>}
- */
-Computation.prototype._send = send;
 
 /**
  * @package
@@ -896,35 +1034,74 @@ Computation.prototype._send = send;
 Computation.prototype._recUpdate = function () {
     /** @const {number} */
     var state = this._state;
-    if ((state & State.DisposeFlags) === 0 && (state & State.Update) === 0) {
-        this._state |= State.Update;
-        if ((state & (State.Respond | State.Send)) === State.Send) {
-            PENDINGS._add(this);
-        } else {
-            UPDATES._add(this);
-        }
+    if ((state & (Opts.DisposeFlags | Opts.Update)) === 0) {
+        this._state |= Opts.Update;
         /** @const {?Array<!Respond>} */
         var owned = this._owned;
         if (owned !== null) {
-            recOwnedDisposed(owned);
+            sendDispose(owned);
         }
-        if ((state & State.Send) !== 0) {
-            this._send();
+        if ((state & Opts.MaybeUpdate) !== 0) {
+            if ((state & Opts.Send) !== 0) {
+                sendUpdate(this);
+            }
+        } else {
+            UPDATES._add(this);
+            if ((state & Opts.Send) !== 0) {
+                if ((state & Opts.Respond) !== 0) {
+                    sendUpdate(this);
+                } else {
+                    sendMayUpdate(this);
+                }
+            }
         }
     }
 };
 
 /**
  * @package
- * @param {!Array<!Respond>} owned 
+ * @this {!Computation<T>}
  */
-function recOwnedDisposed(owned) {
-    /** @type {number} */
-    var ln = owned.length
-    for (; ln-- !== 0;) {
-        owned.pop()._recDispose();
+Computation.prototype._recMayUpdate = function () {
+    /** @const {number} */
+    var state = this._state;
+    if ((state & (Opts.DisposeFlags | Opts.MaybeUpdate)) === 0) {
+        if ((state & Opts.MaybeFlags) === 0) {
+            MAYBES._add(this);
+        }
+        this._state |= Opts.MaybeUpdate;
+        if ((state & Opts.MaybeDispose) === 0) {
+            /** @const {?Array<!Respond>} */
+            var owned = this._owned;
+            if (owned !== null) {
+                sendMayDispose(owned);
+            }
+        }
+        if ((state & Opts.Send) !== 0) {
+            sendMayUpdate(this);
+        }
     }
-}
+};
+
+/**
+ * @package
+ * @this {!Computation<T>}
+ */
+Computation.prototype._recMayDispose = function () {
+    /** @const {number} */
+    var state = this._state;
+    if ((state & (Opts.DisposeFlags | Opts.MaybeDispose)) === 0) {
+        if ((state & Opts.MaybeFlags) === 0) {
+            MAYBES._add(this);
+        }
+        this._state |= Opts.MaybeDispose;
+        /** @const {?Array<!Respond>} */
+        var owned = this._owned;
+        if (owned !== null) {
+            sendMayDispose(owned);
+        }
+    }
+};
 
 /**
  * @struct
@@ -973,19 +1150,20 @@ Queue.prototype._run = function () {
         var item = this._items[i];
         /** @const {number} */
         var state = item._state;
-        if ((state & (State.Update | State.Dispose)) !== 0) {
+        if ((state & Opts.StateFlags) !== 0) {
             try {
-                if ((state & State.Update) !== 0) {
+                if ((state & Opts.MaybeFlags) !== 0) {
+                    clearMaybe(item);
+                }
+                if ((state & Opts.Update) !== 0) {
                     /** @type {!Send} */(item)._update();
-                } else {
+                } else if ((state & Opts.Dispose) !== 0) {
                     item._dispose();
                 }
             } catch (err) {
                 error = 1;
-                if ((state & State.Update) !== 0) {
-                    item._state |= State.Error;
-                }
-                item._state &= ~State.UpdateFlags;
+            } finally {
+                item._state &= ~Opts.StateFlags;
             }
         }
         this._items[i] = null;
@@ -1013,11 +1191,11 @@ var CHANGES = new Queue(Stage.Changes);
 /**
  * @const {!Queue}
  */
-var PENDINGS = new Queue(Stage.Computes);
+var UPDATES = new Queue(Stage.Computes);
 /**
  * @const {!Queue}
  */
-var UPDATES = new Queue(Stage.Effects);
+var MAYBES = new Queue(Stage.Effects);
 /**
  * @type {?Scope}
  */
@@ -1031,7 +1209,7 @@ var LISTEN = false;
  * @package
  */
 function reset() {
-    DISPOSES._count = CHANGES._count = PENDINGS._count = UPDATES._count = 0;
+    DISPOSES._count = CHANGES._count = UPDATES._count = MAYBES._count = 0;
 }
 
 /**
@@ -1040,7 +1218,7 @@ function reset() {
  * @param {!Receive} to
  */
 function logRead(from, to) {
-    from._state |= State.Send;
+    from._state |= Opts.Send;
     /** @type {number} */
     var fromslot;
     /** @const {number} */
@@ -1100,9 +1278,9 @@ function start() {
     /** @const {!Queue} */
     var changes = CHANGES;
     /** @const {!Queue} */
-    var pendings = PENDINGS;
-    /** @const {!Queue} */
     var updates = UPDATES;
+    /** @const {!Queue} */
+    var maybes = MAYBES;
     do {
         if (disposes._count !== 0) {
             errors += disposes._run();
@@ -1113,11 +1291,11 @@ function start() {
         if (disposes._count !== 0) {
             errors += disposes._run();
         }
-        if (pendings._count !== 0) {
-            errors += pendings._run();
-        }
         if (updates._count !== 0) {
             errors += updates._run();
+        }
+        if (maybes._count !== 0) {
+            errors += maybes._run();
         }
         if (errors !== 0) {
             throw new Error("Zorn: Error");
@@ -1125,7 +1303,7 @@ function start() {
         if (cycle++ > 1e5) {
             throw new Error("Zorn: Cycle");
         }
-    } while (changes._count !== 0 || disposes._count !== 0 || pendings._count !== 0 || updates._count !== 0);
+    } while (changes._count !== 0 || disposes._count !== 0 || updates._count !== 0 || maybes._count !== 0);
 }
 
 /**
@@ -1158,7 +1336,7 @@ function cleanupReceiver(node) {
  * @param {number} slot
  */
 function forgetReceiver(send, slot) {
-    if ((send._state & State.DisposeFlags) === 0) {
+    if ((send._state & Opts.DisposeFlags) === 0) {
         if (slot === -1) {
             send._node1 = null;
         } else {
@@ -1213,7 +1391,7 @@ function cleanupSender(send) {
  * @param {number} slot
  */
 function forgetSender(receive, slot) {
-    if ((receive._state & State.DisposeFlags) === 0) {
+    if ((receive._state & Opts.DisposeFlags) === 0) {
         if (slot === -1) {
             receive._source1 = null;
         } else {

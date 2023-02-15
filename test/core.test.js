@@ -283,8 +283,8 @@ describe("compute()", function () {
                 //
                 var seq = "";
                 var a1 = signal(0);
-                var b1 = compute(function () { a1.val; seq += "b1"; });
-                var b2 = compute(function () { a1.val; seq += "b2"; });
+                var b1 = compute(function () { seq += "b1"; return a1.val; });
+                var b2 = compute(function () { seq += "b2"; return a1.val; });
                 var c1 = compute(function () { b1.val, b2.val; seq += "c1"; });
 
                 seq = "";
