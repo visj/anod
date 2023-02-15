@@ -1,9 +1,9 @@
 import { 
     root, dispose, val, owner,
-    compute, $compute, when,
+    compute, $compute, when, peek,
     data, value, nil, freeze, recover,
     cleanup, Data, Value, Computation
-} from './zorn';
+} from '../../src/zorn';
 
 window["root"] = root;
 window["dispose"] = dispose;
@@ -15,6 +15,7 @@ window["data"] = data;
 window["value"] = value;
 window["nil"] = nil;
 window["owner"] = owner;
+window["peek"] = peek;
 window["freeze"] = freeze;
 window["recover"] = recover;
 window["cleanup"] = cleanup;

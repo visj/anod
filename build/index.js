@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { Stage, State } from './src/zorn.js';
+import { Stage, State } from '../src/zorn.js';
 import { exec } from 'child_process';
 
 /**
@@ -20,13 +20,15 @@ function inlineEnum(code, enumName, enumObj) {
 
 var __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+var root = path.join(__dirname, '..');
+
 var CommentRegex = /\/\*[\s\S]*?\*\/|\/\/.*/g;
 var ExportRegex = /export\s\{([\$\w\,\s]+)\s*\};?/;
 var ImportRegex = /import\s*\{([\$\w\,\s]+)\s*\}\s*from\s*['"]([\w\.\/]+)['"];?/g;
 
-var code = fs.readFileSync(path.join(__dirname, 'src', 'zorn.js')).toString();
+var srcCode = fs.readFileSync(path.join(root, 'src', 'zorn.js')).toString();
 
-code = code.split('/* START_OF_FILE */')[1];
+var code = srcCode.split('/* START_OF_FILE */')[1];
 code = code.replace(CommentRegex, '');
 code = code.replace(ImportRegex, '');
 
@@ -43,12 +45,15 @@ var iife = 'var Zorn = (function() {\n\t' + code.replace(ExportRegex, function(_
     return 'return { ' + capture.split(',').map(s => s.trim()).map(val => val + ': ' + val).join(', ') + ' };';
 }).split('\n').join('\n\t') + '\n})();';
 
-fs.writeFileSync(path.join(__dirname, 'dist', 'zorn.js'), iife);
-fs.writeFileSync(path.join(__dirname, 'dist', 'zorn.mjs'), mjs);
-fs.writeFileSync(path.join(__dirname, 'dist', 'zorn.cjs'), cjs);
+fs.writeFileSync(path.join(root, 'dist', 'zorn.js'), srcCode);
+fs.writeFileSync(path.join(root, 'dist', 'zorn.mjs'), mjs);
+fs.writeFileSync(path.join(root, 'dist', 'zorn.cjs'), cjs);
+fs.writeFileSync(path.join(root, 'dist', 'zorn.iife.js'), iife);
+fs.copyFileSync(path.join(root, 'src', 'zorn.d.ts'), path.join(root, 'dist', 'zorn.d.ts'));
 
 if (process.argv.includes('--minify') || process.argv.includes('-m')) {
-    exec('closure-compiler -O=ADVANCED -W=VERBOSE --module_resolution=NODE --js src/zorn.js --js src/index.js', function (err, stdout, stderr) {
+    var src = path.join(root, 'src');
+    exec(`closure-compiler -O=ADVANCED -W=VERBOSE --externs=${path.join(root, 'externs', 'zorn.js')} --module_resolution=NODE --js ${path.join(src, 'zorn.js')} --js ${path.join(__dirname, 'src', 'browser.js')}`, function (err, stdout, stderr) {
         if (err) {
             console.error(err);
             return;
@@ -93,8 +98,8 @@ if (process.argv.includes('--minify') || process.argv.includes('-m')) {
         iife = iife.replace(/[\s\;]*$/, '');
         iife += '};';
         iife += '})();';
-        fs.writeFileSync(path.join(__dirname, 'dist', 'zorn.min.mjs'), mjs);
-        fs.writeFileSync(path.join(__dirname, 'dist', 'zorn.min.cjs'), cjs);
-        fs.writeFileSync(path.join(__dirname, 'dist', 'zorn.min.js'), iife);
+        fs.writeFileSync(path.join(root, 'dist', 'zorn.min.mjs'), mjs);
+        fs.writeFileSync(path.join(root, 'dist', 'zorn.min.cjs'), cjs);
+        fs.writeFileSync(path.join(root, 'dist', 'zorn.min.iife.js'), iife);
     });
 }

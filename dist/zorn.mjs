@@ -49,10 +49,7 @@ function when(src, fn, defer) {
         if (defer) {
             defer = false;
         } else {
-            var listen = LISTEN;
-            LISTEN = false;
-            seed = fn(srcVal, seed);
-            LISTEN = listen;
+            seed = peek(fn, srcVal, seed);
         }
         return seed;
     };
@@ -76,6 +73,13 @@ function dispose(node) {
             DISPOSES._add(node);
         }
     }
+}
+function peek(fn, arg1, arg2) {
+    var listen = LISTEN;
+    LISTEN = false;
+    var result = fn(arg1, arg2);
+    LISTEN = listen;
+    return result;
 }
 function freeze(fn) {
     var result;
@@ -113,28 +117,22 @@ function recover(fn) {
         }
     }
 }
-function Val(fn) {
-    this._fn = fn;
-}
-setValProto(Val.prototype, {
-    get: function () {
-        return this._fn();
-    }
-}, {
-    get: function () {
-        var listen = LISTEN;
-        LISTEN = false;
-        var val = this._fn();
-        LISTEN = listen;
-        return val;
-    }
-});
-function setValProto(obj, val, peek) {
-    Object.defineProperties(obj, { val: val, peek: peek });
+function setValProto(obj, getVal, peekVal, setVal) {
+    Object.defineProperties(obj, { val: { get: getVal, set: setVal }, peek: { get: peekVal } });
 }
 function getValue() {
     return this._value;
 }
+function Val(fn) {
+    this._fn = fn;
+}
+function getVal() {
+    return this._fn();
+}
+function peekVal() {
+    return peek(this._fn);
+}
+setValProto(Val.prototype, getVal, peekVal);
 function Send(owner, state, value) {
     this._state = 0 | state;
     this._value = value;
@@ -150,16 +148,16 @@ function Send(owner, state, value) {
         }
     }
 }
-function sendUpdate(node) {
+function sendUpdate() {
     var ln;
-    var node1 = node._node1;
-    var nodes = node._nodes;
+    var node1 = this._node1;
+    var nodes = this._nodes;
     if (node1 !== null) {
-        receiveUpdate(node1);
+        node1._recUpdate();
     }
     if (nodes !== null && (ln = nodes.length) > 0) {
         for (var i = 0; i < ln; i++) {
-            receiveUpdate(nodes[i]);
+            nodes[i]._recUpdate();
         }
     }
 }
@@ -171,6 +169,13 @@ function disposeSender(node) {
     node._nodeslots = null;
     cleanupSender(node);
 }
+function Receive(owner, state, value) {
+    Send.call(this, owner, state, value);
+    this._source1 = null;
+    this._source1slot = 0;
+    this._sources = null;
+    this._sourceslots = null;
+}
 function Owner() {
     this._state = 0;
     this._owned = null;
@@ -179,7 +184,6 @@ function Owner() {
 }
 function disposeOwner() {
     this._state = 2;
-    this._value = (void 0);
     var i;
     var ln;
     var owned = this._owned;
@@ -199,46 +203,6 @@ function disposeOwner() {
 }
 Owner.prototype._update = function () { };
 Owner.prototype._dispose = disposeOwner;
-function receiveUpdate(node) {
-    var state = node._state;
-    if ((state & 6) === 0 && (state & 16) === 0) {
-        node._state |= 16;
-        if ((state & (128 | 32)) === 32) {
-            PENDINGS._add(node);
-        } else {
-            UPDATES._add(node);
-        }
-        if (node._owned !== null) {
-            receiveDispose(node._owned);
-        }
-        if ((state & 32) !== 0) {
-            sendUpdate(node);
-        }
-    }
-}
-function receiveDispose(nodes) {
-    var ln = nodes.length;
-    for (var i = 0; i < ln; i++) {
-        var node = nodes[i];
-        node._state = 4;
-        DISPOSES._add(node);
-        var owned = node._owned;
-        if (owned !== null) {
-            receiveDispose(owned);
-            owned.length = 0;
-        }
-    }
-}
-function Receive(owner, state, value) {
-    Send.call(this, owner, state, value);
-    this._source1 = null;
-    this._source1slot = 0;
-    this._sources = null;
-    this._sourceslots = null;
-    this._owned = null;
-    this._cleanups = null;
-    this._recovers = null;
-}
 function Data(value) {
     Send.call(this, OWNER, 0, value);
     this._pending = NIL;
@@ -258,7 +222,7 @@ function setData(value) {
             if ((state & 32) !== 0) {
                 reset();
                 this._value = value;
-                sendUpdate(this);
+                this._send();
                 exec();
             } else {
                 this._value = value;
@@ -280,16 +244,17 @@ function updateData() {
     this._pending = NIL;
     this._state &= ~16;
     if ((this._state & 32) !== 0) {
-        sendUpdate(this);
+        this._send();
     }
 }
 function disposeData() {
     disposeSender(this);
     this._pending = void 0;
 }
-setValProto(Data.prototype, { get: getData, set: setData }, { get: getValue });
+setValProto(Data.prototype, getData, getValue, setData);
 Data.prototype._update = updateData;
 Data.prototype._dispose = disposeData;
+Data.prototype._send = sendUpdate;
 function Value(value, eq) {
     Data.call(this, value);
     this._eq = eq;
@@ -302,20 +267,26 @@ function setValue(value) {
     }
     return value;
 }
-setValProto(Value.prototype, { get: getData, set: setValue }, { get: getValue });
+setValProto(Value.prototype, getData, getValue, setValue);
 Value.prototype._update = updateData;
 Value.prototype._dispose = function () {
     this._eq = null;
     disposeData.call(this);
 };
+Value.prototype._send = sendUpdate;
 function Computation(fn, value, state, eq) {
     var owner = OWNER;
     var listen = LISTEN;
     Receive.call(this, owner, state);
+    this._owned = null;
+    this._cleanups = null;
+    this._recovers = null;
     this._fn = fn;
-    this._eq = eq;
+    this._eq = void 0;
     if (eq === false) {
         this._state |= 128;
+    } else if (eq !== void 0) {
+        this._eq = eq;
     }
     OWNER = this;
     LISTEN = true;
@@ -338,23 +309,22 @@ function Computation(fn, value, state, eq) {
     OWNER = owner;
     LISTEN = listen;
 };
-setValProto(Computation.prototype, {
-    get: function () {
-        var state = this._state;
-        if ((state & 6) === 0 && STAGE !== 0) {
-            if ((state & 16) !== 0) {
-                if ((state & 8) !== 0) {
-                    throw new Error();
-                }
-                this._update();
+function getComputation() {
+    var state = this._state;
+    if ((state & 6) === 0 && STAGE !== 0) {
+        if ((state & 16) !== 0) {
+            if ((state & 8) !== 0) {
+                throw new Error();
             }
-            if (LISTEN) {
-                logRead(this, (OWNER));
-            }
+            this._update();
         }
-        return this._value;
+        if (LISTEN) {
+            logRead(this, (OWNER));
+        }
     }
-}, { get: getValue });
+    return this._value;
+}
+setValProto(Computation.prototype, getComputation, getValue);
 Computation.prototype._update = function () {
     var i;
     var ln;
@@ -396,10 +366,42 @@ Computation.prototype._update = function () {
 };
 Computation.prototype._dispose = function () {
     this._fn = null;
+    this._value = void 0;
     disposeOwner.call(this);
     disposeSender(this);
     cleanupReceiver(this);
 };
+Computation.prototype._send = sendUpdate;
+Computation.prototype._recUpdate = function () {
+    var state = this._state;
+    if ((state & 6) === 0 && (state & 16) === 0) {
+        this._state |= 16;
+        if ((state & (128 | 32)) === 32) {
+            PENDINGS._add(this);
+        } else {
+            UPDATES._add(this);
+        }
+        var owned = this._owned;
+        if (owned !== null) {
+            for (var ln = owned.length; ln-- !== 0;) {
+                owned.pop()._recDispose();
+            }
+        }
+        if ((state & 32) !== 0) {
+            this._send();
+        }
+    }
+};
+Computation.prototype._recDispose = function () {
+    this._state = 4;
+    DISPOSES._add(this);
+    var owned = this._owned;
+    if (owned !== null) {
+        for (var ln = owned.length; ln-- !== 0;) {
+            owned.pop()._recDispose();
+        }
+    }
+}
 function Queue(stage) {
     this._stage = stage;
     this._items = [];
@@ -589,7 +591,7 @@ function forgetSender(receive, slot) {
 }
 export {
     root, dispose, val, owner,
-    compute, $compute, when,
+    compute, $compute, when, peek,
     data, value, nil, freeze, recover,
     cleanup, Data, Value, Computation
 };
