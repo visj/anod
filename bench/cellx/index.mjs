@@ -66,12 +66,12 @@ const isSolution = (layers, answer) => answer.every((_, i) => SOLUTIONS[layers][
 async function main() {
   const report = {};
   // report.maverick = { fn: runMaverick, runs: [], avg: [] };
+  report.zorn = { fn: runZorn, runs: [] };
   report['preact/signals'] = { fn: runPreact, runs: [] };
   // report.zornStatic = { fn: runZornStatic, runs: [] };
   report.solid = { fn: runSolid, runs: [] };
   // report.usignal = { fn: runUsignal, runs: [] };
   report.S = { fn: runS, runs: [] };
-  report.zorn = { fn: runZorn, runs: [] };
   report.zornBind = { fn: runZornBind, runs: [] };
   // Has no way to dispose so can't consider it feature comparable.
   // report.reactively = { fn: runReactively, runs: [], avg: [] };
