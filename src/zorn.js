@@ -286,7 +286,7 @@ function dispose(node) {
 
 /**
  * @template P1,P2,P3,T
- * @param {function(P1,P2): T} fn 
+ * @param {function(P1,P2,P3): T} fn 
  * @param {P1=} arg1 
  * @param {P2=} arg2
  * @param {P3=} arg3
