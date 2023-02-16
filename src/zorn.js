@@ -638,8 +638,10 @@ function Receive(owner, state, value) {
  * @this {!Respond}
  */
 function recDispose() {
+    if ((this._state & Opts.MayDispose) === 0) {
+        DISPOSES._add(this);
+    }
     this._state = Opts.Dispose;
-    DISPOSES._add(this);
 }
 
 /**
