@@ -1,10 +1,10 @@
 import assert from 'assert';
-import { root, batch, compute, effect, cleanup, $compute, value } from './helper/zorn.js';
+import { root, batch, data, compute, effect, cleanup, value } from './helper/zorn.js';
 
 describe("mayupdate", function () {
   it("does not trigger downstream computations unless changed", function () {
     root(function () {
-      var d1 = value(1, false);
+      var d1 = data(1);
       var order = '';
       var t1 = compute(function () {
         order += 't1';

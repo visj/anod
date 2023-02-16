@@ -119,11 +119,11 @@ function bundleMinify() {
     exec(cmd, function (err, stdout, stderr) {
         if (err) {
             console.error(err);
-            return;
+            // return;
         }
         if (stderr) {
             console.error(stderr);
-            return;
+            // return;
         }
         var i = 0;
         var regex = /([\;\s]*)window\.([\$\w]+)=/g;

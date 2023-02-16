@@ -314,13 +314,12 @@ function runS(layers, done) {
 
 function runZorn(layers, done) {
   var result;
-  var { data, respond, $respond, root, batch, dispose } = zorn;
-  var node = root(() => {
+  var node = zorn.root(() => {
     const start = {
-      a: data(1),
-      b: data(2),
-      c: data(3),
-      d: data(4),
+      a: zorn.data(1),
+      b: zorn.data(2),
+      c: zorn.data(3),
+      d: zorn.data(4),
     };
 
     let layer = start;
@@ -328,10 +327,10 @@ function runZorn(layers, done) {
     for (let i = layers; i--;) {
       layer = ((m) => {
         return {
-          a: $respond(() => rand % 2 ? m.b.val : m.c.val, 0),
-          b: respond(() => m.a.val - m.c.val, 0),
-          c: respond(() => m.b.val + m.d.val, 0),
-          d: respond(() => m.c.val, 0),
+          a: zorn.$respond(() => rand % 2 ? m.b.val : m.c.val, 0),
+          b: zorn.respond(() => m.a.val - m.c.val, 0),
+          c: zorn.respond(() => m.b.val + m.d.val, 0),
+          d: zorn.respond(() => m.c.val, 0),
         };
       })(layer);
     }
@@ -340,7 +339,7 @@ function runZorn(layers, done) {
 
     const end = layer;
     if (BATCHED) {
-      batch(() => {
+      zorn.batch(() => {
         start.a.val = 4;
         start.b.val = 3;
         start.c.val = 2;
@@ -360,7 +359,7 @@ function runZorn(layers, done) {
     const endTime = performance.now() - startTime;
     result = isSolution(layers, solution) ? endTime : -1;
   });
-  dispose(node);
+  zorn.dispose(node);
   done(result);
 }
 
