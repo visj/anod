@@ -13,7 +13,10 @@ import { exec } from 'child_process';
  */
 function inlineEnum(code, enumName, enumObj) {
     for (var key in enumObj) {
-        code = code.replace(new RegExp(enumName + '\\.' + key, 'g'), enumObj[key]);
+        var regex = new RegExp(enumName + '\\.' + key + '([^\\w])', 'g');
+        code = code.replace(regex, function (_, capture) {
+            return enumObj[key] + ' /* ' + enumName + '.' + key + ' */' + capture;
+        });
     }
     return code;
 }
@@ -57,7 +60,7 @@ function bundle() {
             nodist = false;
         }
     });
-    var CommentRegex = /\/\*[\s\S]*?\*\/|\/\/.*/g;
+    var CommentRegex = /\/\*[\s\S]*?\*\/|\/\/.*[^\S\r\n]*/g;
     var ExportRegex = /export\s\{([\$\w\,\s]+)\s*\};?/;
     var ImportRegex = /import\s*\{([\$\w\,\s]+)\s*\}\s*from\s*['"]([\w\.\/]+)['"];?/g;
 
@@ -67,21 +70,22 @@ function bundle() {
             return;
         }
         var srcCode = data.toString();
+
+        srcCode = inlineEnum(srcCode, 'Opts', Opts);
+        srcCode = inlineEnum(srcCode, 'Stage', Stage);
+
         var code = srcCode.split('/* START_OF_FILE */')[1];
         code = code.replace(CommentRegex, '');
         code = code.replace(ImportRegex, '');
 
         code = code.split('\n').filter(line => line.trim().length > 0).join('\n');
 
-        code = inlineEnum(code, 'Stage', Stage);
-        code = inlineEnum(code, 'Opts', Opts);
-
         var mjs = code;
         var cjs = code.replace(ExportRegex, function (_, capture) {
             return 'module.exports = {' + capture + '};';
         });
         var iife = 'var Zorn = (function() {\n\t' + code.replace(ExportRegex, function (_, capture) {
-            return 'return { ' + capture.split(',').map(s => s.trim()).map(val => val + ': ' + val).join(', ') + ' };';
+            return 'return { ' + capture.trim().split(',').map(s => s.trim()).filter(s => s !== ',').map(val => val + ': ' + val).join(', ') + ' };';
         }).split('\n').join('\n\t') + '\n})();';
         if (nodist) {
             write = function() {

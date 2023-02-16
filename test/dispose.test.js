@@ -7,6 +7,7 @@ describe("root(dispose)", function () {
 		var owner = root(function () {
 			c = 0;
 			d = signal(0);
+			
 			f = compute(function () {
 				c++;
 				return d.val;

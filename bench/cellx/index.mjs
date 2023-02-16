@@ -14,7 +14,7 @@ import * as usignal from "usignal";
 import Table from 'cli-table';
 import * as zorn from "../../dist/zorn.mjs";
 
-const BATCHED = true;
+const BATCHED = false;
 const RUNS_PER_TIER = 150;
 const LAYER_TIERS = [10, 100, 500, 1000, 2000, 2500];
 
@@ -327,10 +327,10 @@ function runZorn(layers, done) {
     for (let i = layers; i--;) {
       layer = ((m) => {
         return {
-          a: zorn.$compute(() => rand % 2 ? m.b.val : m.c.val, 0, false),
-          b: zorn.compute(() => m.a.val - m.c.val, 0, false),
-          c: zorn.compute(() => m.b.val + m.d.val, 0, false),
-          d: zorn.compute(() => m.c.val, 0, false),
+          a: zorn.$compute(() => rand % 2 ? m.b.val : m.c.val, 0),
+          b: zorn.compute(() => m.a.val - m.c.val, 0),
+          c: zorn.compute(() => m.b.val + m.d.val, 0),
+          d: zorn.compute(() => m.c.val, 0),
         };
       })(layer);
     }

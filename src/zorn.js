@@ -95,22 +95,36 @@ Respond.prototype._recMayDispose = function () { };
  */
 export var Opts = {
     Static: 1,
+    Dispose: 2,
+    Disposed: 4,
+    /**
+     * Opts.Dispose | Opts.Disposed
+     */
     DisposeFlags: 6,
-    Disposed: 2,
-    Dispose: 4,
-    MaybeDispose: 8,
-    UpdateFlags: 48,
+    Update: 8,
     Updated: 16,
-    Update: 32,
-    MaybeUpdate: 64,
-    MaybeFlags: 72,
-    Cleared: 128,
-    StateFlags: 252,
+    /**
+     * Opts.Update | Opts.Updated
+     */
+    UpdateFlags: 48,
+    MayDispose: 32,
+    MayUpdate: 64,
+    MayChecked: 128,
+    /**
+     * Opts.MayDispose | Opts.MayUpdate | Opts.MayChecked
+     */
+    MayFlags: 224,
+    /**
+     * Opts.MayFlags | Opts.UpdateFlags
+     */
+    MayOrUpdateFlags: 248,
+    StateFlags: 254,
     Send: 256,
-    Respond: 512,
-    Compare: 1024,
-    Error: 2048,
-}
+    NoSend: 512,
+    Respond: 1024,
+    Compare: 2048,
+    Error: 4096,
+};
 
 /**
  * @const
@@ -121,9 +135,9 @@ export var Stage = {
     Started: 1,
     Disposes: 2,
     Changes: 3,
-    Computes: 4,
-    Effects: 5,
-}
+    Updates: 4,
+    Maybes: 5,
+};
 
 /**
  * @package
@@ -199,6 +213,28 @@ function compute(fn, seed, eq) {
  */
 function $compute(fn, seed, eq) {
     return new Computation(fn, seed, 0, eq);
+}
+
+/**
+ * @public
+ * @template T
+ * @param {function(T): T} fn 
+ * @param {T=} seed 
+ * @returns {!Respond<T>}
+ */
+function effect(fn, seed) {
+    return new Computation(fn, seed, Opts.NoSend | Opts.Static);
+}
+
+/**
+ * @public
+ * @template T
+ * @param {function(T): T} fn 
+ * @param {T=} seed 
+ * @returns {!Respond<T>}
+ */
+function $effect(fn, seed) {
+    return new Computation(fn, seed, Opts.NoSend);
 }
 
 /**
@@ -414,32 +450,56 @@ function Send(owner, state, value) {
  * 
  * @param {!Respond} node 
  */
-function clearMaybe(node) {
-    if (((node._state & Opts.MaybeDispose) !== 0) && ((node._owner & Opts.MaybeFlags) !== 0)) {
-        clearMaybe(node._owner);
+function clearMayDispose(node) {
+    if ((node._owner & Opts.MayFlags) !== 0) {
+        clearMayUpdate(node._owner);
+        node._state &= ~Opts.MayDispose;
     }
-    if ((node._state & (Opts.DisposeFlags | Opts.MaybeUpdate)) === Opts.MaybeUpdate) {
-        /** @type {?Send} */
-        var source1 = /** @type {!Receive} */(node)._source1;
-        if (source1 !== null && ((source1._state & Opts.MaybeFlags) !== 0)) {
-            clearMaybe(source1);
-        }
-        if ((node._state & Opts.Update) !== 0) {
-            return;
-        }
-        /** @type {number} */
-        var ln;
-        /** @const {?Array<!Send>} */
-        var sources = /** @type {!Receive} */(node)._sources;
-        if (sources !== null && (ln = sources.length) > 0) {
-            for (var i = 0; i < ln; i++) {
-                source1 = sources[i];
-                if ((source1._state & Opts.MaybeFlags) !== 0) {
-                    clearMaybe(sources[i]);
+}
+
+/**
+ * 
+ * @param {!Respond} node 
+ */
+function clearMayUpdate(node) {
+    if (((node._state & Opts.MayDispose) !== 0) && ((node._owner._state & Opts.MayFlags) !== 0)) {
+        clearMayUpdate(node._owner);
+        node._state &= ~Opts.MayDispose;
+    }
+    if ((node._state & Opts.DisposeFlags) === 0) {
+        if ((node._state & Opts.MayUpdate) !== 0) {
+            checkSource: {
+                /** @type {?Send} */
+                var source1 = /** @type {!Receive} */(node)._source1;
+                if (source1 !== null && ((source1._state & Opts.MayUpdate) !== 0)) {
+                    clearMayUpdate(source1);
                     if ((node._state & Opts.Update) !== 0) {
-                        return;
+                        break checkSource;
                     }
                 }
+                /** @type {number} */
+                var ln;
+                /** @const {?Array<!Send>} */
+                var sources = /** @type {!Receive} */(node)._sources;
+                if (sources !== null && (ln = sources.length) > 0) {
+                    for (var i = 0; i < ln; i++) {
+                        source1 = sources[i];
+                        if ((source1._state & Opts.MayUpdate) !== 0) {
+                            clearMayUpdate(sources[i]);
+                            if ((node._state & Opts.Update) !== 0) {
+                                break checkSource;
+                            }
+                        }
+                    }
+                }
+            }
+            node._state &= ~Opts.MayUpdate;
+        }
+        if ((node._state & Opts.Update) !== 0) {
+            try {
+                node._update();
+            } finally {
+                node._state &= ~Opts.MayOrUpdateFlags;
             }
         }
     }
@@ -465,16 +525,19 @@ function disposeSend(node) {
 function sendUpdate(send) {
     /** @type {number} */
     var ln;
-    /** @const {?Receive} */
+    /** @type {?Receive} */
     var node1 = send._node1;
     /** @const {?Array<!Receive>} */
     var nodes = send._nodes;
-    if (node1 !== null) {
+    if (node1 !== null && (node1._state & (Opts.DisposeFlags | Opts.Update)) === 0) {
         node1._recUpdate();
     }
     if (nodes !== null && (ln = nodes.length) > 0) {
         for (var i = 0; i < ln; i++) {
-            nodes[i]._recUpdate();
+            node1 = nodes[i];
+            if ((node1._state & (Opts.DisposeFlags | Opts.Update)) === 0) {
+                node1._recUpdate();
+            }
         }
     }
 }
@@ -486,16 +549,19 @@ function sendUpdate(send) {
 function sendMayUpdate(send) {
     /** @type {number} */
     var ln;
-    /** @const {?Receive} */
+    /** @type {?Receive} */
     var node1 = send._node1;
     /** @const {?Array<!Receive>} */
     var nodes = send._nodes;
-    if (node1 !== null) {
+    if (node1 !== null && (node1._state & (Opts.DisposeFlags | Opts.MayUpdate)) === 0) {
         node1._recMayUpdate();
     }
     if (nodes !== null && (ln = nodes.length) > 0) {
         for (var i = 0; i < ln; i++) {
-            nodes[i]._recMayUpdate();
+            node1 = nodes[i];
+            if ((node1._state & (Opts.DisposeFlags | Opts.MayUpdate)) === 0) {
+                node1._recMayUpdate();
+            }
         }
     }
 }
@@ -506,9 +572,13 @@ function sendMayUpdate(send) {
  */
 function sendDispose(owned) {
     /** @type {number} */
-    var ln = owned.length
+    var ln = owned.length;
     for (; ln-- !== 0;) {
-        owned.pop()._recDispose();
+        /** @const {Respond} */
+        var child = owned.pop();
+        if ((child._state & Opts.DisposeFlags) === 0) {
+            child._recDispose();
+        }
     }
 }
 
@@ -518,9 +588,13 @@ function sendDispose(owned) {
  */
 function sendMayDispose(owned) {
     /** @const {number} */
-    var ln = owned.length
+    var ln = owned.length;
     for (var i = 0; i < ln; i++) {
-        owned[i]._recMayDispose();
+        /** @const {Respond} */
+        var child = owned[i];
+        if ((child._state & (Opts.DisposeFlags | Opts.MayDispose)) === 0) {
+            child._recMayDispose();
+        }
     }
 }
 
@@ -573,10 +647,10 @@ function recDispose() {
  * @this {!Respond}
  */
 function recMayDispose() {
-    if ((this._state & Opts.MaybeDispose) === 0) {
+    if ((this._state & Opts.MayDispose) === 0) {
         DISPOSES._add(this);
     }
-    this._state |= Opts.MaybeDispose;
+    this._state |= Opts.MayDispose;
 };
 
 /**
@@ -701,8 +775,8 @@ setValProto(
         /** @const {number} */
         var state = this._state;
         if ((state & Opts.DisposeFlags) === 0) {
-            if ((state & Opts.MaybeDispose) !== 0) {
-                clearMaybe(this);
+            if ((state & Opts.MayDispose) !== 0) {
+                clearMayDispose(this);
             }
             if ((state & Opts.Disposed) === 0) {
                 result = this._fn();
@@ -764,13 +838,13 @@ setValProto(
         /** @const {number} */
         var state = this._state;
         if ((state & Opts.DisposeFlags) === 0) {
-            if ((state & Opts.MaybeDispose) !== 0) {
-                if ((state & Opts.Cleared) !== 0) {
-                    // cyclical ownership
+            if ((state & Opts.MayDispose) !== 0) {
+                if ((state & Opts.MayChecked) !== 0) {
+                    // cyclical ownership ??
                     throw new Error();
                 }
-                this._state |= Opts.Cleared;
-                clearMaybe(this);
+                this._state |= Opts.MayChecked;
+                clearMayDispose(this);
             }
             if ((state & Opts.DisposeFlags) === 0 && LISTEN) {
                 logRead(this, /** @type {!Receive} */(OWNER));
@@ -892,11 +966,13 @@ function Computation(fn, value, state, eq) {
      * @type {?function(T,T): boolean}
      */
     this._eq = null;
-    if (eq === false) {
-        this._state |= Opts.Respond;
-    } else if (eq !== void 0) {
-        this._state |= Opts.Compare;
-        this._eq = /** @type {function(T,T): boolean} */(eq);
+    if ((state & Opts.NoSend) === 0) {
+        if (eq === false) {
+            this._state |= Opts.Respond;
+        } else if (eq !== void 0) {
+            this._state |= Opts.Compare;
+            this._eq = /** @type {function(T,T): boolean} */(eq);
+        }
     }
     OWNER = this;
     LISTEN = true;
@@ -928,28 +1004,30 @@ setValProto(
      * @returns {T}
      */
     function getComputation() {
-        /** @const {number} */
+        /** @type {number} */
         var state = this._state;
         if ((state & Opts.DisposeFlags) === 0 && STAGE !== Stage.Idle) {
-            if ((state & Opts.MaybeFlags) !== 0) {
-                if ((state & Opts.Cleared)) {
+            if ((state & Opts.MayFlags) !== 0) {
+                if ((state & Opts.MayChecked)) {
                     // cyclical dependency
                     throw new Error();
                 }
-                this._state |= Opts.Cleared;
-                clearMaybe(this);
-            }
-            if ((state & Opts.DisposeFlags) !== 0) {
-                return this._value;
+                this._state |= Opts.MayChecked;
+                clearMayUpdate(this);
+                state = this._state;
             }
             if ((state & Opts.Update) !== 0) {
                 if ((state & Opts.Updated) !== 0) {
                     // cyclical dependency
                     throw new Error();
                 }
-                this._update();
+                try {
+                    this._update();
+                } finally {
+                    this._state &= ~Opts.MayOrUpdateFlags;
+                }
             }
-            if (LISTEN) {
+            if ((state & (Opts.DisposeFlags | Opts.NoSend)) === 0 && LISTEN) {
                 logRead(this, /** @type {!Receive} */(OWNER));
             }
         }
@@ -984,17 +1062,23 @@ Computation.prototype._update = function () {
         cleanups.length = 0;
     }
     OWNER = this;
-    LISTEN = (state & Opts.Static) === 0
+    LISTEN = (state & Opts.Static) === 0;
     if (LISTEN) {
         cleanupReceiver(this);
     }
+    /** @const {T} */
     var value = this._value;
     this._state |= Opts.Updated;
     this._value = this._fn(value);
-    if (((state & Opts.Respond) === 0) && ((state & Opts.Compare) === 0 ? value !== this._value : !this._eq(value, this._value))) {
+    if (
+        ((state & Opts.Respond) === 0) &&
+        ((state & Opts.Compare) === 0 ?
+            value !== this._value :
+            !this._eq(value, this._value))
+    ) {
         sendUpdate(this);
     }
-    this._state &= ~Opts.StateFlags;
+    this._state &= ~Opts.MayOrUpdateFlags;
     OWNER = owner;
     LISTEN = listen;
 };
@@ -1016,16 +1100,34 @@ Computation.prototype._dispose = function () {
  * @this {!Computation<T>}
  */
 Computation.prototype._recDispose = function () {
-    if ((this._state & Opts.MaybeDispose) === 0) {
+    if ((this._state & Opts.MayDispose) === 0) {
+        this._state = Opts.Dispose;
         DISPOSES._add(this);
+    } else {
+        this._dispose();
     }
-    this._state = Opts.Dispose;
     /** @const {?Array<!Respond>} */
     var owned = this._owned;
     if (owned !== null) {
         sendDispose(owned);
     }
-}
+};
+
+/**
+ * @package
+ * @this {!Computation<T>}
+ */
+ Computation.prototype._recMayDispose = function () {
+    /** @const {number} */
+    var state = this._state;
+    if ((state & Opts.MayFlags) === 0) {
+        PENDINGS._add(this);
+    }
+    this._state |= Opts.MayDispose;
+    if (this._owned !== null) {
+        sendMayDispose(this._owned);
+    }
+};
 
 /**
  * @package
@@ -1034,25 +1136,17 @@ Computation.prototype._recDispose = function () {
 Computation.prototype._recUpdate = function () {
     /** @const {number} */
     var state = this._state;
-    if ((state & (Opts.DisposeFlags | Opts.Update)) === 0) {
-        this._state |= Opts.Update;
-        /** @const {?Array<!Respond>} */
-        var owned = this._owned;
-        if (owned !== null) {
-            sendDispose(owned);
-        }
-        if ((state & Opts.MaybeUpdate) !== 0) {
-            if ((state & Opts.Send) !== 0) {
+    this._state = (state | Opts.Update) & ~Opts.MayUpdate;
+    if (this._owned !== null) {
+        sendDispose(this._owned);
+    }
+    UPDATES._add(this);
+    if ((state & Opts.MayUpdate) === 0) {
+        if ((state & Opts.Send) !== 0) {
+            if ((state & Opts.Respond) !== 0) {
                 sendUpdate(this);
-            }
-        } else {
-            UPDATES._add(this);
-            if ((state & Opts.Send) !== 0) {
-                if ((state & Opts.Respond) !== 0) {
-                    sendUpdate(this);
-                } else {
-                    sendMayUpdate(this);
-                }
+            } else {
+                sendMayUpdate(this);
             }
         }
     }
@@ -1065,41 +1159,17 @@ Computation.prototype._recUpdate = function () {
 Computation.prototype._recMayUpdate = function () {
     /** @const {number} */
     var state = this._state;
-    if ((state & (Opts.DisposeFlags | Opts.MaybeUpdate)) === 0) {
-        if ((state & Opts.MaybeFlags) === 0) {
-            MAYBES._add(this);
-        }
-        this._state |= Opts.MaybeUpdate;
-        if ((state & Opts.MaybeDispose) === 0) {
-            /** @const {?Array<!Respond>} */
-            var owned = this._owned;
-            if (owned !== null) {
-                sendMayDispose(owned);
-            }
-        }
-        if ((state & Opts.Send) !== 0) {
-            sendMayUpdate(this);
+    if ((state & Opts.MayFlags) === 0) {
+        PENDINGS._add(this);
+    }
+    this._state |= Opts.MayUpdate;
+    if ((state & Opts.MayDispose) === 0) {
+        if (this._owned !== null) {
+            sendMayDispose(this._owned);
         }
     }
-};
-
-/**
- * @package
- * @this {!Computation<T>}
- */
-Computation.prototype._recMayDispose = function () {
-    /** @const {number} */
-    var state = this._state;
-    if ((state & (Opts.DisposeFlags | Opts.MaybeDispose)) === 0) {
-        if ((state & Opts.MaybeFlags) === 0) {
-            MAYBES._add(this);
-        }
-        this._state |= Opts.MaybeDispose;
-        /** @const {?Array<!Respond>} */
-        var owned = this._owned;
-        if (owned !== null) {
-            sendMayDispose(owned);
-        }
+    if ((state & Opts.Send) !== 0) {
+        sendMayUpdate(this);
     }
 };
 
@@ -1152,8 +1222,8 @@ Queue.prototype._run = function () {
         var state = item._state;
         if ((state & Opts.StateFlags) !== 0) {
             try {
-                if ((state & Opts.MaybeFlags) !== 0) {
-                    clearMaybe(item);
+                if ((state & Opts.MayFlags) !== 0) {
+                    clearMayUpdate(item);
                 }
                 if ((state & Opts.Update) !== 0) {
                     /** @type {!Send} */(item)._update();
@@ -1163,7 +1233,7 @@ Queue.prototype._run = function () {
             } catch (err) {
                 error = 1;
             } finally {
-                item._state &= ~Opts.StateFlags;
+                item._state &= ~Opts.MayOrUpdateFlags;
             }
         }
         this._items[i] = null;
@@ -1191,11 +1261,11 @@ var CHANGES = new Queue(Stage.Changes);
 /**
  * @const {!Queue}
  */
-var UPDATES = new Queue(Stage.Computes);
+var UPDATES = new Queue(Stage.Updates);
 /**
  * @const {!Queue}
  */
-var MAYBES = new Queue(Stage.Effects);
+var PENDINGS = new Queue(Stage.Maybes);
 /**
  * @type {?Scope}
  */
@@ -1209,7 +1279,7 @@ var LISTEN = false;
  * @package
  */
 function reset() {
-    DISPOSES._count = CHANGES._count = UPDATES._count = MAYBES._count = 0;
+    DISPOSES._count = CHANGES._count = UPDATES._count = PENDINGS._count = 0;
 }
 
 /**
@@ -1280,7 +1350,7 @@ function start() {
     /** @const {!Queue} */
     var updates = UPDATES;
     /** @const {!Queue} */
-    var maybes = MAYBES;
+    var maybes = PENDINGS;
     do {
         if (disposes._count !== 0) {
             errors += disposes._run();
@@ -1417,7 +1487,9 @@ function forgetSender(receive, slot) {
 }
 
 export {
-    root, dispose, val,
-    compute, $compute, peek, stable,
-    signal, batch, recover, cleanup
+    peek, stable, batch,
+    recover, cleanup, dispose,
+    root, val, signal,
+    compute, $compute,
+    effect, $effect
 };

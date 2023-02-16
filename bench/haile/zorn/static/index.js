@@ -229,29 +229,29 @@ function createComputations1000to1(n, sources) {
 }
 
 function createComputation0(i) {
-    Zorn.compute(function () { return i; });
+    Zorn.effect(function () { return i; });
 }
 
 function createComputation1(s1) {
-    Zorn.compute(function () { 
+    Zorn.effect(function () { 
         return s1.val; 
     });
 }
 
 function createComputation2(s1, s2) {
-    Zorn.compute(function () { return s1.val + s2.val; });
+    Zorn.effect(function () { return s1.val + s2.val; });
 }
 
 function createComputation4(s1, s2, s3, s4) {
-    Zorn.compute(function () { return s1.val + s2.val + s3.val + s4.val; });
+    Zorn.effect(function () { return s1.val + s2.val + s3.val + s4.val; });
 }
 
 function createComputation8(s1, s2, s3, s4, s5, s6, s7, s8) {
-    Zorn.compute(function () { return s1.val + s2.val + s3.val + s4.val + s5.val + s6.val + s7.val + s8.val; });
+    Zorn.effect(function () { return s1.val + s2.val + s3.val + s4.val + s5.val + s6.val + s7.val + s8.val; });
 }
 
 function createComputation1000(ss, offset) {
-    Zorn.compute(function () {
+    Zorn.effect(function () {
         var sum = 0;
         for (var i = 0; i < 1000; i++) {
             sum += ss[offset + i].val;
@@ -262,7 +262,7 @@ function createComputation1000(ss, offset) {
 
 function updateComputations1to1(n, sources) {
     var s1 = sources[0],
-        c = Zorn.compute(function () { return s1.val; });
+        c = Zorn.effect(function () { return s1.val; });
     for (var i = 0; i < n; i++) {
         s1.val = i;
     }
@@ -271,7 +271,7 @@ function updateComputations1to1(n, sources) {
 function updateComputations2to1(n, sources) {
     var s1 = sources[0],
         s2 = sources[1],
-        c = Zorn.compute(function () { return s1.val + s2.val; });
+        c = Zorn.effect(function () { return s1.val + s2.val; });
     for (var i = 0; i < n; i++) {
         s1.val = i;
     }
@@ -282,7 +282,7 @@ function updateComputations4to1(n, sources) {
         s2 = sources[1],
         s3 = sources[2],
         s4 = sources[3],
-        c = Zorn.compute(function () { return s1.val + s2.val + s3.val + s4.val; });
+        c = Zorn.effect(function () { return s1.val + s2.val + s3.val + s4.val; });
     for (var i = 0; i < n; i++) {
         s1.val = i;
     }
@@ -290,7 +290,7 @@ function updateComputations4to1(n, sources) {
 
 function updateComputations1000to1(n, sources) {
     var s1 = sources[0],
-        c = Zorn.compute(function () {
+        c = Zorn.effect(function () {
             var sum = 0;
             for (var i = 0; i < 1000; i++) {
                 sum += sources[i].val;
@@ -304,8 +304,8 @@ function updateComputations1000to1(n, sources) {
 
 function updateComputations1to2(n, sources) {
     var s1 = sources[0],
-        c1 = Zorn.compute(function () { return s1.val; }),
-        c2 = Zorn.compute(function () { return s1.val; });
+        c1 = Zorn.effect(function () { return s1.val; }),
+        c2 = Zorn.effect(function () { return s1.val; });
     for (var i = 0; i < n / 2; i++) {
         s1.val = i;
     }
@@ -313,10 +313,10 @@ function updateComputations1to2(n, sources) {
 
 function updateComputations1to4(n, sources) {
     var s1 = sources[0],
-        c1 = Zorn.compute(function () { return s1.val; }),
-        c2 = Zorn.compute(function () { return s1.val; }),
-        c3 = Zorn.compute(function () { return s1.val; }),
-        c4 = Zorn.compute(function () { return s1.val; });
+        c1 = Zorn.effect(function () { return s1.val; }),
+        c2 = Zorn.effect(function () { return s1.val; }),
+        c3 = Zorn.effect(function () { return s1.val; }),
+        c4 = Zorn.effect(function () { return s1.val; });
     for (var i = 0; i < n / 4; i++) {
         s1.val = i;
     }
@@ -325,7 +325,7 @@ function updateComputations1to4(n, sources) {
 function updateComputations1to1000(n, sources) {
     var s1 = sources[0];
     for (var i = 0; i < 1000; i++) {
-        Zorn.compute(function () { return s1.val; });
+        Zorn.effect(function () { return s1.val; });
     }
     for (var i = 0; i < n / 1000; i++) {
         s1.val = i;

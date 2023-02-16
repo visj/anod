@@ -32,3 +32,7 @@ export function signal<T>(value: T, eq?: Compare<T>): Respond<T>;
 export function compute<T>(fn: (seed: T) => T, seed?: T, eq?: Compare<T>): Readonly<Respond<T>>;
 
 export function $compute<T>(fn: (seed: T) => T, seed?: T, eq?: Compare<T>): Readonly<Respond<T>>;
+
+export function effect<T>(fn: (seed: T) => T, seed?: T): Readonly<Respond<T>>;
+
+export function $effect<T>(fn: (seed: T) => T, seed?: T): Readonly<Respond<T>>;
