@@ -1,5 +1,5 @@
 import assert from 'assert';
-import { root, compute, $compute, value } from './helper/zorn.js';
+import { root, effect, compute, $compute, value } from './helper/zorn.js';
 
 describe("compute()", function () {
     describe("creation", function () {
@@ -15,7 +15,7 @@ describe("compute()", function () {
         it("occurs once intitially", function () {
             root(function () {
                 var calls = 0;
-                compute(function () {
+                effect(function () {
                     calls++;
                 });
                 assert.equal(calls, 1);
@@ -41,7 +41,7 @@ describe("compute()", function () {
             root(function () {
                 var d = value(1);
                 var fevals = 0;
-                compute(function () {
+                effect(function () {
                     fevals++;
                     d.val;
                 });
@@ -57,7 +57,7 @@ describe("compute()", function () {
             root(function () {
                 var d = value(1);
                 var fevals = 0;
-                compute(function () {
+                effect(function () {
                     fevals++;
                     d.val;
                 });
@@ -140,7 +140,7 @@ describe("compute()", function () {
         it("does not register a dependency", function () {
             root(function () {
                 var fevals = 0, d;
-                compute(function () {
+                effect(function () {
                     fevals++;
                     d = value(1);
                 });
@@ -230,7 +230,7 @@ describe("compute()", function () {
             root(function () {
                 var d = value(1);
                 assert.throws(function () {
-                    compute(function () {
+                    effect(function () {
                         d.val;
                         d.val++;
                     });
@@ -285,7 +285,7 @@ describe("compute()", function () {
                 var a1 = value(0);
                 var b1 = compute(function () { seq += "b1"; return a1.val; });
                 var b2 = compute(function () { seq += "b2"; return a1.val; });
-                var c1 = compute(function () { b1.val, b2.val; seq += "c1"; });
+                effect(function () { b1.val, b2.val; seq += "c1"; });
 
                 seq = "";
                 a1.val++;
@@ -347,7 +347,7 @@ describe("compute()", function () {
                 var g3 = compute(function () { return f1.val + f2.val + f3.val; });
 
                 var hcount = 0;
-                compute(function () {
+                effect(function () {
                     hcount++;
                     g1.val + g2.val + g3.val;
                 });

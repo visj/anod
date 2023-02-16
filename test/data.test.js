@@ -1,5 +1,5 @@
 import assert from 'assert';
-import { root, compute, value, batch } from './helper/zorn.js';
+import { root, effect, compute, value, batch } from './helper/zorn.js';
 
 describe("data", function () {
     it("takes and returns an initial value", function () {
@@ -50,7 +50,7 @@ describe("data", function () {
     it("throws if set to two different values in a computation", function () {
         root(function () {
             var d = value(1);
-            compute(function () {
+            effect(function () {
                 d.val = 2;
                 assert.throws(function () {
                     d.val = 3;

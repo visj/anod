@@ -1,5 +1,5 @@
 import assert from 'assert';
-import { root, val, compute, value } from './helper/zorn.js';
+import { root, val, effect, compute, value } from './helper/zorn.js';
 
 describe("peek(...)", function () {
 
@@ -19,7 +19,7 @@ describe("peek(...)", function () {
             var c = value(3);
             var d = 0;
             
-            compute(function () {
+            effect(function () {
                 d++; 
                 a.val;
                 b.peek;
@@ -46,7 +46,7 @@ describe("peek(...)", function () {
             var c = value(3);
             var d = 0;
             
-            compute(function () {
+            effect(function () {
                 d++; 
                 a.val;
                 val(function() {

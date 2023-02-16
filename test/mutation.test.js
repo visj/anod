@@ -1,5 +1,5 @@
 import assert from 'assert';
-import { root, compute, value } from './helper/zorn.js';
+import { root, effect, compute, value } from './helper/zorn.js';
 
 describe("Computations which modify data", function () {
     it("batch data while executing computation", function () {
@@ -7,7 +7,7 @@ describe("Computations which modify data", function () {
             var a = value(false);
             var b = value(0);
             var cb;
-            compute(function () {
+            effect(function () {
                 if (a.val) {
                     b.val = 1;
                     cb = b.val;
@@ -29,14 +29,14 @@ describe("Computations which modify data", function () {
             var a = value(false);
             var b = value(0);
             var db;
-            compute(function () {
+            effect(function () {
                 if (a.val) {
                     seq += "c";
                     b.val = 1;
                     a.val = false;
                 }
             });
-            compute(function () {
+            effect(function () {
                 if (a.val) {
                     seq += "d";
                     db = b.val;
@@ -58,7 +58,7 @@ describe("Computations which modify data", function () {
             var seq = "";
             var a = value(0);
 
-            compute(function () {
+            effect(function () {
                 seq += a.val;
                 if (a.val < 10) {
                     a.val++;
@@ -86,10 +86,10 @@ describe("Computations which modify data", function () {
             var a1 = value(0);
             var c1 = value(0);
             var b1 = compute(function () { return a1.val; });
-            compute(function () { c1.val = a1.val; });
+            effect(function () { c1.val = a1.val; });
             var b3 = compute(function () { return a1.val; });
-            compute(function () { seq += "c4(" + c1.val + ")"; return b1.val; });
-            compute(function () { seq += "c5(" + c1.val + ")"; return b3.val; });
+            effect(function () { seq += "c4(" + c1.val + ")"; b1.val; });
+            effect(function () { seq += "c5(" + c1.val + ")"; b3.val; });
 
             seq = "";
             a1.val = 1;
