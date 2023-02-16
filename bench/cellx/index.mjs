@@ -46,6 +46,14 @@ const med = (array) => {
 }
 // array.sort((a, b) => (a - b < 0 ? 1 : -1))[Math.floor(array.length / 2)] || 0;
 
+function shuffleArray(array) {
+  for (let i = array.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [array[i], array[j]] = [array[j], array[i]];
+  }
+  return array;
+}
+
 const SOLUTIONS = {
   10: [2, 4, -2, -3],
   100: [2, 2, 4, 2],
@@ -70,13 +78,15 @@ async function main() {
   report['preact/signals'] = { fn: runPreact, runs: [] };
   // report.zornStatic = { fn: runZornStatic, runs: [] };
   report.solid = { fn: runSolid, runs: [] };
-  report.zorn = { fn: runZorn, runs: [] };
+  report.zornRespond = { fn: runZornRespond, runs: [] };
   // report.usignal = { fn: runUsignal, runs: [] };
   report.S = { fn: runS, runs: [] };
+  report.zornCompute = { fn: runZornCompute, runs: [] };
   // Has no way to dispose so can't consider it feature comparable.
   // report.reactively = { fn: runReactively, runs: [], avg: [] };
   // These libraries are not comparable in terms of features.
   // report.cellx = { fn: runCellx, runs: [] };
+  
   // warm up first
   for (const lib of Object.keys(report)) {
     const current = report[lib];
@@ -95,7 +105,7 @@ async function main() {
     }
   }
 
-  for (const lib of Object.keys(report)) {
+  for (const lib of shuffleArray(Object.keys(report))) {
     const current = report[lib];
 
     for (let i = 0; i < LAYER_TIERS.length; i += 1) {
@@ -312,7 +322,58 @@ function runS(layers, done) {
   });
 }
 
-function runZorn(layers, done) {
+function runZornCompute(layers, done) {
+  var result;
+  var node = zorn.root(() => {
+    const start = {
+      a: zorn.data(1),
+      b: zorn.data(2),
+      c: zorn.data(3),
+      d: zorn.data(4),
+    };
+
+    let layer = start;
+
+    for (let i = layers; i--;) {
+      layer = ((m) => {
+        return {
+          a: zorn.$compute(() => rand % 2 ? m.b.val : m.c.val, 0),
+          b: zorn.compute(() => m.a.val - m.c.val, 0),
+          c: zorn.compute(() => m.b.val + m.d.val, 0),
+          d: zorn.compute(() => m.c.val, 0),
+        };
+      })(layer);
+    }
+
+    const startTime = performance.now();
+
+    const end = layer;
+    if (BATCHED) {
+      zorn.batch(() => {
+        start.a.val = 4;
+        start.b.val = 3;
+        start.c.val = 2;
+        start.d.val = 1;
+      });
+    } else {
+      start.a.val = 4;
+      end.a.val, end.b.val, end.c.val, end.d.val;
+      start.b.val = 3;
+      end.a.val, end.b.val, end.c.val, end.d.val;
+      start.c.val = 2;
+      end.a.val, end.b.val, end.c.val, end.d.val;
+      start.d.val = 1;
+    }
+
+    const solution = [end.a.val, end.b.val, end.c.val, end.d.val];
+    const endTime = performance.now() - startTime;
+    result = isSolution(layers, solution) ? endTime : -1;
+  });
+  zorn.dispose(node);
+  done(result);
+}
+
+function runZornRespond(layers, done) {
   var result;
   var node = zorn.root(() => {
     const start = {

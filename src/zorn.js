@@ -19,20 +19,26 @@ function Nil() { }
  * @package
  * @interface
  */
-function State() { }
+function Opt() { }
 
 /**
  * @package
  * @type {number}
  */
-State.prototype._opt;
+Opt.prototype._opt;
 
 /**
  * @package
  * @interface
- * @extends {State}
+ * @extends {Opt}
  */
 function Dispose() { }
+
+/**
+ * @package
+ * @type {number}
+ */
+Dispose.prototype._age;
 
 /**
  * @package
@@ -72,6 +78,12 @@ Own.prototype._cleanups;
  * @type {?Array<!Recover>}
  */
 Own.prototype._recovers;
+
+/**
+ * @package
+ * @param {!Signal} child 
+ */
+Own.prototype._add = function(child) { };
 
 /**
  * @public
@@ -154,15 +166,22 @@ export var Stage = {
     Disposes: 2,
     Changes: 3,
     Computes: 4,
-    Responds: 5,
+    Effects: 5,
 };
 
 /**
  * @package
  * @interface
- * @extends {Signal}
+ * @template T
+ * @extends {Signal<T>}
  */
 function Send() { }
+
+/**
+ * @package
+ * @type {T}
+ */
+Send.prototype._value;
 
 /**
  * @package
@@ -350,16 +369,6 @@ function $effect(fn, seed) {
 /**
  * @public
  * @template T
- * @param {function(): T} fn 
- * @returns {!Signal<T>}
- */
-function val(fn) {
-    return new Value(fn);
-}
-
-/**
- * @public
- * @template T
  * @param {T} value 
  * @returns {!Signal<T>}
  */
@@ -410,26 +419,22 @@ function peek(fn) {
 
 /**
  * @public
- * @template T
- * @param {function(): T} fn 
- * @returns {T}
+ * @param {function(): void} fn 
+ * @returns {void}
  */
 function batch(fn) {
-    /** @type {T} */
-    var result;
     if (STAGE === Stage.Idle) {
         reset();
         STAGE = Stage.Started;
         try {
-            result = fn();
+            fn();
             exec();
         } finally {
             STAGE = Stage.Idle;
         }
     } else {
-        result = fn();
+        fn();
     }
-    return result;
 }
 
 /**
@@ -449,10 +454,12 @@ function cleanup(fn) {
     /** @const {?Own} */
     var owner = OWNER;
     if (owner !== null) {
-        if (owner._cleanups === null) {
+        /** @const {?Array<Cleanup>} */
+        var cleanups = owner._cleanups;
+        if (cleanups === null) {
             owner._cleanups = [fn];
         } else {
-            owner._cleanups.push(fn);
+            cleanups[cleanups.length] = fn;
         }
     }
 }
@@ -465,10 +472,12 @@ function recover(fn) {
     /** @const {?Own} */
     var owner = OWNER;
     if (owner !== null) {
-        if (owner._recovers === null) {
+        /** @const {?Array<Recover>} */
+        var recovers = owner._recovers;
+        if (recovers === null) {
             owner._recovers = [fn];
         } else {
-            owner._recovers.push(fn);
+            recovers[recovers.length] = fn;
         }
     }
 }
@@ -481,15 +490,15 @@ function recover(fn) {
  * @constructor
  * @implements {Dispose}
  */
-function Zorn() { }
+function Disposer() { }
 
 /**
  * @package
- * @this {!Zorn}
+ * @this {!Disposer}
  * @param {number} time
  * @returns {void}
  */
-Zorn.prototype._recDispose = function (time) {
+Disposer.prototype._recDispose = function (time) {
     this._age = time;
     this._opt = Opts.Dispose;
     DISPOSES._add(this);
@@ -497,10 +506,10 @@ Zorn.prototype._recDispose = function (time) {
 
 /**
  * @package
- * @this {!Zorn}
+ * @this {!Disposer}
  * @param {number} time
  */
-Zorn.prototype._recMayDispose = function (time) {
+Disposer.prototype._recMayDispose = function (time) {
     this._mayDisposeAge = time;
     this._opt |= Opts.MayDispose;
 };;
@@ -509,8 +518,8 @@ Zorn.prototype._recMayDispose = function (time) {
  * @noinline
  * @param {Function} ctor
  */
-function setZornProto(ctor) {
-    ctor.prototype = new /** @type {Function} */(Zorn)();
+function setDisposeProto(ctor) {
+    ctor.prototype = new /** @type {Function} */(Disposer)();
     ctor.constructor = ctor;
 }
 
@@ -586,19 +595,28 @@ function clearMayUpdate(node, time) {
  * @package
  * @abstract
  * @constructor
- * @extends {Zorn}
- * @implements {Send}
+ * @extends {Disposer}
+ * @implements {Send<T>}
  * @implements {Signal<T>}
  * @param {?Own} owner 
- * @param {number|undefined} state 
+ * @param {number|undefined} opt 
  * @param {T} value
+ * @param {(function(T,T): boolean)|null=} eq
  */
-function Sender(owner, state, value) {
+function Sender(owner, opt, value, eq) {
     /**
      * @package
      * @type {number}
      */
-    this._opt = 0 | state;
+    this._opt = (
+        ((opt & Opts.NoSend) !== 0) ?
+            0 :
+            eq === null ?
+                Opts.Respond :
+                eq !== void 0 ?
+                    Opts.Compare :
+                    0
+    ) | opt;
     /**
      * @package
      * @type {T}
@@ -609,6 +627,11 @@ function Sender(owner, state, value) {
      * @type {?Own}
      */
     this._owner = owner;
+    /**
+     * @package
+     * @type {(function(T,T): boolean)|null|undefined}
+     */
+    this._eq = eq;
     /**
      * @package
      * @type {number}
@@ -640,21 +663,22 @@ function Sender(owner, state, value) {
      */
     this._nodeslots = null;
     if (owner !== null) {
-        setOwner(owner, this);
+        owner._add(this);
     }
 }
 
 /**
  * @package
- * @param {!Send} node
+ * @param {!Sender} node
  */
-function disposeSend(node) {
+function disposeSender(node) {
     node._opt = Opts.Disposed;
-    node._value = void 0;
-    node._node1 = null;
-    node._nodes = null;
-    node._nodeslots = null;
     cleanupSender(node);
+    node._value =
+        node._owner =
+        node._eq =
+        node._nodes =
+        node._nodeslots = null;
 }
 
 /**
@@ -745,7 +769,7 @@ function sendMayDispose(owned, time) {
  * @struct
  * @package
  * @constructor
- * @extends {Zorn}
+ * @extends {Disposer}
  * @implements {Own}
  */
 function Owner() {
@@ -763,7 +787,7 @@ function Owner() {
      * @package
      * @type {?Array<!Signal>}
      */
-    this._owned = null;
+    this._owned = [];
     /**
      * @package
      * @type {?Array<!Cleanup>}
@@ -776,7 +800,7 @@ function Owner() {
     this._recovers = null;
 }
 
-setZornProto(Owner);
+setDisposeProto(Owner);
 
 /**
  * @package
@@ -798,13 +822,14 @@ function disposeOwn(time) {
             owned[i]._dispose(time);
         }
     }
-    this._owned = null;
     if (cleanups !== null && (ln = cleanups.length) !== 0) {
         for (i = 0; i < ln; i++) {
             cleanups[i](true);
         }
     }
-    this._cleanups = null;
+    this._cleanups = 
+        this._owned = 
+        this._recovers = null;
 }
 
 /**
@@ -816,100 +841,10 @@ Owner.prototype._dispose = disposeOwn;
 
 /**
  * @package
- * @param {!Own} owner 
- * @param {!Signal} node 
+ * @param {!Signal} child 
  */
-function setOwner(owner, node) {
-    if (owner._owned === null) {
-        owner._owned = [node];
-    } else {
-        owner._owned.push(node);
-    }
-}
-
-/**
- * @struct
- * @package
- * @template T
- * @constructor
- * @implements {Signal<T>}
- * @extends {Zorn}
- * @param {function(): T} fn
- */
-function Value(fn) {
-    /**
-     * @package
-     * @type {number}
-     */
-    this._opt = 0;
-    /**
-     * @package
-     * @type {?function(): T}
-     */
-    this._fn = fn;
-    /** @const {?Own} */
-    var owner = OWNER;
-    /**
-     * @package
-     * @type {?Own}
-     */
-    this._owner = owner;
-    /**
-     * @package
-     * @type {number}
-     */
-    this._mayDisposeAge = 0;
-    if (owner !== null) {
-        setOwner(owner, this);
-    }
-}
-
-setZornProto(Value);
-
-setValProto(
-    Value.prototype,
-    /**
-     * @template T 
-     * @this {!Value<T>}
-     * @returns {T}
-     */
-    function () {
-        /** @type {T} */
-        var result;
-        /** @const {number} */
-        var opt = this._opt;
-        if ((opt & Opts.DisposeFlags) === 0) {
-            /** @const {number} */
-            var time = TIME;
-            if ((opt & Opts.MayDispose) !== 0 && this._mayDisposeAge === time) {
-                clearMayUpdate(/** @type {Computation} */(this._owner), time);
-            }
-            result = (opt & Opts.Disposed) === 0 ? this._fn() : peek(/** @type {function(): T} */(this._fn));
-        } else if ((opt & Opts.Dispose) !== 0) {
-            result = peek(/** @type {function(): T} */(this._fn));
-        }
-        return result;
-    },
-    /**
-     * @template T 
-     * @this {!Value<T>}
-     * @returns {T}
-     */
-    function () {
-        if (this._opt !== Opts.Disposed) {
-            return peek(/** @type {function(): T} */(this._fn));
-        }
-    }
-);
-
-/**
- * @package
- * @override
- * @this {!Value<T>}
- */
-Value.prototype._dispose = function () {
-    this._opt = Opts.Disposed;
-    this._fn = null;
+Owner.prototype._add = function(child) {
+    this._owned[this._owned.length] = child;
 }
 
 /**
@@ -921,23 +856,18 @@ Value.prototype._dispose = function () {
  * @param {T} value
  * @param {(function(T,T): boolean)|null=} eq
  * @implements {Signal<T>}
- * @implements {Send}
+ * @implements {Send<T>}
  */
 function Data(value, eq) {
-    Sender.call(this, OWNER, 0, value);
+    Sender.call(this, OWNER, 0, value, eq);
     /**
      * @package
      * @type {T|Nil}
      */
     this._pending = NIL;
-    /**
-     * @package
-     * @type {(function(T,T): boolean)|null|undefined}
-     */
-    this._eq = eq;
 }
 
-setZornProto(Data);
+setDisposeProto(Data);
 
 setValProto(
     Data.prototype,
@@ -949,7 +879,7 @@ setValProto(
     function () {
         /** @const {number} */
         var opt = this._opt;
-        if ((opt & Opts.DisposeFlags) === 0 && STAGE !== Stage.Idle) {
+        log: if ((opt & Opts.DisposeFlags) === 0 && STAGE !== Stage.Idle) {
             /** @const {number} */
             var time = TIME;
             if ((opt & Opts.MayDispose) !== 0 && this._mayDisposeAge === time) {
@@ -960,7 +890,7 @@ setValProto(
                 this._opt |= Opts.MayCleared;
                 clearMayUpdate(/** @type {Computation} */(this._owner), time);
                 if ((this._opt & Opts.DisposeFlags) !== 0) {
-                    return this._value;
+                    break log;
                 }
             }
             if (LISTEN) {
@@ -980,16 +910,18 @@ setValProto(
         /** @const {number} */
         var opt = this._opt;
         if ((opt & Opts.DisposeFlags) === 0) {
-            if (this._eq === null || (this._eq === void 0 ? value !== this._value : !this._eq(value, this._value))) {
+            if ((
+                ((opt & Opts.Respond) !== 0) || (
+                    ((opt & Opts.Compare) === 0) ?
+                        value !== this._value :
+                        !this._eq(value, this._value)
+                )
+            ) && (STAGE !== Stage.Idle || (opt & Opts.Send) !== 0)) {
                 if (STAGE === Stage.Idle) {
-                    if ((opt & Opts.Send) !== 0) {
-                        reset();
-                        this._value = value;
-                        sendUpdate(this, TIME + 1);
-                        exec();
-                    } else {
-                        this._value = value;
-                    }
+                    reset();
+                    this._value = value;
+                    sendUpdate(this, TIME + 1);
+                    exec();
                 } else {
                     if (this._pending === NIL) {
                         this._pending = value;
@@ -999,6 +931,8 @@ setValProto(
                         throw new Error("Zorn: Conflict");
                     }
                 }
+            } else {
+                this._value = value;
             }
         }
         return value;
@@ -1025,9 +959,8 @@ Data.prototype._update = function (time) {
  * @this {!Data<T>}
  */
 Data.prototype._dispose = function () {
-    disposeSend(this);
+    disposeSender(this);
     this._pending = void 0;
-    this._eq = null;
 };
 
 /**
@@ -1039,18 +972,18 @@ Data.prototype._dispose = function () {
  * @param {function(T): T} fn 
  * @param {T} value 
  * @param {(function(T,T): boolean)|null=} eq
- * @param {number} state
+ * @param {number} opt
  * @implements {Signal<T>}
  * @implements {Own<T>}
- * @implements {Send}
+ * @implements {Send<T>}
  * @implements {ReceiveMany<T>}
  */
-function Computation(fn, value, state, eq) {
+function Computation(fn, value, opt, eq) {
     /** @const {?Own} */
     var owner = OWNER;
     /** @const {boolean} */
     var listen = LISTEN;
-    Sender.call(this, owner, state, value);
+    Sender.call(this, owner, opt, value, eq);
     /**
      * @package
      * @type {number}
@@ -1096,19 +1029,6 @@ function Computation(fn, value, state, eq) {
      * @type {?function(T): T}
      */
     this._fn = fn;
-    /**
-     * @package
-     * @type {?function(T,T): boolean}
-     */
-    this._eq = null;
-    if ((state & Opts.NoSend) === 0) {
-        if (eq === null) {
-            this._opt |= Opts.Respond;
-        } else if (eq !== void 0) {
-            this._opt |= Opts.Compare;
-            this._eq = /** @type {function(T,T): boolean} */(eq);
-        }
-    }
     OWNER = this;
     LISTEN = true;
     if (STAGE === Stage.Idle) {
@@ -1131,7 +1051,7 @@ function Computation(fn, value, state, eq) {
     LISTEN = listen;
 };
 
-setZornProto(Computation);
+setDisposeProto(Computation);
 
 setValProto(
     Computation.prototype,
@@ -1204,7 +1124,7 @@ Computation.prototype._update = function (time) {
     var value = this._value;
     this._opt |= Opts.Updated;
     this._value = this._fn(value);
-    if (((opt & (Opts.Send | Opts.Respond)) === Opts.Send) && ((opt & Opts.Compare) === 0 ? value !== this._value : !this._eq(value, this._value))) {
+    if (((opt & (Opts.Send | Opts.Respond | Opts.NoSend)) === Opts.Send) && ((opt & Opts.Compare) === 0 ? value !== this._value : !this._eq(value, this._value))) {
         sendUpdate(this, time);
     }
     this._opt &= ~Opts.UpdateFlags;
@@ -1218,12 +1138,25 @@ Computation.prototype._update = function (time) {
  * @this {!Computation<T>}
  */
 Computation.prototype._dispose = function (time) {
-    this._fn = null;
-    this._value = void 0;
     disposeOwn.call(this, time);
-    disposeSend(this);
+    disposeSender(this);
     cleanupReceiver(this);
+    this._fn =
+        this._sources =
+        this._sourceslots = null;
 };
+
+/**
+ * @package
+ * @param {!Signal} child 
+ */
+Computation.prototype._add = function(child) {
+    if (this._owned === null) {
+        this._owned = [child];
+    } else {
+        this._owned[this._owned.length] = child;
+    }
+}
 
 /**
  * @package
@@ -1235,14 +1168,20 @@ Computation.prototype._recDispose = function (time) {
     /** @const {number} */
     var age = this._age;
     this._age = time;
-    this._opt = Opts.Dispose;
-    if (STAGE === Stage.Computes) {
-        COMPUTES._add(this);
-    } else {
-        DISPOSES._add(this);
-    }
-    if (this._owned !== null && age < time) {
-        sendDispose(this._owned, time);
+    this._opt = (this._opt | Opts.Dispose) & ~Opts.Update;
+    /*
+     * If age is current, then this computation has already been
+     * flagged for update and been enqueued in COMPUTES or RESPONDS.
+     */
+    if (age < time) {
+        if (STAGE === Stage.Computes) {
+            COMPUTES._add(this);
+        } else {
+            DISPOSES._add(this);
+        }
+        if (this._owned !== null) {
+            sendDispose(this._owned, time);
+        }
     }
 };
 
@@ -1378,7 +1317,7 @@ var CHANGES = new Queue(Stage.Changes);
 /** @const {!Queue} */
 var COMPUTES = new Queue(Stage.Computes);
 /** @const {!Queue} */
-var EFFECTS = new Queue(Stage.Responds);
+var EFFECTS = new Queue(Stage.Effects);
 /** @type {?Own} */
 var OWNER = null;
 /** @type {boolean} */
@@ -1599,9 +1538,8 @@ function forgetSender(receive, slot) {
 }
 
 export {
-    peek, batch, stable,
+    root, peek, batch, stable,
     recover, cleanup, dispose,
-    root, val,
     value, data,
     compute, $compute,
     respond, $respond,

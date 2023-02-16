@@ -19,7 +19,7 @@ describe("mayupdate", function () {
       d1.val = 1;
       assert.equal(order, 't1');
       order = '';
-      d1.val++
+      d1.val++;
       assert.equal(order, 't1c1');
     });
   });

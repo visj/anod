@@ -1,14 +1,12 @@
 import assert from 'assert';
-import { root, val, effect, compute, value } from './helper/zorn.js';
+import { root, effect, compute, peek, value } from './helper/zorn.js';
 
 describe("peek(...)", function () {
 
     it("returns the value of a data", function () {
         root(function() {
             var d = value(1);
-            assert.equal(val(function() {
-                return d.val;
-            }).peek, 1);
+            assert.equal(d.peek, 1);
         });
     });
 
@@ -49,9 +47,9 @@ describe("peek(...)", function () {
             effect(function () {
                 d++; 
                 a.val;
-                val(function() {
-                    return b.val;
-                }).peek;
+                peek(function() {
+                    a.val; b.val;
+                });
                 c.val;
             });
 

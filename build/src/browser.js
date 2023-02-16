@@ -1,7 +1,6 @@
 import {
-    peek, batch, stable,
+    root, peek, batch, stable,
     recover, cleanup, dispose,
-    root, val,
     data, value,
     compute, $compute,
     respond, $respond,
@@ -15,7 +14,6 @@ window["recover"] = recover;
 window["cleanup"] = cleanup;
 window["dispose"] = dispose;
 window["root"] = root;
-window["val"] = val;
 window["data"] = data;
 window["value"] = value;
 window["compute"] = compute;

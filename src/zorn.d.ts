@@ -1,6 +1,6 @@
-export class Scope { }
+export class Dispose { }
 
-export class Respond<T = any> extends Scope {
+export class Signal<T = any> extends Dispose {
     val: T;
     readonly peek: T;
 }
@@ -13,7 +13,7 @@ export type Compare<T> = false | ((a: T, b: T) => boolean);
 
 export function peek<T>(fn: () => T): T;
 
-export function batch<T>(fn: () => T): T;
+export function batch(fn: () => void): void;
 
 export function stable(): void;
 
@@ -21,24 +21,22 @@ export function cleanup(fn: Cleanup): void;
 
 export function recover(fn: Recover): void;
 
-export function dispose(val: Scope): void;
+export function dispose(val: Dispose): void;
 
-export function root<T>(fn: () => T): Scope<T>;
+export function root<T>(fn: () => T): Dispose<T>;
 
-export function val<T>(fn: () => T): Readonly<Respond<T>>;
+export function data<T>(value: T): Signal<T>;
 
-export function data<T>(value: T): Respond<T>;
+export function value<T>(value: T, eq?: Compare<T>): Signal<T>;
 
-export function value<T>(value: T, eq?: Compare<T>): Respond<T>;
+export function compute<T>(fn: (seed: T) => T, seed?: T, eq?: Compare<T>): Readonly<Signal<T>>;
 
-export function compute<T>(fn: (seed: T) => T, seed?: T, eq?: Compare<T>): Readonly<Respond<T>>;
+export function $compute<T>(fn: (seed: T) => T, seed?: T, eq?: Compare<T>): Readonly<Signal<T>>;
 
-export function $compute<T>(fn: (seed: T) => T, seed?: T, eq?: Compare<T>): Readonly<Respond<T>>;
+export function respond<T>(fn: (seed: T) => T, seed?: T): Readonly<Signal<T>>;
 
-export function respond<T>(fn: (seed: T) => T, seed?: T): Readonly<Respond<T>>;
+export function $respond<T>(fn: (seed: T) => T, seed?: T): Readonly<Signal<T>>;
 
-export function $respond<T>(fn: (seed: T) => T, seed?: T): Readonly<Respond<T>>;
+export function effect<T>(fn: (seed: T) => T, seed?: T): Readonly<Signal<T>>;
 
-export function effect<T>(fn: (seed: T) => T, seed?: T): Readonly<Respond<T>>;
-
-export function $effect<T>(fn: (seed: T) => T, seed?: T): Readonly<Respond<T>>;
+export function $effect<T>(fn: (seed: T) => T, seed?: T): Readonly<Signal<T>>;
