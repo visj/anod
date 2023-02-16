@@ -1,11 +1,11 @@
 import assert from 'assert';
-import { root, compute, signal, batch } from './helper/zorn.js';
+import { root, compute, value, batch } from './helper/zorn.js';
 
 describe("exceptions within computations", function () {
     it("halt updating", function () {
         root(function () {
-            var a = signal(false)
-            var b = signal(1);
+            var a = value(false)
+            var b = value(1);
             compute(function () {
                 if (a.val) {
                     throw new Error();
@@ -29,8 +29,8 @@ describe("exceptions within computations", function () {
 
     it("leave non-excepted parts of dependency tree intact", function () {
         root(function () {
-            var a = signal(false);
-            var b = signal(1);
+            var a = value(false);
+            var b = value(1);
             compute(function () {
                 if (a.val) {
                     throw new Error();

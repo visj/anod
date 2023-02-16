@@ -14,7 +14,7 @@ import * as usignal from "usignal";
 import Table from 'cli-table';
 import * as zorn from "../../dist/zorn.mjs";
 
-const BATCHED = false;
+const BATCHED = true;
 const RUNS_PER_TIER = 150;
 const LAYER_TIERS = [10, 100, 500, 1000, 2000, 2500];
 
@@ -314,12 +314,13 @@ function runS(layers, done) {
 
 function runZorn(layers, done) {
   var result;
-  var node = zorn.root(() => {
+  var { data, respond, $respond, root, batch, dispose } = zorn;
+  var node = root(() => {
     const start = {
-      a: zorn.signal(1),
-      b: zorn.signal(2),
-      c: zorn.signal(3),
-      d: zorn.signal(4),
+      a: data(1),
+      b: data(2),
+      c: data(3),
+      d: data(4),
     };
 
     let layer = start;
@@ -327,10 +328,10 @@ function runZorn(layers, done) {
     for (let i = layers; i--;) {
       layer = ((m) => {
         return {
-          a: zorn.$compute(() => rand % 2 ? m.b.val : m.c.val, 0),
-          b: zorn.compute(() => m.a.val - m.c.val, 0),
-          c: zorn.compute(() => m.b.val + m.d.val, 0),
-          d: zorn.compute(() => m.c.val, 0),
+          a: $respond(() => rand % 2 ? m.b.val : m.c.val, 0),
+          b: respond(() => m.a.val - m.c.val, 0),
+          c: respond(() => m.b.val + m.d.val, 0),
+          d: respond(() => m.c.val, 0),
         };
       })(layer);
     }
@@ -339,7 +340,7 @@ function runZorn(layers, done) {
 
     const end = layer;
     if (BATCHED) {
-      zorn.batch(() => {
+      batch(() => {
         start.a.val = 4;
         start.b.val = 3;
         start.c.val = 2;
@@ -359,7 +360,7 @@ function runZorn(layers, done) {
     const endTime = performance.now() - startTime;
     result = isSolution(layers, solution) ? endTime : -1;
   });
-  zorn.dispose(node);
+  dispose(node);
   done(result);
 }
 

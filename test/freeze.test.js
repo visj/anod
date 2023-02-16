@@ -1,9 +1,9 @@
 import assert from 'assert';
-import { root, compute, signal, batch } from './helper/zorn.js';
+import { root, compute, value, batch } from './helper/zorn.js';
 
 describe("batch", function () {
 	it("batches changes until end", function () {
-		var d = signal(1);
+		var d = value(1);
 			
 		batch(function () {
 			d.val = 2;
@@ -15,7 +15,7 @@ describe("batch", function () {
 	
 	it("halts propagation within its scope", function () {
         root(function () {
-			var d = signal(1);
+			var d = value(1);
 			var f = compute(function() { 
 				return d.val;
 			});

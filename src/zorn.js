@@ -33,6 +33,12 @@ Dispose.prototype._state;
 Dispose.prototype._dispose = function () { };
 
 /**
+ * @package
+ * @returns {void}
+ */
+Dispose.prototype._recDispose = function () { };
+
+/**
  * @template T
  * @interface
  * @extends {Dispose}
@@ -81,12 +87,6 @@ Respond.prototype.peek;
  * @package
  * @returns {void}
  */
-Respond.prototype._recDispose = function () { };
-
-/**
- * @package
- * @returns {void}
- */
 Respond.prototype._recMayDispose = function () { };
 
 /**
@@ -98,24 +98,24 @@ export var Opts = {
     Dispose: 2,
     Disposed: 4,
     /**
-     * Opts.Dispose | Opts.Disposed
+     * Dispose | Disposed
      */
     DisposeFlags: 6,
     Update: 8,
     Updated: 16,
     /**
-     * Opts.Update | Opts.Updated
+     * Update | Updated
      */
     UpdateFlags: 48,
     MayDispose: 32,
     MayUpdate: 64,
     MayChecked: 128,
     /**
-     * Opts.MayDispose | Opts.MayUpdate | Opts.MayChecked
+     * MayDispose | MayUpdate | MayChecked
      */
     MayFlags: 224,
     /**
-     * Opts.MayFlags | Opts.UpdateFlags
+     * MayFlags | UpdateFlags
      */
     MayOrUpdateFlags: 248,
     StateFlags: 254,
@@ -222,6 +222,29 @@ function $compute(fn, seed, eq) {
  * @param {T=} seed 
  * @returns {!Respond<T>}
  */
+function respond(fn, seed) {
+    return new Computation(fn, seed, Opts.Static, false);
+}
+
+/**
+ * @public
+ * @template T
+ * @param {function(T): T} fn 
+ * @param {T=} seed 
+ * @returns {!Respond<T>}
+ */
+function $respond(fn, seed) {
+    return new Computation(fn, seed, 0, false);
+}
+
+
+/**
+ * @public
+ * @template T
+ * @param {function(T): T} fn 
+ * @param {T=} seed 
+ * @returns {!Respond<T>}
+ */
 function effect(fn, seed) {
     return new Computation(fn, seed, Opts.NoSend | Opts.Static);
 }
@@ -251,10 +274,20 @@ function val(fn) {
  * @public
  * @template T
  * @param {T} value 
+ * @returns {!Respond<T>}
+ */
+function data(value) {
+    return new Signal(value, false);
+}
+
+/**
+ * @public
+ * @template T
+ * @param {T} value 
  * @param {(function(T,T): boolean)|boolean=} eq
  * @returns {!Respond<T>}
  */
-function signal(value, eq) {
+function value(value, eq) {
     return new Signal(value, eq);
 }
 
@@ -269,8 +302,7 @@ function dispose(node) {
         if (STAGE === Stage.Idle) {
             node._dispose();
         } else {
-            node._state = (state & ~Opts.Update) | Opts.Dispose;
-            DISPOSES._add(node);
+            node._recDispose();
         }
     }
 }
@@ -635,7 +667,7 @@ function Receive(owner, state, value) {
 
 /**
  * @package
- * @this {!Respond}
+ * @this {!Dispose}
  */
 function recDispose() {
     if ((this._state & Opts.MayDispose) === 0) {
@@ -646,7 +678,7 @@ function recDispose() {
 
 /**
  * @package
- * @this {!Respond}
+ * @this {!Dispose}
  */
 function recMayDispose() {
     if ((this._state & Opts.MayDispose) === 0) {
@@ -717,6 +749,12 @@ function disposeScope() {
  * @this {!Owner}
  */
 Owner.prototype._dispose = disposeScope;
+
+/**
+ * @package
+ * @this {!Owner}
+ */
+Owner.prototype._recDispose = recDispose;
 
 /**
  * @struct
@@ -1189,7 +1227,7 @@ function Queue(stage) {
     this._stage = stage;
     /**
      * @package
-     * @const {!Array<?Respond>}
+     * @const {!Array<?Dispose>}
      */
     this._items = [];
     /**
@@ -1201,7 +1239,7 @@ function Queue(stage) {
 
 /**
  * @package
- * @param {!Respond} item
+ * @param {!Dispose} item
  * @this {!Queue}
  */
 Queue.prototype._add = function (item) {
@@ -1218,16 +1256,15 @@ Queue.prototype._run = function () {
     /** @type {number} */
     var error = 0;
     for (var i = 0; i < this._count; i++) {
-        /** @const {?Respond} */
+        /** @const {?Dispose} */
         var item = this._items[i];
         /** @const {number} */
         var state = item._state;
         if ((state & Opts.StateFlags) !== 0) {
             try {
                 if ((state & Opts.MayFlags) !== 0) {
-                    clearMayUpdate(item);
-                }
-                if ((state & Opts.Update) !== 0) {
+                    clearMayUpdate(/** @type {!Respond} */(item));
+                } else if ((state & Opts.Update) !== 0) {
                     /** @type {!Send} */(item)._update();
                 } else if ((state & Opts.Dispose) !== 0) {
                     item._dispose();
@@ -1489,9 +1526,11 @@ function forgetSender(receive, slot) {
 }
 
 export {
-    peek, stable, batch,
+    peek, batch, stable,
     recover, cleanup, dispose,
-    root, val, signal,
+    root, val,
+    value, data,
     compute, $compute,
+    respond, $respond,
     effect, $effect
 };

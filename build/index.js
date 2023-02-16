@@ -15,7 +15,7 @@ function inlineEnum(code, enumName, enumObj) {
     for (var key in enumObj) {
         var regex = new RegExp(enumName + '\\.' + key + '([^\\w])', 'g');
         code = code.replace(regex, function (_, capture) {
-            return enumObj[key] + ' /* ' + enumName + '.' + key + ' */' + capture;
+            return enumObj[key] + '/* ' + enumName + '.' + key + ' */' + capture.trim();
         });
     }
     return code;
@@ -78,17 +78,25 @@ function bundle() {
         code = code.replace(CommentRegex, '');
         code = code.replace(ImportRegex, '');
 
-        code = code.split('\n').filter(line => line.trim().length > 0).join('\n');
+        code = code.split('\n').filter(function (line) {
+            return line.trim().length > 0;
+        }).join('\n');
 
         var mjs = code;
         var cjs = code.replace(ExportRegex, function (_, capture) {
             return 'module.exports = {' + capture + '};';
         });
         var iife = 'var Zorn = (function() {\n\t' + code.replace(ExportRegex, function (_, capture) {
-            return 'return { ' + capture.trim().split(',').map(s => s.trim()).filter(s => s !== ',').map(val => val + ': ' + val).join(', ') + ' };';
+            return 'return { ' + capture.trim().split(',').map(function(s) {
+                return s.trim();
+            }).filter(function(s) {
+                return s !== ',';
+            }).map(function(val) {
+                return val + ': ' + val;
+            }).join(', ') + ' };';
         }).split('\n').join('\n\t') + '\n})();';
         if (nodist) {
-            write = function() {
+            write = function () {
                 writeBundle(srcCode, mjs, cjs, iife);
             }
         } else {

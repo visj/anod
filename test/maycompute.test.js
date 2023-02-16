@@ -1,10 +1,10 @@
 import assert from 'assert';
-import { root, batch, compute, effect, cleanup, $compute, signal } from './helper/zorn.js';
+import { root, batch, compute, effect, cleanup, $compute, value } from './helper/zorn.js';
 
 describe("mayupdate", function () {
   it("does not trigger downstream computations unless changed", function () {
     root(function () {
-      var d1 = signal(1, false);
+      var d1 = value(1, false);
       var order = '';
       var t1 = compute(function () {
         order += 't1';
@@ -26,8 +26,8 @@ describe("mayupdate", function () {
 
   it("updates downstream pending nodes", function () {
     root(function () {
-      var d1 = signal(0);
-      var d2 = signal(0);
+      var d1 = value(0);
+      var d2 = value(0);
       var order = '';
       var t1 = compute(function () {
         order += 't1';
@@ -56,7 +56,7 @@ describe("mayupdate", function () {
 
   it("does not execute pending disposed nodes", function () {
     root(function () {
-      var d1 = signal(0);
+      var d1 = value(0);
       var order = '';
       var t1 = compute(function () {
         order += 't1';
@@ -81,7 +81,7 @@ describe("mayupdate", function () {
 
   it("updates if dependent on both tracing and non-tracing node", function() {
     root(function() {
-      var d1 = signal(0);
+      var d1 = value(0);
       var count = 0;
       var t1 = compute(function() {
         return d1.val;
@@ -102,8 +102,8 @@ describe("mayupdate", function () {
 
   it("does not update if called while being in mayDispose state", function() {
     root(function() {
-      var d1 = signal(1);
-      var d2 = signal(1);
+      var d1 = value(1);
+      var d2 = value(1);
       var count = 0;
       var c1;
       var c2 = compute(function() {

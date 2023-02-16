@@ -1,11 +1,11 @@
 import assert from 'assert';
-import { root, compute, signal } from './helper/zorn.js';
+import { root, compute, value } from './helper/zorn.js';
 
 describe("root()", function () {
     it("allows subcomputations to escape their parents", function () {
         root(function () {
-            var outerTrigger = signal(0);
-            var innerTrigger = signal(0);
+            var outerTrigger = value(0);
+            var innerTrigger = value(0);
             var innerRuns = 0;
 
             compute(function () {
@@ -31,7 +31,7 @@ describe("root()", function () {
 
             assert.equal(innerRuns, 3);
 
-            // now trigger inner signal: three orphaned computations should equal three runs
+            // now trigger inner value: three orphaned computations should equal three runs
             innerRuns = 0;
             innerTrigger.val++;
 
@@ -41,7 +41,7 @@ describe("root()", function () {
 
     it("does not batch updates when used at top level", function () {
         root(function() {
-            var s = signal(1);
+            var s = value(1);
             var c = compute(function () { return s.val; });
 
             assert.equal(c.val, 1);
@@ -58,7 +58,7 @@ describe("root()", function () {
 
     it("persists through entire scope when used at top level", function() {
         root(function() {
-            var s = signal(1);
+            var s = value(1);
             compute(function() { s.val; });
             s.val = 2;
             var c2 = compute(function(){ return s.val; });

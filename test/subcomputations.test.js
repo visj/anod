@@ -1,11 +1,11 @@
 import assert from 'assert';
-import { root, compute, signal, dispose } from './helper/zorn.js';
+import { root, compute, value, dispose } from './helper/zorn.js';
 
 describe("compute() with subcomputations", function () {
 
     it("does not register a dependency on the subcomputation", function () {
         root(function () {
-            var d = signal(1);
+            var d = value(1);
             var outerCount = 0;
             var innerCount = 0;
             function outerCounter() {
@@ -37,8 +37,8 @@ describe("compute() with subcomputations", function () {
             innerCount, innerCounter;
 
         function init() {
-            d = signal(1);
-            e = signal(2);
+            d = value(1);
+            e = value(2);
             outerCount = innerCount = 0;
             outerCounter = function () {
                 outerCount++;
@@ -88,7 +88,7 @@ describe("compute() with subcomputations", function () {
     describe("which disposes sub that's being updated", function () {
         it("propagates successfully", function () {
             root(function () {
-                var a = signal(1);
+                var a = value(1);
                 var b = compute(function () {
                     var c = compute(function () {
                         return a.val;
@@ -112,7 +112,7 @@ describe("compute() with subcomputations", function () {
     describe("which disposes a sub with a dependee with a sub", function () {
         it("propagates successfully", function () {
             root(function () {
-                var a = signal(1);
+                var a = value(1);
                 var c;
                 compute(function () {
                     c = compute(function () {

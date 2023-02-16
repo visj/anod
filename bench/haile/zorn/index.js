@@ -21,13 +21,11 @@ var getHeapUsage = tryDefine(['%CollectHeapUsage()'], zero);
 var collectGarbage = tryDefine(['%CollectGarbage(null)'], zero);
 var optimizeFunctionOnNextCall = tryDefine(['fn', '%OptimizeFunctionOnNextCall(fn)'], zero);
 
-var S = typeof window !== 'undefined' ? Zorn : require('../../../../dist/zorn.cjs');
+var Zorn = typeof window !== 'undefined' ? Zorn : require('../../../dist/zorn.cjs');
 
 var now = typeof process === 'undefined' ? browserNow : nodeNow;
 
 var COUNT = 1e6;
-
-var sideEffect = 0;
 
 var lines = [];
 
@@ -40,146 +38,84 @@ main();
 console.log(lines.join("\n"));
 
 function main() {
-    var createTotal = { ms: 0, mem: 0 };
-    createTotal = addRes(createTotal, bench(createDataSignals, COUNT, COUNT));
-    createTotal = addRes(createTotal, bench(createComputations0to1, COUNT, 0));
-    createTotal = addRes(createTotal, bench(createComputations1to1, COUNT, COUNT));
-    createTotal = addRes(createTotal, bench(createComputations2to1, COUNT / 2, COUNT));
-    createTotal = addRes(createTotal, bench(createComputations4to1, COUNT / 4, COUNT));
-    createTotal = addRes(createTotal, bench(createComputations1000to1, COUNT / 1000, COUNT));
-    //createTotal = addRes(createTotal, bench1(createComputations8, COUNT, 8 * COUNT));
-    createTotal = addRes(createTotal, bench(createComputations1to2, COUNT, COUNT / 2));
-    createTotal = addRes(createTotal, bench(createComputations1to4, COUNT, COUNT / 4));
-    createTotal = addRes(createTotal, bench(createComputations1to8, COUNT, COUNT / 8));
-    createTotal = addRes(createTotal, bench(createComputations1to1000, COUNT, COUNT / 1000));
+    var createTotal = 0;
+    createTotal += bench(createDataSignals, COUNT, COUNT);
+    createTotal += bench(createComputations0to1, COUNT, 0);
+    createTotal += bench(createComputations1to1, COUNT, COUNT);
+    createTotal += bench(createComputations2to1, COUNT / 2, COUNT);
+    createTotal += bench(createComputations4to1, COUNT / 4, COUNT);
+    createTotal += bench(createComputations1000to1, COUNT / 1000, COUNT);
+    //total += bench1(createComputations8, COUNT, 8 * COUNT);
+    createTotal += bench(createComputations1to2, COUNT, COUNT / 2);
+    createTotal += bench(createComputations1to4, COUNT, COUNT / 4);
+    createTotal += bench(createComputations1to8, COUNT, COUNT / 8);
+    createTotal += bench(createComputations1to1000, COUNT, COUNT / 1000);
     log('---');
-    bench(readToplevelSignal, COUNT, COUNT);
-    bench(readWatchedSignal, COUNT, COUNT);
-    bench(sampleNoSignal, COUNT, COUNT);
-    bench(sampleToplevelSignal, COUNT, COUNT);
-    bench(sampleWatchedSignal, COUNT, COUNT);
+    var updateTotal = 0;
+    updateTotal += bench(updateComputations1to1, COUNT * 4, 1);
+    updateTotal += bench(updateComputations2to1, COUNT * 2, 2);
+    updateTotal += bench(updateComputations4to1, COUNT, 4);
+    updateTotal += bench(updateComputations1000to1, COUNT / 100, 1000);
+    updateTotal += bench(updateComputations1to2, COUNT * 4, 1);
+    updateTotal += bench(updateComputations1to4, COUNT * 4, 1);
+    updateTotal += bench(updateComputations1to1000, COUNT * 4, 1);
     log('---');
-    var updateTotal = { ms: 0, mem: 0 };
-    updateTotal = addRes(updateTotal, bench(updateComputations1to1, COUNT * 4, 1));
-    updateTotal = addRes(updateTotal, bench(updateComputations2to1, COUNT * 2, 2));
-    updateTotal = addRes(updateTotal, bench(updateComputations4to1, COUNT, 4));
-    updateTotal = addRes(updateTotal, bench(updateComputations1000to1, COUNT / 100, 1000));
-    updateTotal = addRes(updateTotal, bench(updateComputations1to2, COUNT * 4, 1));
-    updateTotal = addRes(updateTotal, bench(updateComputations1to4, COUNT * 4, 1));
-    updateTotal = addRes(updateTotal, bench(updateComputations1to1000, COUNT * 4, 1));
-    log('---');
-    printRes('create total', createTotal);
-    printRes('update total', updateTotal);
-    printRes('total', addRes(createTotal, updateTotal));
+    log(`create total: ${createTotal.toFixed(0)}`);
+    log(`update total: ${updateTotal.toFixed(0)}`);
+    log(`total: ${(createTotal + updateTotal).toFixed(0)}`);
 }
 
 function bench(fn, count, scount) {
-    var res = run(fn, count, scount);
-    printRes(fn.name, res);
-    return res;
+    var time = run(fn, count, scount);
+    printRes(fn.name, { ms: time, mem: 0 });
+    return time;
 }
 
 function printRes(name, res) {
     log(`${name.padEnd(30)} ${res.ms.toFixed(1).padStart(5)} ${(res.mem / 1000).toFixed(0).padStart(10)}`);
 }
 
-function addRes(a, b) {
-    return { ms: a.ms + b.ms, mem: a.mem + b.mem };
-}
-
 function run(fn, n, scount) {
     // prep n * arity sources
     var start,
-        end,
-        heapBefore,
-        heapAfter;
+        end;
 
-    sideEffect = 0;
+    // run 3 times to warm up 
+    var sources = createDataSignals(scount, []);
+    fn(n / 100, sources);
+    sources = createDataSignals(scount, []);
+    fn(n / 100, sources);
+    sources = createDataSignals(scount, []);
+    optimizeFunctionOnNextCall(fn);
+    fn(n / 100, sources);
+    sources = createDataSignals(scount, []);
+    for (var i = 0; i < scount; i++) {
+        sources[i].val;
+        sources[i].val;
+        sources[i].val;
+    }
 
-    S.root(function () {
-        //S.freeze(function () {
-        // run 3 times to warm up 
-        var sources = createDataSignals(scount, []);
-        fn(n / 100, sources);
-        sources = createDataSignals(scount, []);
-        fn(n / 100, sources);
-        sources = createDataSignals(scount, []);
-        optimizeFunctionOnNextCall(fn);
-        fn(n / 100, sources);
-        sources = createDataSignals(scount, []);
+    // start GC clean
+    collectGarbage(null);
 
-        for (var i = 0; i < scount; i++) {
-            sources[i].get();
-            sources[i].get();
-            optimizeFunctionOnNextCall(sources[i].get);
-            sources[i].get();
-        }
+    start = now();
 
-        // start GC clean
-        collectGarbage(null);
+    fn(n, sources);
 
-        start = now();
+    // end GC clean
+    sources = null;
+    collectGarbage(null);
 
-        heapBefore = getHeapUsage();
-        fn(n, sources);
-        heapAfter = getHeapUsage();
+    end = now();
 
-        // end GC clean
-        sources = null;
-        collectGarbage(null);
-
-        end = now();
-
-        //});
-    });
-
-    return { ms: end - start, mem: heapAfter - heapBefore };
+    return end - start;
 }
 
 function createDataSignals(n, sources) {
     for (var i = 0; i < n; i++) {
-        sources[i] = new S.Data(i);
+        sources[i] = Zorn.data(i);
     }
     return sources;
-}
-
-function readToplevelSignal(n, sources) {
-    for (var i = 0; i < n; i++) {
-        sideEffect += sources[i].get()
-    }
-}
-
-function readWatchedSignal(n, sources) {
-    S.effect(function () {
-        for (var i = 0; i < n; i++) {
-            sideEffect += sources[i].get()
-        }
-    });
-}
-
-function sampleNoSignal(n, sources) {
-    S.effect(function () {
-        var fn = () => i;
-        for (var i = 0; i < n; i++) {
-            sideEffect += S.sample(fn);
-        }
-    });
-}
-
-function sampleToplevelSignal(n, sources) {
-    var fn = () => sources[i].get();
-    for (var i = 0; i < n; i++) {
-        sideEffect += S.sample(fn);
-    }
-}
-
-function sampleWatchedSignal(n, sources) {
-    S.effect(function () {
-        var fn = () => sources[i].get();
-        for (var i = 0; i < n; i++) {
-            sideEffect += S.sample(fn);
-        }
-    });
 }
 
 function createComputations0to1(n, sources) {
@@ -293,49 +229,51 @@ function createComputations1000to1(n, sources) {
 }
 
 function createComputation0(i) {
-    S.effect(() => sideEffect += i);
+    Zorn.effect(function () { return i; });
 }
 
 function createComputation1(s1) {
-    S.effect(() => sideEffect += s1.get());
+    Zorn.effect(function () { 
+        return s1.val; 
+    });
 }
 
 function createComputation2(s1, s2) {
-    S.effect(() => sideEffect += s1.get() + s2.get());
+    Zorn.effect(function () { return s1.val + s2.val; });
 }
 
 function createComputation4(s1, s2, s3, s4) {
-    S.effect(() => sideEffect += s1.get() + s2.get() + s3.get() + s4.get());
+    Zorn.effect(function () { return s1.val + s2.val + s3.val + s4.val; });
 }
 
 function createComputation8(s1, s2, s3, s4, s5, s6, s7, s8) {
-    S.effect(() => sideEffect += s1.get() + s2.get() + s3.get() + s4.get() + s5.get() + s6.get() + s7.get() + s8.get());
+    Zorn.effect(function () { return s1.val + s2.val + s3.val + s4.val + s5.val + s6.val + s7.val + s8.val; });
 }
 
 function createComputation1000(ss, offset) {
-    S.effect(() => {
+    Zorn.effect(function () {
         var sum = 0;
         for (var i = 0; i < 1000; i++) {
-            sum += ss[offset + i].get();
+            sum += ss[offset + i].val;
         }
-        sideEffect += sum;
-    }, undefined);
+        return sum;
+    });
 }
 
 function updateComputations1to1(n, sources) {
     var s1 = sources[0],
-        c = S.effect(() => s1.get());
+        c = Zorn.effect(function () { return s1.val; });
     for (var i = 0; i < n; i++) {
-        s1.set(i);
+        s1.val = i;
     }
 }
 
 function updateComputations2to1(n, sources) {
     var s1 = sources[0],
         s2 = sources[1],
-        c = S.effect(() => s1.get() + s2.get());
+        c = Zorn.effect(function () { return s1.val + s2.val; });
     for (var i = 0; i < n; i++) {
-        s1.set(i);
+        s1.val = i;
     }
 }
 
@@ -344,53 +282,53 @@ function updateComputations4to1(n, sources) {
         s2 = sources[1],
         s3 = sources[2],
         s4 = sources[3],
-        c = S.effect(() => s1.get() + s2.get() + s3.get() + s4.get());
+        c = Zorn.effect(function () { return s1.val + s2.val + s3.val + s4.val; });
     for (var i = 0; i < n; i++) {
-        s1.set(i);
+        s1.val = i;
     }
 }
 
 function updateComputations1000to1(n, sources) {
     var s1 = sources[0],
-        c = S.effect(() => {
+        c = Zorn.effect(function () {
             var sum = 0;
             for (var i = 0; i < 1000; i++) {
-                sum += sources[i].get();
+                sum += sources[i].val;
             }
             return sum;
-        }, undefined);
+        });
     for (var i = 0; i < n; i++) {
-        s1.set(i);
+        s1.val = i;
     }
 }
 
 function updateComputations1to2(n, sources) {
     var s1 = sources[0],
-        c1 = S.effect(() => s1.get()),
-        c2 = S.effect(() => s1.get());
+        c1 = Zorn.effect(function () { return s1.val; }),
+        c2 = Zorn.effect(function () { return s1.val; });
     for (var i = 0; i < n / 2; i++) {
-        s1.set(i);
+        s1.val = i;
     }
 }
 
 function updateComputations1to4(n, sources) {
     var s1 = sources[0],
-        c1 = S.effect(() => s1.get()),
-        c2 = S.effect(() => s1.get()),
-        c3 = S.effect(() => s1.get()),
-        c4 = S.effect(() => s1.get());
+        c1 = Zorn.effect(function () { return s1.val; }),
+        c2 = Zorn.effect(function () { return s1.val; }),
+        c3 = Zorn.effect(function () { return s1.val; }),
+        c4 = Zorn.effect(function () { return s1.val; });
     for (var i = 0; i < n / 4; i++) {
-        s1.set(i);
+        s1.val = i;
     }
 }
 
 function updateComputations1to1000(n, sources) {
     var s1 = sources[0];
     for (var i = 0; i < 1000; i++) {
-        S.effect(() => s1.get());
+        Zorn.effect(function () { return s1.val; });
     }
     for (var i = 0; i < n / 1000; i++) {
-        s1.set(i);
+        s1.val = i;
     }
 }
 

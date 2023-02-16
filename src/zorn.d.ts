@@ -27,11 +27,17 @@ export function root<T>(fn: () => T): Scope<T>;
 
 export function val<T>(fn: () => T): Readonly<Respond<T>>;
 
-export function signal<T>(value: T, eq?: Compare<T>): Respond<T>;
+export function data<T>(value: T): Respond<T>;
+
+export function value<T>(value: T, eq?: Compare<T>): Respond<T>;
 
 export function compute<T>(fn: (seed: T) => T, seed?: T, eq?: Compare<T>): Readonly<Respond<T>>;
 
 export function $compute<T>(fn: (seed: T) => T, seed?: T, eq?: Compare<T>): Readonly<Respond<T>>;
+
+export function respond<T>(fn: (seed: T) => T, seed?: T): Readonly<Respond<T>>;
+
+export function $respond<T>(fn: (seed: T) => T, seed?: T): Readonly<Respond<T>>;
 
 export function effect<T>(fn: (seed: T) => T, seed?: T): Readonly<Respond<T>>;
 
