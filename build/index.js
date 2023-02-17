@@ -155,7 +155,7 @@ function bundleMinify() {
         i = 0;
         var iife = 'var Zorn=(function(){' + stdout.replace(regex, function (_, newLine, capture) {
             if (i++ === 0) {
-                return 'return{' + capture + ':';
+                return ';return{' + capture + ':';
             }
             if (newLine) {
                 newLine = newLine.replace(';', '');

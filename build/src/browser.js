@@ -1,10 +1,10 @@
 import {
     root, peek, batch, stable,
     recover, cleanup, dispose,
-    data, value,
+    data, value, array,
     compute, $compute,
     respond, $respond,
-    effect, $effect,
+    effect, $effect
 } from '../../src/zorn';
 
 window["peek"] = peek;
@@ -16,6 +16,7 @@ window["dispose"] = dispose;
 window["root"] = root;
 window["data"] = data;
 window["value"] = value;
+window["array"] = array;
 window["compute"] = compute;
 window["$compute"] = $compute;
 window["respond"] = respond;
