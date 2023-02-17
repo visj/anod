@@ -733,12 +733,36 @@ function Sender(owner, opt, value, eq) {
  */
 function disposeSender(node) {
     node._opt = Opts.Disposed;
-    cleanupSender(node);
+    updateSender(node);
     node._value =
         node._owner =
         node._eq =
         node._nodes =
         node._nodeslots = null;
+}
+
+/**
+ * @protected
+ * @param {!Send} send
+ */
+function updateSender(send) {
+    /** @type {number} */
+    var ln;
+    /** @const {?Receive} */
+    var node1 = send._node1;
+    /** @const {?Array<!Receive>} */
+    var nodes = send._nodes;
+    if (node1 !== null) {
+        removeSender(node1, send._node1slot);
+        send._node1 = null;
+    }
+    if (nodes !== null && (ln = nodes.length) !== 0) {
+        /** @const {?Array<number>} */
+        var nodeslots = send._nodeslots;
+        for (; ln-- !== 0;) {
+            removeSender(nodes.pop(), nodeslots.pop());
+        }
+    }
 }
 
 /**
@@ -984,6 +1008,48 @@ function Receiver() {
 }
 
 /**
+ * @protected
+ * @param {!Receiver} node
+ */
+function updateReceiver(node) {
+    if (node._source1 !== null) {
+        removeReceiver(node._source1, node._source1slot);
+        node._source1 = null;
+    }
+}
+
+/**
+ * @protected
+ * @param {!Send} send 
+ * @param {number} slot
+ */
+function removeReceiver(send, slot) {
+    if ((send._opt & Opts.DisposeFlags) === 0) {
+        if (slot === -1) {
+            send._node1 = null;
+        } else {
+            /** @const {?Array<Receive>} */
+            var nodes = send._nodes;
+            /** @const {?Array<number>} */
+            var nodeslots = send._nodeslots;
+            /** @const {Receive} */
+            var last = nodes.pop();
+            /** @const {number} */
+            var lastslot = nodeslots.pop();
+            if (slot !== nodes.length) {
+                nodes[slot] = last;
+                nodeslots[slot] = lastslot;
+                if (lastslot === -1) {
+                    last._source1slot = slot;
+                } else {
+                    last._sourceslots[lastslot] = slot;
+                }
+            }
+        }
+    }
+}
+
+/**
  * @struct
  * @template T 
  * @protected
@@ -1084,7 +1150,7 @@ setValProto(
      * @returns {T}
      */
     function getComputation() {
-        /** @type {number} */
+        /** @const {number} */
         var opt = this._opt;
         if ((opt & Opts.DisposeFlags) === 0 && STAGE !== Stage.Idle) {
             /** @const {number} */
@@ -1112,6 +1178,25 @@ setValProto(
 );
 
 /**
+ * 
+ * @param {Computation} node 
+ */
+function updateManyReceivers(node) {
+    updateReceiver(/** @type {?} */(node));
+    /** @type {number} */
+    var ln;
+    /** @const {?Array<!Send>} */
+    var sources = node._sources;
+    if (sources !== null && (ln = sources.length) !== 0) {
+        /** @const {?Array<number>} */
+        var sourceslots = node._sourceslots;
+        for (; ln-- !== 0;) {
+            removeReceiver(sources.pop(), sourceslots.pop());
+        }
+    }
+}
+
+/**
  * @protected
  * @override
  * @this {!Computation<T>}
@@ -1133,7 +1218,7 @@ Computation.prototype._addChild = function (child) {
 Computation.prototype._dispose = function (time) {
     disposeOwn.call(this, time);
     disposeSender(this);
-    cleanupReceiver(this);
+    updateManyReceivers(this);
     this._fn =
         this._sources =
         this._sourceslots = null;
@@ -1210,7 +1295,7 @@ Computation.prototype._update = function (time) {
     OWNER = this;
     LISTEN = (opt & Opts.Static) === 0;
     if (LISTEN) {
-        cleanupReceiver(this);
+        updateManyReceivers(this);
     }
     /** @const {T} */
     var value = this._value;
@@ -1454,89 +1539,10 @@ function start() {
 
 /**
  * @protected
- * @param {!ReceiveMany} node
- */
-function cleanupReceiver(node) {
-    /** @type {number} */
-    var ln;
-    /** @const {?Send} */
-    var source1 = node._source1;
-    /** @const {?Array<!Send>} */
-    var sources = node._sources;
-    if (source1 !== null) {
-        forgetReceiver(source1, node._source1slot);
-        node._source1 = null;
-    }
-    if (sources !== null && (ln = sources.length) !== 0) {
-        /** @const {?Array<number>} */
-        var sourceslots = node._sourceslots;
-        for (; ln-- !== 0;) {
-            forgetReceiver(sources.pop(), sourceslots.pop());
-        }
-    }
-}
-
-/**
- * @protected
- * @param {!Send} send 
- * @param {number} slot
- */
-function forgetReceiver(send, slot) {
-    if ((send._opt & Opts.DisposeFlags) === 0) {
-        if (slot === -1) {
-            send._node1 = null;
-        } else {
-            /** @const {?Array<Receive>} */
-            var nodes = send._nodes;
-            /** @const {?Array<number>} */
-            var nodeslots = send._nodeslots;
-            /** @const {Receive} */
-            var last = nodes.pop();
-            /** @const {number} */
-            var lastslot = nodeslots.pop();
-            if (slot !== nodes.length) {
-                nodes[slot] = last;
-                nodeslots[slot] = lastslot;
-                if (lastslot === -1) {
-                    last._source1slot = slot;
-                } else {
-                    last._sourceslots[lastslot] = slot;
-                }
-            }
-        }
-    }
-}
-
-/**
- * @protected
- * @param {!Send} send
- */
-function cleanupSender(send) {
-    /** @type {number} */
-    var ln;
-    /** @const {?Receive} */
-    var node1 = send._node1;
-    /** @const {?Array<!Receive>} */
-    var nodes = send._nodes;
-    if (node1 !== null) {
-        forgetSender(node1, send._node1slot);
-        send._node1 = null;
-    }
-    if (nodes !== null && (ln = nodes.length) !== 0) {
-        /** @const {?Array<number>} */
-        var nodeslots = send._nodeslots;
-        for (; ln-- !== 0;) {
-            forgetSender(nodes.pop(), nodeslots.pop());
-        }
-    }
-}
-
-/**
- * @protected
  * @param {!Receive} receive 
  * @param {number} slot
  */
-function forgetSender(receive, slot) {
+function removeSender(receive, slot) {
     if ((receive._opt & Opts.DisposeFlags) === 0) {
         if (slot === -1) {
             receive._source1 = null;
