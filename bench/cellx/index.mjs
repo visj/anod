@@ -12,7 +12,7 @@ import * as preact from '@preact/signals-core';
 import * as maverick from '@maverick-js/signals';
 import * as usignal from "usignal";
 import Table from 'cli-table';
-import * as zorn from "../../dist/zorn.mjs";
+import * as zorn from "../../dist/zorn.min.mjs";
 
 const BATCHED = true;
 const RUNS_PER_TIER = 150;
@@ -78,10 +78,9 @@ async function main() {
   report['preact/signals'] = { fn: runPreact, runs: [] };
   // report.zornStatic = { fn: runZornStatic, runs: [] };
   report.solid = { fn: runSolid, runs: [] };
-  report.zornRespond = { fn: runZornRespond, runs: [] };
   // report.usignal = { fn: runUsignal, runs: [] };
   report.S = { fn: runS, runs: [] };
-  report.zornCompute = { fn: runZornCompute, runs: [] };
+  report.zorn = { fn: runZorn, runs: [] };
   // Has no way to dispose so can't consider it feature comparable.
   // report.reactively = { fn: runReactively, runs: [], avg: [] };
   // These libraries are not comparable in terms of features.
@@ -322,7 +321,7 @@ function runS(layers, done) {
   });
 }
 
-function runZornCompute(layers, done) {
+function runZorn(layers, done) {
   var result;
   var node = zorn.root(() => {
     const start = {
@@ -341,57 +340,6 @@ function runZornCompute(layers, done) {
           b: zorn.compute(() => m.a.val - m.c.val, 0),
           c: zorn.compute(() => m.b.val + m.d.val, 0),
           d: zorn.compute(() => m.c.val, 0),
-        };
-      })(layer);
-    }
-
-    const startTime = performance.now();
-
-    const end = layer;
-    if (BATCHED) {
-      zorn.batch(() => {
-        start.a.val = 4;
-        start.b.val = 3;
-        start.c.val = 2;
-        start.d.val = 1;
-      });
-    } else {
-      start.a.val = 4;
-      end.a.val, end.b.val, end.c.val, end.d.val;
-      start.b.val = 3;
-      end.a.val, end.b.val, end.c.val, end.d.val;
-      start.c.val = 2;
-      end.a.val, end.b.val, end.c.val, end.d.val;
-      start.d.val = 1;
-    }
-
-    const solution = [end.a.val, end.b.val, end.c.val, end.d.val];
-    const endTime = performance.now() - startTime;
-    result = isSolution(layers, solution) ? endTime : -1;
-  });
-  zorn.dispose(node);
-  done(result);
-}
-
-function runZornRespond(layers, done) {
-  var result;
-  var node = zorn.root(() => {
-    const start = {
-      a: zorn.data(1),
-      b: zorn.data(2),
-      c: zorn.data(3),
-      d: zorn.data(4),
-    };
-
-    let layer = start;
-
-    for (let i = layers; i--;) {
-      layer = ((m) => {
-        return {
-          a: zorn.$respond(() => rand % 2 ? m.b.val : m.c.val, 0),
-          b: zorn.respond(() => m.a.val - m.c.val, 0),
-          c: zorn.respond(() => m.b.val + m.d.val, 0),
-          d: zorn.respond(() => m.c.val, 0),
         };
       })(layer);
     }

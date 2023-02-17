@@ -21,6 +21,46 @@ function inlineEnum(code, enumName, enumObj) {
     return code;
 }
 
+var __EXCLUDE__ = '/* __EXCLUDE__ */';
+
+/**
+ * 
+ * @param {string} str 
+ * @returns {string}
+ */
+function stripExcludes(str) {
+    var inExclude = false;
+    var sb = '';
+    var head, tail;
+    head = tail = 0;
+    do {
+        head = str.indexOf(__EXCLUDE__, tail);
+        if (!inExclude) {
+            if (head === -1 || head + __EXCLUDE__.length === str.length) {
+                sb = sb + str.slice(tail);
+            } else {
+                sb = sb + str.slice(tail, head);
+            }
+        }
+        tail = head + __EXCLUDE__.length;
+        inExclude = !inExclude;
+        if (head === -1) {
+            break;
+        }
+    } while (tail < str.length);
+    return sb;
+}
+
+/**
+ * 
+ * @param {string} str 
+ */
+function stripEmptyLines(str) {
+    return str.split('\n').filter(function (line) {
+        return line.trim().length > 0;
+    }).join('\n');
+}
+
 function logError(err) {
     if (err) {
         console.error(err);
@@ -29,15 +69,16 @@ function logError(err) {
 
 var __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-var root = path.join(__dirname, '..');
+var rootDir = path.join(__dirname, '..');
 
-var dist = path.join(root, 'dist');
+var dist = path.join(rootDir, 'dist');
 
-if (process.argv.includes('--minify') || process.argv.includes('-m')) {
-    bundleMinify();
-}
+var srcFile = path.join(rootDir, 'src', 'zorn.js');
+var externsFile = path.join(rootDir, 'externs', 'zorn.js');
+var closureFile = path.join(__dirname, 'src', 'closure.js');
 
 bundle();
+bundleMinify();
 
 function bundle() {
     /** @type {?function(): void} */
@@ -64,7 +105,7 @@ function bundle() {
     var ExportRegex = /export\s\{([\$\w\,\s]+)\s*\};?/;
     var ImportRegex = /import\s*\{([\$\w\,\s]+)\s*\}\s*from\s*['"]([\w\.\/]+)['"];?/g;
 
-    fs.readFile(path.join(root, 'src', 'zorn.js'), function (err, data) {
+    fs.readFile(srcFile, function (err, data) {
         if (err) {
             console.error(err);
             return;
@@ -74,13 +115,10 @@ function bundle() {
         srcCode = inlineEnum(srcCode, 'Opts', Opts);
         srcCode = inlineEnum(srcCode, 'Stage', Stage);
 
-        var code = srcCode.split('/* START_OF_FILE */')[1];
+        var code = stripExcludes(srcCode);
         code = code.replace(CommentRegex, '');
         code = code.replace(ImportRegex, '');
-
-        code = code.split('\n').filter(function (line) {
-            return line.trim().length > 0;
-        }).join('\n');
+        code = stripEmptyLines(code);
 
         var mjs = code;
         var cjs = code.replace(ExportRegex, function (_, capture) {
@@ -106,42 +144,50 @@ function bundle() {
 }
 
 function writeBundle(srcCode, mjs, cjs, iife) {
-    fs.writeFile(path.join(dist, 'zorn.js'), srcCode, logError);
+    fs.readFile(externsFile, function(err, data) {
+        if (err) {
+            console.error(err);
+            return;
+        }
+        var externsCode = data.toString();
+        srcCode = stripExcludes(externsCode) + '\n' + srcCode;
+        srcCode = stripEmptyLines(srcCode);
+        fs.writeFile(path.join(dist, 'zorn.closure.js'), srcCode, logError);
+    });
     fs.writeFile(path.join(dist, 'zorn.mjs'), mjs, logError);
     fs.writeFile(path.join(dist, 'zorn.cjs'), cjs, logError);
     fs.writeFile(path.join(dist, 'zorn.iife.js'), iife, logError);
-    fs.copyFile(path.join(root, 'src', 'zorn.d.ts'), path.join(root, 'dist', 'zorn.d.ts'), logError);
+    fs.copyFile(path.join(rootDir, 'src', 'zorn.d.ts'), path.join(rootDir, 'dist', 'zorn.d.ts'), logError);
 }
 
 function bundleMinify() {
-    var src = path.join(root, 'src');
-    var cmd = `closure-compiler --language_out=ECMASCRIPT5 -O=ADVANCED -W=VERBOSE --externs=${path.join(root, 'externs', 'zorn.js')} --module_resolution=NODE --js ${path.join(src, 'zorn.js')} --js ${path.join(__dirname, 'src', 'browser.js')}`;
+    var cmd = "closure-compiler --language_out=ECMASCRIPT5 -O=ADVANCED -W=VERBOSE --module_resolution=NODE --externs=" + externsFile + " --js " + srcFile + " --js " + closureFile;
     exec(cmd, function (err, stdout, stderr) {
         if (err) {
             console.error(err);
-            // return;
+            return;
         }
         if (stderr) {
             console.error(stderr);
-            // return;
+            return;
         }
         var i = 0;
         var regex = /([\;\s]*)window\.([\$\w]+)=/g;
         var mjs = stdout.replace(regex, function (_, newLine, capture) {
             if (i++ === 0) {
-                return 'export var ' + capture + '=';
+                return ';export var ' + capture + '=';
             }
             if (newLine) {
                 newLine = newLine.replace(';', '');
             }
             return newLine + ',' + capture + '=';
         });
-        fs.writeFile(path.join(root, 'dist', 'zorn.min.mjs'), mjs, logError);
+        fs.writeFile(path.join(rootDir, 'dist', 'zorn.min.mjs'), mjs, logError);
 
         i = 0;
         var cjs = stdout.replace(regex, function (_, newLine, capture) {
             if (i++ === 0) {
-                return 'module.exports={' + capture + ':';
+                return ';module.exports={' + capture + ':';
             }
             if (newLine) {
                 newLine = newLine.replace(';', '');
@@ -149,8 +195,8 @@ function bundleMinify() {
             return newLine + ',' + capture + ':';
         });
         cjs = cjs.replace(/[\s\;]*$/, '');
-        cjs += '};';
-        fs.writeFile(path.join(root, 'dist', 'zorn.min.cjs'), cjs, logError);
+        cjs = cjs + '};';
+        fs.writeFile(path.join(rootDir, 'dist', 'zorn.min.cjs'), cjs, logError);
 
         i = 0;
         var iife = 'var Zorn=(function(){' + stdout.replace(regex, function (_, newLine, capture) {
@@ -163,8 +209,7 @@ function bundleMinify() {
             return newLine + ',' + capture + ':';
         });
         iife = iife.replace(/[\s\;]*$/, '');
-        iife += '};';
-        iife += '})();';
-        fs.writeFile(path.join(root, 'dist', 'zorn.min.iife.js'), iife, logError);
+        iife = iife + '};' + '})();';
+        fs.writeFile(path.join(rootDir, 'dist', 'zorn.min.iife.js'), iife, logError);
     });
 }

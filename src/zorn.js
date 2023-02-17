@@ -1,54 +1,44 @@
-/**
- * @public
- * @typedef {function(boolean): void}
- */
+/* __EXCLUDE__ */
+
+/** @typedef {function(boolean): void} */
 var Cleanup;
 
-/**
- * @public
- * @typedef {function(*): void}
- */
+/** @typedef {function(*): void} */
 var Recover;
 
 /** 
  * @interface
  */
-function Nil() { }
+function nil() { }
 
 /**
- * @package
+ * @protected
  * @interface
- */
-function Opt() { }
-
-/**
- * @package
- * @type {number}
- */
-Opt.prototype._opt;
-
-/**
- * @package
- * @interface
- * @extends {Opt}
+ * @extends {Signal}
  */
 function Dispose() { }
 
 /**
- * @package
+ * @protected
+ * @type {number}
+ */
+Dispose.prototype._opt;
+
+/**
+ * @protected
  * @type {number}
  */
 Dispose.prototype._age;
 
 /**
- * @package
+ * @protected
  * @param {number} time
  * @returns {void}
  */
 Dispose.prototype._dispose = function (time) { };
 
 /**
- * @package
+ * @protected
  * @param {number} time
  * @returns {void}
  */
@@ -59,74 +49,31 @@ Dispose.prototype._recDispose = function (time) { };
  * @interface
  * @extends {Dispose}
  */
-function Own() { }
+function Owner() { }
 
 /**
- * @package
- * @type {?Array<!Signal>}
+ * @protected
+ * @type {?Array<!Child>}
  */
-Own.prototype._owned;
+Owner.prototype._owned;
 
 /**
- * @package
- * @type {?Array<!Cleanup>}
+ * @protected
+ * @type {?Array<Cleanup>}
  */
-Own.prototype._cleanups;
+Owner.prototype._cleanups;
 
 /**
- * @package
- * @type {?Array<!Recover>}
+ * @protected
+ * @type {?Array<Recover>}
  */
-Own.prototype._recovers;
+Owner.prototype._recovers;
 
 /**
- * @package
- * @param {!Signal} child 
+ * @protected
+ * @param {!Child} child 
  */
-Own.prototype._add = function (child) { };
-
-/**
- * @public
- * @interface
- * @template T
- * @extends {Dispose}
- */
-function Signal() { }
-
-/**
- * @public
- * @export
- * @noinline
- * @type {T}
- */
-Signal.prototype.val;
-
-/**
- * @public
- * @export
- * @noinline
- * @type {T}
- */
-Signal.prototype.peek;
-
-/**
- * @package
- * @type {?Own}
- */
-Signal.prototype._owner;
-
-/**
- * @package
- * @type {number}
- */
-Signal.prototype._mayDisposeAge;
-
-/**
- * @package
- * @param {number} time
- * @returns {void}
- */
-Signal.prototype._recMayDispose = function (time) { };
+Owner.prototype._addChild = function (child) { };
 
 /**
  * @const 
@@ -174,491 +121,155 @@ export var Stage = {
 };
 
 /**
- * @package
+ * @protected
  * @interface
  * @template T
- * @extends {Signal<T>}
+ * @extends {Dispose}
+ */
+function Child() { }
+
+/**
+ * @protected
+ * @type {T}
+ */
+Child.prototype._value;
+
+/**
+ * @protected
+ * @type {?Owner}
+ */
+Child.prototype._owner;
+
+/**
+ * @protected
+ * @type {number}
+ */
+Child.prototype._mayDisposeAge;
+
+/**
+ * @protected
+ * @param {number} time
+ * @returns {void}
+ */
+Child.prototype._recMayDispose = function (time) { };
+
+/**
+ * @protected
+ * @interface
+ * @template T
+ * @extends {Child<T>}
  */
 function Send() { }
 
 /**
- * @package
- * @type {T}
- */
-Send.prototype._value;
-
-/**
- * @package
+ * @protected
  * @type {?Receive}
  */
 Send.prototype._node1;
 
 /**
- * @package
+ * @protected
  * @type {number}
  */
 Send.prototype._node1slot;
 
 /**
- * @package
+ * @protected
  * @type {?Array<!Receive>}
  */
 Send.prototype._nodes;
 
 /**
- * @package
+ * @protected
  * @type {?Array<number>}
  */
 Send.prototype._nodeslots;
 
 /**
- * @package
+ * @protected
  * @param {number} time
  * @returns {void}
  */
 Send.prototype._update = function (time) { };
 
 /**
- * @package
+ * @protected
  * @interface
  * @template T
- * @extends {Signal<T>}
+ * @extends {Child<T>}
  */
 function Receive() { }
 
 /**
- * @package
+ * @protected
  * @type {number}
  */
 Receive.prototype._age;
 
 /**
- * @package
+ * @protected
  * @type {number}
  */
 Receive.prototype._mayUpdateAge;
 
 /**
- * @package
+ * @protected
+ * @type {?Send}
+ */
+Receive.prototype._source1;
+
+/**
+ * @protected
+ * @type {number}
+ */
+Receive.prototype._source1slot;
+
+/**
+ * @protected
  * @param {number} time
  * @returns {void}
  */
 Receive.prototype._recUpdate = function (time) { };
 
 /**
- * @package
+ * @protected
  * @param {number} time
  * @returns {void}
  */
 Receive.prototype._recMayUpdate = function (time) { };
 
 /**
- * @package
+ * @protected
  * @interface
  * @template T
  * @extends {Receive<T>}
  */
-function ReceiveOne() { }
-
-/**
- * @package
- * @type {?Send}
- */
-ReceiveOne.prototype._source1;
-
-/**
- * @package
- * @type {number}
- */
-ReceiveOne.prototype._source1slot;
-
-/**
- * @package
- * @interface
- * @template T
- * @extends {ReceiveOne<T>}
- */
 function ReceiveMany() { }
 
 /**
- * @package
+ * @protected
  * @type {?Array<!Send>}
  */
 ReceiveMany.prototype._sources;
 
 /**
- * @package
+ * @protected
  * @type {?Array<number>}
  */
 ReceiveMany.prototype._sourceslots;
 
-/**
- * @template T
- * @interface
- * @extends {Signal<!Array<T>>}
- */
-function SignalCollection() { }
-
-/**
- * @param {function(T,!Signal<number>): boolean} callbackFn
- * @returns {!Signal<boolean>}
- */
-SignalCollection.prototype.every = function (callbackFn) { };
-
-/**
- * @param {function(T,!Signal<number>): boolean} callbackFn
- * @returns {!SignalCollection<T>}
- */
-SignalCollection.prototype.filter = function (callbackFn) { };
-
-/**
- * @param {function(T,!Signal<number>): boolean} callbackFn
- * @returns {!Signal<T|undefined>}
- */
-SignalCollection.prototype.find = function (callbackFn) { };
-
-/**
- * @param {function(T,!Signal<number>): boolean} callbackFn
- * @returns {!Signal<number>}
- */
-SignalCollection.prototype.findIndex = function (callbackFn) { };
-
-/**
- * @param {function(T,!Signal<number>): boolean} callbackFn
- * @returns {!Signal<T|undefined>}
- */
-SignalCollection.prototype.findLast = function (callbackFn) { };
-
-/**
- * @param {function(T,!Signal<number>): boolean} callbackFn
- * @returns {!Signal<number>}
- */
-SignalCollection.prototype.findLastIndex = function (callbackFn) { };
-
-/**
- * @param {function(T): void} callbackFn
- * @returns {void} 
- */
-SignalCollection.prototype.forEach = function (callbackFn) { };
-
-/**
- * @param {T} searchElement
- * @returns {!Signal<boolean>}
- */
-SignalCollection.prototype.includes = function (searchElement) { };
-
-/**
- * 
- * @param {T} searchElement 
- * @param {number=} fromIndex
- * @returns {!Signal<number>}
- */
-SignalCollection.prototype.indexOf = function (searchElement, fromIndex) { };
-
-/**
- * 
- * @param {string=} separator
- * @returns {!Signal<string>}
- */
-SignalCollection.prototype.join = function (separator) { };
-
-/**
- * 
- * @param {T} searchElement 
- * @param {number=} fromIndex
- * @returns {!Signal<number>}
- */
-SignalCollection.prototype.lastIndexOf = function (searchElement, fromIndex) { };
-
-/**
- * @template U
- * @param {function(T,!Signal<number>): U} callbackFn
- * @returns {!SignalCollection<U>}
- */
-SignalCollection.prototype.map = function (callbackFn) { };
-
-/**
- * @template U
- * @param {function((T|U),T,!Signal<number>): U} callbackFn 
- * @param {U=} initialValue 
- * @returns {!SignalCollection<U>}
- */
-SignalCollection.prototype.reduce = function (callbackFn, initialValue) { };
-
-/**
- * @template U
- * @param {function((T|U),T,!Signal<number>): U} callbackFn 
- * @param {U=} initialValue 
- * @returns {!SignalCollection<U>}
- */
-SignalCollection.prototype.reduceRight = function (callbackFn, initialValue) { };
-
-/**
- * @returns {!SignalCollection<T>}
- */
-SignalCollection.prototype.reverse = function () { };
-
-/**
- * @param {number=} start
- * @param {number=} end
- * @returns {!SignalCollection<T>}
- */
-SignalCollection.prototype.slice = function (start, end) { };
-
-/**
- * 
- * @param {function(T,!Signal<number>): boolean} callbackFn
- * @returns {!Signal<boolean>} 
- */
-SignalCollection.prototype.some = function (callbackFn) { };
-
-/**
- * @template T
- * @interface
- * @extends {SignalCollection<T>}
- */
-function SignalArray() { }
-
-/**
- * @throws {Error}
- */
-SignalArray.prototype.pop = function () { };
-
-/**
- * @param {...T} elementN
- * @throws {Error}
- */
-SignalArray.prototype.push = function (elementN) { };
-
-/**
- * @throws {Error}
- */
-SignalArray.prototype.shift = function () { };
-
-/**
- * 
- * @param {function(T,T): number} compareFn
- * @throws {Error}
- */
-SignalArray.prototype.sort = function (compareFn) { };
-
-/**
- * 
- * @param {number} start 
- * @param {number=} deleteCount 
- * @param {...T} items
- * @throws {Error}
- */
-SignalArray.prototype.splice = function (start, deleteCount, items) { };
-
-/**
- * 
- * @param {...T} elementN
- * @throws {Error} 
- */
-SignalArray.prototype.unshift = function (elementN) { };
-
-/**
- * @struct
- * @package
- * @abstract
- * @template T
- * @constructor
- * @extends {Sender<!Array<T>>}
- * @implements {SignalCollection<T>}
- */
-function ArrayCallbacks() { }
-
-/**
- * @type {!Array<T>}
- */
-ArrayCallbacks.prototype.val;
-
-/**
- * @type {!Array<T>}
- */
-ArrayCallbacks.prototype.peek;
-
-/**
- * @param {function(T,!Signal<number>): boolean} callbackFn
- * @returns {!Signal<boolean>}
- */
-ArrayCallbacks.prototype.every = function (callbackFn) { };
-
-/**
- * @param {function(T,!Signal<number>): boolean} callbackFn
- * @returns {!SignalCollection<T>}
- */
-ArrayCallbacks.prototype.filter = function (callbackFn) { };
-
-/**
- * @param {function(T,!Signal<number>): boolean} callbackFn
- * @returns {!Signal<T|undefined>}
- */
-ArrayCallbacks.prototype.find = function (callbackFn) { };
-
-/**
- * @param {function(T,!Signal<number>): boolean} callbackFn
- * @returns {!Signal<number>}
- */
-ArrayCallbacks.prototype.findIndex = function (callbackFn) { };
-
-/**
- * @param {function(T,!Signal<number>): boolean} callbackFn
- * @returns {!Signal<T|undefined>}
- */
-ArrayCallbacks.prototype.findLast = function (callbackFn) { };
-
-/**
- * @param {function(T,!Signal<number>): boolean} callbackFn
- * @returns {!Signal<number>}
- */
-ArrayCallbacks.prototype.findLastIndex = function (callbackFn) { };
-
-/**
- * @param {function(T): void} callbackFn
- * @returns {void} 
- */
-ArrayCallbacks.prototype.forEach = function (callbackFn) { };
-
-/**
- * @param {T} searchElement
- * @returns {!Signal<boolean>}
- */
-ArrayCallbacks.prototype.includes = function (searchElement) { };
-
-/**
- * 
- * @param {T} searchElement 
- * @param {number=} fromIndex
- * @returns {!Signal<number>}
- */
-ArrayCallbacks.prototype.indexOf = function (searchElement, fromIndex) { };
-
-/**
- * 
- * @param {string=} separator
- * @returns {!Signal<string>}
- */
-ArrayCallbacks.prototype.join = function (separator) { };
-
-/**
- * 
- * @param {T} searchElement 
- * @param {number=} fromIndex
- * @returns {!Signal<number>}
- */
-ArrayCallbacks.prototype.lastIndexOf = function (searchElement, fromIndex) { };
-
-/**
- * @template U
- * @param {function(T,!Signal<number>): U} callbackFn
- * @returns {!SignalCollection<U>}
- */
-ArrayCallbacks.prototype.map = function (callbackFn) { };
-
-/**
- * @template U
- * @param {function((T|U),T,!Signal<number>): U} callbackFn 
- * @param {U=} initialValue 
- * @returns {!SignalCollection<U>}
- */
-ArrayCallbacks.prototype.reduce = function (callbackFn, initialValue) { };
-
-/**
- * @template U
- * @param {function((T|U),T,!Signal<number>): U} callbackFn 
- * @param {U=} initialValue 
- * @returns {!SignalCollection<U>}
- */
-ArrayCallbacks.prototype.reduceRight = function (callbackFn, initialValue) { };
-
-/**
- * @returns {!SignalCollection<T>}
- */
-ArrayCallbacks.prototype.reverse = function () { };
-
-/**
- * @param {number=} start
- * @param {number=} end
- * @returns {!SignalCollection<T>}
- */
-ArrayCallbacks.prototype.slice = function (start, end) { };
-
-/**
- * 
- * @param {function(T,!Signal<number>): boolean} callbackFn
- * @returns {!Signal<boolean>} 
- */
-ArrayCallbacks.prototype.some = function (callbackFn) { };
-
-/**
- * @struct
- * @package
- * @abstract
- * @template T
- * @constructor
- * @extends {ArrayCallbacks<T>}
- * @implements {SignalArray<T>}
- */
-function ArrayMutations() { }
-
-/**
- * @this {!ArrayMutations<T>}
- * @throws {Error}
- */
-ArrayMutations.prototype.pop = function () { };
-
-/**
- * @this {!ArrayMutations<T>}
- * @param {...T} elementN
- * @throws {Error}
- */
-ArrayMutations.prototype.push = function (elementN) { };
-
-/**
- * @this {!ArrayMutations<T>}
- * @throws {Error}
- */
-ArrayMutations.prototype.shift = function () { };
-
-/**
- * @this {!ArrayMutations<T>}
- * @param {function(T,T): number} compareFn
- * @throws {Error}
- */
-ArrayMutations.prototype.sort = function (compareFn) { };
-
-/**
- * @this {!ArrayMutations<T>}
- * @param {number} start 
- * @param {number=} deleteCount 
- * @param {...T} items
- * @throws {Error}
- */
-ArrayMutations.prototype.splice = function (start, deleteCount, items) { };
-
-/**
- * @this {!ArrayMutations<T>}
- * @param {...T} elementN
- * @throws {Error} 
- */
-ArrayMutations.prototype.unshift = function (elementN) { };
-
-/* START_OF_FILE */
-
-// Public API
+/* __EXCLUDE__ */
 
 /**
  * @public
  * @template T
  * @param {function(): T} fn 
- * @returns {!Own<T>}
+ * @returns {!Signal<T>}
  */
 function root(fn) {
     /** @const {!Owner} */
-    var node = new Owner();
-    /** @const {?Own} */
+    var node = new Root();
+    /** @const {?Owner} */
     var owner = OWNER;
     /** @const {boolean} */
     var listen = LISTEN;
@@ -702,29 +313,6 @@ function compute(fn, seed, eq) {
 function $compute(fn, seed, eq) {
     return new Computation(fn, seed, 0, eq);
 }
-
-/**
- * @public
- * @template T
- * @param {function(T): T} fn 
- * @param {T=} seed 
- * @returns {!Signal<T>}
- */
-function respond(fn, seed) {
-    return new Computation(fn, seed, Opts.Static, null);
-}
-
-/**
- * @public
- * @template T
- * @param {function(T): T} fn 
- * @param {T=} seed 
- * @returns {!Signal<T>}
- */
-function $respond(fn, seed) {
-    return new Computation(fn, seed, 0, null);
-}
-
 
 /**
  * @public
@@ -780,7 +368,7 @@ function array(value) {
 
 /**
  * @public
- * @param {!Signal} node 
+ * @param {!Dispose} node 
  */
 function dispose(node) {
     if ((node._opt & Opts.DisposeFlags) === 0) {
@@ -842,7 +430,7 @@ function stable() {
  * @param {Cleanup} fn 
  */
 function cleanup(fn) {
-    /** @const {?Own} */
+    /** @const {?Owner} */
     var owner = OWNER;
     if (owner !== null) {
         /** @const {?Array<Cleanup>} */
@@ -860,7 +448,7 @@ function cleanup(fn) {
  * @param {Recover} fn
  */
 function recover(fn) {
-    /** @const {?Own} */
+    /** @const {?Owner} */
     var owner = OWNER;
     if (owner !== null) {
         /** @const {?Array<Recover>} */
@@ -876,7 +464,7 @@ function recover(fn) {
 // Internal
 
 /**
- * @package
+ * @protected
  * @abstract
  * @constructor
  * @implements {Dispose}
@@ -884,7 +472,7 @@ function recover(fn) {
 function Disposer() { }
 
 /**
- * @package
+ * @protected
  * @this {!Disposer}
  * @param {number} time
  * @returns {void}
@@ -896,7 +484,7 @@ Disposer.prototype._recDispose = function (time) {
 };
 
 /**
- * @package
+ * @protected
  * @this {!Disposer}
  * @param {number} time
  */
@@ -916,24 +504,21 @@ function extend(parent, child) {
 }
 
 /**
- * @package
- * @noinline
+ * @protected
  * @template T
  * @param {Function} obj
- * @param {function(this:Signal): T} getVal
- * @param {function(this:Signal): T} peekVal
- * @param {function(this:Signal, T): T=} setVal
- * @returns {Signal<T>}
+ * @param {function(this:Child): T} getVal
+ * @param {function(this:Child): T} peekVal
+ * @param {function(this:Child, T): T=} setVal
  */
 function setValProto(obj, getVal, peekVal, setVal) {
     Object.defineProperties(obj.prototype, { val: { get: getVal, set: setVal }, peek: { get: peekVal } });
-    return /** @type {Signal<T>} */(obj);
 }
 
 /**
- * @package
+ * @protected
  * @template T
- * @this {!Signal<T>}
+ * @this {!Child<T>}
  * @returns {T}
  */
 function getValue() {
@@ -941,7 +526,7 @@ function getValue() {
 }
 
 /**
- * @param {Own|Receive} node 
+ * @param {Dispose} node 
  * @param {number} time
  */
 function clearMayUpdate(node, time) {
@@ -985,20 +570,102 @@ function clearMayUpdate(node, time) {
 
 /**
  * @struct
+ * @protected
+ * @constructor
+ * @extends {Disposer}
+ * @implements {Owner}
+ */
+function Root() {
+    /**
+     * @protected
+     * @type {number}
+     */
+    this._opt = 0;
+    /**
+     * @protected
+     * @type {number}
+     */
+    this._age = 0;
+    /**
+     * @protected
+     * @type {?Array<!Child>}
+     */
+    this._owned = [];
+    /**
+     * @protected
+     * @type {?Array<!Cleanup>}
+     */
+    this._cleanups = null;
+    /**
+     * @protected
+     * @type {?Array<!Recover>}
+     */
+    this._recovers = null;
+}
+
+extend(Disposer, Root);
+
+/**
+ * @protected
+ * @this {!Owner}
+ * @param {number} time
+ */
+function disposeOwn(time) {
+    this._opt = Opts.Disposed;
+    /** @type {number} */
+    var i;
+    /** @type {number} */
+    var ln;
+    /** @const {?Array<!Child>} */
+    var owned = this._owned;
+    /** @const {?Array<Cleanup>} */
+    var cleanups = this._cleanups;
+    if (owned !== null && (ln = owned.length) !== 0) {
+        for (i = 0; i < ln; i++) {
+            owned[i]._dispose(time);
+        }
+    }
+    if (cleanups !== null && (ln = cleanups.length) !== 0) {
+        for (i = 0; i < ln; i++) {
+            cleanups[i](true);
+        }
+    }
+    this._cleanups =
+        this._owned =
+        this._recovers = null;
+}
+
+/**
+ * @protected
+ * @override
+ * @this {!Owner}
+ */
+Root.prototype._dispose = disposeOwn;
+
+/**
+ * @protected
+ * @param {!Child} child 
+ */
+Root.prototype._addChild = function (child) {
+    this._owned[this._owned.length] = child;
+}
+
+/**
+ * @struct
  * @template T
- * @package
+ * @protected
  * @abstract
  * @constructor
  * @extends {Disposer}
  * @implements {Send<T>}
- * @param {?Own} owner 
+ * @param {?Owner} owner 
  * @param {number|undefined} opt 
  * @param {T} value
  * @param {(function(T,T): boolean)|null=} eq
  */
 function Sender(owner, opt, value, eq) {
     /**
-     * @package
+     * @protected
      * @type {number}
      */
     this._opt = (
@@ -1011,57 +678,57 @@ function Sender(owner, opt, value, eq) {
                     0
     ) | opt;
     /**
-     * @package
+     * @protected
      * @type {T}
      */
     this._value = value;
     /**
-     * @package
-     * @type {?Own}
+     * @protected
+     * @type {?Owner}
      */
     this._owner = owner;
     /**
-     * @package
+     * @protected
      * @type {(function(T,T): boolean)|null|undefined}
      */
     this._eq = eq;
     /**
-     * @package
+     * @protected
      * @type {number}
      */
     this._age = 0;
     /**
-     * @package
+     * @protected
      * @type {number}
      */
     this._mayDisposeAge = 0;
     /**
-     * @package
+     * @protected
      * @type {?ReceiveMany}
      */
     this._node1 = null;
     /**
-     * @package
+     * @protected
      * @type {number}
      */
     this._node1slot = -1;
     /**
-     * @package
+     * @protected
      * @type {?Array<!ReceiveMany>}
      */
     this._nodes = null;
     /**
-     * @package
+     * @protected
      * @type {?Array<number>}
      */
     this._nodeslots = null;
     if (owner !== null) {
-        owner._add(this);
+        owner._addChild(this);
     }
 }
 
 /**
- * @package
+ * @protected
  * @param {!Sender} node
  */
 function disposeSender(node) {
@@ -1075,7 +742,7 @@ function disposeSender(node) {
 }
 
 /**
- * @package
+ * @protected
  * @param {!Send} send
  * @param {number} time
  */
@@ -1100,7 +767,7 @@ function sendUpdate(send, time) {
 }
 
 /**
- * @package
+ * @protected
  * @param {!Send} send
  * @param {number} time
  */
@@ -1125,15 +792,15 @@ function sendMayUpdate(send, time) {
 }
 
 /**
- * @package
- * @param {!Array<!Signal>} owned 
+ * @protected
+ * @param {!Array<!Child>} owned 
  * @param {number} time
  */
 function sendDispose(owned, time) {
     /** @type {number} */
     var ln = owned.length;
     for (; ln-- !== 0;) {
-        /** @const {Signal} */
+        /** @const {!Child} */
         var child = owned.pop();
         if ((child._opt & Opts.DisposeFlags) === 0) {
             child._recDispose(time);
@@ -1142,15 +809,15 @@ function sendDispose(owned, time) {
 }
 
 /**
- * @package
- * @param {!Array<!Signal>} owned 
+ * @protected
+ * @param {!Array<!Child>} owned 
  * @param {number} time
  */
 function sendMayDispose(owned, time) {
     /** @const {number} */
     var ln = owned.length;
     for (var i = 0; i < ln; i++) {
-        /** @const {Signal} */
+        /** @const {!Child} */
         var child = owned[i];
         if (child._opt !== Opts.Disposed && child._mayDisposeAge < time) {
             child._recMayDispose(time);
@@ -1160,106 +827,41 @@ function sendMayDispose(owned, time) {
 
 /**
  * @struct
- * @package
- * @constructor
- * @extends {Disposer}
- * @implements {Own}
- */
-function Owner() {
-    /**
-     * @package
-     * @type {number}
-     */
-    this._opt = 0;
-    /**
-     * @package
-     * @type {number}
-     */
-    this._age = 0;
-    /**
-     * @package
-     * @type {?Array<!Signal>}
-     */
-    this._owned = [];
-    /**
-     * @package
-     * @type {?Array<!Cleanup>}
-     */
-    this._cleanups = null;
-    /**
-     * @package
-     * @type {?Array<!Recover>}
-     */
-    this._recovers = null;
-}
-
-extend(Disposer, Owner);
-
-/**
- * @package
- * @this {!Own}
- * @param {number} time
- */
-function disposeOwn(time) {
-    this._opt = Opts.Disposed;
-    /** @type {number} */
-    var i;
-    /** @type {number} */
-    var ln;
-    /** @const {?Array<!Signal>} */
-    var owned = this._owned;
-    /** @const {?Array<Cleanup>} */
-    var cleanups = this._cleanups;
-    if (owned !== null && (ln = owned.length) !== 0) {
-        for (i = 0; i < ln; i++) {
-            owned[i]._dispose(time);
-        }
-    }
-    if (cleanups !== null && (ln = cleanups.length) !== 0) {
-        for (i = 0; i < ln; i++) {
-            cleanups[i](true);
-        }
-    }
-    this._cleanups =
-        this._owned =
-        this._recovers = null;
-}
-
-/**
- * @package
- * @override
- * @this {!Owner}
- */
-Owner.prototype._dispose = disposeOwn;
-
-/**
- * @package
- * @param {!Signal} child 
- */
-Owner.prototype._add = function (child) {
-    this._owned[this._owned.length] = child;
-}
-
-/**
- * @struct
  * @template T
- * @package
+ * @protected
  * @constructor
  * @extends {Sender<T>}
+ * @implements {WritableSignal<T>}
  * @param {T} value
  * @param {(function(T,T): boolean)|null=} eq
- * @implements {Send<T>}
  */
 function Data(value, eq) {
     Sender.call(this, OWNER, 0, value, eq);
     /**
-     * @package
-     * @type {T|Nil}
+     * @protected
+     * @type {T|nil}
      */
     this._pending = NIL;
 }
 
 extend(Disposer, Data);
+
+/* __EXCLUDE__ */
+
+/**
+ * @type {T}
+ * @nocollapse
+ * @throws {Error}
+ */
+Data.prototype.val;
+
+/**
+ * @type {T}
+ * @readonly
+ */
+Data.prototype.peek;
+
+/* __EXCLUDE__ */
 
 setValProto(
     Data,
@@ -1332,7 +934,7 @@ setValProto(
 );
 
 /**
- * @package
+ * @protected
  * @this {!Data<T>}
  * @param {number} time
  */
@@ -1346,7 +948,7 @@ Data.prototype._update = function (time) {
 };
 
 /**
- * @package
+ * @protected
  * @override
  * @this {!Data<T>}
  */
@@ -1357,68 +959,67 @@ Data.prototype._dispose = function () {
 
 /**
  * @struct
- * @template T 
- * @package
+ * @template T
+ * @protected
+ * @abstract
  * @constructor
  * @extends {Sender<T>}
- * @param {function(T): T} fn 
- * @param {T} value 
- * @param {(function(T,T): boolean)|null=} eq
- * @param {number} opt
- * @implements {Own<T>}
- * @implements {ReceiveMany<T>}
  */
-function Computation(fn, value, opt, eq) {
-    /** @const {?Own} */
-    var owner = OWNER;
-    /** @const {boolean} */
-    var listen = LISTEN;
-    Sender.call(this, owner, opt, value, eq);
+function Receiver() {
     /**
-     * @package
+     * @protected
      * @type {number}
      */
     this._mayUpdateAge = 0;
     /**
-     * @package
+     * @protected
      * @type {?Send}
      */
     this._source1 = null;
     /**
-     * @package
+     * @protected
      * @type {number}
      */
     this._source1slot = 0;
+}
+
+/**
+ * @struct
+ * @template T 
+ * @protected
+ * @constructor
+ * @extends {Receiver<T,(function(T): T)>}
+ * @implements {ReadonlySignal<T>}
+ * @implements {Owner<T>}
+ * @implements {ReceiveMany<T>}
+ * @param {function(T): T} fn 
+ * @param {T} value 
+ * @param {(function(T,T): boolean)|null=} eq
+ * @param {number} opt
+ */
+function Computation(fn, value, opt, eq) {
+    /** @const {?Owner} */
+    var owner = OWNER;
+    /** @const {boolean} */
+    var listen = LISTEN;
+    Root.call(/** @type {?} */(this));
+    Sender.call(this, owner, opt, value, eq);
+    Receiver.call(this);
     /**
-     * @package
+     * @protected
+     * @type {?(function(T): T)}
+     */
+    this._fn = fn;
+    /**
+     * @protected
      * @type {?Array<!Send>}
      */
     this._sources = null;
     /**
-     * @package
+     * @protected
      * @type {?Array<number>}
      */
     this._sourceslots = null;
-    /**
-     * @package
-     * @type {?Array<!Signal>}
-     */
-    this._owned = null;
-    /**
-     * @package
-     * @type {?Array<!Cleanup>}
-     */
-    this._cleanups = null;
-    /**
-     * @package
-     * @type {?Array<!Recover>}
-     */
-    this._recovers = null;
-    /**
-     * @package
-     * @type {?function(T): T}
-     */
-    this._fn = fn;
     OWNER = this;
     LISTEN = true;
     if (STAGE === Stage.Idle) {
@@ -1442,6 +1043,38 @@ function Computation(fn, value, opt, eq) {
 };
 
 extend(Disposer, Computation);
+
+/* __EXCLUDE__ */
+
+/**
+ * @type {T}
+ * @nocollapse
+ * @throws {Error}
+ */
+Computation.prototype.val;
+
+/**
+ * @type {T}
+ * @readonly
+ */
+Computation.prototype.peek;
+/**
+ * @protected
+ * @type {?Array<!Child>}
+ */
+Computation.prototype._owned;
+/**
+ * @protected
+ * @type {?Array<Cleanup>}
+ */
+Computation.prototype._cleanups;
+/**
+ * @protected
+ * @type {?Array<Recover>}
+ */
+Computation.prototype._recovers;
+
+/* __EXCLUDE__ */
 
 setValProto(
     Computation,
@@ -1479,12 +1112,12 @@ setValProto(
 );
 
 /**
- * @package
+ * @protected
  * @override
  * @this {!Computation<T>}
- * @param {!Signal} child 
+ * @param {!Child} child 
  */
-Computation.prototype._add = function (child) {
+Computation.prototype._addChild = function (child) {
     if (this._owned === null) {
         this._owned = [child];
     } else {
@@ -1493,7 +1126,7 @@ Computation.prototype._add = function (child) {
 };
 
 /**
- * @package
+ * @protected
  * @override
  * @this {!Computation<T>}
  */
@@ -1507,7 +1140,7 @@ Computation.prototype._dispose = function (time) {
 };
 
 /**
- * @package
+ * @protected
  * @override
  * @this {!Computation<T>}
  * @param {number} time
@@ -1534,7 +1167,7 @@ Computation.prototype._recDispose = function (time) {
 };
 
 /**
- * @package
+ * @protected
  * @override
  * @this {!Computation<T>}
  * @param {number} time
@@ -1548,7 +1181,7 @@ Computation.prototype._recMayDispose = function (time) {
 };
 
 /**
- * @package
+ * @protected
  * @override
  * @this {Computation<T>}
  * @param {number} time
@@ -1558,7 +1191,7 @@ Computation.prototype._update = function (time) {
     var i;
     /** @type {number} */
     var ln;
-    /** @const {?Own} */
+    /** @const {?Owner} */
     var owner = OWNER;
     /** @const {boolean} */
     var listen = LISTEN;
@@ -1592,7 +1225,7 @@ Computation.prototype._update = function (time) {
 };
 
 /**
- * @package
+ * @protected
  * @this {!Computation<T>}
  * @param {number} time
  */
@@ -1618,7 +1251,7 @@ Computation.prototype._recUpdate = function (time) {
 };
 
 /**
- * @package
+ * @protected
  * @this {!Computation<T>}
  * @param {number} time
  */
@@ -1635,30 +1268,30 @@ Computation.prototype._recMayUpdate = function (time) {
 
 /**
  * @struct
- * @package
+ * @protected
  * @constructor
  * @param {number} stage 
  */
 function Queue(stage) {
     /**
-     * @package
+     * @protected
      * @const {number}
      */
     this._stage = stage;
     /**
-     * @package
+     * @protected
      * @const {!Array<?Dispose>}
      */
     this._items = [];
     /**
-     * @package
+     * @protected
      * @type {number}
      */
     this._count = 0;
 }
 
 /**
- * @package
+ * @protected
  * @param {!Dispose} item
  * @this {!Queue}
  */
@@ -1667,7 +1300,7 @@ Queue.prototype._add = function (item) {
 };
 
 /**
- * @package
+ * @protected
  * @returns {number}
  * @this {!Queue}
  * @param {number} time
@@ -1696,8 +1329,8 @@ Queue.prototype._run = function (time) {
     return error;
 };
 
-/** @const {!Nil} */
-var NIL = /** @type {!Nil} */({});
+/** @const {!nil} */
+var NIL = /** @type {!nil} */({});
 /** @type {number} */
 var TIME = 1;
 /** @type {number} */
@@ -1710,22 +1343,22 @@ var CHANGES = new Queue(Stage.Changes);
 var COMPUTES = new Queue(Stage.Computes);
 /** @const {!Queue} */
 var EFFECTS = new Queue(Stage.Effects);
-/** @type {?Own} */
+/** @type {?Owner} */
 var OWNER = null;
 /** @type {boolean} */
 var LISTEN = false;
 
 /**
- * @package
+ * @protected
  */
 function reset() {
     DISPOSES._count = CHANGES._count = COMPUTES._count = EFFECTS._count = 0;
 }
 
 /**
- * @package
+ * @protected
  * @param {!Send} from 
- * @param {!ReceiveOne|!ReceiveMany} to
+ * @param {!Receive|!ReceiveMany} to
  */
 function logRead(from, to) {
     from._opt |= Opts.Send;
@@ -1759,11 +1392,11 @@ function logRead(from, to) {
 }
 
 /**
- * @package
+ * @protected
  * @throws {Error}
  */
 function exec() {
-    /** @const {?Own} */
+    /** @const {?Owner} */
     var owner = OWNER;
     try {
         start();
@@ -1775,7 +1408,7 @@ function exec() {
 }
 
 /**
- * @package
+ * @protected
  * @throws {Error}
  */
 function start() {
@@ -1820,7 +1453,7 @@ function start() {
 }
 
 /**
- * @package
+ * @protected
  * @param {!ReceiveMany} node
  */
 function cleanupReceiver(node) {
@@ -1844,7 +1477,7 @@ function cleanupReceiver(node) {
 }
 
 /**
- * @package
+ * @protected
  * @param {!Send} send 
  * @param {number} slot
  */
@@ -1875,7 +1508,7 @@ function forgetReceiver(send, slot) {
 }
 
 /**
- * @package
+ * @protected
  * @param {!Send} send
  */
 function cleanupSender(send) {
@@ -1899,7 +1532,7 @@ function cleanupSender(send) {
 }
 
 /**
- * @package
+ * @protected
  * @param {!Receive} receive 
  * @param {number} slot
  */
@@ -1931,14 +1564,13 @@ function forgetSender(receive, slot) {
 
 /**
  * @struct
- * @package
+ * @protected
  * @abstract
  * @template T
  * @constructor
- * @extends {ArrayCallbacks<T>}
+ * @extends {Sender<!Array<T>>}
  */
 function Collection() { }
-
 
 /**
  * @param {function(T,!Signal<number>): boolean} callbackFn
@@ -2055,44 +1687,59 @@ Collection.prototype.some = function (callbackFn) { };
 
 /**
  * @struct
- * @package
+ * @protected
  * @template T,U
  * @constructor
  * @extends {Collection<T>}
+ * @implements {ReadonlySignal<!Array<T>>}
+ * @implements {Receive<!Array<T>>}
  * @param {!Send<!Array>} src
- * @param {function(T,number): U} fn
- * @implements {ReceiveOne<!Array<T>>}
+ * @param {function(T,ReadonlySignal<number>): U} fn
  */
 function Enumerable(src, fn) {
-    /** @const {?Own} */
-    var owner = OWNER;
-    Sender.call(this, owner, 0, []);
+    Sender.call(this, OWNER, 0, []);
+    Receiver.call(/** @type {?} */(this));
     /**
-     * @package
-     * @type {function(T,number): U}
+     * @protected
+     * @type {?(function(T,ReadonlySignal<number>): U)}
      */
     this._fn = fn;
-    /**
-     * @package
-     * @type {number}
-     */
-    this._mayUpdateAge = 0;
-    /**
-     * @package
-     * @type {?Send}
-     */
-    this._source1 = null;
-    /**
-     * @package
-     * @type {number}
-     */
-    this._source1slot = -1;
     logRead(src, this);
 }
 
 extend(Collection, Enumerable);
 
-Enumerable.prototype = setValProto(
+/* __EXCLUDE__ */
+/**
+ * @type {T}
+ * @nocollapse
+ * @throws {Error}
+ */
+Enumerable.prototype.val;
+
+/**
+ * @type {T}
+ * @readonly
+ */
+Enumerable.prototype.peek;
+/**
+ * @protected
+ * @type {T}
+ */
+Enumerable.prototype._source1;
+/**
+ * @protected
+ * @type {number}
+ */
+Enumerable.prototype._source1slot;
+/**
+ * @protected
+ * @type {number}
+ */
+Enumerable.prototype._mayUpdateAge;
+/* __EXCLUDE__ */
+
+setValProto(
     Enumerable,
     /**
      * @template T
@@ -2106,7 +1753,7 @@ Enumerable.prototype = setValProto(
 );
 
 /**
- * @package
+ * @protected
  * @override
  * @this {!Enumerable<T>}
  * @param {number} time 
@@ -2116,7 +1763,7 @@ Enumerable.prototype._dispose = function (time) {
 };
 
 /**
- * @package
+ * @protected
  * @override 
  * @this {!Enumerable<T>}
  * @param {number} time 
@@ -2126,7 +1773,7 @@ Enumerable.prototype._recDispose = function (time) {
 };
 
 /**
- * @package
+ * @protected
  * @override 
  * @this {!Enumerable<T>}
  * @param {number} time 
@@ -2136,7 +1783,7 @@ Enumerable.prototype._recMayDispose = function (time) {
 };
 
 /**
- * @package
+ * @protected
  * @override
  * @this {!Enumerable<T>}
  * @param {number} time 
@@ -2146,7 +1793,7 @@ Enumerable.prototype._update = function (time) {
 };
 
 /**
- * @package
+ * @protected
  * @this {!Enumerable<T>}
  * @param {number} time 
  */
@@ -2155,7 +1802,7 @@ Enumerable.prototype._recUpdate = function (time) {
 };
 
 /**
- * @package
+ * @protected
  * @param {number} time 
  */
 Enumerable.prototype._recMayUpdate = function (time) {
@@ -2164,20 +1811,32 @@ Enumerable.prototype._recMayUpdate = function (time) {
 
 /**
  * @struct
- * @package
+ * @protected
  * @template T
  * @constructor
  * @extends {Collection<T>}
- * @param {!Array<T>} value
  * @implements {SignalArray<T>}
+ * @param {!Array<T>} value
  */
 function DataArray(value) {
-    /** @const {?Own} */
-    var owner = OWNER;
-    Sender.call(this, owner, 0, value);
+    Sender.call(this, OWNER, 0, value);
 }
 
 extend(Collection, DataArray);
+
+/* __EXCLUDE__ */
+/**
+ * @type {T}
+ * @noinline
+ */
+DataArray.prototype.val;
+
+/**
+ * @type {T}
+ * @readonly
+ */
+DataArray.prototype.peek;
+/* __EXCLUDE__ */
 
 setValProto(
     DataArray,
@@ -2201,7 +1860,7 @@ setValProto(
 );
 
 /**
- * @package
+ * @protected
  * @override
  * @this {!DataArray<T>}
  * @param {number} time
@@ -2211,7 +1870,7 @@ DataArray.prototype._dispose = function (time) {
 };
 
 /**
- * @package
+ * @protected
  * @override
  * @this {!DataArray<T>}
  * @param {number} time
@@ -2267,6 +1926,5 @@ export {
     recover, cleanup, dispose,
     data, value, array,
     compute, $compute,
-    respond, $respond,
     effect, $effect
 };

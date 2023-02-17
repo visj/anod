@@ -1,8 +1,9 @@
+/* __EXCLUDE__ */
 /**
  * @fileoverview
  * @externs
  */
-
+/* __EXCLUDE__ */
 /**
  * @template T
  * @interface
@@ -10,37 +11,47 @@
 function Signal() { }
 
 /**
- * @type {T}
- * @nocollapse
- * @throws {Error}
+ * @template T
+ * @interface
+ * @extends {Signal<T>}
  */
-Signal.prototype.val;
+function ReadonlySignal() { }
 
 /**
  * @type {T}
+ * @readonly
  * @nocollapse
+ * @throws {Error}
  */
-Signal.prototype.peek;
+ReadonlySignal.prototype.val;
+
+/**
+ * @type {T}
+ * @readonly
+ * @nosideeffects
+ */
+ReadonlySignal.prototype.peek;
 
 /**
  * @template T
- * @constructor
- * @implements {Signal<!Array<T>>}
+ * @interface
+ * @extends {Signal<T>}
  */
-function DataArray() { }
+function WritableSignal() { }
 
 /**
- * @type {!Array<T>}
+ * @type {T}
  * @nocollapse
  * @throws {Error}
  */
-DataArray.prototype.val;
+WritableSignal.prototype.val;
 
 /**
- * @type {!Array<T>}
- * @nocollapse
+ * @type {T}
+ * @readonly
+ * @nosideeffects
  */
-DataArray.prototype.peek;
+WritableSignal.prototype.peek;
 
 /**
  * @template T
@@ -48,6 +59,13 @@ DataArray.prototype.peek;
  * @extends {Signal<!Array<T>>}
  */
 function SignalCollection() { }
+
+/**
+ * @type {T}
+ * @readonly
+ * @nosideeffects
+ */
+SignalCollection.prototype.peek;
 
 /**
  * @param {function(T,!Signal<number>): boolean} callbackFn
@@ -165,6 +183,23 @@ SignalCollection.prototype.some = function (callbackFn) { };
 /**
  * @template T
  * @interface
+ * @extends {ReadonlySignal<!Array<T>>}
+ * @extends {SignalCollection<T>}
+ */
+function SignalEnumerable() { }
+
+/**
+ * @type {T}
+ * @readonly
+ * @nocollapse
+ * @throws {Error}
+ */
+SignalEnumerable.prototype.val;
+
+/**
+ * @template T
+ * @interface
+ * @extends {WritableSignal<!Array<T>>}
  * @extends {SignalCollection<T>}
  */
 function SignalArray() { }
