@@ -1,5 +1,3 @@
-export class RootSignal { }
-
 export class ReadSignal<T = any> extends RootSignal {
     get val(): T;
 
@@ -22,6 +20,8 @@ export function data<T>(value: T): Signal<T>;
 
 export function value<T>(value: T, eq?: Compare<T>): Signal<T>;
 
+export function array<T>(items?: T[], eq?: Compare<T>): SignalArray<T>;
+
 export function compute<T>(callback: (seed: T) => T, seed?: T, compareFn?: Compare<T>): Readonly<Signal<T>>;
 
 export function $compute<T>(callback: (seed: T) => T, seed?: T, compareFn?: Compare<T>): Readonly<Signal<T>>;
@@ -30,19 +30,17 @@ export function effect<T>(callback: (seed: T) => T, seed?: T): Readonly<Signal<T
 
 export function $effect<T>(callback: (seed: T) => T, seed?: T): Readonly<Signal<T>>;
 
+export function cleanup(cleanupFn: CleanupFn): void;
+
+export function recover(recoverFn: RecoverFn): void;
+
+export function dispose(val: ReadSignal): void;
+
 export function peek<T>(callback: () => T): T;
 
 export function batch(callback: () => void): void;
 
 export function stable(): void;
-
-export function cleanup(cleanupFn: CleanupFn): boolean;
-
-export function recover(recoverFn: RecoverFn): boolean;
-
-export function dispose(val: RootSignal): boolean;
-
-export function array<T>(items?: T[]): SignalArray<T>;
 
 export class SignalCollection<T = any> extends ReadSignal<T[]> {
 
@@ -93,7 +91,11 @@ export class SignalCollection<T = any> extends ReadSignal<T[]> {
     some(callbackFn: (element: T, index: number) => boolean): ReadSignal<boolean>;
 }
 
-export class SignalArray<T = any> extends Signal<T[]>, SignalCollection<T>{
+export class SignalArray<T = any> extends SignalCollection<T>{
+
+    set val(items: T[]): T[];
+
+    set length(val: number): number;
 
     pop(): T | undefined;
 

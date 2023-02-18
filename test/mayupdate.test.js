@@ -50,7 +50,7 @@ describe("mayupdate", function () {
       });
       order = '';
       d1.val = 1;
-      assert.equal(order, 't1e[c]2_1c1e1e2_1');
+      assert.equal(order, 't1c1e[c]2_1e1e2_1');
     });
   });
 
@@ -74,4 +74,35 @@ describe("mayupdate", function () {
       assert.equal(c2.val, 2);
     });
   });
+
+  it("does not update if pending source disposes", function() {
+    root(function() {
+      var d1 = value(0);
+      var d2 = value(0);
+      var c1 = compute(function() {
+        return d1.val;
+      });
+      var c2 = compute(function() {
+        return c1.val;
+      });
+      var c3;
+      effect(function() {
+        c3 = compute(function() {
+          return c2.val;
+        });
+        c1.val;
+      });
+      var c4 = compute(function() {
+        return d2.val;
+      });
+      var count = 0;
+      effect(function() {
+        c4.val; c3.val;
+        count++;
+      });
+      d1.val++;
+      assert.equal(count, 1);
+    });
+  });
+
 });

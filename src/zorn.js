@@ -71,6 +71,18 @@ function SignalCollection() { }
 SignalCollection.prototype.peek;
 
 /**
+ * @type {!ReadSignal<number>}
+ */
+SignalCollection.prototype.length;
+
+/**
+ * 
+ * @param {...(T|!Array<T>)} items
+ * @returns {!SignalEnumerable<T>} 
+ */
+SignalCollection.prototype.concat = function (items) { };
+
+/**
  * @param {function(T,number): boolean} callbackFn
  * @returns {!ReadSignal<boolean>}
  */
@@ -255,10 +267,10 @@ SignalArray.prototype.unshift = function (elementN) { };
 /* __SOURCE__ */
 
 /** @typedef {function(boolean): void} */
-var Cleanup;
+var CleanupFn;
 
 /** @typedef {function(*): void} */
-var Recover;
+var RecoverFn;
 
 /** 
  * @interface
@@ -287,35 +299,53 @@ Dispose.prototype._dispose = function (time) { };
 
 /**
  * @interface
- * @template T
  * @extends {Dispose}
  */
-function Owner() { }
-
-/**
- * @protected
- * @type {?Array<!Child>}
- */
-Owner.prototype._owned;
-
-/**
- * @protected
- * @type {?Array<Cleanup>}
- */
-Owner.prototype._cleanups;
-
-/**
- * @protected
- * @type {?Array<Recover>}
- */
-Owner.prototype._recovers;
+function Own() { }
 
 /**
  * @protected
  * @param {!Child} child
  * @returns {void}
  */
-Owner.prototype._addChild = function (child) { };
+Own.prototype._addChild = function (child) { };
+
+/**
+ * @protected
+ * @param {CleanupFn} cleanupFn 
+ */
+Own.prototype._addCleanup = function (cleanupFn) { };
+
+/**
+ * @protected
+ * @param {RecoverFn} recoverFn 
+ */
+Own.prototype._addRecover = function (recoverFn) { };
+
+/**
+ * @protected
+ * @interface
+ * @extends {Own}
+ */
+function OwnOne() { };
+
+/**
+ * @protected
+ * @type {?Array<!Child>}
+ */
+OwnOne.prototype._children;
+
+/**
+ * @protected
+ * @type {?Array<CleanupFn>}
+ */
+OwnOne.prototype._cleanups;
+
+/**
+ * @protected
+ * @type {?Array<RecoverFn>}
+ */
+OwnOne.prototype._recovers;
 
 /**
  * @const 
@@ -371,7 +401,7 @@ function Child() { }
 
 /**
  * @protected
- * @type {?Owner}
+ * @type {?Own}
  */
 Child.prototype._owner;
 
@@ -384,11 +414,11 @@ Child.prototype._recDispose = function (time) { };
 
 /**
  * @protected
- * @param {!Owner} owner
+ * @param {!Own} Own
  * @param {number} time
  * @returns {void}
  */
-Child.prototype._recMayDispose = function (owner, time) { };
+Child.prototype._recMayDispose = function (Own, time) { };
 
 /**
  * @protected
@@ -530,7 +560,7 @@ ReceiveMany.prototype._sourceslots;
 function root(fn) {
     /** @const {?Root} */
     var _root = ROOT;
-    /** @const {?Owner} */
+    /** @const {?Own} */
     var owner = OWNER;
     /** @const {boolean} */
     var listen = LISTEN;
@@ -697,37 +727,25 @@ function stable() {
 
 /**
  * @public
- * @param {Cleanup} fn 
+ * @param {CleanupFn} fn 
  */
 function cleanup(fn) {
-    /** @const {?Owner} */
+    /** @const {?Own} */
     var owner = OWNER;
     if (owner !== null) {
-        /** @const {?Array<Cleanup>} */
-        var cleanups = owner._cleanups;
-        if (cleanups === null) {
-            owner._cleanups = [fn];
-        } else {
-            cleanups[cleanups.length] = fn;
-        }
+        owner._addCleanup(fn);
     }
 }
 
 /**
  * @public
- * @param {Recover} fn
+ * @param {RecoverFn} fn
  */
 function recover(fn) {
-    /** @const {?Owner} */
+    /** @const {?Own} */
     var owner = OWNER;
     if (owner !== null) {
-        /** @const {?Array<Recover>} */
-        var recovers = owner._recovers;
-        if (recovers === null) {
-            owner._recovers = [fn];
-        } else {
-            recovers[recovers.length] = fn;
-        }
+        owner._addRecover(fn);
     }
 }
 
@@ -735,14 +753,27 @@ function recover(fn) {
 
 /**
  * @noinline
- * @param {Function} parent
  * @param {Function} child
+ * @param {Function} parent1
+ * @param {Function=} parent2
  */
-function extend(parent, child) {
-    /** @const {function(new: Object)} */
-    function proto() { }
-    proto.prototype = parent.prototype;
-    child.prototype = new proto();
+function extend(child, parent1, parent2) {
+    /**
+     * @constructor
+     * @extends {Reactive}
+     */
+    function ctor() { };
+    /** @type {Object} */
+    var proto = ctor.prototype = new Reactive();
+    for (var key in parent1.prototype) {
+        proto[key] = parent1.prototype[key];
+    }
+    if (parent2 !== void 0) {
+        for (var key in parent2.prototype) {
+            proto[key] = parent2.prototype[key];
+        }
+    }
+    child.prototype = new ctor();
     child.constructor = child;
 }
 
@@ -772,7 +803,7 @@ function setValProto(obj, getVal, peekVal, setVal) {
  * @struct
  * @protected
  * @constructor
- * @implements {Owner}
+ * @implements {OwnOne}
  * @implements {RootSignal}
  */
 function Root() {
@@ -785,22 +816,22 @@ function Root() {
      * @protected
      * @type {?Array<!Child>}
      */
-    this._owned = [];
+    this._children = [];
     /**
      * @protected
-     * @type {?Array<!Cleanup>}
+     * @type {?Array<CleanupFn>}
      */
     this._cleanups = null;
     /**
      * @protected
-     * @type {?Array<!Recover>}
+     * @type {?Array<RecoverFn>}
      */
     this._recovers = null;
 }
 
 /**
  * @protected
- * @param {!Owner} owner
+ * @param {!OwnOne} owner
  * @param {number} time
  */
 function disposeOwner(owner, time) {
@@ -810,8 +841,8 @@ function disposeOwner(owner, time) {
     /** @type {number} */
     var ln;
     /** @const {?Array<!Child>} */
-    var owned = owner._owned;
-    /** @const {?Array<Cleanup>} */
+    var owned = owner._children;
+    /** @const {?Array<CleanupFn>} */
     var cleanups = owner._cleanups;
     if (owned !== null && (ln = owned.length) !== 0) {
         for (i = 0; i < ln; i++) {
@@ -824,14 +855,14 @@ function disposeOwner(owner, time) {
         }
     }
     owner._cleanups =
-        owner._owned =
+        owner._children =
         owner._recovers = null;
 }
 
 /**
  * @protected
  * @override
- * @this {!Owner}
+ * @this {!Root}
  * @param {number} time
  * @returns {void}
  */
@@ -844,7 +875,37 @@ Root.prototype._dispose = function (time) {
  * @returns {void}
  */
 Root.prototype._addChild = function (child) {
-    this._owned[this._owned.length] = child;
+    if (this._children === null) {
+        this._children = [child];
+    } else {
+        this._children[this._children.length] = child;
+    }
+};
+
+/**
+ * @protected
+ * @param {CleanupFn} cleanupFn
+ * @returns {void}
+ */
+Root.prototype._addCleanup = function (cleanupFn) {
+    if (this._cleanups === null) {
+        this._cleanups = [cleanupFn];
+    } else {
+        this._cleanups[this._cleanups.length] = cleanupFn;
+    }
+};
+
+/**
+ * @protected
+ * @param {RecoverFn} recoverFn
+ * @returns {void}
+ */
+Root.prototype._addRecover = function (recoverFn) {
+    if (this._recovers === null) {
+        this._recovers = [recoverFn];
+    } else {
+        this._recovers[this._recovers.length] = recoverFn;
+    }
 };
 
 /**
@@ -1005,15 +1066,15 @@ function sendMayUpdate(send, time) {
 
 /**
  * @protected
- * @param {!Array<!Child>} owned 
+ * @param {!Array<!Child>} children 
  * @param {number} time
  */
-function sendDispose(owned, time) {
-    /** @type {number} */
-    var ln = owned.length;
-    for (; ln-- !== 0;) {
+function sendDispose(children, time) {
+    /** @const {number} */
+    var ln = children.length;
+    for (var /** number */ i = 0; i < ln; i++) {
         /** @const {!Child} */
-        var child = owned.pop();
+        var child = children[i];
         if ((child._opt & Opts.DisposeFlags) === 0) {
             child._recDispose(time);
         }
@@ -1022,27 +1083,34 @@ function sendDispose(owned, time) {
 
 /**
  * @protected
- * @param {!Owner} owner
- * @param {!Array<!Child>} owned 
+ * @param {!Own} owner
+ * @param {!Array<!Child>} children 
  * @param {number} time
  */
-function sendMayDispose(owner, owned, time) {
+function sendMayDispose(owner, children, time) {
     /** @const {number} */
-    var ln = owned.length;
+    var ln = children.length;
     for (var /** number */ i = 0; i < ln; i++) {
         /** @const {!Child} */
-        var child = owned[i];
-        if (child._opt !== Opts.Disposed && (child._opt & Opts.MayDispose) === 0) {
+        var child = children[i];
+        if ((child._opt & (Opts.DisposeFlags | Opts.MayDispose)) === 0) {
             child._recMayDispose(owner, time);
         }
     }
 }
 
 /**
+ * @protected
+ * @constructor
+ */
+function Reactive() { }
+
+/**
  * @struct
  * @template T,U
  * @protected
  * @constructor
+ * @extends {Reactive}
  * @implements {Send<T>}
  * @implements {Signal<T>}
  * @param {number} opt
@@ -1063,7 +1131,7 @@ function Data(opt, set, value, eq) {
     this._value = value;
     /**
      * @protected
-     * @type {?Owner}
+     * @type {?Own}
      */
     this._owner = null;
     /**
@@ -1096,12 +1164,14 @@ function Data(opt, set, value, eq) {
      * @type {U}
      */
     this._set = set;
-    /** @const {?Owner} */
+    /** @const {?Own} */
     var owner = OWNER;
     if (owner !== null) {
         owner._addChild(this);
     }
 }
+
+extend(Data, Reactive);
 
 /**
  * @protected
@@ -1116,7 +1186,7 @@ Data.prototype._recDispose = function (time) {
 /**
  * @protected
  * @this {!Data<T>}
- * @param {!Owner} owner
+ * @param {!Own} owner
  * @param {number} time
  * @returns {void}
  */
@@ -1179,11 +1249,12 @@ setValProto(
                 var time = TIME;
                 if ((opt & Opts.MayDispose) !== 0) {
                     if ((opt & Opts.MayCleared) !== 0) {
-                        // cyclical ownership ??
+                        // cyclical Ownship ??
                         throw new Error();
                     }
                     this._opt |= Opts.MayCleared;
                     this._owner._clearMayDispose(time);
+                    this._opt &= ~(Opts.MayFlags);
                     if ((this._opt & Opts.DisposeFlags) !== 0) {
                         break set;
                     }
@@ -1226,7 +1297,7 @@ Data.prototype._dispose = function (time) {
  * @protected
  * @override
  * @this {!Data<T>}
- * @param {!Owner} owner 
+ * @param {!Own} owner 
  * @param {number} time 
  */
 Data.prototype._recMayDispose = function (owner, time) {
@@ -1238,7 +1309,6 @@ Data.prototype._recMayDispose = function (owner, time) {
 
 /**
  * @protected
- * @this {!Data<T,(T|nil)>}
  * @param {number} time
  * @returns {void}
  */
@@ -1257,7 +1327,7 @@ Data.prototype._update = function (time) {
  * @protected
  * @constructor
  * @extends {Data<T,(function(T): T)>}
- * @implements {Owner<T>}
+ * @implements {OwnOne}
  * @implements {ReceiveMany}
  * @implements {ReadSignal<T>}
  * @param {function(T): T} fn 
@@ -1266,7 +1336,7 @@ Data.prototype._update = function (time) {
  * @param {number} opt
  */
 function Computation(fn, value, opt, eq) {
-    /** @const {?Owner} */
+    /** @const {?Own} */
     var owner = OWNER;
     /** @const {boolean} */
     var listen = LISTEN;
@@ -1285,15 +1355,15 @@ function Computation(fn, value, opt, eq) {
      * @protected
      * @type {?Array<!Child>}
      */
-    this._owned = null;
+    this._children = null;
     /**
      * @protected
-     * @type {?Array<!Cleanup>}
+     * @type {?Array<CleanupFn>}
      */
     this._cleanups = null;
     /**
      * @protected
-     * @type {?Array<!Recover>}
+     * @type {?Array<RecoverFn>}
      */
     this._recovers = null;
     /**
@@ -1343,7 +1413,7 @@ function Computation(fn, value, opt, eq) {
     LISTEN = listen;
 };
 
-extend(Data, Computation);
+extend(Computation, Root, Data);
 
 /* __EXCLUDE__ */
 
@@ -1359,6 +1429,25 @@ Computation.prototype.val;
  * @readonly
  */
 Computation.prototype.peek;
+
+/**
+ * @protected
+ * @param {!Child} child
+ * @returns {void}
+ */
+Computation.prototype._addChild;
+
+/**
+ * @protected
+ * @param {CleanupFn} cleanupFn 
+ */
+Computation.prototype._addCleanup;
+
+/**
+ * @protected
+ * @param {RecoverFn} recoverFn 
+ */
+Computation.prototype._addRecover;
 
 /* __EXCLUDE__ */
 
@@ -1402,7 +1491,7 @@ setValProto(
  * 
  * @param {Computation} node 
  */
-function disposeSources(node) {
+function disposeReceiver(node) {
     if (node._source1 !== null) {
         removeReceiver(node._source1, node._source1slot);
         node._source1 = null;
@@ -1418,20 +1507,6 @@ function disposeSources(node) {
             removeReceiver(sources.pop(), sourceslots.pop());
         }
     }
-}
-
-/**
- * @protected
- * @override
- * @this {!Computation<T>}
- * @param {!Child} child 
- */
-Computation.prototype._addChild = function (child) {
-    if (this._owned === null) {
-        this._owned = [child];
-    } else {
-        this._owned[this._owned.length] = child;
-    }
 };
 
 /**
@@ -1441,7 +1516,7 @@ Computation.prototype._addChild = function (child) {
  */
 Computation.prototype._dispose = function (time) {
     disposeOwner(this, time);
-    disposeSources(this);
+    disposeReceiver(this);
     this._unmount();
     this._value = null;
 };
@@ -1461,8 +1536,8 @@ Computation.prototype._recDispose = function (time) {
      * If age is current, then this computation has already been
      * flagged for update and been enqueued in COMPUTES or RESPONDS.
      */
-    if (age !== time && this._owned !== null) {
-        sendDispose(this._owned, time);
+    if (age !== time && this._children !== null) {
+        sendDispose(this._children, time);
     }
 };
 
@@ -1470,7 +1545,7 @@ Computation.prototype._recDispose = function (time) {
  * @protected
  * @override
  * @this {!Computation<T>}
- * @param {!Owner} owner
+ * @param {!Own} owner
  * @param {number} time
  */
 Computation.prototype._recMayDispose = function (owner, time) {
@@ -1480,52 +1555,74 @@ Computation.prototype._recMayDispose = function (owner, time) {
     if (this._owner === null) {
         this._owner = owner;
     }
-    if (this._owned !== null && (opt & Opts.MayUpdate) === 0) {
-        sendMayDispose(this, this._owned, time);
+    if (this._children !== null && (opt & Opts.MayUpdate) === 0) {
+        sendMayDispose(this, this._children, time);
     }
 };
 
-Computation.prototype._clearMayDispose = function (time) {
+/**
+ * @this {!Receive}
+ * @param {number} time 
+ */
+function clearMayDispose(time) {
     /** @type {number} */
     var opt = this._opt;
     if ((opt & Opts.MayDispose) !== 0) {
         this._owner._clearMayDispose(time);
         opt = this._opt &= ~Opts.MayDispose;
     }
-    if ((opt & Opts.DisposeFlags) === 0) {
-        checkSource: if ((opt & Opts.MayUpdate) !== 0) {
-            /** @type {?Send} */
-            var source1 = this._source1;
-            if (
-                source1 !== null &&
-                (source1._opt & Opts.Respond) === 0 &&
-                (source1._opt & (Opts.Update | Opts.MayUpdate)) !== 0
-            ) {
-                source1._clearMayUpdate(time);
-                if (this._age === time) {
-                    break checkSource;
-                }
-            }
-            /** @type {number} */
-            var ln;
-            /** @const {?Array<!Send>} */
-            var sources = this._sources;
-            if (sources !== null && (ln = sources.length) > 0) {
-                for (var /** number */ i = 0; i < ln; i++) {
-                    source1 = sources[i];
-                    if (
-                        (source1._opt & Opts.Respond) === 0 &&
-                        (source1._opt & (Opts.Update | Opts.MayUpdate)) !== 0
-                    ) {
-                        source1._clearMayUpdate(time);
-                        if (this._age === time) {
-                            break checkSource;
-                        }
+    if ((opt & (Opts.DisposeFlags | Opts.MayUpdate)) === Opts.MayUpdate) {
+        /** @type {?Send} */
+        var source1 = this._source1;
+        if (
+            source1 !== null &&
+            (source1._opt & Opts.Respond) === 0 &&
+            (source1._opt & (Opts.Update | Opts.MayUpdate)) !== 0
+        ) {
+            source1._clearMayUpdate(time);
+        }
+        opt = this._opt;
+        this._opt &= ~Opts.MayUpdate;
+    }
+    return (opt & (Opts.DisposeFlags | Opts.MayUpdate)) === Opts.MayUpdate;
+}
+
+/**
+ * @this {!Receive}
+ * @param {number} time 
+ */
+function clearMayUpdate(time) {
+    this._clearMayDispose(time);
+    if ((this._opt & Opts.Update) !== 0 && this._age === time) {
+        this._update(time);
+    }
+};
+
+/**
+ * @protected
+ * @param {number} time 
+ * @returns {void}
+ */
+Computation.prototype._clearMayDispose = function (time) {
+    if (clearMayDispose.call(this, time)) {
+        /** @type {number} */
+        var ln;
+        /** @const {?Array<!Send>} */
+        var sources = this._sources;
+        if (sources !== null && (ln = sources.length) > 0) {
+            for (var /** number */ i = 0; i < ln; i++) {
+                var source1 = sources[i];
+                if (
+                    (source1._opt & Opts.Respond) === 0 &&
+                    (source1._opt & (Opts.Update | Opts.MayUpdate)) !== 0
+                ) {
+                    source1._clearMayUpdate(time);
+                    if (this._age === time) {
+                        break;
                     }
                 }
             }
         }
-        this._opt &= ~Opts.MayUpdate;
     }
 };
 
@@ -1540,7 +1637,7 @@ Computation.prototype._update = function (time) {
     var /** number */ i;
     /** @type {number} */
     var ln;
-    /** @const {?Owner} */
+    /** @const {?Own} */
     var owner = OWNER;
     /** @const {boolean} */
     var listen = LISTEN;
@@ -1549,14 +1646,14 @@ Computation.prototype._update = function (time) {
     /** @const {number} */
     var opt = this._opt;
     /** @const {?Array<!Child>} */
-    var owned = this._owned;
-    if (owned !== null && (ln = owned.length) !== 0) {
+    var children = this._children;
+    if (children !== null && (ln = children.length) !== 0) {
         for (i = 0; i < ln; i++) {
-            owned[i]._dispose(time);
+            children[i]._dispose(time);
         }
-        owned.length = 0;
+        children.length = 0;
     }
-    /** @const {?Array<Cleanup>} */
+    /** @const {?Array<CleanupFn>} */
     var cleanups = this._cleanups;
     if (cleanups !== null && (ln = cleanups.length) !== 0) {
         for (i = 0; i < ln; i++) {
@@ -1567,7 +1664,7 @@ Computation.prototype._update = function (time) {
     OWNER = this;
     if ((opt & Opts.Static) === 0) {
         LISTEN = true;
-        disposeSources(this);
+        disposeReceiver(this);
     } else {
         LISTEN = false;
     }
@@ -1596,8 +1693,8 @@ Computation.prototype._recUpdate = function (time) {
     var opt = this._opt;
     this._age = time;
     this._opt |= Opts.Update;
-    if (this._owned !== null) {
-        sendDispose(this._owned, time);
+    if (this._children !== null) {
+        sendDispose(this._children, time);
     }
     if ((opt & (Opts.Send | Opts.Respond)) === Opts.Send) {
         COMPUTES._add(this);
@@ -1621,8 +1718,8 @@ Computation.prototype._recMayUpdate = function (time) {
     /** @const {number} */
     var opt = this._opt;
     this._opt = (opt | Opts.MayUpdate) & ~Opts.MayCleared;
-    if (this._owned !== null && (opt & Opts.MayDispose) === 0) {
-        sendMayDispose(this, this._owned, time);
+    if (this._children !== null && (opt & Opts.MayDispose) === 0) {
+        sendMayDispose(this, this._children, time);
     }
     if ((opt & Opts.Send) !== 0) {
         sendMayUpdate(this, time);
@@ -1635,12 +1732,7 @@ Computation.prototype._recMayUpdate = function (time) {
  * @param {number} time
  * @returns {void} 
  */
-Computation.prototype._clearMayUpdate = function (time) {
-    this._clearMayDispose(time);
-    if ((this._opt & Opts.Update) !== 0 && this._age === time) {
-        this._update(time);
-    }
-};
+Computation.prototype._clearMayUpdate = clearMayUpdate;
 
 /**
  * @protected
@@ -1736,7 +1828,7 @@ var COMPUTES = new Queue(Stage.Computes);
 var EFFECTS = new Queue(Stage.Effects);
 /** @type {?Root} */
 var ROOT = null;
-/** @type {?Owner} */
+/** @type {?Own} */
 var OWNER = null;
 /** @type {boolean} */
 var LISTEN = false;
@@ -1789,7 +1881,7 @@ function logRead(from, to) {
  * @throws {Error}
  */
 function exec() {
-    /** @const {?Owner} */
+    /** @const {?Own} */
     var owner = OWNER;
     try {
         start();
@@ -1846,13 +1938,31 @@ function start() {
  * @struct
  * @protected
  * @abstract
- * @template T
+ * @template T,U
  * @constructor
- * @extends {Data<!Array<T>>}
+ * @extends {Data<!Array<T>,U>}
  */
 function Collection() { }
 
-extend(Data, Collection);
+extend(Collection, Data);
+
+/* __EXCLUDE__ */
+
+/**
+ * @type {!ReadSignal<number>}  
+ */
+Collection.prototype.length;
+
+/* __EXCLUDE__ */
+
+/**
+ * 
+ * @param {...(T|!Array<T>)} items
+ * @returns {!SignalEnumerable<T>} 
+ */
+Collection.prototype.concat = function (items) {
+
+};
 
 /**
  * @param {function(T,number): boolean} callbackFn
@@ -1972,7 +2082,8 @@ Collection.prototype.some = function (callbackFn) { };
  * @protected
  * @template T,U
  * @constructor
- * @extends {Collection<T>}
+ * @extends {Collection<T,(function(T,!ReadSignal<number>): U)>}
+ * @implements {Own}
  * @implements {Receive}
  * @implements {ReadSignal<!Array<T>>}
  * @param {!Send<!Array>} src
@@ -1998,7 +2109,7 @@ function Enumerable(src, fn) {
     logRead(src, this);
 }
 
-extend(Collection, Enumerable);
+extend(Enumerable, Computation, Collection);
 
 /* __EXCLUDE__ */
 
@@ -2014,6 +2125,25 @@ Enumerable.prototype.val;
  * @readonly
  */
 Enumerable.prototype.peek;
+
+/**
+ * @protected
+ * @param {!Child} child
+ * @returns {void}
+ */
+Enumerable.prototype._addChild = function (child) { };
+
+/**
+ * @protected
+ * @param {CleanupFn} cleanupFn 
+ */
+Enumerable.prototype._addCleanup = function (cleanupFn) { };
+
+/**
+ * @protected
+ * @param {RecoverFn} recoverFn 
+ */
+Enumerable.prototype._addRecover = function (recoverFn) { };
 
 /* __EXCLUDE__ */
 
@@ -2055,7 +2185,6 @@ Enumerable.prototype._unmount = function () {
  * @param {number} time 
  */
 Enumerable.prototype._update = function (time) {
-
 };
 
 /**
@@ -2064,7 +2193,14 @@ Enumerable.prototype._update = function (time) {
  * @param {number} time 
  */
 Enumerable.prototype._recUpdate = function (time) {
-
+    /** @const {number} */
+    var opt = this._opt;
+    this._age = time;
+    this._opt |= Opts.Update;
+    COMPUTES._add(this);
+    if ((opt & Opts.MayUpdate) === 0) {
+        sendMayUpdate(this, time);
+    }
 };
 
 /**
@@ -2073,7 +2209,12 @@ Enumerable.prototype._recUpdate = function (time) {
  * @param {number} time 
  */
 Enumerable.prototype._recMayUpdate = function (time) {
-
+    /** @const {number} */
+    var opt = this._opt;
+    this._opt = (opt | Opts.MayUpdate) & ~Opts.MayCleared;
+    if ((opt & Opts.Send) !== 0) {
+        sendMayUpdate(this, time);
+    }
 };
 
 /**
@@ -2082,18 +2223,14 @@ Enumerable.prototype._recMayUpdate = function (time) {
  * @param {number} time 
  * @returns {void}
  */
-Enumerable.prototype._clearMayDispose = function (time) {
-
-};
+Enumerable.prototype._clearMayDispose = clearMayDispose;
 
 /**
  * @protected
  * @param {number} time
  * @returns {void} 
  */
-Enumerable.prototype._clearMayUpdate = function (time) {
-
-};
+Enumerable.prototype._clearMayUpdate = clearMayUpdate;
 
 /**
  * @struct
@@ -2109,7 +2246,7 @@ function DataArray(value, eq) {
     Data.call(this, 0, NIL, value != null ? value : [], eq);
 }
 
-extend(Collection, DataArray);
+extend(DataArray, Data, Collection);
 
 /* __EXCLUDE__ */
 
