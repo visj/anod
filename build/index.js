@@ -183,7 +183,7 @@ function writeBundle(mjs, cjs, iife, closureCode, ext) {
             bundleMinify(closureFile);
         }
     });
-    // fs.copyFile(path.join(rootDir, 'src', 'zorn.d.ts'), path.join(rootDir, 'dist', 'zorn.d.ts'), logError);
+    fs.copyFile(path.join(rootDir, 'src', 'zorn.d.ts'), path.join(rootDir, 'dist', 'zorn.d.ts'), logError);
 }
 
 /**

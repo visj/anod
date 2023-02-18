@@ -1,5 +1,5 @@
 import assert from 'assert';
-import { root, effect, compute, value } from './helper/zorn.js';
+import { root, effect, compute, cleanup, value } from './helper/zorn.js';
 
 describe("root()", function () {
     it("allows subcomputations to escape their parents", function () {
@@ -64,6 +64,34 @@ describe("root()", function () {
             var c2 = compute(function(){ return s.val; });
             s.val = 3;
             assert.equal(c2.val, 3);
+        });
+    });
+
+    it("disposes owned root nodes", function() {
+        root(function(teardown) {
+            var d1;
+            var count = 0;
+            var cleanups = 0;
+            effect(function() {
+                root(function() {
+                    cleanup(function(final) {
+                        if (final) {
+                            cleanups++;
+                        }
+                    });
+                    d1 = value(0);
+                    effect(function() { 
+                        d1.val;
+                        count++;
+                    });
+                });
+            });
+            d1.val++;
+            assert.equal(count, 2);
+            teardown();
+            d1.val++;
+            assert.equal(count, 2);
+            assert.equal(cleanups, 1);
         });
     });
 });

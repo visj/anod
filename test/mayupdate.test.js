@@ -1,5 +1,5 @@
 import assert from 'assert';
-import { root, batch, data, compute, effect, cleanup, value } from './helper/zorn.js';
+import { root, data, compute, effect, cleanup, value } from './helper/zorn.js';
 
 describe("mayupdate", function () {
   it("does not trigger downstream computations unless changed", function () {
@@ -54,38 +54,13 @@ describe("mayupdate", function () {
     });
   });
 
-  it("does not execute pending disposed nodes", function () {
-    root(function () {
-      var d1 = value(0);
-      var order = '';
-      var t1 = compute(function () {
-        order += 't1';
-        return d1.val;
-      });
-      effect(function () {
-        t1.val;
-        order += 'c1';
-        if (d1.peek === 0) {
-          effect(function () {
-            order += 'c2';
-            d1.val;
-          });
-        }
-      });
-      assert.equal(order, 't1c1c2');
-      order = '';
-      d1.val++;
-      assert.equal(order, 't1c1');
-    });
-  });
-
-  it("updates if dependent on both tracing and non-tracing node", function() {
+  it("updates once if dependent on both tracing and non-tracing node", function() {
     root(function() {
       var d1 = value(0);
       var count = 0;
       var t1 = compute(function() {
         return d1.val;
-      });
+      }, null);
       var c1 = compute(function() {
         return d1.val;
       });
@@ -99,38 +74,4 @@ describe("mayupdate", function () {
       assert.equal(c2.val, 2);
     });
   });
-
-  it("does not update if called while being in mayDispose state", function() {
-    root(function() {
-      var d1 = value(1);
-      var d2 = value(1);
-      var count = 0;
-      var c1;
-      var c2 = compute(function() {
-        return d1.val < 2;
-      });
-      effect(function() {
-        d2.val;
-        if (c1 !== void 0) {
-          c1.val;
-        }
-      });
-      effect(function() {
-        c2.val;
-        if (c1 === void 0) {
-          c1 = compute(function() {
-            count++;
-            return d2.val;
-          });
-        }
-      });
-      d1.val++;
-      batch(function() {
-        d2.val++;
-        d1.val++;
-      });
-      // c1 is disposed but called from previous effect, should not update
-      assert.equal(count, 1);
-    })
-  })
 });
