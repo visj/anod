@@ -4,10 +4,10 @@ import { root, effect, compute, value, dispose } from './helper/zorn.js';
 describe("root(dispose)", function () {
 	it("disables updates and sets computation's value to undefined", function () {
 		var c, d, f;
-		var owner = root(function () {
+		root(function (teardown) {
 			c = 0;
 			d = value(0);
-			
+
 			f = compute(function () {
 				c++;
 				return d.val;
@@ -20,38 +20,39 @@ describe("root(dispose)", function () {
 
 			assert.equal(c, 2);
 			assert.equal(f.val, 1);
-		});
-		dispose(owner);
-		d.val = 2;
 
-		assert.equal(c, 2);
-		assert.equal(f.val, void 0);
+			teardown();
+			d.val = 2;
+
+			assert.equal(c, 2);
+			assert.equal(f.val, void 0);
+		});
 	});
 
 	it("works from the body of its own computation", function () {
 		var c, d;
-		var owner = root(function () {
+		root(function (teardown) {
 			c = 0;
 			d = value(0);
 			effect(function () {
 				c++;
 				if (d.val) {
-					dispose(owner);
+					teardown();
 				}
 				d.val;
 			});
 
 			assert.equal(c, 1);
+			d.val = 1;
+			assert.equal(c, 2);
+			d.val = 2;
+			assert.equal(c, 2);
 		});
-		d.val = 1;
-		assert.equal(c, 2);
-		d.val = 2;
-		assert.equal(c, 2);
 	});
 
 	it("works from the body of a subcomputation", function () {
 		var c, d;
-		var owner = root(function () {
+		root(function (teardown) {
 			c = 0;
 			d = value(0);
 			effect(function () {
@@ -59,35 +60,39 @@ describe("root(dispose)", function () {
 				d.val;
 				effect(function () {
 					if (d.val) {
-						dispose(owner);
+						teardown();
 					}
 				});
 			});
 
 			assert.equal(c, 1);
+
+			d.val = 1;
+			assert.equal(c, 2);
+			d.val = 2;
+			assert.equal(c, 2);
 		});
-		d.val = 1;
-		assert.equal(c, 2);
-		d.val = 2;
-		assert.equal(c, 2);
 	});
 
-	it("disposes values created by computations", function() {
-		root(function() {
+	it("disposes values created by computations", function () {
+		root(function () {
 			var d1 = value(0);
 			var d2 = value(0);
 			var d3;
 			var count = 0;
 
-			effect(function() {
+			effect(function () {
 				d2.val;
 				if (d3 === void 0) {
 					d3 = value(0);
 				}
 			});
-			effect(function() {
+			effect(function () { d3.val; });
+			effect(function () { d3.val; });
+			effect(function () { d3.val; });
+			effect(function () {
 				d1.val;
-				effect(function() {
+				effect(function () {
 					d3.val;
 					count++;
 				});

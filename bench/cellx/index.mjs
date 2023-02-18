@@ -76,15 +76,14 @@ async function main() {
   
   report.maverick = { fn: runMaverick, runs: [], avg: [] };
   report['preact/signals'] = { fn: runPreact, runs: [] };
-  // report.zornStatic = { fn: runZornStatic, runs: [] };
   report.solid = { fn: runSolid, runs: [] };
-  // report.usignal = { fn: runUsignal, runs: [] };
+  report.usignal = { fn: runUsignal, runs: [] };
   report.S = { fn: runS, runs: [] };
   report.zorn = { fn: runZorn, runs: [] };
   // Has no way to dispose so can't consider it feature comparable.
-  // report.reactively = { fn: runReactively, runs: [], avg: [] };
+  report.reactively = { fn: runReactively, runs: [], avg: [] };
   // These libraries are not comparable in terms of features.
-  // report.cellx = { fn: runCellx, runs: [] };
+  report.cellx = { fn: runCellx, runs: [] };
   
   // warm up first
   for (const lib of Object.keys(report)) {
@@ -322,8 +321,7 @@ function runS(layers, done) {
 }
 
 function runZorn(layers, done) {
-  var result;
-  var node = zorn.root(() => {
+  zorn.root((dispose) => {
     const start = {
       a: zorn.data(1),
       b: zorn.data(2),
@@ -366,10 +364,9 @@ function runZorn(layers, done) {
 
     const solution = [end.a.val, end.b.val, end.c.val, end.d.val];
     const endTime = performance.now() - startTime;
-    result = isSolution(layers, solution) ? endTime : -1;
+    dispose();
+    done(isSolution(layers, solution) ? endTime : -1);
   });
-  zorn.dispose(node);
-  done(result);
 }
 
 /**

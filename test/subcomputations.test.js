@@ -75,13 +75,12 @@ describe("compute() with subcomputations", function () {
         });
 
         it("disposes child when it is disposed", function () {
-            var owner = root(function () {
+            root(function (teardown) {
                 init();
+                teardown();
+                e.val = 3;
+                assert.equal(g.val, void 0);
             });
-
-            dispose(owner);
-            e.val = 3;
-            assert.equal(g.val, void 0);
         });
     });
 

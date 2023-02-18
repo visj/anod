@@ -68,19 +68,20 @@ describe("cleanup", function () {
 
     it("can be run within root scope", function () {
         var called = false;
-        var node = root(function () {
+        root(function (teardown) {
             cleanup(function () {
                 called = true;
             });
+
+            teardown();
+            assert.equal(called, true);
         });
-        dispose(node);
-        assert.equal(called, true);
     });
 
     it("is run only once when a computation is disposed", function () {
         var d = value(1);
         var called = 0;
-        var node = root(function () {
+        root(function (teardown) {
 
             compute(function () {
                 d.val;
@@ -88,13 +89,13 @@ describe("cleanup", function () {
                     called++;
                 });
             });
+            assert.equal(called, 0);
+            d.val++;
+            assert.equal(called, 1);
+            teardown();
+            assert.equal(called, 2);
+            d.val++;
+            assert.equal(called, 2);
         });
-        assert.equal(called, 0);
-        d.val++;
-        assert.equal(called, 1);
-        dispose(node);
-        assert.equal(called, 2);
-        d.val++;
-        assert.equal(called, 2);
     });
 });

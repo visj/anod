@@ -23,7 +23,7 @@ export function recover(fn: Recover): void;
 
 export function dispose(val: Dispose): void;
 
-export function root<T>(fn: () => T): Dispose<T>;
+export function root<T>(fn: (teardown: () => void) => T): T;
 
 export function data<T>(value: T): Signal<T>;
 

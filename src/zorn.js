@@ -521,31 +521,34 @@ ReceiveMany.prototype._sourceslots;
 /**
  * @public
  * @template T
- * @param {function(): T} fn 
- * @returns {!RootSignal<T>}
+ * @param {function(function(): void): T} fn 
+ * @returns {T}
  */
 function root(fn) {
-    /** @const {!Root} */
-    var node = new Root();
+    /** @const {boolean} */
+    var orphan = fn.length === 0;
+    /** @const {?Root} */
+    var node = orphan ? null : new Root();
+    /** @const {(function(): void)|undefined} */
+    var disposer = orphan ? void 0 : function () {
+        dispose(/** @type {!Root} */(node));
+    };
     /** @const {?Owner} */
     var owner = OWNER;
     /** @const {boolean} */
     var listen = LISTEN;
     OWNER = node;
     LISTEN = false;
-    if (STAGE === Stage.Idle) {
-        try {
-            fn();
-        } finally {
-            OWNER = owner;
-            LISTEN = listen;
-        }
-    } else {
-        fn();
+    try {
+        return (
+            orphan ? 
+               /** @type {function(): T} */(fn)() : 
+               fn(/** @type {function(): void} */(disposer))
+        );
+    } finally {
         OWNER = owner;
         LISTEN = listen;
     }
-    return node;
 }
 
 /**
@@ -807,7 +810,7 @@ function clearMayUpdate(node, time) {
                 /** @const {?Array<!Send>} */
                 var sources = node._sources;
                 if (sources !== null && (ln = sources.length) > 0) {
-                    for (var i = 0; i < ln; i++) {
+                    for (var /** number */ i = 0; i < ln; i++) {
                         source1 = /** @type {Receive} */(sources[i]);
                         if ((source1._opt & Opts.MayUpdate) !== 0 && source1._mayUpdateAge === time) {
                             clearMayUpdate(source1, time);
@@ -832,6 +835,7 @@ function clearMayUpdate(node, time) {
  * @constructor
  * @extends {Disposer}
  * @implements {Owner}
+ * @implements {RootSignal}
  */
 function Root() {
     /**
@@ -871,7 +875,7 @@ extend(Disposer, Root);
 function disposeOwn(time) {
     this._opt = Opts.Disposed;
     /** @type {number} */
-    var i;
+    var /** number */ i;
     /** @type {number} */
     var ln;
     /** @const {?Array<!Child>} */
@@ -1066,7 +1070,7 @@ function sendUpdate(send, time) {
         node1._recUpdate(time);
     }
     if (nodes !== null && (ln = nodes.length) > 0) {
-        for (var i = 0; i < ln; i++) {
+        for (var /** number */ i = 0; i < ln; i++) {
             node1 = nodes[i];
             if (node1._age < time) {
                 node1._recUpdate(time);
@@ -1091,7 +1095,7 @@ function sendMayUpdate(send, time) {
     /** @type {number} */
     var ln;
     if (nodes !== null && (ln = nodes.length) > 0) {
-        for (var i = 0; i < ln; i++) {
+        for (var /** number */ i = 0; i < ln; i++) {
             node1 = nodes[i];
             if (node1._age < time && node1._mayUpdateAge < time) {
                 node1._recMayUpdate(time);
@@ -1125,7 +1129,7 @@ function sendDispose(owned, time) {
 function sendMayDispose(owned, time) {
     /** @const {number} */
     var ln = owned.length;
-    for (var i = 0; i < ln; i++) {
+    for (var /** number */ i = 0; i < ln; i++) {
         /** @const {!Child} */
         var child = owned[i];
         if (child._opt !== Opts.Disposed && child._mayDisposeAge < time) {
@@ -1699,7 +1703,7 @@ Computation.prototype._recMayDispose = function (time) {
  */
 Computation.prototype._update = function (time) {
     /** @type {number} */
-    var i;
+    var /** number */ i;
     /** @type {number} */
     var ln;
     /** @const {?Owner} */
@@ -1820,9 +1824,9 @@ Queue.prototype._run = function (time) {
     STAGE = this._stage;
     /** @type {number} */
     var error = 0;
-    for (var i = 0; i < this._count; i++) {
+    for (var /** number */ i = 0; i < this._count; i++) {
         /** @const {?Dispose} */
-        var item = this._items[i];
+        var /** number */ item = this._items[i];
         if ((item._opt & (Opts.Update | Opts.Dispose)) !== 0) {
             try {
                 if ((item._opt & Opts.Update) !== 0) {
