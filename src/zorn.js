@@ -2212,7 +2212,7 @@ function Enumerable(src, fn) {
     Receiver.call(this);
     /**
      * @protected
-     * @type {?(function(T,ReadSignal<number>): U)}
+     * @type {?(function(T,!ReadSignal<number>): U)}
      */
     this._fn = fn;
     logRead(src, this);
