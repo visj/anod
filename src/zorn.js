@@ -286,13 +286,6 @@ Dispose.prototype._opt;
 Dispose.prototype._dispose = function (time) { };
 
 /**
- * @protected
- * @param {number} time
- * @returns {void}
- */
-Dispose.prototype._recDispose = function (time) { };
-
-/**
  * @interface
  * @template T
  * @extends {Dispose}
@@ -323,13 +316,6 @@ Owner.prototype._recovers;
  * @returns {void}
  */
 Owner.prototype._addChild = function (child) { };
-
-/**
- * @protected
- * @param {number} time
- * @returns {void}
- */
-Owner.prototype._clearMayDispose = function (time) { };
 
 /**
  * @const 
@@ -391,16 +377,18 @@ Child.prototype._owner;
 
 /**
  * @protected
- * @type {number}
- */
-Child.prototype._mayDisposeAge;
-
-/**
- * @protected
  * @param {number} time
  * @returns {void}
  */
-Child.prototype._recMayDispose = function (time) { };
+Child.prototype._recDispose = function (time) { };
+
+/**
+ * @protected
+ * @param {!Owner} owner
+ * @param {number} time
+ * @returns {void}
+ */
+Child.prototype._recMayDispose = function (owner, time) { };
 
 /**
  * @protected
@@ -456,8 +444,7 @@ Send.prototype._update = function (time) { };
 /**
  * @protected
  * @interface
- * @template T
- * @extends {Send<T>}
+ * @extends {Child}
  */
 function Receive() { }
 
@@ -466,12 +453,6 @@ function Receive() { }
  * @type {number}
  */
 Receive.prototype._age;
-
-/**
- * @protected
- * @type {number}
- */
-Receive.prototype._mayUpdateAge;
 
 /**
  * @protected
@@ -508,6 +489,13 @@ Receive.prototype._recMayUpdate = function (time) { };
 /**
  * @protected
  * @param {number} time
+ * @returns {void}
+ */
+Receive.prototype._clearMayDispose = function (time) { };
+
+/**
+ * @protected
+ * @param {number} time
  * @returns {void} 
  */
 Receive.prototype._clearMayUpdate = function (time) { };
@@ -515,8 +503,7 @@ Receive.prototype._clearMayUpdate = function (time) { };
 /**
  * @protected
  * @interface
- * @template T
- * @extends {Receive<T>}
+ * @extends {Receive}
  */
 function ReceiveMany() { }
 
@@ -623,7 +610,7 @@ function $effect(fn, seed) {
  * @returns {!Signal<T>}
  */
 function data(value) {
-    return new Data(value, null);
+    return new Data(Opts.Respond, NIL, value, null);
 }
 
 /**
@@ -634,16 +621,17 @@ function data(value) {
  * @returns {!Signal<T>}
  */
 function value(value, eq) {
-    return new Data(value, eq);
+    return new Data(Opts.Respond | (eq != null ? Opts.Compare : 0), NIL, value, eq);
 }
 
 /**
  * @template T
  * @param {!Array<T>=} value 
+ * @param {(function(!Array<T>,!Array<T>): boolean)=} eq
  * @returns {!SignalArray<T>}
  */
-function array(value) {
-    return new DataArray(value == null ? [] : value);
+function array(value, eq) {
+    return new DataArray(value, eq);
 }
 
 /**
@@ -751,7 +739,10 @@ function recover(fn) {
  * @param {Function} child
  */
 function extend(parent, child) {
-    child.prototype = new parent;
+    /** @const {function(new: Object)} */
+    function proto() { }
+    proto.prototype = parent.prototype;
+    child.prototype = new proto();
     child.constructor = child;
 }
 
@@ -764,35 +755,6 @@ function extend(parent, child) {
 function getValue() {
     return this._value;
 }
-
-/**
- * @protected
- * @abstract
- * @constructor
- * @implements {Dispose}
- */
-function Disposer() { }
-
-/**
- * @protected
- * @this {!Disposer}
- * @param {number} time
- * @returns {void}
- */
-Disposer.prototype._recDispose = function (time) {
-    this._opt = Opts.Dispose;
-};
-
-/**
- * @protected
- * @this {!Disposer}
- * @param {number} time
- * @returns {void}
- */
-Disposer.prototype._recMayDispose = function (time) {
-    this._mayDisposeAge = time;
-    this._opt |= Opts.MayDispose;
-};
 
 /**
  * @protected
@@ -810,7 +772,6 @@ function setValProto(obj, getVal, peekVal, setVal) {
  * @struct
  * @protected
  * @constructor
- * @extends {Disposer}
  * @implements {Owner}
  * @implements {RootSignal}
  */
@@ -820,26 +781,38 @@ function Root() {
      * @type {number}
      */
     this._opt = 0;
-
+    /**
+     * @protected
+     * @type {?Array<!Child>}
+     */
+    this._owned = [];
+    /**
+     * @protected
+     * @type {?Array<!Cleanup>}
+     */
+    this._cleanups = null;
+    /**
+     * @protected
+     * @type {?Array<!Recover>}
+     */
+    this._recovers = null;
 }
-
-extend(Disposer, Root);
 
 /**
  * @protected
- * @this {!Owner}
+ * @param {!Owner} owner
  * @param {number} time
  */
-function disposeOwn(time) {
-    this._opt = Opts.Disposed;
+function disposeOwner(owner, time) {
+    owner._opt = Opts.Disposed;
     /** @type {number} */
     var /** number */ i;
     /** @type {number} */
     var ln;
     /** @const {?Array<!Child>} */
-    var owned = this._owned;
+    var owned = owner._owned;
     /** @const {?Array<Cleanup>} */
-    var cleanups = this._cleanups;
+    var cleanups = owner._cleanups;
     if (owned !== null && (ln = owned.length) !== 0) {
         for (i = 0; i < ln; i++) {
             owned[i]._dispose(time);
@@ -850,96 +823,29 @@ function disposeOwn(time) {
             cleanups[i](true);
         }
     }
-    this._cleanups =
-        this._owned =
-        this._recovers = null;
+    owner._cleanups =
+        owner._owned =
+        owner._recovers = null;
 }
 
 /**
  * @protected
  * @override
  * @this {!Owner}
+ * @param {number} time
+ * @returns {void}
  */
-Root.prototype._dispose = disposeOwn;
-
+Root.prototype._dispose = function (time) {
+    disposeOwner(this, time);
+}
 /**
  * @protected
  * @param {!Child} child 
+ * @returns {void}
  */
 Root.prototype._addChild = function (child) {
     this._owned[this._owned.length] = child;
-}
-
-/* __EXCLUDE__ */
-
-/**
- * @protected
- * @param {number} time
- * @returns {void} 
- */
-Root.prototype._clearMayDispose = function (time) { };
-
-/* __EXCLUDE__ */
-
-/**
- * @protected
- * @template T
- * @this {!Send<T>}
- * @param {?Owner} owner 
- * @param {number|undefined} opt 
- * @param {T} value
- * @param {(function(T,T): boolean)|null=} eq
- */
-function Sender(owner, opt, value, eq) {
-    /**
-     * @protected
-     * @type {number}
-     */
-    this._opt = 0 | opt;
-    /**
-     * @protected
-     * @type {T}
-     */
-    this._value = value;
-    /**
-     * @protected
-     * @type {?Owner}
-     */
-    this._owner = owner;
-    /**
-     * @protected
-     * @type {(function(T,T): boolean)|null|undefined}
-     */
-    this._eq = eq;
-    /**
-     * @protected
-     * @type {number}
-     */
-    this._mayDisposeAge = 0;
-    /**
-     * @protected
-     * @type {?ReceiveMany}
-     */
-    this._node1 = null;
-    /**
-     * @protected
-     * @type {number}
-     */
-    this._node1slot = -1;
-    /**
-     * @protected
-     * @type {?Array<!ReceiveMany>}
-     */
-    this._nodes = null;
-    /**
-     * @protected
-     * @type {?Array<number>}
-     */
-    this._nodeslots = null;
-    if (owner !== null) {
-        owner._addChild(this);
-    }
-}
+};
 
 /**
  * @protected
@@ -1003,290 +909,6 @@ function removeReceiver(send, slot) {
 
 /**
  * @protected
- * @param {!Send} send
- * @param {number} time
- */
-function sendUpdate(send, time) {
-    /** @type {number} */
-    var ln;
-    /** @type {?Receive} */
-    var node1 = send._node1;
-    /** @const {?Array<!Receive>} */
-    var nodes = send._nodes;
-    if (node1 !== null && node1._age !== time) {
-        node1._recUpdate(time);
-    }
-    if (nodes !== null && (ln = nodes.length) > 0) {
-        for (var /** number */ i = 0; i < ln; i++) {
-            node1 = nodes[i];
-            if (node1._age !== time) {
-                node1._recUpdate(time);
-            }
-        }
-    }
-}
-
-/**
- * @protected
- * @param {!Send} send
- * @param {number} time
- */
-function sendMayUpdate(send, time) {
-    /** @type {?Receive} */
-    var node1 = send._node1;
-    /** @const {?Array<!Receive>} */
-    var nodes = send._nodes;
-    if (node1 !== null && node1._age !== time && node1._mayUpdateAge !== time) {
-        node1._recMayUpdate(time);
-    }
-    /** @type {number} */
-    var ln;
-    if (nodes !== null && (ln = nodes.length) > 0) {
-        for (var /** number */ i = 0; i < ln; i++) {
-            node1 = nodes[i];
-            if (node1._age !== time && node1._mayUpdateAge !== time) {
-                node1._recMayUpdate(time);
-            }
-        }
-    }
-}
-
-/**
- * @protected
- * @param {!Array<!Child>} owned 
- * @param {number} time
- */
-function sendDispose(owned, time) {
-    /** @type {number} */
-    var ln = owned.length;
-    for (; ln-- !== 0;) {
-        /** @const {!Child} */
-        var child = owned.pop();
-        if ((child._opt & Opts.DisposeFlags) === 0) {
-            child._recDispose(time);
-        }
-    }
-}
-
-/**
- * @protected
- * @param {!Array<!Child>} owned 
- * @param {number} time
- */
-function sendMayDispose(owned, time) {
-    /** @const {number} */
-    var ln = owned.length;
-    for (var /** number */ i = 0; i < ln; i++) {
-        /** @const {!Child} */
-        var child = owned[i];
-        if (child._opt !== Opts.Disposed && child._mayDisposeAge !== time) {
-            child._recMayDispose(time);
-        }
-    }
-}
-
-/**
- * @struct
- * @template T
- * @protected
- * @constructor
- * @extends {Disposer}
- * @implements {Send<T>}
- * @implements {Signal<T>}
- * @param {T} value
- * @param {(function(T,T): boolean)|null=} eq
- */
-function Data(value, eq) {
-    Sender.call(this, OWNER, Opts.Respond | (eq != null ? Opts.Compare : 0), value, eq);
-    /**
-     * @protected
-     * @type {T|nil}
-     */
-    this._pending = NIL;
-}
-
-extend(Disposer, Data);
-
-/* __EXCLUDE__ */
-
-/**
- * @type {T}
- * @nocollapse
- * @throws {Error}
- */
-Data.prototype.val;
-
-/**
- * @type {T}
- * @readonly
- */
-Data.prototype.peek;
-
-/**
- * @protected
- * @type {number}
- */
-Data.prototype._opt;
-
-/**
- * @protected
- * @type {number}
- */
-Data.prototype._age;
-
-/**
- * @protected
- * @type {?Owner}
- */
-Data.prototype._owner;
-
-/**
- * @protected
- * @type {number}
- */
-Data.prototype._mayDisposeAge;
-
-/**
- * @protected
- * @type {T}
- */
-Data.prototype._value;
-
-/**
- * @protected
- * @type {(function(T,T): boolean)|null|undefined}
- */
-Data.prototype._eq;
-
-/**
- * @protected
- * @type {?Receive}
- */
-Data.prototype._node1;
-
-/**
- * @protected
- * @type {number}
- */
-Data.prototype._node1slot;
-
-/**
- * @protected
- * @type {?Array<!Receive>}
- */
-Data.prototype._nodes;
-
-/**
- * @protected
- * @type {?Array<number>}
- */
-Data.prototype._nodeslots;
-
-/* __EXCLUDE__ */
-
-setValProto(
-    Data,
-    /**
-     * @template T
-     * @this {!Data<T>}
-     * @returns {T}
-     */
-    function () {
-        if ((this._opt & Opts.DisposeFlags) === 0 && STAGE !== Stage.Idle && LISTEN) {
-            logRead(this, /** @type {!ReceiveMany} */(OWNER));
-        }
-        return this._value;
-    },
-    getValue,
-    /**
-     * @template T
-     * @this {!Data<T>}
-     * @param {T} value
-     * @returns {T}
-     */
-    function (value) {
-        /** @const {number} */
-        var opt = this._opt;
-        if ((opt & Opts.DisposeFlags) === 0) {
-            if ((
-                this._eq === null || (
-                    ((opt & Opts.Compare) === 0) ?
-                        value !== this._value :
-                        !this._eq(value, this._value)
-                )
-            ) && (STAGE !== Stage.Idle || (opt & Opts.Send) !== 0)) {
-                /** @const {number} */
-                var time = TIME;
-                if ((opt & Opts.MayDispose) !== 0 && this._mayDisposeAge === time) {
-                    if ((opt & Opts.MayCleared) !== 0) {
-                        // cyclical ownership ??
-                        throw new Error();
-                    }
-                    this._opt |= Opts.MayCleared;
-                    this._owner._clearMayDispose(time);
-                    // clearMayUpdate(/** @type {Computation} */(this._owner), time);
-                    if ((this._opt & Opts.DisposeFlags) !== 0) {
-                        return value;
-                    }
-                }
-                if (STAGE === Stage.Idle) {
-                    reset();
-                    this._value = value;
-                    sendUpdate(this, TIME + 1);
-                    exec();
-                } else {
-                    if (this._pending === NIL) {
-                        this._pending = value;
-                        this._opt |= Opts.Update;
-                        CHANGES._add(this);
-                    } else if (value !== this._pending) {
-                        throw new Error("Zorn: Conflict");
-                    }
-                }
-            } else {
-                this._value = value;
-            }
-        }
-        return value;
-    }
-);
-
-/**
- * @protected
- * @override
- * @this {!Data<T>}
- * @param {number} time
- */
-Data.prototype._dispose = function (time) {
-    disposeSender(this);
-    this._value =
-        this._pending = null;
-};
-
-/**
- * @protected
- * @this {!Data<T>}
- * @param {number} time
- */
-Data.prototype._update = function (time) {
-    this._value = this._pending;
-    this._pending = NIL;
-    this._opt &= ~(Opts.Update | Opts.MayFlags);
-    if ((this._opt & Opts.Send) !== 0) {
-        sendUpdate(this, time);
-    }
-};
-
-/**
- * @protected
- * @template T
- * @this {!Receive<T>}
- */
-function Receiver() {
-}
-
-/**
- * @protected
  * @param {!Receive|!ReceiveMany} receive 
  * @param {number} slot
  */
@@ -1332,15 +954,312 @@ function removeSender(receive, slot) {
 }
 
 /**
+ * @protected
+ * @param {!Send} send
+ * @param {number} time
+ */
+function sendUpdate(send, time) {
+    /** @type {number} */
+    var ln;
+    /** @type {?Receive} */
+    var node1 = send._node1;
+    /** @const {?Array<!Receive>} */
+    var nodes = send._nodes;
+    if (node1 !== null && node1._age !== time) {
+        node1._recUpdate(time);
+    }
+    if (nodes !== null && (ln = nodes.length) > 0) {
+        for (var /** number */ i = 0; i < ln; i++) {
+            node1 = nodes[i];
+            if (node1._age !== time) {
+                node1._recUpdate(time);
+            }
+        }
+    }
+}
+
+/**
+ * @protected
+ * @param {!Send} send
+ * @param {number} time
+ */
+function sendMayUpdate(send, time) {
+    /** @type {?Receive} */
+    var node1 = send._node1;
+    /** @const {?Array<!Receive>} */
+    var nodes = send._nodes;
+    if (node1 !== null && node1._age !== time && (node1._opt & Opts.MayUpdate) === 0) {
+        node1._recMayUpdate(time);
+    }
+    /** @type {number} */
+    var ln;
+    if (nodes !== null && (ln = nodes.length) > 0) {
+        for (var /** number */ i = 0; i < ln; i++) {
+            node1 = nodes[i];
+            if (node1._age !== time && (node1._opt & Opts.MayUpdate) === 0) {
+                node1._recMayUpdate(time);
+            }
+        }
+    }
+}
+
+/**
+ * @protected
+ * @param {!Array<!Child>} owned 
+ * @param {number} time
+ */
+function sendDispose(owned, time) {
+    /** @type {number} */
+    var ln = owned.length;
+    for (; ln-- !== 0;) {
+        /** @const {!Child} */
+        var child = owned.pop();
+        if ((child._opt & Opts.DisposeFlags) === 0) {
+            child._recDispose(time);
+        }
+    }
+}
+
+/**
+ * @protected
+ * @param {!Owner} owner
+ * @param {!Array<!Child>} owned 
+ * @param {number} time
+ */
+function sendMayDispose(owner, owned, time) {
+    /** @const {number} */
+    var ln = owned.length;
+    for (var /** number */ i = 0; i < ln; i++) {
+        /** @const {!Child} */
+        var child = owned[i];
+        if (child._opt !== Opts.Disposed && (child._opt & Opts.MayDispose) === 0) {
+            child._recMayDispose(owner, time);
+        }
+    }
+}
+
+/**
+ * @struct
+ * @template T,U
+ * @protected
+ * @constructor
+ * @implements {Send<T>}
+ * @implements {Signal<T>}
+ * @param {number} opt
+ * @param {U} set
+ * @param {T} value
+ * @param {(function(T,T): boolean)|null=} eq
+ */
+function Data(opt, set, value, eq) {
+    /**
+     * @protected
+     * @type {number}
+     */
+    this._opt = opt;
+    /**
+     * @protected
+     * @type {T}
+     */
+    this._value = value;
+    /**
+     * @protected
+     * @type {?Owner}
+     */
+    this._owner = null;
+    /**
+     * @protected
+     * @type {(function(T,T): boolean)|null|undefined}
+     */
+    this._eq = eq;
+    /**
+     * @protected
+     * @type {?ReceiveMany}
+     */
+    this._node1 = null;
+    /**
+     * @protected
+     * @type {number}
+     */
+    this._node1slot = -1;
+    /**
+     * @protected
+     * @type {?Array<!ReceiveMany>}
+     */
+    this._nodes = null;
+    /**
+     * @protected
+     * @type {?Array<number>}
+     */
+    this._nodeslots = null;
+    /**
+     * @protected
+     * @type {U}
+     */
+    this._set = set;
+    /** @const {?Owner} */
+    var owner = OWNER;
+    if (owner !== null) {
+        owner._addChild(this);
+    }
+}
+
+/**
+ * @protected
+ * @this {!Data<T>}
+ * @param {number} time
+ * @returns {void}
+ */
+Data.prototype._recDispose = function (time) {
+    this._opt = Opts.Dispose;
+};
+
+/**
+ * @protected
+ * @this {!Data<T>}
+ * @param {!Owner} owner
+ * @param {number} time
+ * @returns {void}
+ */
+Data.prototype._recMayDispose = function (owner, time) {
+    this._opt |= Opts.MayDispose;
+    if (this._owner === null) {
+        this._owner = owner;
+    }
+};
+
+/* __EXCLUDE__ */
+
+/**
+ * @type {T}
+ * @nocollapse
+ * @throws {Error}
+ */
+Data.prototype.val;
+
+/**
+ * @type {T}
+ * @readonly
+ */
+Data.prototype.peek;
+
+/* __EXCLUDE__ */
+
+setValProto(
+    Data,
+    /**
+     * @template T
+     * @this {!Data<T>}
+     * @returns {T}
+     */
+    function () {
+        if ((this._opt & Opts.DisposeFlags) === 0 && LISTEN) {
+            logRead(this, /** @type {!ReceiveMany} */(OWNER));
+        }
+        return this._value;
+    },
+    getValue,
+    /**
+     * @template T
+     * @this {!Data<T>}
+     * @param {T} value
+     * @returns {T}
+     */
+    function (value) {
+        /** @const {number} */
+        var opt = this._opt;
+        set: if ((opt & Opts.DisposeFlags) === 0) {
+            if ((
+                this._eq === null || (
+                    ((opt & Opts.Compare) === 0) ?
+                        value !== this._value :
+                        !this._eq(value, this._value)
+                )
+            ) && (STAGE !== Stage.Idle || (opt & Opts.Send) !== 0)) {
+                /** @const {number} */
+                var time = TIME;
+                if ((opt & Opts.MayDispose) !== 0) {
+                    if ((opt & Opts.MayCleared) !== 0) {
+                        // cyclical ownership ??
+                        throw new Error();
+                    }
+                    this._opt |= Opts.MayCleared;
+                    this._owner._clearMayDispose(time);
+                    if ((this._opt & Opts.DisposeFlags) !== 0) {
+                        break set;
+                    }
+                }
+                if (STAGE === Stage.Idle) {
+                    reset();
+                    this._value = value;
+                    sendUpdate(this, TIME + 1);
+                    exec();
+                } else {
+                    if (this._set === NIL) {
+                        this._set = value;
+                        this._opt |= Opts.Update;
+                        CHANGES._add(this);
+                    } else if (value !== this._set) {
+                        throw new Error("Zorn: Conflict");
+                    }
+                }
+            } else {
+                this._value = value;
+            }
+        }
+        return value;
+    }
+);
+
+/**
+ * @protected
+ * @override
+ * @this {!Data<T>}
+ * @param {number} time
+ */
+Data.prototype._dispose = function (time) {
+    disposeSender(this);
+    this._value =
+        this._set = null;
+};
+
+/**
+ * @protected
+ * @override
+ * @this {!Data<T>}
+ * @param {!Owner} owner 
+ * @param {number} time 
+ */
+Data.prototype._recMayDispose = function (owner, time) {
+    this._opt |= Opts.MayDispose;
+    if (this._owner === null) {
+        this._owner = owner;
+    }
+};
+
+/**
+ * @protected
+ * @this {!Data<T,(T|nil)>}
+ * @param {number} time
+ * @returns {void}
+ */
+Data.prototype._update = function (time) {
+    this._value = this._set;
+    this._set = NIL;
+    this._opt &= ~(Opts.Update | Opts.MayFlags);
+    if ((this._opt & Opts.Send) !== 0) {
+        sendUpdate(this, time);
+    }
+};
+
+/**
  * @struct
  * @template T 
  * @protected
  * @constructor
- * @extends {Root}
- * @implements {ReadSignal<T>}
+ * @extends {Data<T,(function(T): T)>}
  * @implements {Owner<T>}
- * @implements {Send<T>}
- * @implements {ReceiveMany<T>}
+ * @implements {ReceiveMany}
+ * @implements {ReadSignal<T>}
  * @param {function(T): T} fn 
  * @param {T} value 
  * @param {(function(T,T): boolean)|null=} eq
@@ -1351,28 +1270,37 @@ function Computation(fn, value, opt, eq) {
     var owner = OWNER;
     /** @const {boolean} */
     var listen = LISTEN;
-    Root.call(this);
-    Sender.call(
+    Data.call(
         this,
-        owner,
         Opts.ReceiveMany | (
             ((opt & Opts.NoSend) === 0) ? opt : opt | (
                 eq === null ? Opts.Respond : eq !== void 0 ? Opts.Compare : 0
             )
         ),
+        fn,
         value,
         eq
     );
     /**
      * @protected
-     * @type {number}
+     * @type {?Array<!Child>}
      */
-    this._age = 0;
+    this._owned = null;
+    /**
+     * @protected
+     * @type {?Array<!Cleanup>}
+     */
+    this._cleanups = null;
+    /**
+     * @protected
+     * @type {?Array<!Recover>}
+     */
+    this._recovers = null;
     /**
      * @protected
      * @type {number}
      */
-    this._mayUpdateAge = 0;
+    this._age = 0;
     /**
      * @protected
      * @type {?Send}
@@ -1383,11 +1311,6 @@ function Computation(fn, value, opt, eq) {
      * @type {number}
      */
     this._source1slot = 0;
-    /**
-     * @protected
-     * @type {?(function(T): T)}
-     */
-    this._fn = fn;
     /**
      * @protected
      * @type {?Array<!Send>}
@@ -1420,7 +1343,7 @@ function Computation(fn, value, opt, eq) {
     LISTEN = listen;
 };
 
-extend(Disposer, Computation);
+extend(Data, Computation);
 
 /* __EXCLUDE__ */
 
@@ -1437,103 +1360,6 @@ Computation.prototype.val;
  */
 Computation.prototype.peek;
 
-/**
- * @protected
- * @type {number}
- */
-Computation.prototype._opt;
-
-/**
- * @protected
- * @type {?Array<!Child>}
- */
-Computation.prototype._owned;
-
-/**
- * @protected
- * @type {?Array<Cleanup>}
- */
-Computation.prototype._cleanups;
-
-/**
- * @protected
- * @type {?Array<Recover>}
- */
-Computation.prototype._recovers;
-
-/**
- * @protected
- * @type {?Owner}
- */
-Computation.prototype._owner;
-
-/**
- * @protected
- * @type {number}
- */
-Computation.prototype._mayDisposeAge;
-
-/**
- * @protected
- * @type {T}
- */
-Computation.prototype._value;
-
-/**
- * @protected
- * @type {(function(T,T): boolean)|null|undefined}
- */
-Computation.prototype._eq;
-
-/**
- * @protected
- * @type {?Receive}
- */
-Computation.prototype._node1;
-
-/**
- * @protected
- * @type {number}
- */
-Computation.prototype._node1slot;
-
-/**
- * @protected
- * @type {?Array<!Receive>}
- */
-Computation.prototype._nodes;
-
-/**
- * @protected
- * @type {?Array<number>}
- */
-Computation.prototype._nodeslots;
-
-/**
- * @protected
- * @type {number}
- */
-Computation.prototype._age;
-
-/**
- * @protected
- * @type {number}
- */
-Computation.prototype._mayUpdateAge;
-
-/**
- * @protected
- * @type {?Send}
- */
-Computation.prototype._source1;
-
-/**
- * @protected
- * @type {number}
- */
-Computation.prototype._source1slot;
-
-
 /* __EXCLUDE__ */
 
 setValProto(
@@ -1549,7 +1375,7 @@ setValProto(
         if ((opt & Opts.DisposeFlags) === 0 && STAGE !== Stage.Idle) {
             /** @const {number} */
             var time = TIME;
-            if (STAGE === Stage.Computes && (opt & Opts.MayDispose | Opts.MayUpdate) !== 0 && this._age !== time && (this._mayDisposeAge === time || this._mayUpdateAge === time)) {
+            if (STAGE === Stage.Computes && (opt & Opts.MayDispose | Opts.MayUpdate) !== 0 && this._age !== time) {
                 if ((opt & Opts.MayCleared) !== 0) {
                     // cyclic dependency
                     throw new Error("cyclic pending dependency");
@@ -1576,7 +1402,7 @@ setValProto(
  * 
  * @param {Computation} node 
  */
-function removeSources(node) {
+function disposeSources(node) {
     if (node._source1 !== null) {
         removeReceiver(node._source1, node._source1slot);
         node._source1 = null;
@@ -1614,8 +1440,8 @@ Computation.prototype._addChild = function (child) {
  * @this {!Computation<T>}
  */
 Computation.prototype._dispose = function (time) {
-    disposeOwn.call(this, time);
-    removeSources(this);
+    disposeOwner(this, time);
+    disposeSources(this);
     this._unmount();
     this._value = null;
 };
@@ -1635,15 +1461,8 @@ Computation.prototype._recDispose = function (time) {
      * If age is current, then this computation has already been
      * flagged for update and been enqueued in COMPUTES or RESPONDS.
      */
-    if (age !== time) {
-        if (STAGE === Stage.Computes) {
-            COMPUTES._add(this);
-        } else {
-            DISPOSES._add(this);
-        }
-        if (this._owned !== null) {
-            sendDispose(this._owned, time);
-        }
+    if (age !== time && this._owned !== null) {
+        sendDispose(this._owned, time);
     }
 };
 
@@ -1651,78 +1470,63 @@ Computation.prototype._recDispose = function (time) {
  * @protected
  * @override
  * @this {!Computation<T>}
+ * @param {!Owner} owner
  * @param {number} time
  */
-Computation.prototype._recMayDispose = function (time) {
-    this._mayDisposeAge = time;
-    this._opt = (this._opt | Opts.MayDispose) & ~Opts.MayCleared;
-    if (this._owned !== null && this._mayUpdateAge !== time) {
-        sendMayDispose(this._owned, time);
+Computation.prototype._recMayDispose = function (owner, time) {
+    /** @const {number} */
+    var opt = this._opt;
+    this._opt = (opt | Opts.MayDispose) & ~Opts.MayCleared;
+    if (this._owner === null) {
+        this._owner = owner;
+    }
+    if (this._owned !== null && (opt & Opts.MayUpdate) === 0) {
+        sendMayDispose(this, this._owned, time);
     }
 };
 
 Computation.prototype._clearMayDispose = function (time) {
     /** @type {number} */
     var opt = this._opt;
-    if ((opt & Opts.MayDispose) !== 0 && this._mayDisposeAge === time) {
+    if ((opt & Opts.MayDispose) !== 0) {
         this._owner._clearMayDispose(time);
         opt = this._opt &= ~Opts.MayDispose;
     }
     if ((opt & Opts.DisposeFlags) === 0) {
-        if ((opt & Opts.MayUpdate) !== 0 && this._mayUpdateAge === time) {
-            checkSource: {
-                /** @type {?Send} */
-                var source1 = this._source1;
-                if (
-                    source1 !== null &&
-                    (source1._opt & Opts.Respond) === 0 &&
-                    (
-                        ((source1._opt & Opts.MayUpdate) !== 0 && (source1._mayUpdateAge === time)) ||
-                        ((source1._opt & Opts.Update) !== 0 && (source1._age === time))
-                    )
-                ) {
-                    source1._clearMayUpdate(time);
-                    if (this._age === time) {
-                        break checkSource;
-                    }
+        checkSource: if ((opt & Opts.MayUpdate) !== 0) {
+            /** @type {?Send} */
+            var source1 = this._source1;
+            if (
+                source1 !== null &&
+                (source1._opt & Opts.Respond) === 0 &&
+                (source1._opt & (Opts.Update | Opts.MayUpdate)) !== 0
+            ) {
+                source1._clearMayUpdate(time);
+                if (this._age === time) {
+                    break checkSource;
                 }
-                /** @type {number} */
-                var ln;
-                /** @const {?Array<!Send>} */
-                var sources = this._sources;
-                if (sources !== null && (ln = sources.length) > 0) {
-                    for (var /** number */ i = 0; i < ln; i++) {
-                        source1 = sources[i];
-                        if (
-                            source1 !== null &&
-                            (source1._opt & Opts.Respond) === 0 &&
-                            (
-                                ((source1._opt & Opts.MayUpdate) !== 0 && (source1._mayUpdateAge === time)) ||
-                                ((source1._opt & Opts.Update) !== 0 && (source1._age === time))
-                            )
-                        ) {
-                            source1._clearMayUpdate(time);
-                            if (this._age === time) {
-                                break checkSource;
-                            }
+            }
+            /** @type {number} */
+            var ln;
+            /** @const {?Array<!Send>} */
+            var sources = this._sources;
+            if (sources !== null && (ln = sources.length) > 0) {
+                for (var /** number */ i = 0; i < ln; i++) {
+                    source1 = sources[i];
+                    if (
+                        (source1._opt & Opts.Respond) === 0 &&
+                        (source1._opt & (Opts.Update | Opts.MayUpdate)) !== 0
+                    ) {
+                        source1._clearMayUpdate(time);
+                        if (this._age === time) {
+                            break checkSource;
                         }
                     }
                 }
             }
         }
+        this._opt &= ~Opts.MayUpdate;
     }
-    opt = this._opt &= ~Opts.MayUpdate;
-};
-
-/**
- * @protected
- * @returns {void}
- */
-Computation.prototype._unmount = function () {
-    disposeSender(this);
-    this._fn =
-        this._sources =
-        this._sourceslots = null;
 };
 
 /**
@@ -1761,21 +1565,23 @@ Computation.prototype._update = function (time) {
         cleanups.length = 0;
     }
     OWNER = this;
-    LISTEN = (opt & Opts.Static) === 0;
-    if (LISTEN) {
-        removeSources(this);
+    if ((opt & Opts.Static) === 0) {
+        LISTEN = true;
+        disposeSources(this);
+    } else {
+        LISTEN = false;
     }
     /** @const {T} */
     var value = this._value;
     this._opt |= Opts.Updated;
-    this._value = this._fn(value);
+    this._value = this._set(value);
     if (
         ((opt & (Opts.Send | Opts.Respond)) === Opts.Send) &&
         ((opt & Opts.Compare) === 0 ? value !== this._value : !this._eq(value, this._value))
     ) {
         sendUpdate(this, time);
     }
-    this._opt &= ~Opts.UpdateFlags;
+    this._opt &= ~(Opts.UpdateFlags | Opts.MayFlags);
     OWNER = owner;
     LISTEN = listen;
 };
@@ -1795,7 +1601,7 @@ Computation.prototype._recUpdate = function (time) {
     }
     if ((opt & (Opts.Send | Opts.Respond)) === Opts.Send) {
         COMPUTES._add(this);
-        if (this._mayUpdateAge !== time) {
+        if ((opt & Opts.MayUpdate) === 0) {
             sendMayUpdate(this, time);
         }
     } else {
@@ -1812,12 +1618,13 @@ Computation.prototype._recUpdate = function (time) {
  * @param {number} time
  */
 Computation.prototype._recMayUpdate = function (time) {
-    this._mayUpdateAge = time;
-    this._opt = (this._opt | Opts.MayUpdate) & ~Opts.MayCleared;
-    if (this._owned !== null && this._mayDisposeAge !== time) {
-        sendMayDispose(this._owned, time);
+    /** @const {number} */
+    var opt = this._opt;
+    this._opt = (opt | Opts.MayUpdate) & ~Opts.MayCleared;
+    if (this._owned !== null && (opt & Opts.MayDispose) === 0) {
+        sendMayDispose(this, this._owned, time);
     }
-    if ((this._opt & Opts.Send) !== 0) {
+    if ((opt & Opts.Send) !== 0) {
         sendMayUpdate(this, time);
     }
 };
@@ -1833,6 +1640,17 @@ Computation.prototype._clearMayUpdate = function (time) {
     if ((this._opt & Opts.Update) !== 0 && this._age === time) {
         this._update(time);
     }
+};
+
+/**
+ * @protected
+ * @returns {void}
+ */
+Computation.prototype._unmount = function () {
+    disposeSender(this);
+    this._set =
+        this._sources =
+        this._sourceslots = null;
 };
 
 /**
@@ -1890,7 +1708,11 @@ Queue.prototype._run = function (time) {
                 }
             } catch (err) {
                 error = 1;
+            } finally {
+                item._opt &= ~(Opts.UpdateFlags | Opts.MayFlags);
             }
+        } else {
+            item._opt &= ~Opts.MayFlags;
         }
         this._items[i] = null;
     }
@@ -2026,49 +1848,11 @@ function start() {
  * @abstract
  * @template T
  * @constructor
- * @extends {Disposer}
- * @implements {Send<!Array<T>>}
+ * @extends {Data<!Array<T>>}
  */
 function Collection() { }
 
-/* __EXCLUDE__ */
-
-/**
- * @protected
- * @type {T}
- */
-Collection.prototype._value;
-
-/**
- * @protected
- * @type {(function(T,T): boolean)|null|undefined}
- */
-Collection.prototype._eq;
-
-/**
- * @protected
- * @type {?Receive}
- */
-Collection.prototype._node1;
-
-/**
- * @protected
- * @type {number}
- */
-Collection.prototype._node1slot;
-
-/**
- * @protected
- * @type {?Array<!Receive>}
- */
-Collection.prototype._nodes;
-
-/**
- * @protected
- * @type {?Array<number>}
- */
-Collection.prototype._nodeslots;
-/* __EXCLUDE__ */
+extend(Data, Collection);
 
 /**
  * @param {function(T,number): boolean} callbackFn
@@ -2189,19 +1973,28 @@ Collection.prototype.some = function (callbackFn) { };
  * @template T,U
  * @constructor
  * @extends {Collection<T>}
+ * @implements {Receive}
  * @implements {ReadSignal<!Array<T>>}
- * @implements {Receive<!Array<T>>}
  * @param {!Send<!Array>} src
  * @param {function(T,!ReadSignal<number>): U} fn
  */
 function Enumerable(src, fn) {
-    Sender.call(this, OWNER, 0, []);
-    Receiver.call(this);
+    Data.call(this, 0, fn, []);
     /**
      * @protected
-     * @type {?(function(T,!ReadSignal<number>): U)}
+     * @type {number}
      */
-    this._fn = fn;
+    this._age = 0;
+    /**
+     * @protected
+     * @type {?Send}
+     */
+    this._source1 = null;
+    /**
+     * @protected
+     * @type {number}
+     */
+    this._source1slot = 0;
     logRead(src, this);
 }
 
@@ -2221,58 +2014,6 @@ Enumerable.prototype.val;
  * @readonly
  */
 Enumerable.prototype.peek;
-
-/**
- * @protected
- * @type {T}
- */
-Enumerable.prototype._value;
-
-/**
- * @protected
- * @type {(function(T,T): boolean)|null|void}
- */
-Enumerable.prototype._eq;
-
-/**
- * @protected
- * @type {?Receive}
- */
-Enumerable.prototype._node1;
-
-/**
- * @protected
- * @type {number}
- */
-Enumerable.prototype._node1slot;
-
-/**
- * @protected
- * @type {?Array<!Receive>}
- */
-Enumerable.prototype._nodes;
-
-/**
- * @protected
- * @type {?Array<number>}
- */
-Enumerable.prototype._nodeslots;
-
-/**
- * @protected
- * @type {T}
- */
-Enumerable.prototype._source1;
-/**
- * @protected
- * @type {number}
- */
-Enumerable.prototype._source1slot;
-/**
- * @protected
- * @type {number}
- */
-Enumerable.prototype._mayUpdateAge;
 
 /* __EXCLUDE__ */
 
@@ -2296,26 +2037,6 @@ setValProto(
  * @param {number} time 
  */
 Enumerable.prototype._dispose = function (time) {
-
-};
-
-/**
- * @protected
- * @override 
- * @this {!Enumerable<T>}
- * @param {number} time 
- */
-Enumerable.prototype._recDispose = function (time) {
-
-};
-
-/**
- * @protected
- * @override 
- * @this {!Enumerable<T>}
- * @param {number} time 
- */
-Enumerable.prototype._recMayDispose = function (time) {
 
 };
 
@@ -2348,9 +2069,20 @@ Enumerable.prototype._recUpdate = function (time) {
 
 /**
  * @protected
+ * @override
  * @param {number} time 
  */
 Enumerable.prototype._recMayUpdate = function (time) {
+
+};
+
+/**
+ * @protected
+ * @this {!Enumerable<T>}
+ * @param {number} time 
+ * @returns {void}
+ */
+Enumerable.prototype._clearMayDispose = function (time) {
 
 };
 
@@ -2370,10 +2102,11 @@ Enumerable.prototype._clearMayUpdate = function (time) {
  * @constructor
  * @extends {Collection<T>}
  * @implements {SignalArray<T>}
- * @param {!Array<T>} value
+ * @param {!Array<T>=} value
+ * @param {function(!Array<T>,!Array<T>): boolean=} eq
  */
-function DataArray(value) {
-    Sender.call(this, OWNER, 0, value);
+function DataArray(value, eq) {
+    Data.call(this, 0, NIL, value != null ? value : [], eq);
 }
 
 extend(Collection, DataArray);
@@ -2391,42 +2124,6 @@ DataArray.prototype.val;
  * @readonly
  */
 DataArray.prototype.peek;
-
-/**
- * @protected
- * @type {T}
- */
-DataArray.prototype._value;
-
-/**
- * @protected
- * @type {(function(T,T): boolean)|null|void}
- */
-DataArray.prototype._eq;
-
-/**
- * @protected
- * @type {?Receive}
- */
-DataArray.prototype._node1;
-
-/**
- * @protected
- * @type {number}
- */
-DataArray.prototype._node1slot;
-
-/**
- * @protected
- * @type {?Array<!Receive>}
- */
-DataArray.prototype._nodes;
-
-/**
- * @protected
- * @type {?Array<number>}
- */
-DataArray.prototype._nodeslots;
 
 /* __EXCLUDE__ */
 
@@ -2518,10 +2215,7 @@ export {
     recover, cleanup, dispose,
     data, value, array,
     compute, $compute,
-    effect, $effect,
-    Root, Sender, Receiver,
-    Data, Computation,
-    Collection, Enumerable, DataArray,
+    effect, $effect
 };
 
 /* __SOURCE__ */

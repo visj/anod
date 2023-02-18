@@ -130,7 +130,7 @@ function bundle() {
         var cjs = code.replace(ExportRegex, function (_, capture) {
             return 'module.exports = {' + capture + '};';
         });
-        var iife = 'var Zorn = (function() {\n\t' + code.replace(ExportRegex, function (_, capture) {
+        var iife = 'var Z=(function() {\n\t' + code.replace(ExportRegex, function (_, capture) {
             return 'return { ' + capture
                 .trim()
                 .split(',')

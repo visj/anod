@@ -12,9 +12,9 @@ import * as preact from '@preact/signals-core';
 import * as maverick from '@maverick-js/signals';
 import * as usignal from "usignal";
 import Table from 'cli-table';
-import * as zorn from "../../dist/zorn.min.mjs";
+import * as zorn from "../../dist/zorn.mjs";
 
-const BATCHED = false;
+const BATCHED = true;
 const RUNS_PER_TIER = 50;
 const LAYER_TIERS = [10, 100, 500, 1000, 2000, 2500];
 

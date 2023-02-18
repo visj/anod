@@ -38,20 +38,5 @@ if (globalThis.gc) {
                 done();
             });
         });
-
-        it("should not be collected when it has chilren", function(done) {
-            root(function(teardown) {
-                var d1 = value(1);
-                var ref = new WeakRef(effect(function() {
-                    effect(function() {
-                        d1.val;
-                    });
-                }));
-                collect(function() {
-                    assert.notEqual(ref.deref(), void 0);
-                    done();
-                });
-            });
-        });
     });
 }

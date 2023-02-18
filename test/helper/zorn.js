@@ -1,1 +1,1 @@
-export * from '../../dist/zorn.min.mjs';
+export * from '../../dist/zorn.mjs';
