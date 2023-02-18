@@ -820,21 +820,7 @@ function Root() {
      * @type {number}
      */
     this._opt = 0;
-    /**
-     * @protected
-     * @type {?Array<!Child>}
-     */
-    this._owned = [];
-    /**
-     * @protected
-     * @type {?Array<!Cleanup>}
-     */
-    this._cleanups = null;
-    /**
-     * @protected
-     * @type {?Array<!Recover>}
-     */
-    this._recovers = null;
+
 }
 
 extend(Disposer, Root);
@@ -884,12 +870,16 @@ Root.prototype._addChild = function (child) {
     this._owned[this._owned.length] = child;
 }
 
+/* __EXCLUDE__ */
+
 /**
  * @protected
  * @param {number} time
  * @returns {void} 
  */
 Root.prototype._clearMayDispose = function (time) { };
+
+/* __EXCLUDE__ */
 
 /**
  * @protected
@@ -921,11 +911,6 @@ function Sender(owner, opt, value, eq) {
      * @type {(function(T,T): boolean)|null|undefined}
      */
     this._eq = eq;
-    /**
-     * @protected
-     * @type {number}
-     */
-    this._age = 0;
     /**
      * @protected
      * @type {number}
@@ -1274,7 +1259,7 @@ setValProto(
  */
 Data.prototype._dispose = function (time) {
     disposeSender(this);
-    this._value = 
+    this._value =
         this._pending = null;
 };
 
@@ -1298,21 +1283,6 @@ Data.prototype._update = function (time) {
  * @this {!Receive<T>}
  */
 function Receiver() {
-    /**
-     * @protected
-     * @type {number}
-     */
-    this._mayUpdateAge = 0;
-    /**
-     * @protected
-     * @type {?Send}
-     */
-    this._source1 = null;
-    /**
-     * @protected
-     * @type {number}
-     */
-    this._source1slot = 0;
 }
 
 /**
@@ -1382,15 +1352,37 @@ function Computation(fn, value, opt, eq) {
     /** @const {boolean} */
     var listen = LISTEN;
     Root.call(this);
-    Sender.call(this, owner, Opts.ReceiveMany | opt, value, eq);
-    Receiver.call(this);
-    if ((opt & Opts.NoSend) === 0) {
-        if (eq === null) {
-            this._opt |= Opts.Respond;
-        } else if (eq !== void 0) {
-            this._opt |= Opts.Compare;
-        }
-    }
+    Sender.call(
+        this,
+        owner,
+        Opts.ReceiveMany | (
+            ((opt & Opts.NoSend) === 0) ? opt : opt | (
+                eq === null ? Opts.Respond : eq !== void 0 ? Opts.Compare : 0
+            )
+        ),
+        value,
+        eq
+    );
+    /**
+     * @protected
+     * @type {number}
+     */
+    this._age = 0;
+    /**
+     * @protected
+     * @type {number}
+     */
+    this._mayUpdateAge = 0;
+    /**
+     * @protected
+     * @type {?Send}
+     */
+    this._source1 = null;
+    /**
+     * @protected
+     * @type {number}
+     */
+    this._source1slot = 0;
     /**
      * @protected
      * @type {?(function(T): T)}
@@ -1557,18 +1549,19 @@ setValProto(
         if ((opt & Opts.DisposeFlags) === 0 && STAGE !== Stage.Idle) {
             /** @const {number} */
             var time = TIME;
-            if ((opt & Opts.Update) !== 0 && this._age === time) {
-                if ((opt & Opts.Updated) !== 0) {
-                    throw new Error("cyclic dependency");
-                }
-                this._update(time);
-            } else if ((opt & Opts.MayDispose | Opts.MayUpdate) !== 0 && this._age !== time && (this._mayDisposeAge === time || this._mayUpdateAge === time)) {
+            if (STAGE === Stage.Computes && (opt & Opts.MayDispose | Opts.MayUpdate) !== 0 && this._age !== time && (this._mayDisposeAge === time || this._mayUpdateAge === time)) {
                 if ((opt & Opts.MayCleared) !== 0) {
                     // cyclic dependency
                     throw new Error("cyclic pending dependency");
                 }
                 this._opt |= Opts.MayCleared;
                 this._clearMayDispose(time);
+            }
+            if ((opt & Opts.Update) !== 0 && this._age === time) {
+                if ((opt & Opts.Updated) !== 0) {
+                    throw new Error("cyclic dependency");
+                }
+                this._update(time);
             }
             if ((this._opt & (Opts.DisposeFlags | Opts.NoSend)) === 0 && LISTEN) {
                 logRead(this, /** @type {!ReceiveMany} */(OWNER));
@@ -1725,7 +1718,7 @@ Computation.prototype._clearMayDispose = function (time) {
  * @protected
  * @returns {void}
  */
-Computation.prototype._unmount = function() {
+Computation.prototype._unmount = function () {
     disposeSender(this);
     this._fn =
         this._sources =
@@ -2330,7 +2323,7 @@ Enumerable.prototype._recMayDispose = function (time) {
  * @protected
  * @returns {void}
  */
-Enumerable.prototype._unmount = function() {
+Enumerable.prototype._unmount = function () {
 
 };
 

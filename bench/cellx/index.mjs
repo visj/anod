@@ -14,8 +14,8 @@ import * as usignal from "usignal";
 import Table from 'cli-table';
 import * as zorn from "../../dist/zorn.min.mjs";
 
-const BATCHED = true;
-const RUNS_PER_TIER = 150;
+const BATCHED = false;
+const RUNS_PER_TIER = 50;
 const LAYER_TIERS = [10, 100, 500, 1000, 2000, 2500];
 
 function zero() {
