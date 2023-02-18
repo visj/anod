@@ -21,7 +21,7 @@ var getHeapUsage = tryDefine(['%CollectHeapUsage()'], zero);
 var collectGarbage = tryDefine(['%CollectGarbage(null)'], zero);
 var optimizeFunctionOnNextCall = tryDefine(['fn', '%OptimizeFunctionOnNextCall(fn)'], zero);
 
-var zorn = Zorn;
+var zorn = Z;
 
 var now = typeof process === 'undefined' ? browserNow : nodeNow;
 

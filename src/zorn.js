@@ -1,4 +1,258 @@
+/**
+ * @fileoverview
+ * @author Vilhelm Sjölund
+ __EXTERNS__
+ * @externs
+ __EXTERNS__
+ */
+
 /* __EXCLUDE__ */
+
+/**
+ * @interface
+ */
+function RootSignal() { }
+
+/**
+ * @template T
+ * @interface
+ * @extends {RootSignal}
+ */
+function ReadSignal() { }
+
+/**
+ * @type {T}
+ * @readonly
+ * @nocollapse
+ * @throws {Error}
+ */
+ReadSignal.prototype.val;
+
+/**
+ * @type {T}
+ * @readonly
+ */
+ReadSignal.prototype.peek;
+
+/**
+ * @interface
+ * @template T
+ * @extends {RootSignal}
+ */
+function Signal() { }
+
+/**
+ * @type {T}
+ * @nocollapse
+ * @throws {Error}
+ */
+Signal.prototype.val;
+
+/**
+ * @type {T} 
+ __EXTERNS__
+ * @nosideeffects 
+ __EXTERNS__
+ * @readonly
+ */
+Signal.prototype.peek;
+
+/**
+ * @interface
+ * @template T
+ * @extends {RootSignal}
+ */
+function SignalCollection() { }
+
+/**
+ * @readonly
+ * @type {!Array<T>}
+ */
+SignalCollection.prototype.peek;
+
+/**
+ * @param {function(T,!ReadSignal<number>): boolean} callbackFn
+ * @returns {!ReadSignal<boolean>}
+ */
+SignalCollection.prototype.every = function (callbackFn) { };
+
+/**
+ * @param {function(T,!ReadSignal<number>): boolean} callbackFn
+ * @returns {!SignalCollection<T>}
+ */
+SignalCollection.prototype.filter = function (callbackFn) { };
+
+/**
+ * @param {function(T,!ReadSignal<number>): boolean} callbackFn
+ * @returns {!ReadSignal<T|undefined>}
+ */
+SignalCollection.prototype.find = function (callbackFn) { };
+
+/**
+ * @param {function(T,!ReadSignal<number>): boolean} callbackFn
+ * @returns {!ReadSignal<number>}
+ */
+SignalCollection.prototype.findIndex = function (callbackFn) { };
+
+/**
+ * @param {function(T,!ReadSignal<number>): boolean} callbackFn
+ * @returns {!ReadSignal<T|undefined>}
+ */
+SignalCollection.prototype.findLast = function (callbackFn) { };
+
+/**
+ * @param {function(T,!ReadSignal<number>): boolean} callbackFn
+ * @returns {!ReadSignal<number>}
+ */
+SignalCollection.prototype.findLastIndex = function (callbackFn) { };
+
+/**
+ * @param {function(T): void} callbackFn
+ * @returns {void} 
+ */
+SignalCollection.prototype.forEach = function (callbackFn) { };
+
+/**
+ * @param {T} searchElement
+ * @returns {!ReadSignal<boolean>}
+ */
+SignalCollection.prototype.includes = function (searchElement) { };
+
+/**
+ * 
+ * @param {T} searchElement 
+ * @param {number=} fromIndex
+ * @returns {!ReadSignal<number>}
+ */
+SignalCollection.prototype.indexOf = function (searchElement, fromIndex) { };
+
+/**
+ * 
+ * @param {string=} separator
+ * @returns {!ReadSignal<string>}
+ */
+SignalCollection.prototype.join = function (separator) { };
+
+/**
+ * 
+ * @param {T} searchElement 
+ * @param {number=} fromIndex
+ * @returns {!ReadSignal<number>}
+ */
+SignalCollection.prototype.lastIndexOf = function (searchElement, fromIndex) { };
+
+/**
+ * @template U
+ * @param {function(T,!ReadSignal<number>): U} callbackFn
+ * @returns {!SignalCollection<U>}
+ */
+SignalCollection.prototype.map = function (callbackFn) { };
+
+/**
+ * @template U
+ * @param {function((T|U),T,!ReadSignal<number>): U} callbackFn 
+ * @param {U=} initialValue 
+ * @returns {!SignalCollection<U>}
+ */
+SignalCollection.prototype.reduce = function (callbackFn, initialValue) { };
+
+/**
+ * @template U
+ * @param {function((T|U),T,!ReadSignal<number>): U} callbackFn 
+ * @param {U=} initialValue 
+ * @returns {!SignalCollection<U>}
+ */
+SignalCollection.prototype.reduceRight = function (callbackFn, initialValue) { };
+
+/**
+ * @returns {!SignalCollection<T>}
+ */
+SignalCollection.prototype.reverse = function () { };
+
+/**
+ * @param {number=} start
+ * @param {number=} end
+ * @returns {!SignalCollection<T>}
+ */
+SignalCollection.prototype.slice = function (start, end) { };
+
+/**
+ * 
+ * @param {function(T,!ReadSignal<number>): boolean} callbackFn
+ * @returns {!Signal<boolean>} 
+ */
+SignalCollection.prototype.some = function (callbackFn) { };
+
+/**
+ * @interface
+ * @template T
+ * @extends {ReadSignal<!Array<T>>}
+ * @extends {SignalCollection<T>}
+ */
+function SignalEnumerable() { }
+
+/**
+ * @readonly
+ * @nocollapse
+ * @type {!Array<T>}
+ * @throws {Error}
+ */
+SignalEnumerable.prototype.val;
+
+/**
+ * @interface
+ * @template T
+ * @extends {Signal<!Array<T>>}
+ * @extends {SignalCollection<T>}
+ */
+function SignalArray() { }
+
+/**
+ * @throws {Error}
+ * @returns {void}
+ */
+SignalArray.prototype.pop = function () { };
+
+/**
+ * @throws {Error}
+ * @param {...T} elementN
+ * @returns {void}
+ */
+SignalArray.prototype.push = function (elementN) { };
+
+/**
+ * @throws {Error}
+ * @returns {void}
+ */
+SignalArray.prototype.shift = function () { };
+
+/**
+ * 
+ * @throws {Error}
+ * @param {function(T,T): number} compareFn
+ * @returns {void}
+ */
+SignalArray.prototype.sort = function (compareFn) { };
+
+/**
+ * 
+ * @throws {Error}
+ * @param {number} start 
+ * @param {number=} deleteCount 
+ * @param {...T} items
+ * @returns {void}
+ */
+SignalArray.prototype.splice = function (start, deleteCount, items) { };
+
+/**
+ * 
+ * @throws {Error} 
+ * @param {...T} elementN
+ * @returns {void}
+ */
+SignalArray.prototype.unshift = function (elementN) { };
+
+/* __SOURCE__ */
 
 /** @typedef {function(boolean): void} */
 var Cleanup;
@@ -14,7 +268,7 @@ function nil() { }
 /**
  * @protected
  * @interface
- * @extends {Signal}
+ * @extends {RootSignal}
  */
 function Dispose() { }
 
@@ -45,8 +299,8 @@ Dispose.prototype._dispose = function (time) { };
 Dispose.prototype._recDispose = function (time) { };
 
 /**
- * @template T
  * @interface
+ * @template T
  * @extends {Dispose}
  */
 function Owner() { }
@@ -123,16 +377,9 @@ export var Stage = {
 /**
  * @protected
  * @interface
- * @template T
  * @extends {Dispose}
  */
 function Child() { }
-
-/**
- * @protected
- * @type {T}
- */
-Child.prototype._value;
 
 /**
  * @protected
@@ -157,9 +404,21 @@ Child.prototype._recMayDispose = function (time) { };
  * @protected
  * @interface
  * @template T
- * @extends {Child<T>}
+ * @extends {Child}
  */
 function Send() { }
+
+/**
+ * @protected
+ * @type {T}
+ */
+Send.prototype._value;
+
+/**
+ * @protected
+ * @type {(function(T,T): boolean)|null|undefined}
+ */
+Send.prototype._eq;
 
 /**
  * @protected
@@ -195,8 +454,7 @@ Send.prototype._update = function (time) { };
 /**
  * @protected
  * @interface
- * @template T
- * @extends {Child<T>}
+ * @extends {Child}
  */
 function Receive() { }
 
@@ -264,10 +522,10 @@ ReceiveMany.prototype._sourceslots;
  * @public
  * @template T
  * @param {function(): T} fn 
- * @returns {!Signal<T>}
+ * @returns {!RootSignal<T>}
  */
 function root(fn) {
-    /** @const {!Owner} */
+    /** @const {!Root} */
     var node = new Root();
     /** @const {?Owner} */
     var owner = OWNER;
@@ -296,7 +554,7 @@ function root(fn) {
  * @param {function(T): T} fn 
  * @param {T=} seed 
  * @param {(function(T,T): boolean)|null=} eq
- * @returns {!Signal<T>}
+ * @returns {!ReadSignal<T>}
  */
 function compute(fn, seed, eq) {
     return new Computation(fn, seed, Opts.Static, eq);
@@ -308,7 +566,7 @@ function compute(fn, seed, eq) {
  * @param {function(T): T} fn 
  * @param {T=} seed 
  * @param {(function(T,T): boolean)|null=} eq
- * @returns {!Signal<T>}
+ * @returns {!ReadSignal<T>}
  */
 function $compute(fn, seed, eq) {
     return new Computation(fn, seed, 0, eq);
@@ -319,7 +577,7 @@ function $compute(fn, seed, eq) {
  * @template T
  * @param {function(T): T} fn 
  * @param {T=} seed 
- * @returns {!Signal<T>}
+ * @returns {!ReadSignal<T>}
  */
 function effect(fn, seed) {
     return new Computation(fn, seed, Opts.NoSend | Opts.Static);
@@ -330,7 +588,7 @@ function effect(fn, seed) {
  * @template T
  * @param {function(T): T} fn 
  * @param {T=} seed 
- * @returns {!Signal<T>}
+ * @returns {!ReadSignal<T>}
  */
 function $effect(fn, seed) {
     return new Computation(fn, seed, Opts.NoSend);
@@ -464,6 +722,26 @@ function recover(fn) {
 // Internal
 
 /**
+ * @noinline
+ * @param {Function} parent
+ * @param {Function} child
+ */
+function extend(parent, child) {
+    child.prototype = new parent;
+    child.constructor = child;
+}
+
+/**
+ * @protected
+ * @template T
+ * @this {!Child<T>}
+ * @returns {T}
+ */
+function getValue() {
+    return this._value;
+}
+
+/**
  * @protected
  * @abstract
  * @constructor
@@ -491,17 +769,7 @@ Disposer.prototype._recDispose = function (time) {
 Disposer.prototype._recMayDispose = function (time) {
     this._mayDisposeAge = time;
     this._opt |= Opts.MayDispose;
-};;
-
-/**
- * @noinline
- * @param {Function} parent
- * @param {Function} child
- */
-function extend(parent, child) {
-    child.prototype = new parent;
-    child.constructor = child;
-}
+};
 
 /**
  * @protected
@@ -513,16 +781,6 @@ function extend(parent, child) {
  */
 function setValProto(obj, getVal, peekVal, setVal) {
     Object.defineProperties(obj.prototype, { val: { get: getVal, set: setVal }, peek: { get: peekVal } });
-}
-
-/**
- * @protected
- * @template T
- * @this {!Child<T>}
- * @returns {T}
- */
-function getValue() {
-    return this._value;
 }
 
 /**
@@ -651,13 +909,9 @@ Root.prototype._addChild = function (child) {
 }
 
 /**
- * @struct
- * @template T
  * @protected
- * @abstract
- * @constructor
- * @extends {Disposer}
- * @implements {Send<T>}
+ * @template T
+ * @this {!Send<T>}
  * @param {?Owner} owner 
  * @param {number|undefined} opt 
  * @param {T} value
@@ -729,7 +983,7 @@ function Sender(owner, opt, value, eq) {
 
 /**
  * @protected
- * @param {!Sender} node
+ * @param {!Send} node
  */
 function disposeSender(node) {
     node._opt = Opts.Disposed;
@@ -753,14 +1007,45 @@ function updateSender(send) {
     /** @const {?Array<!Receive>} */
     var nodes = send._nodes;
     if (node1 !== null) {
-        removeSender(node1, send._node1slot);
+        removeSenderFromReceiver(node1, send._node1slot);
         send._node1 = null;
     }
     if (nodes !== null && (ln = nodes.length) !== 0) {
         /** @const {?Array<number>} */
         var nodeslots = send._nodeslots;
         for (; ln-- !== 0;) {
-            removeSender(nodes.pop(), nodeslots.pop());
+            removeSenderFromReceiver(nodes.pop(), nodeslots.pop());
+        }
+    }
+}
+
+/**
+ * @protected
+ * @param {!Send} send 
+ * @param {number} slot
+ */
+function removeReceiverFromSender(send, slot) {
+    if ((send._opt & Opts.DisposeFlags) === 0) {
+        if (slot === -1) {
+            send._node1 = null;
+        } else {
+            /** @const {?Array<Receive>} */
+            var nodes = send._nodes;
+            /** @const {?Array<number>} */
+            var nodeslots = send._nodeslots;
+            /** @const {Receive} */
+            var last = nodes.pop();
+            /** @const {number} */
+            var lastslot = nodeslots.pop();
+            if (slot !== nodes.length) {
+                nodes[slot] = last;
+                nodeslots[slot] = lastslot;
+                if (lastslot === -1) {
+                    last._source1slot = slot;
+                } else {
+                    last._sourceslots[lastslot] = slot;
+                }
+            }
         }
     }
 }
@@ -854,8 +1139,9 @@ function sendMayDispose(owned, time) {
  * @template T
  * @protected
  * @constructor
- * @extends {Sender<T>}
- * @implements {WritableSignal<T>}
+ * @extends {Disposer}
+ * @implements {Send<T>}
+ * @implements {Signal<T>}
  * @param {T} value
  * @param {(function(T,T): boolean)|null=} eq
  */
@@ -884,6 +1170,66 @@ Data.prototype.val;
  * @readonly
  */
 Data.prototype.peek;
+
+/**
+ * @protected
+ * @type {number}
+ */
+Data.prototype._opt;
+
+/**
+ * @protected
+ * @type {number}
+ */
+Data.prototype._age;
+
+/**
+ * @protected
+ * @type {?Owner}
+ */
+Data.prototype._owner;
+
+/**
+ * @protected
+ * @type {number}
+ */
+Data.prototype._mayDisposeAge;
+
+/**
+ * @protected
+ * @type {T}
+ */
+Data.prototype._value;
+
+/**
+ * @protected
+ * @type {(function(T,T): boolean)|null|undefined}
+ */
+Data.prototype._eq;
+
+/**
+ * @protected
+ * @type {?Receive}
+ */
+Data.prototype._node1;
+
+/**
+ * @protected
+ * @type {number}
+ */
+Data.prototype._node1slot;
+
+/**
+ * @protected
+ * @type {?Array<!Receive>}
+ */
+Data.prototype._nodes;
+
+/**
+ * @protected
+ * @type {?Array<number>}
+ */
+Data.prototype._nodeslots;
 
 /* __EXCLUDE__ */
 
@@ -982,12 +1328,9 @@ Data.prototype._dispose = function () {
 };
 
 /**
- * @struct
- * @template T
  * @protected
- * @abstract
- * @constructor
- * @extends {Sender<T>}
+ * @template T
+ * @this {!Receive<T>}
  */
 function Receiver() {
     /**
@@ -1009,40 +1352,40 @@ function Receiver() {
 
 /**
  * @protected
- * @param {!Receiver} node
+ * @param {!Receive} node
  */
 function updateReceiver(node) {
     if (node._source1 !== null) {
-        removeReceiver(node._source1, node._source1slot);
+        removeReceiverFromSender(node._source1, node._source1slot);
         node._source1 = null;
     }
 }
 
 /**
  * @protected
- * @param {!Send} send 
+ * @param {!Receive} receive 
  * @param {number} slot
  */
-function removeReceiver(send, slot) {
-    if ((send._opt & Opts.DisposeFlags) === 0) {
+function removeSenderFromReceiver(receive, slot) {
+    if ((receive._opt & Opts.DisposeFlags) === 0) {
         if (slot === -1) {
-            send._node1 = null;
+            receive._source1 = null;
         } else {
-            /** @const {?Array<Receive>} */
-            var nodes = send._nodes;
+            /** @const {?Array<!Send>} */
+            var sources = /** @type {ReceiveMany} */(receive)._sources;
             /** @const {?Array<number>} */
-            var nodeslots = send._nodeslots;
-            /** @const {Receive} */
-            var last = nodes.pop();
+            var sourceslots = /** @type {ReceiveMany} */(receive)._sourceslots;
+            /** @const {!Send} */
+            var last = sources.pop();
             /** @const {number} */
-            var lastslot = nodeslots.pop();
-            if (slot !== nodes.length) {
-                nodes[slot] = last;
-                nodeslots[slot] = lastslot;
+            var lastslot = sourceslots.pop();
+            if (slot !== sources.length) {
+                sources[slot] = last;
+                sourceslots[slot] = lastslot;
                 if (lastslot === -1) {
-                    last._source1slot = slot;
+                    last._node1slot = slot;
                 } else {
-                    last._sourceslots[lastslot] = slot;
+                    last._nodeslots[lastslot] = slot;
                 }
             }
         }
@@ -1054,9 +1397,10 @@ function removeReceiver(send, slot) {
  * @template T 
  * @protected
  * @constructor
- * @extends {Receiver<T,(function(T): T)>}
- * @implements {ReadonlySignal<T>}
+ * @extends {Root}
+ * @implements {ReadSignal<T>}
  * @implements {Owner<T>}
+ * @implements {Send<T>}
  * @implements {ReceiveMany<T>}
  * @param {function(T): T} fn 
  * @param {T} value 
@@ -1068,7 +1412,7 @@ function Computation(fn, value, opt, eq) {
     var owner = OWNER;
     /** @const {boolean} */
     var listen = LISTEN;
-    Root.call(/** @type {?} */(this));
+    Root.call(this);
     Sender.call(this, owner, opt, value, eq);
     Receiver.call(this);
     /**
@@ -1124,21 +1468,103 @@ Computation.prototype.val;
  * @readonly
  */
 Computation.prototype.peek;
+
+/**
+ * @protected
+ * @type {number}
+ */
+Computation.prototype._opt;
+
 /**
  * @protected
  * @type {?Array<!Child>}
  */
 Computation.prototype._owned;
+
 /**
  * @protected
  * @type {?Array<Cleanup>}
  */
 Computation.prototype._cleanups;
+
 /**
  * @protected
  * @type {?Array<Recover>}
  */
 Computation.prototype._recovers;
+
+/**
+ * @protected
+ * @type {?Owner}
+ */
+Computation.prototype._owner;
+
+/**
+ * @protected
+ * @type {number}
+ */
+Computation.prototype._mayDisposeAge;
+
+/**
+ * @protected
+ * @type {T}
+ */
+Computation.prototype._value;
+
+/**
+ * @protected
+ * @type {(function(T,T): boolean)|null|undefined}
+ */
+Computation.prototype._eq;
+
+/**
+ * @protected
+ * @type {?Receive}
+ */
+Computation.prototype._node1;
+
+/**
+ * @protected
+ * @type {number}
+ */
+Computation.prototype._node1slot;
+
+/**
+ * @protected
+ * @type {?Array<!Receive>}
+ */
+Computation.prototype._nodes;
+
+/**
+ * @protected
+ * @type {?Array<number>}
+ */
+Computation.prototype._nodeslots;
+
+/**
+ * @protected
+ * @type {number}
+ */
+Computation.prototype._age;
+
+/**
+ * @protected
+ * @type {number}
+ */
+Computation.prototype._mayUpdateAge;
+
+/**
+ * @protected
+ * @type {?Send}
+ */
+Computation.prototype._source1;
+
+/**
+ * @protected
+ * @type {number}
+ */
+Computation.prototype._source1slot;
+
 
 /* __EXCLUDE__ */
 
@@ -1191,7 +1617,7 @@ function updateManyReceivers(node) {
         /** @const {?Array<number>} */
         var sourceslots = node._sourceslots;
         for (; ln-- !== 0;) {
-            removeReceiver(sources.pop(), sourceslots.pop());
+            removeReceiverFromSender(sources.pop(), sourceslots.pop());
         }
     }
 }
@@ -1538,79 +1964,73 @@ function start() {
 }
 
 /**
- * @protected
- * @param {!Receive} receive 
- * @param {number} slot
- */
-function removeSender(receive, slot) {
-    if ((receive._opt & Opts.DisposeFlags) === 0) {
-        if (slot === -1) {
-            receive._source1 = null;
-        } else {
-            /** @const {?Array<Send>} */
-            var sources = /** @type {ReceiveMany} */(receive)._sources;
-            /** @const {?Array<number>} */
-            var sourceslots = /** @type {ReceiveMany} */(receive)._sourceslots;
-            /** @const {Send} */
-            var last = sources.pop();
-            /** @const {number} */
-            var lastslot = sourceslots.pop();
-            if (slot !== sources.length) {
-                sources[slot] = last;
-                sourceslots[slot] = lastslot;
-                if (lastslot === -1) {
-                    last._node1slot = slot;
-                } else {
-                    last._nodeslots[lastslot] = slot;
-                }
-            }
-        }
-    }
-}
-
-/**
  * @struct
  * @protected
  * @abstract
  * @template T
  * @constructor
- * @extends {Sender<!Array<T>>}
+ * @extends {Disposer}
+ * @implements {Send<!Array<T>>}
  */
 function Collection() { }
 
+/* __EXCLUDE__ */
+
 /**
- * @param {function(T,!Signal<number>): boolean} callbackFn
- * @returns {!Signal<boolean>}
+ * @protected
+ * @type {?Receive}
+ */
+Collection.prototype._node1;
+/**
+ * @protected
+ * @type {number}
+ */
+Collection.prototype._node1slot;
+/**
+ * @protected
+ * @type {?Array<!Receive>}
+ */
+Collection.prototype._nodes;
+/**
+ * @protected
+ * @type {?Array<number>}
+ */
+Collection.prototype._nodeslots;
+/* __EXCLUDE__ */
+
+/**
+ * @param {function(T,!ReadSignal<number>): boolean} callbackFn
+ * @returns {!ReadSignal<boolean>}
  */
 Collection.prototype.every = function (callbackFn) { };
 
 /**
- * @param {function(T,!Signal<number>): boolean} callbackFn
+ * @param {function(T,!ReadSignal<number>): boolean} callbackFn
  * @returns {!SignalCollection<T>}
  */
 Collection.prototype.filter = function (callbackFn) { };
 
 /**
- * @param {function(T,!Signal<number>): boolean} callbackFn
- * @returns {!Signal<T|undefined>}
+ * @param {function(T,!ReadSignal<number>): boolean} callbackFn
+ * @returns {!ReadSignal<T|undefined>}
  */
 Collection.prototype.find = function (callbackFn) { };
 
 /**
- * @param {function(T,!Signal<number>): boolean} callbackFn
- * @returns {!Signal<number>}
+ * @param {function(T,!ReadSignal<number>): boolean} callbackFn
+ * @returns {!ReadSignal<number>}
  */
 Collection.prototype.findIndex = function (callbackFn) { };
 
 /**
- * @param {function(T,!Signal<number>): boolean} callbackFn
- * @returns {!Signal<T|undefined>}
+ * @param {function(T,!ReadSignal<number>): boolean} callbackFn
+ * @returns {!ReadSignal<T|undefined>}
  */
 Collection.prototype.findLast = function (callbackFn) { };
 
 /**
- * @param {function(T,!Signal<number>): boolean} callbackFn
- * @returns {!Signal<number>}
+ * @param {function(T,!ReadSignal<number>): boolean} callbackFn
+ * @returns {!ReadSignal<number>}
  */
 Collection.prototype.findLastIndex = function (callbackFn) { };
 
@@ -1622,7 +2042,7 @@ Collection.prototype.forEach = function (callbackFn) { };
 
 /**
  * @param {T} searchElement
- * @returns {!Signal<boolean>}
+ * @returns {!ReadSignal<boolean>}
  */
 Collection.prototype.includes = function (searchElement) { };
 
@@ -1630,14 +2050,14 @@ Collection.prototype.includes = function (searchElement) { };
  * 
  * @param {T} searchElement 
  * @param {number=} fromIndex
- * @returns {!Signal<number>}
+ * @returns {!ReadSignal<number>}
  */
 Collection.prototype.indexOf = function (searchElement, fromIndex) { };
 
 /**
  * 
  * @param {string=} separator
- * @returns {!Signal<string>}
+ * @returns {!ReadSignal<string>}
  */
 Collection.prototype.join = function (separator) { };
 
@@ -1645,20 +2065,20 @@ Collection.prototype.join = function (separator) { };
  * 
  * @param {T} searchElement 
  * @param {number=} fromIndex
- * @returns {!Signal<number>}
+ * @returns {!ReadSignal<number>}
  */
 Collection.prototype.lastIndexOf = function (searchElement, fromIndex) { };
 
 /**
  * @template U
- * @param {function(T,!Signal<number>): U} callbackFn
+ * @param {function(T,!ReadSignal<number>): U} callbackFn
  * @returns {!SignalCollection<U>}
  */
 Collection.prototype.map = function (callbackFn) { };
 
 /**
  * @template U
- * @param {function((T|U),T,!Signal<number>): U} callbackFn 
+ * @param {function((T|U),T,!ReadSignal<number>): U} callbackFn 
  * @param {U=} initialValue 
  * @returns {!SignalCollection<U>}
  */
@@ -1666,7 +2086,7 @@ Collection.prototype.reduce = function (callbackFn, initialValue) { };
 
 /**
  * @template U
- * @param {function((T|U),T,!Signal<number>): U} callbackFn 
+ * @param {function((T|U),T,!ReadSignal<number>): U} callbackFn 
  * @param {U=} initialValue 
  * @returns {!SignalCollection<U>}
  */
@@ -1686,7 +2106,7 @@ Collection.prototype.slice = function (start, end) { };
 
 /**
  * 
- * @param {function(T,!Signal<number>): boolean} callbackFn
+ * @param {function(T,!ReadSignal<number>): boolean} callbackFn
  * @returns {!Signal<boolean>} 
  */
 Collection.prototype.some = function (callbackFn) { };
@@ -1697,17 +2117,17 @@ Collection.prototype.some = function (callbackFn) { };
  * @template T,U
  * @constructor
  * @extends {Collection<T>}
- * @implements {ReadonlySignal<!Array<T>>}
+ * @implements {ReadSignal<!Array<T>>}
  * @implements {Receive<!Array<T>>}
  * @param {!Send<!Array>} src
- * @param {function(T,ReadonlySignal<number>): U} fn
+ * @param {function(T,ReadSignal<number>): U} fn
  */
 function Enumerable(src, fn) {
     Sender.call(this, OWNER, 0, []);
-    Receiver.call(/** @type {?} */(this));
+    Receiver.call(this);
     /**
      * @protected
-     * @type {?(function(T,ReadonlySignal<number>): U)}
+     * @type {?(function(T,ReadSignal<number>): U)}
      */
     this._fn = fn;
     logRead(src, this);
@@ -1716,6 +2136,7 @@ function Enumerable(src, fn) {
 extend(Collection, Enumerable);
 
 /* __EXCLUDE__ */
+
 /**
  * @type {T}
  * @nocollapse
@@ -1728,6 +2149,43 @@ Enumerable.prototype.val;
  * @readonly
  */
 Enumerable.prototype.peek;
+
+/**
+ * @protected
+ * @type {T}
+ */
+Enumerable.prototype._value;
+
+/**
+ * @protected
+ * @type {(function(T,T): boolean)|null|undefined}
+ */
+Enumerable.prototype._eq;
+
+/**
+ * @protected
+ * @type {?Receive}
+ */
+Enumerable.prototype._node1;
+
+/**
+ * @protected
+ * @type {number}
+ */
+Enumerable.prototype._node1slot;
+
+/**
+ * @protected
+ * @type {?Array<!Receive>}
+ */
+Enumerable.prototype._nodes;
+
+/**
+ * @protected
+ * @type {?Array<number>}
+ */
+Enumerable.prototype._nodeslots;
+
 /**
  * @protected
  * @type {T}
@@ -1743,6 +2201,7 @@ Enumerable.prototype._source1slot;
  * @type {number}
  */
 Enumerable.prototype._mayUpdateAge;
+
 /* __EXCLUDE__ */
 
 setValProto(
@@ -1831,6 +2290,7 @@ function DataArray(value) {
 extend(Collection, DataArray);
 
 /* __EXCLUDE__ */
+
 /**
  * @type {T}
  * @noinline
@@ -1842,6 +2302,43 @@ DataArray.prototype.val;
  * @readonly
  */
 DataArray.prototype.peek;
+
+/**
+ * @protected
+ * @type {T}
+ */
+DataArray.prototype._value;
+
+/**
+ * @protected
+ * @type {(function(T,T): boolean)|null|undefined}
+ */
+DataArray.prototype._eq;
+
+/**
+ * @protected
+ * @type {?Receive}
+ */
+DataArray.prototype._node1;
+
+/**
+ * @protected
+ * @type {number}
+ */
+DataArray.prototype._node1slot;
+
+/**
+ * @protected
+ * @type {?Array<!Receive>}
+ */
+DataArray.prototype._nodes;
+
+/**
+ * @protected
+ * @type {?Array<number>}
+ */
+DataArray.prototype._nodeslots;
+
 /* __EXCLUDE__ */
 
 setValProto(
@@ -1932,5 +2429,10 @@ export {
     recover, cleanup, dispose,
     data, value, array,
     compute, $compute,
-    effect, $effect
+    effect, $effect,
+    Root, Sender, Receiver,
+    Data, Computation,
+    Collection, Enumerable, DataArray,
 };
+
+/* __SOURCE__ */
