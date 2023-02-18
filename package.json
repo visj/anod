@@ -11,7 +11,7 @@
     "externs/*"
   ],
   "scripts": {
-    "test": "mocha"
+    "test": "node --expose-gc ./node_modules/mocha/bin/_mocha"
   },
   "keywords": [
     "reactive",

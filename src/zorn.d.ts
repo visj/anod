@@ -1,13 +1,13 @@
 export class RootSignal { }
 
 export class ReadSignal<T = any> extends RootSignal {
-    readonly val: T;
-    readonly peek: T;
+    get val(): T;
+
+    get peek(): T;
 }
 
-export class Signal<T = any> extends RootSignal {
-    val: T;
-    readonly peek: T;
+export class Signal<T = any> extends ReadSignal<T> {
+    set val(val: T): T;
 }
 
 export type RecoverFn = (err: any) => void;
@@ -16,50 +16,53 @@ export type CleanupFn = (final: boolean) => void;
 
 export type Compare<T> = ((a: T, b: T) => boolean) | null;
 
-export function root<T>(fn: (teardown: () => void) => T): T;
+export function root<T>(callback: (teardown: () => void) => T): T;
 
 export function data<T>(value: T): Signal<T>;
 
 export function value<T>(value: T, eq?: Compare<T>): Signal<T>;
 
-export function compute<T>(fn: (seed: T) => T, seed?: T, eq?: Compare<T>): Readonly<Signal<T>>;
+export function compute<T>(callback: (seed: T) => T, seed?: T, compareFn?: Compare<T>): Readonly<Signal<T>>;
 
-export function $compute<T>(fn: (seed: T) => T, seed?: T, eq?: Compare<T>): Readonly<Signal<T>>;
+export function $compute<T>(callback: (seed: T) => T, seed?: T, compareFn?: Compare<T>): Readonly<Signal<T>>;
 
-export function effect<T>(fn: (seed: T) => T, seed?: T): Readonly<Signal<T>>;
+export function effect<T>(callback: (seed: T) => T, seed?: T): Readonly<Signal<T>>;
 
-export function $effect<T>(fn: (seed: T) => T, seed?: T): Readonly<Signal<T>>;
+export function $effect<T>(callback: (seed: T) => T, seed?: T): Readonly<Signal<T>>;
 
-export function peek<T>(fn: () => T): T;
+export function peek<T>(callback: () => T): T;
 
-export function batch(fn: () => void): void;
+export function batch(callback: () => void): void;
 
 export function stable(): void;
 
-export function cleanup(fn: CleanupFn): void;
+export function cleanup(cleanupFn: CleanupFn): boolean;
 
-export function recover(fn: RecoverFn): void;
+export function recover(recoverFn: RecoverFn): boolean;
 
-export function dispose(val: RootSignal): void;
+export function dispose(val: RootSignal): boolean;
 
 export function array<T>(items?: T[]): SignalArray<T>;
 
-export class SignalCollection<T = any> extends RootSignal {
-    readonly peek: T[];
+export class SignalCollection<T = any> extends ReadSignal<T[]> {
 
-    every(callbackFn: (element: T, index: ReadSignal<number>) => boolean): ReadSignal<boolean>;
+    get length(): ReadSignal<number>;
 
-    filter(callbackFn: (element: T, index: ReadSignal<number>) => boolean): SignalEnumerable<T>;
+    concat(...items: (T | T[])[]): SignalCollection<T>;
 
-    find(callbackFn: (element: T, index: ReadSignal<number>) => boolean): ReadSignal<T | undefined>;
+    every(callbackFn: (element: T, index: number) => boolean): ReadSignal<boolean>;
 
-    findIndex(callbackFn: (element: T, index: ReadSignal<number>) => boolean): ReadSignal<number>;
+    filter(callbackFn: (element: T, index: number) => boolean): SignalCollection<T>;
 
-    findLast(callbackFn: (element: T, index: ReadSignal<number>) => boolean): ReadSignal<T | undefined>;
+    find(callbackFn: (element: T, index: number) => boolean): ReadSignal<T | void>;
 
-    findLastIndex(callbackFn: (element: T, index: ReadSignal<number>) => boolean): ReadSignal<number>;
+    findIndex(callbackFn: (element: T, index: number) => boolean): ReadSignal<number>;
 
-    forEach(callbackFn: (element: T, index: ReadSignal<number>) => void): void;
+    findLast(callbackFn: (element: T, index: number) => boolean): ReadSignal<T | void>;
+
+    findLastIndex(callbackFn: (element: T, index: number) => boolean): ReadSignal<number>;
+
+    forEach(callbackFn: (element: T, index: number) => void): void;
 
     includes(searchElement: T, fromIndex?: number): ReadSignal<boolean>;
 
@@ -69,49 +72,38 @@ export class SignalCollection<T = any> extends RootSignal {
 
     lastIndexOf(searchElement: T, fromIndex?: number): ReadSignal<number>;
 
-    map<U>(callbackFn: (element: T, index: ReadSignal<number>) => U): SignalEnumerable<U>;
+    map<U>(callbackFn: (element: T, index: ReadSignal<number>) => U): SignalCollection<U>;
 
-    reduce(callbackFn: (previousValue: T, currentValue: T, currentIndex: ReadSignal<number>) => T): ReadSignal<T>;
+    reduce(callbackFn: (previousValue: T, currentValue: T, currentIndex: number) => T): ReadSignal<T>;
 
-    reduce(callbackFn: (previousValue: T, currentValue: T, currentIndex: ReadSignal<number>) => T, initialValue: T): ReadSignal<T>;
+    reduce(callbackFn: (previousValue: T, currentValue: T, currentIndex: number) => T, initialValue: T): ReadSignal<T>;
 
-    reduce<U>(callbackFn: (previousValue: U, currentValue: T, currentIndex: ReadSignal<number>) => U, initialValue: U): ReadSignal<U>;
+    reduce<U>(callbackFn: (previousValue: U, currentValue: T, currentIndex: number) => U, initialValue: U): ReadSignal<U>;
 
-    reduceRight(callbackFn: (previousValue: T, currentValue: T, currentIndex: ReadSignal<number>) => T): ReadSignal<T>;
+    reduceRight(callbackFn: (previousValue: T, currentValue: T, currentIndex: number) => T): ReadSignal<T>;
 
-    reduceRight(callbackFn: (previousValue: T, currentValue: T, currentIndex: ReadSignal<number>) => T, initialValue: T): ReadSignal<T>;
+    reduceRight(callbackFn: (previousValue: T, currentValue: T, currentIndex: number) => T, initialValue: T): ReadSignal<T>;
 
-    reduceRight<U>(callbackFn: (previousValue: U, currentValue: T, currentIndex: ReadSignal<number>) => U, initialValue: U): ReadSignal<U>;
+    reduceRight<U>(callbackFn: (previousValue: U, currentValue: T, currentIndex: number) => U, initialValue: U): ReadSignal<U>;
 
-    reverse(): SignalEnumerable<T>;
+    reverse(): SignalCollection<T>;
 
-    slice(start?: number, end?: number): SignalEnumerable<T>;
+    slice(start?: number, end?: number): SignalCollection<T>;
 
-    some(callbackFn: (element: T, index: ReadSignal<number>) => boolean): ReadSignal<boolean>;
+    some(callbackFn: (element: T, index: number) => boolean): ReadSignal<boolean>;
 }
 
-export class SignalEnumerable<T = any> extends SignalCollection<T> {
-    readonly val: T[];
-}
+export class SignalArray<T = any> extends Signal<T[]>, SignalCollection<T>{
 
-export class SignalArray<T = any> extends SignalCollection<T> {
-    val: T[];
+    pop(): T | undefined;
 
-    get length(): ReadSignal<number>;
-    
-    set length(val: number);
+    push(...items: T[]): number;
 
-    concat(...items: (T | T[])[]): SignalArray<T>;
+    shift(): T | undefined;
 
-    pop(): void;
+    splice(start: number, deleteCount?: number, ...items: T[]): T[];
 
-    push(...items: T[]): void;
+    sort(compareFn?: (a: T, b: T) => number): this;
 
-    shift(): void;
-
-    splice(start: number, deleteCount?: number, ...items: T[]): void;
-    
-    sort(compareFn?: (a: T, b: T) => number): void;
-    
-    unshift(...items: T[]): void;
+    unshift(...items: T[]): number;
 }

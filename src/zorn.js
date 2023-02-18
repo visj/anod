@@ -71,43 +71,43 @@ function SignalCollection() { }
 SignalCollection.prototype.peek;
 
 /**
- * @param {function(T,!ReadSignal<number>): boolean} callbackFn
+ * @param {function(T,number): boolean} callbackFn
  * @returns {!ReadSignal<boolean>}
  */
 SignalCollection.prototype.every = function (callbackFn) { };
 
 /**
- * @param {function(T,!ReadSignal<number>): boolean} callbackFn
- * @returns {!SignalCollection<T>}
+ * @param {function(T,number): boolean} callbackFn
+ * @returns {!SignalEnumerable<T>}
  */
 SignalCollection.prototype.filter = function (callbackFn) { };
 
 /**
- * @param {function(T,!ReadSignal<number>): boolean} callbackFn
+ * @param {function(T,number): boolean} callbackFn
  * @returns {!ReadSignal<T|undefined>}
  */
 SignalCollection.prototype.find = function (callbackFn) { };
 
 /**
- * @param {function(T,!ReadSignal<number>): boolean} callbackFn
+ * @param {function(T,number): boolean} callbackFn
  * @returns {!ReadSignal<number>}
  */
 SignalCollection.prototype.findIndex = function (callbackFn) { };
 
 /**
- * @param {function(T,!ReadSignal<number>): boolean} callbackFn
+ * @param {function(T,number): boolean} callbackFn
  * @returns {!ReadSignal<T|undefined>}
  */
 SignalCollection.prototype.findLast = function (callbackFn) { };
 
 /**
- * @param {function(T,!ReadSignal<number>): boolean} callbackFn
+ * @param {function(T,number): boolean} callbackFn
  * @returns {!ReadSignal<number>}
  */
 SignalCollection.prototype.findLastIndex = function (callbackFn) { };
 
 /**
- * @param {function(T): void} callbackFn
+ * @param {function(T,number): void} callbackFn
  * @returns {void} 
  */
 SignalCollection.prototype.forEach = function (callbackFn) { };
@@ -144,42 +144,42 @@ SignalCollection.prototype.lastIndexOf = function (searchElement, fromIndex) { }
 /**
  * @template U
  * @param {function(T,!ReadSignal<number>): U} callbackFn
- * @returns {!SignalCollection<U>}
+ * @returns {!SignalEnumerable<U>}
  */
 SignalCollection.prototype.map = function (callbackFn) { };
 
 /**
  * @template U
- * @param {function((T|U),T,!ReadSignal<number>): U} callbackFn 
+ * @param {function((T|U),T,number): U} callbackFn 
  * @param {U=} initialValue 
- * @returns {!SignalCollection<U>}
+ * @returns {!ReadSignal<U>}
  */
 SignalCollection.prototype.reduce = function (callbackFn, initialValue) { };
 
 /**
  * @template U
- * @param {function((T|U),T,!ReadSignal<number>): U} callbackFn 
+ * @param {function((T|U),T,number): U} callbackFn
  * @param {U=} initialValue 
- * @returns {!SignalCollection<U>}
+ * @returns {!ReadSignal<U>}
  */
 SignalCollection.prototype.reduceRight = function (callbackFn, initialValue) { };
 
 /**
- * @returns {!SignalCollection<T>}
+ * @returns {!SignalEnumerable<T>}
  */
 SignalCollection.prototype.reverse = function () { };
 
 /**
  * @param {number=} start
  * @param {number=} end
- * @returns {!SignalCollection<T>}
+ * @returns {!SignalEnumerable<T>}
  */
 SignalCollection.prototype.slice = function (start, end) { };
 
 /**
  * 
- * @param {function(T,!ReadSignal<number>): boolean} callbackFn
- * @returns {!Signal<boolean>} 
+ * @param {function(T,number): boolean} callbackFn
+ * @returns {!ReadSignal<boolean>} 
  */
 SignalCollection.prototype.some = function (callbackFn) { };
 
@@ -366,7 +366,7 @@ export var Opts = {
     NoSend: 512,
     Respond: 1024,
     Compare: 2048,
-    Error: 4096,
+    ReceiveMany: 4096
 };
 
 /**
@@ -490,6 +490,12 @@ Receive.prototype._source1;
  * @type {number}
  */
 Receive.prototype._source1slot;
+
+/**
+ * 
+ * @returns {void}
+ */
+Receive.prototype._unmount = function () { };
 
 /**
  * @protected
@@ -984,8 +990,7 @@ function disposeSender(send) {
             removeSender(nodes.pop(), nodeslots.pop());
         }
     }
-    send._value =
-        send._owner =
+    send._owner =
         send._eq =
         send._nodes =
         send._nodeslots = null;
@@ -1276,10 +1281,12 @@ setValProto(
  * @protected
  * @override
  * @this {!Data<T>}
+ * @param {number} time
  */
-Data.prototype._dispose = function () {
+Data.prototype._dispose = function (time) {
     disposeSender(this);
-    this._pending = void 0;
+    this._value = 
+        this._pending = null;
 };
 
 /**
@@ -1321,13 +1328,22 @@ function Receiver() {
 
 /**
  * @protected
- * @param {!Receive} receive 
+ * @param {!Receive|!ReceiveMany} receive 
  * @param {number} slot
  */
 function removeSender(receive, slot) {
-    if ((receive._opt & Opts.DisposeFlags) === 0) {
+    /** @const {number} */
+    var opt = receive._opt;
+    if ((opt & Opts.DisposeFlags) === 0) {
+        /** @type {boolean} */
+        var orphan;
         if (slot === -1) {
             receive._source1 = null;
+            orphan = (
+                (opt & Opts.ReceiveMany) === 0 ||
+                /** @type {ReceiveMany} */(receive)._sources === null ||
+                /** @type {ReceiveMany} */(receive)._sources.length === 0
+            );
         } else {
             /** @const {?Array<!Send>} */
             var sources = /** @type {ReceiveMany} */(receive)._sources;
@@ -1337,7 +1353,9 @@ function removeSender(receive, slot) {
             var last = sources.pop();
             /** @const {number} */
             var lastslot = sourceslots.pop();
-            if (slot !== sources.length) {
+            /** @const {number} */
+            var ln = sources.length;
+            if (slot !== ln) {
                 sources[slot] = last;
                 sourceslots[slot] = lastslot;
                 if (lastslot === -1) {
@@ -1346,6 +1364,10 @@ function removeSender(receive, slot) {
                     last._nodeslots[lastslot] = slot;
                 }
             }
+            orphan = ln === 1 && receive._source1 === null;
+        }
+        if (orphan) {
+            receive._unmount();
         }
     }
 }
@@ -1371,7 +1393,7 @@ function Computation(fn, value, opt, eq) {
     /** @const {boolean} */
     var listen = LISTEN;
     Root.call(this);
-    Sender.call(this, owner, opt, value, eq);
+    Sender.call(this, owner, Opts.ReceiveMany | opt, value, eq);
     Receiver.call(this);
     if ((opt & Opts.NoSend) === 0) {
         if (eq === null) {
@@ -1611,11 +1633,9 @@ Computation.prototype._addChild = function (child) {
  */
 Computation.prototype._dispose = function (time) {
     disposeOwn.call(this, time);
-    disposeSender(this);
     removeSources(this);
-    this._fn =
-        this._sources =
-        this._sourceslots = null;
+    this._unmount();
+    this._value = null;
 };
 
 /**
@@ -1710,19 +1730,17 @@ Computation.prototype._clearMayDispose = function (time) {
         }
     }
     opt = this._opt &= ~Opts.MayUpdate;
-}
+};
 
 /**
  * @protected
- * @override
- * @param {number} time
- * @returns {void} 
+ * @returns {void}
  */
-Computation.prototype._clearMayUpdate = function (time) {
-    this._clearMayDispose(time);
-    if ((this._opt & Opts.Update) !== 0 && this._age === time) {
-        this._update(time);
-    }
+Computation.prototype._unmount = function() {
+    disposeSender(this);
+    this._fn =
+        this._sources =
+        this._sourceslots = null;
 };
 
 /**
@@ -1811,6 +1829,19 @@ Computation.prototype._recMayUpdate = function (time) {
     }
     if ((this._opt & Opts.Send) !== 0) {
         sendMayUpdate(this, time);
+    }
+};
+
+/**
+ * @protected
+ * @override
+ * @param {number} time
+ * @returns {void} 
+ */
+Computation.prototype._clearMayUpdate = function (time) {
+    this._clearMayDispose(time);
+    if ((this._opt & Opts.Update) !== 0 && this._age === time) {
+        this._update(time);
     }
 };
 
@@ -2053,43 +2084,43 @@ Collection.prototype._nodeslots;
 /* __EXCLUDE__ */
 
 /**
- * @param {function(T,!ReadSignal<number>): boolean} callbackFn
+ * @param {function(T,number): boolean} callbackFn
  * @returns {!ReadSignal<boolean>}
  */
 Collection.prototype.every = function (callbackFn) { };
 
 /**
- * @param {function(T,!ReadSignal<number>): boolean} callbackFn
- * @returns {!SignalCollection<T>}
+ * @param {function(T,number): boolean} callbackFn
+ * @returns {!SignalEnumerable<T>}
  */
 Collection.prototype.filter = function (callbackFn) { };
 
 /**
- * @param {function(T,!ReadSignal<number>): boolean} callbackFn
+ * @param {function(T,number): boolean} callbackFn
  * @returns {!ReadSignal<T|undefined>}
  */
 Collection.prototype.find = function (callbackFn) { };
 
 /**
- * @param {function(T,!ReadSignal<number>): boolean} callbackFn
+ * @param {function(T,number): boolean} callbackFn
  * @returns {!ReadSignal<number>}
  */
 Collection.prototype.findIndex = function (callbackFn) { };
 
 /**
- * @param {function(T,!ReadSignal<number>): boolean} callbackFn
+ * @param {function(T,number): boolean} callbackFn
  * @returns {!ReadSignal<T|undefined>}
  */
 Collection.prototype.findLast = function (callbackFn) { };
 
 /**
- * @param {function(T,!ReadSignal<number>): boolean} callbackFn
+ * @param {function(T,number): boolean} callbackFn
  * @returns {!ReadSignal<number>}
  */
 Collection.prototype.findLastIndex = function (callbackFn) { };
 
 /**
- * @param {function(T): void} callbackFn
+ * @param {function(T,number): void} callbackFn
  * @returns {void} 
  */
 Collection.prototype.forEach = function (callbackFn) { };
@@ -2126,42 +2157,42 @@ Collection.prototype.lastIndexOf = function (searchElement, fromIndex) { };
 /**
  * @template U
  * @param {function(T,!ReadSignal<number>): U} callbackFn
- * @returns {!SignalCollection<U>}
+ * @returns {!SignalEnumerable<U>}
  */
 Collection.prototype.map = function (callbackFn) { };
 
 /**
  * @template U
- * @param {function((T|U),T,!ReadSignal<number>): U} callbackFn 
+ * @param {function((T|U),T,number): U} callbackFn 
  * @param {U=} initialValue 
- * @returns {!SignalCollection<U>}
+ * @returns {!ReadSignal<U>}
  */
 Collection.prototype.reduce = function (callbackFn, initialValue) { };
 
 /**
  * @template U
- * @param {function((T|U),T,!ReadSignal<number>): U} callbackFn 
+ * @param {function((T|U),T,number): U} callbackFn 
  * @param {U=} initialValue 
- * @returns {!SignalCollection<U>}
+ * @returns {!ReadSignal<U>}
  */
 Collection.prototype.reduceRight = function (callbackFn, initialValue) { };
 
 /**
- * @returns {!SignalCollection<T>}
+ * @returns {!SignalEnumerable<T>}
  */
 Collection.prototype.reverse = function () { };
 
 /**
  * @param {number=} start
  * @param {number=} end
- * @returns {!SignalCollection<T>}
+ * @returns {!SignalEnumerable<T>}
  */
 Collection.prototype.slice = function (start, end) { };
 
 /**
  * 
- * @param {function(T,!ReadSignal<number>): boolean} callbackFn
- * @returns {!Signal<boolean>} 
+ * @param {function(T,number): boolean} callbackFn
+ * @returns {!ReadSignal<boolean>} 
  */
 Collection.prototype.some = function (callbackFn) { };
 
@@ -2174,7 +2205,7 @@ Collection.prototype.some = function (callbackFn) { };
  * @implements {ReadSignal<!Array<T>>}
  * @implements {Receive<!Array<T>>}
  * @param {!Send<!Array>} src
- * @param {function(T,ReadSignal<number>): U} fn
+ * @param {function(T,!ReadSignal<number>): U} fn
  */
 function Enumerable(src, fn) {
     Sender.call(this, OWNER, 0, []);
@@ -2212,7 +2243,7 @@ Enumerable.prototype._value;
 
 /**
  * @protected
- * @type {(function(T,T): boolean)|null|undefined}
+ * @type {(function(T,T): boolean)|null|void}
  */
 Enumerable.prototype._eq;
 
@@ -2303,6 +2334,14 @@ Enumerable.prototype._recMayDispose = function (time) {
 
 /**
  * @protected
+ * @returns {void}
+ */
+Enumerable.prototype._unmount = function() {
+
+};
+
+/**
+ * @protected
  * @override
  * @this {!Enumerable<T>}
  * @param {number} time 
@@ -2325,6 +2364,15 @@ Enumerable.prototype._recUpdate = function (time) {
  * @param {number} time 
  */
 Enumerable.prototype._recMayUpdate = function (time) {
+
+};
+
+/**
+ * @protected
+ * @param {number} time
+ * @returns {void} 
+ */
+Enumerable.prototype._clearMayUpdate = function (time) {
 
 };
 
@@ -2365,7 +2413,7 @@ DataArray.prototype._value;
 
 /**
  * @protected
- * @type {(function(T,T): boolean)|null|undefined}
+ * @type {(function(T,T): boolean)|null|void}
  */
 DataArray.prototype._eq;
 
