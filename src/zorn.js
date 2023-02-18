@@ -280,12 +280,6 @@ Dispose.prototype._opt;
 
 /**
  * @protected
- * @type {number}
- */
-Dispose.prototype._age;
-
-/**
- * @protected
  * @param {number} time
  * @returns {void}
  */
@@ -661,7 +655,9 @@ function dispose(node) {
         if (STAGE === Stage.Idle) {
             node._dispose(TIME);
         } else {
-            node._recDispose(TIME);
+            // Schedule disposal for next batch
+            node._opt |= Opts.Dispose;
+            DISPOSES._add(node);
         }
     }
 }
@@ -784,9 +780,7 @@ function Disposer() { }
  * @returns {void}
  */
 Disposer.prototype._recDispose = function (time) {
-    this._age = time;
     this._opt = Opts.Dispose;
-    DISPOSES._add(this);
 };
 
 /**
@@ -826,11 +820,6 @@ function Root() {
      * @type {number}
      */
     this._opt = 0;
-    /**
-     * @protected
-     * @type {number}
-     */
-    this._age = 0;
     /**
      * @protected
      * @type {?Array<!Child>}
@@ -1762,6 +1751,14 @@ Computation.prototype._update = function (time) {
     LISTEN = false;
     /** @const {number} */
     var opt = this._opt;
+    /** @const {?Array<!Child>} */
+    var owned = this._owned;
+    if (owned !== null && (ln = owned.length) !== 0) {
+        for (i = 0; i < ln; i++) {
+            owned[i]._dispose(time);
+        }
+        owned.length = 0;
+    }
     /** @const {?Array<Cleanup>} */
     var cleanups = this._cleanups;
     if (cleanups !== null && (ln = cleanups.length) !== 0) {
@@ -2014,9 +2011,6 @@ function start() {
         }
         if (changes._count !== 0) {
             errors += changes._run(time);
-        }
-        if (disposes._count !== 0) {
-            errors += disposes._run(time);
         }
         if (computes._count !== 0) {
             errors += computes._run(time);
