@@ -41,24 +41,6 @@ describe("when", function () {
         assert.equal(count, 3);
     });
 
-    it("provides source val as fourth argument", function() {
-        var d1 = value(1);
-        effectWhen(d1, function(a, b, c, sourceVal) {
-            assert.equal(d1.val, sourceVal);
-        });
-        d1.val++;
-    });
-
-    it("provides source val as fourth argument when using an array of dependencies", function() {
-        var d1 = value(1);
-        var d2 = value(1);
-        effectWhen([d1, d2], function(a, b, c, sourceVal) {
-            assert.equal(d1.val, sourceVal[0]);
-            assert.equal(d2.val, sourceVal[1]);
-        });
-        d1.val++;
-    });
-
     it("does not evaluate source val when not used", function() {
         var d1 = value(1);
         effectWhen(d1, function() {
