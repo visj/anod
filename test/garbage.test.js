@@ -18,7 +18,7 @@ if (globalThis.gc) {
 
         it("should not be collected when referenced", function (done) {
             var d1 = value(1);
-            var ref = new WeakRef(effect(function () {
+            var ref = new WeakRef(compute(function () {
                 d1.val;
             }));
             collect(function () {
@@ -29,7 +29,7 @@ if (globalThis.gc) {
 
         it("should be collected when disposed", function (done) {
             var d1 = value(1);
-            var ref = new WeakRef(effect(function () {
+            var ref = new WeakRef(compute(function () {
                 d1.val;
             }));
             dispose(d1);

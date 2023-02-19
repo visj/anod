@@ -1,11 +1,9 @@
 import assert from 'assert';
-import { root, effect, compute, value, dispose } from './helper/zorn.js';
+import { root, batch, effect, $effect, compute, value, dispose } from './helper/zorn.js';
 
 describe("dispose", function () {
 
 	describe("root", function () {
-
-
 		it("disables updates and sets computation's value to undefined", function () {
 			var c, d, f;
 			root(function (teardown) {
@@ -127,7 +125,7 @@ describe("dispose", function () {
 							dispose(c1);
 						}
 					});
-					effect(function() {
+					effect(function () {
 						count += c1.val;
 					});
 				});
@@ -150,7 +148,7 @@ describe("dispose", function () {
 							dispose(c1);
 						}
 					});
-					effect(function() {
+					effect(function () {
 						count += c1.val;
 					});
 				});
@@ -159,6 +157,34 @@ describe("dispose", function () {
 				assert.equal(count, 1);
 			});
 		});
-
 	});
+
+	describe("unmount", function () {
+
+		it("does not unmount pending computations with changing dependencies", function () {
+			var d1 = value(true);
+			var d2 = value(0);
+			var d3 = value(0);
+			var count = 0;
+			effect(function () {
+				if (!d1.val) {
+					dispose(d1);
+					dispose(d2);
+					d3.val++;
+				}
+			});
+			$effect(function () {
+				count++;
+				if (d1.val) {
+					d2.val;
+				} else {
+					d3.val;
+				}
+			});
+			count = 0;
+			d1.val = false;
+			assert.equal(count, 2);
+		});
+	});
+
 });

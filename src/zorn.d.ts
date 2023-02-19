@@ -8,13 +8,17 @@ export class Signal<T = any> extends ReadSignal<T> {
     set val(val: T): T;
 }
 
+type Source = ReadSignal | ReadSignal[] | readonly ReadSignal[];
+
+export type DisposeFn = () => void;
+
 export type RecoverFn = (err: any) => void;
 
 export type CleanupFn = (final: boolean) => void;
 
 export type Compare<T> = ((a: T, b: T) => boolean) | null;
 
-export function root<T>(callback: (teardown: () => void) => T): T;
+export function root<T>(callback: (disposeFn: DisposeFn) => T): T;
 
 export function data<T>(value: T): Signal<T>;
 
@@ -22,13 +26,53 @@ export function value<T>(value: T, eq?: Compare<T>): Signal<T>;
 
 export function array<T>(items?: T[], eq?: Compare<T>): SignalArray<T>;
 
-export function compute<T>(callback: (seed: T) => T, seed?: T, compareFn?: Compare<T>): Readonly<Signal<T>>;
+export function compute<T>(callback: () => T): ReadSignal<T>;
 
-export function $compute<T>(callback: (seed: T) => T, seed?: T, compareFn?: Compare<T>): Readonly<Signal<T>>;
+export function compute<T>(callback: (seed: T, dispose: DisposeFn) => T, seed: T, compareFn?: Compare<T>): ReadSignal<T>;
 
-export function effect<T>(callback: (seed: T) => T, seed?: T): Readonly<Signal<T>>;
+export function compute<T,U>(callback: (seed: T, dispose: DisposeFn, args: U) => T, seed: T, compareFn: Compare<T>, args: U): ReadSignal<T>;
 
-export function $effect<T>(callback: (seed: T) => T, seed?: T): Readonly<Signal<T>>;
+export function compute<T,U>(callback: (seed: T, dispose: DisposeFn, args: U) => T, seed?: T, compareFn?: Compare<T>, args?: U): ReadSignal<T>;
+
+export function $compute<T>(callback: () => T): ReadSignal<T>;
+
+export function $compute<T>(callback: (seed: T, dispose: DisposeFn) => T, seed: T, compareFn?: Compare<T>): ReadSignal<T>;
+
+export function $compute<T,U>(callback: (seed: T, dispose: DisposeFn, args: U) => T, seed: T, compareFn: Compare<T>, args: U): ReadSignal<T>;
+
+export function $compute<T,U>(callback: (seed: T, dispose: DisposeFn, args: U) => T, seed?: T, compareFn?: Compare<T>, args?: U): ReadSignal<T>;
+
+export function computeWhen<T>(src: Source, callback: () => T): ReadSignal<T>;
+
+export function computeWhen<T>(src: Source, callback: (seed: T, dispose: DisposeFn) => T, seed: T, compareFn?: Compare<T>, defer?: boolean): ReadSignal<T>;
+
+export function computeWhen<T,U>(src: Source, callback: (seed: T, dispose: DisposeFn, args: U) => T, seed: T, compareFn: Compare<T>, defer: boolean, args: U): ReadSignal<T>;
+
+export function computeWhen<T,U>(src: Source, callback: (seed: T, dispose: DisposeFn, args: U) => T, seed?: T, compareFn?: Compare<T>, defer?: boolean, args?: U): ReadSignal<T>;
+
+export function effect<T>(callback: () => T): T;
+
+export function effect<T>(callback: (seed: T, dispose: DisposeFn) => T, seed: T): T;
+
+export function effect<T,U>(callback: (seed: T, dispose: DisposeFn, args: U) => T, seed: T, args: U): T;
+
+export function effect<T,U>(callback: (seed: T, dispose: DisposeFn, args: U) => T, seed?: T, args?: U): T;
+
+export function $effect<T>(callback: () => T): T;
+
+export function $effect<T>(callback: (seed: T, dispose: DisposeFn) => T, seed: T): T;
+
+export function $effect<T,U>(callback: (seed: T, dispose: DisposeFn, args: U) => T, seed: T, args: U): T;
+
+export function $effect<T,U>(callback: (seed: T, dispose: DisposeFn, args: U) => T, seed?: T, args?: U): T;
+
+export function effectWhen<T>(src: Source, callback: () => T): T;
+
+export function effectWhen<T>(src: Source, callback: (seed: T, dispose: DisposeFn) => T, seed: T, defer?: boolean): T;
+
+export function effectWhen<T,U>(src: Source, callback: (seed: T, dispose: DisposeFn, args: U) => T, seed: T, defer: boolean, args: U): T;
+
+export function effectWhen<T,U>(src: Source, callback: (seed: T, dispose: DisposeFn, args: U) => T, seed?: T, defer?: boolean, args?: U): T;
 
 export function cleanup(cleanupFn: CleanupFn): void;
 

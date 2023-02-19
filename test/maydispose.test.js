@@ -16,7 +16,7 @@ describe("may dispose", function () {
          * If d3 is created inside nested effect, it will be disposed 
          * when parent effect updates.
          */
-        var e1 = effect(function () {
+        var stop = effect(function (_, stop) {
           c1.val;
           effect(function () {
             var d3 = data(d1.peek);
@@ -32,6 +32,7 @@ describe("may dispose", function () {
               });
             });
           });
+          return stop;
         });
         count = 0;
         batch(function() {
@@ -39,7 +40,7 @@ describe("may dispose", function () {
           d2.val++;
         });
         assert.equal(count, 2);
-        dispose(e1);
+        stop();
         /*
          * In this example however, d3 is created inside parent,
          * so it will not be disposed when the effect updates.

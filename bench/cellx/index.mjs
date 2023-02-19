@@ -15,8 +15,8 @@ import Table from 'cli-table';
 import * as zorn from "../../dist/zorn.mjs";
 
 const BATCHED = true;
-const RUNS_PER_TIER = 50;
-const LAYER_TIERS = [10, 100, 500, 1000, 2000, 2500];
+const RUNS_PER_TIER = 10000;
+const LAYER_TIERS = [1, 2, 3, 4, 5, 10, 15, 20, 25, 50];
 
 function zero() {
   return 0;
@@ -48,20 +48,39 @@ const med = (array) => {
 
 function shuffleArray(array) {
   for (let i = array.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [array[i], array[j]] = [array[j], array[i]];
+    const j = Math.floor(Math.random() * (i + 1));
+    [array[i], array[j]] = [array[j], array[i]];
   }
   return array;
 }
 
-const SOLUTIONS = {
-  10: [2, 4, -2, -3],
-  100: [2, 2, 4, 2],
-  500: [-2, 1, -4, -4],
-  1000: [2, 2, 4, 2],
-  2000: [-2, 1, -4, -4],
-  2500: [2, 2, 4, 2],
-};
+const SOLUTIONS = [
+  [3, 2, 4, 2]
+  , [2, -1, 4, 4]
+  , [-1, -2, 3, 4]
+  , [-2, -4, 2, 3]
+  , [-4, -4, -1, 2]
+  , [2, 4, -2, -3]
+  , [-1, -2, 3, 4]
+  , [-2, 1, -4, -4]
+  , [3, 2, 4, 2]
+  , [2, -1, 4, 4]
+];
+
+const COMPUTED_SOLUTIONS = [
+  [3, 2, 4, 2]
+  ,[2, -1, 4, 4]
+  ,[-1, -2, 3, 4]
+  ,[3, -4, 2, 3]
+  ,[-4, 1, -1, 2]
+  ,[3, -2, -2, 3]
+  ,[1, -3, 3, 1]
+  ,[-2, 5, 1, -2]
+  ,[3, -2, -2, 3]
+  ,[-2, 5, 1, -2]
+]
+
+
 
 var rand = 0;
 
@@ -69,22 +88,27 @@ var rand = 0;
  * @param {number} layers
  * @param {number[]} answer
  */
-const isSolution = (layers, answer) => answer.every((_, i) => SOLUTIONS[layers][i] === _);
+const isSolution = (layers, answer) => {
+  return (
+    answer.every((_, i) => SOLUTIONS[LAYER_TIERS.indexOf(layers)][i] === _) ||
+    answer.every((_, i) => COMPUTED_SOLUTIONS[LAYER_TIERS.indexOf(layers)][i] === _)
+  );
+};
 
 async function main() {
   const report = {};
-  
+
+  report.solid = { fn: runSolid, runs: [] };
+  report.S = { fn: runS, runs: [] };
   report.maverick = { fn: runMaverick, runs: [], avg: [] };
   report['preact/signals'] = { fn: runPreact, runs: [] };
-  report.solid = { fn: runSolid, runs: [] };
   report.usignal = { fn: runUsignal, runs: [] };
-  report.S = { fn: runS, runs: [] };
   report.zorn = { fn: runZorn, runs: [] };
   // Has no way to dispose so can't consider it feature comparable.
   report.reactively = { fn: runReactively, runs: [], avg: [] };
   // These libraries are not comparable in terms of features.
   report.cellx = { fn: runCellx, runs: [] };
-  
+
   // warm up first
   for (const lib of Object.keys(report)) {
     const current = report[lib];
@@ -92,8 +116,8 @@ async function main() {
     for (let i = 0; i < LAYER_TIERS.length; i += 1) {
       let layers = LAYER_TIERS[i];
       const runs = [];
-      rand++;
       for (let j = 0; j < RUNS_PER_TIER; j += 1) {
+        rand = 0;
         runs.push(await start(current.fn, layers));
       }
       // Give cellx time to release its global pendingCells array
@@ -109,8 +133,8 @@ async function main() {
     for (let i = 0; i < LAYER_TIERS.length; i += 1) {
       let layers = LAYER_TIERS[i];
       const runs = [];
-      rand++;
       for (let j = 0; j < RUNS_PER_TIER; j += 1) {
+        rand = 0;
         runs.push(await start(current.fn, layers));
       }
       // Give cellx time to release its global pendingCells array
@@ -192,6 +216,7 @@ function runReactively(layers, done) {
       };
     })(layer);
   }
+  rand++;
 
   const startTime = performance.now();
 
@@ -238,6 +263,7 @@ function runMaverick(layers, done) {
         };
       })(layer);
     }
+    rand++;
 
     const startTime = performance.now();
 
@@ -292,6 +318,7 @@ function runS(layers, done) {
         };
       })(layer);
     }
+    rand++;
 
     const startTime = performance.now();
 
@@ -341,6 +368,7 @@ function runZorn(layers, done) {
         };
       })(layer);
     }
+    rand++;
 
     const startTime = performance.now();
 
@@ -395,6 +423,7 @@ function runSolid(layers, done) {
         return props;
       })(layer);
     }
+    rand++;
 
     const startTime = performance.now();
 
@@ -413,7 +442,6 @@ function runSolid(layers, done) {
 
     const solution = [end.a(), end.b(), end.c(), end.d()];
     const endTime = performance.now() - startTime;
-
     dispose();
     done(isSolution(layers, solution) ? endTime : -1);
   });
@@ -444,6 +472,7 @@ function runPreact(layers, done) {
       return props;
     })(layer);
   }
+  rand++;
 
   const startTime = performance.now();
 
@@ -496,6 +525,7 @@ function runCellx(layers, done) {
       return props;
     })(layer);
   }
+  rand++;
 
   const startTime = performance.now();
 
@@ -545,6 +575,7 @@ function runUsignal(layers, done) {
       return props;
     })(layer);
   }
+  rand++;
 
   const startTime = performance.now();
 
