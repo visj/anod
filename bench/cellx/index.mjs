@@ -61,15 +61,38 @@ const SOLUTIONS = [
 
 const COMPUTED_SOLUTIONS = [
   [3, 2, 4, 2]
-  ,[2, -1, 4, 4]
-  ,[-1, -2, 3, 4]
-  ,[3, -4, 2, 3]
-  ,[-4, 1, -1, 2]
-  ,[3, -2, -2, 3]
-  ,[1, -3, 3, 1]
-  ,[-2, 5, 1, -2]
-  ,[3, -2, -2, 3]
-  ,[-2, 5, 1, -2]
+  , [2, -1, 4, 4]
+  , [-1, -2, 3, 4]
+  , [3, -4, 2, 3]
+  , [-4, 1, -1, 2]
+  , [3, 4, -2, 3]
+  , [-1, -3, 3, 5]
+  , [-2, 7, 1, -4]
+  , [3, 2, 4, 3]
+  , [2, -1, 5, 4]
+  , [3, 2, 4, 2]
+  , [2, -1, 4, 4]
+  , [-1, -2, 3, 4]
+  , [3, -4, 2, 3]
+  , [-4, 1, -1, 2]
+  , [3, 4, -2, 3]
+  , [-1, -3, 3, 5]
+  , [-2, 7, 1, -4]
+  , [3, 2, 4, 3]
+  , [2, -1, 5, 4]
+]
+
+const COMPUTED_BATCH_SOLUTIONS = [
+  [3, 2, 4, 2]
+  , [2, -1, 4, 4]
+  , [-1, -2, 3, 4]
+  , [3, -4, 2, 3]
+  , [-4, 1, -1, 2]
+  , [3, -2, -2, 3]
+  , [1, -3, 3, 1]
+  , [-2, 5, 1, -2]
+  , [3, -2, -2, 3]
+  , [-2, 5, 1, -2]
 ]
 
 
@@ -81,9 +104,10 @@ var rand = 0;
  * @param {number[]} answer
  */
 const isSolution = (layers, answer) => {
-  return (
-    answer.every((_, i) => SOLUTIONS[LAYER_TIERS.indexOf(layers)][i] === _) ||
-    answer.every((_, i) => COMPUTED_SOLUTIONS[LAYER_TIERS.indexOf(layers)][i] === _)
+  return answer.every((_, i) => (
+    SOLUTIONS[LAYER_TIERS.indexOf(layers)][i] === _) ||
+    COMPUTED_SOLUTIONS[LAYER_TIERS.indexOf(layers)][i] === _ ||
+    COMPUTED_BATCH_SOLUTIONS[LAYER_TIERS.indexOf(layers)][i] === _
   );
 };
 

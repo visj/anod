@@ -386,15 +386,16 @@ export var Opts = {
      * MayDispose | MayUpdate | MayCleared
      */
     MayFlags: 224,
-    Send: 256,
-    SendMany: 512,
-    Receive: 1024,
-    ReceiveMany: 2048,
-    Respond: 4096,
-    Bound: 8192,
-    Defer: 16384,
-    Unmount: 32768,
-    Compare: 65536,
+    Own: 256,
+    Send: 512,
+    SendMany: 1024,
+    Receive: 2048,
+    ReceiveMany: 4096,
+    Respond: 8192,
+    Bound: 16384,
+    Defer: 32768,
+    Unmount: 65536,
+    Compare: 131072,
 };
 
 /**
@@ -423,28 +424,17 @@ export var Mutation = {
     PushRange: 5,
     Shift: 6,
     Unshift: 7,
-    Remove: 8,
-    RemoveRange: 9,
-    Insert: 10,
-    InsertRange: 11,
-    Replace: 12,
-    ReplaceRange: 13,
-    Splice: 14,
-    Reverse: 15,
-    Sort: 16,
-    Custom: 17,
-};
-
-/**
- * @const
- * @enum {number}
- */
-export var Args = {
-    Source: 0,
-    Changed: 1,
-    Mutation: 2,
-    MutationArgs: 3,
-    FunctionArgs: 4
+    UnshiftRange: 8,
+    Remove: 9,
+    RemoveRange: 10,
+    Insert: 11,
+    InsertRange: 12,
+    Replace: 13,
+    ReplaceRange: 14,
+    ReplaceInsert: 15,
+    Reverse: 16,
+    Sort: 17,
+    Custom: 18,
 };
 
 /**
@@ -456,7 +446,7 @@ function Child() { }
 
 /**
  * @protected
- * @type {?Own}
+ * @type {?Receive}
  */
 Child.prototype._owner;
 
@@ -469,11 +459,26 @@ Child.prototype._recDispose = function (time) { };
 
 /**
  * @protected
- * @param {!Own} Own
+ * @param {!Receive} owner
  * @param {number} time
  * @returns {void}
  */
-Child.prototype._recMayDispose = function (Own, time) { };
+Child.prototype._recMayDispose = function (owner, time) { };
+
+/**
+ * @protected
+ * @param {number} time
+ * @returns {void}
+ */
+Child.prototype._update = function (time) { };
+
+/**
+ * @protected
+ * @param {number} stage
+ * @param {number} time
+ * @returns {void} 
+ */
+Child.prototype._clearMayUpdate = function (stage, time) { };
 
 /**
  * @protected
@@ -525,21 +530,6 @@ Send.prototype._nodes;
  * @type {?Array<number>}
  */
 Send.prototype._nodeslots;
-
-/**
- * @protected
- * @param {number} time
- * @returns {void}
- */
-Send.prototype._update = function (time) { };
-
-/**
- * @protected
- * @param {number} stage
- * @param {number} time
- * @returns {void} 
- */
-Send.prototype._clearMayUpdate = function (stage, time) { };
 
 /**
  * @protected
@@ -1008,7 +998,7 @@ function makeReactive(
      */
     function ctor() { };
     /** @const {Reactive} */
-    var base = ctor.prototype = {} ;// new /** @type {?} */(Reactive)();
+    var base = ctor.prototype = {};// new /** @type {?} */(Reactive)();
     for (var /** number */ i = 0; i < inherits.length; i++) {
         /** @const {!Object} */
         var proto = inherits[i].prototype;
@@ -1239,6 +1229,7 @@ Root.prototype._dispose = function (time) {
  * @returns {void}
  */
 Root.prototype._addChild = function (child) {
+    this._opt |= Opts.Own;
     if (this._children === null) {
         this._children = [child];
     } else {
@@ -1438,7 +1429,7 @@ function sendMayUpdate(send, time) {
 
 /**
  * @protected
- * @param {!Array<!Child>} children 
+ * @param {Array<!Child>} children 
  * @param {number} time
  */
 function sendDispose(children, time) {
@@ -1455,8 +1446,8 @@ function sendDispose(children, time) {
 
 /**
  * @protected
- * @param {!Own} owner
- * @param {!Array<!Child>} children 
+ * @param {!Receive} owner
+ * @param {Array<!Child>} children 
  * @param {number} time
  */
 function sendMayDispose(owner, children, time) {
@@ -1510,7 +1501,7 @@ Reactive.prototype._dispose;
 
 /**
  * @protected
- * @type {?Own}
+ * @type {?Receive}
  */
 Reactive.prototype._owner;
 
@@ -1523,13 +1514,28 @@ Reactive.prototype._recDispose;
 
 /**
  * @protected
- * @param {!Own} Own
+ * @param {!Receive} Own
  * @param {number} time
  * @returns {void}
  */
 Reactive.prototype._recMayDispose;
 
+/**
+ * @protected
+ * @param {number} time
+ * @returns {void}
+ */
+Reactive.prototype._update;
+
 /* __EXCLUDE__ */
+
+/**
+ * @protected
+ * @param {number} stage
+ * @param {number} time 
+ * @returns {void}
+ */
+Reactive.prototype._clearMayUpdate = function(stage, time) { };
 
 /**
  * @struct
@@ -1557,7 +1563,7 @@ function Data(opt, set, value, eq) {
     this._value = value;
     /**
      * @protected
-     * @type {?Own}
+     * @type {?Receive}
      */
     this._owner = null;
     /**
@@ -1635,7 +1641,7 @@ function setData(value) {
                     throw new Error();
                 }
                 this._opt |= Opts.MayCleared;
-                /** @type {Receive} */(this._owner)._clearMayUpdate(stage, time);
+                this._owner._clearMayUpdate(stage, time);
                 this._opt &= ~(Opts.MayFlags);
                 if ((this._opt & Opts.DisposeFlags) !== 0) {
                     break set;
@@ -1661,39 +1667,6 @@ makeReactive(Data, [], peekVal, getData, setData);
 
 /**
  * @protected
- * @this {!Data<T>}
- * @param {number} time
- * @returns {void}
- */
-Data.prototype._recDispose = function (time) {
-    this._opt = Opts.Dispose;
-};
-
-/**
- * @protected
- * @this {!Data<T>}
- * @param {!Own} owner
- * @param {number} time
- * @returns {void}
- */
-Data.prototype._recMayDispose = function (owner, time) {
-    this._opt |= Opts.MayDispose;
-    if (this._owner === null) {
-        this._owner = owner;
-    }
-};
-
-/**
- * @protected
- * @this {!Data<T>}
- * @param {number} stage
- * @param {number} time
- * @returns {void}
- */
-Data.prototype._clearMayUpdate = function (stage, time) { };
-
-/**
- * @protected
  * @override
  * @this {!Data<T>}
  * @param {number} time
@@ -1706,10 +1679,20 @@ Data.prototype._dispose = function (time) {
 
 /**
  * @protected
- * @override
  * @this {!Data<T>}
- * @param {!Own} owner 
- * @param {number} time 
+ * @param {number} time
+ * @returns {void}
+ */
+Data.prototype._recDispose = function (time) {
+    this._opt = Opts.Dispose;
+};
+
+/**
+ * @protected
+ * @this {!Data<T>}
+ * @param {!Receive} owner
+ * @param {number} time
+ * @returns {void}
  */
 Data.prototype._recMayDispose = function (owner, time) {
     this._opt |= Opts.MayDispose;
@@ -1799,7 +1782,7 @@ function Computation(fn, value, opt, args, eq, src) {
      */
     this._args = args;
     if ((opt & Opts.Defer) === 0) {
-        startCompute(this, args, /** @type {Source} */(src));
+        startCompute(this, true, this, args, /** @type {Source} */(src));
     } else {
         this._opt &= ~Opts.Defer;
         initSource(this, /** @type {Source} */(src));
@@ -1829,19 +1812,21 @@ makeReactive(Computation, [Root, Data], peekVal, getComputation);
 
 /**
  * @template T,U
- * @param {Receive} node 
+ * @param {Own} owner
+ * @param {boolean} listen
+ * @param {Receive<T,U>} node 
  * @param {U=} args
  * @param {Source=} src
  */
-function startCompute(node, args, src) {
+function startCompute(owner, listen, node, args, src) {
     /** @const {?Own} */
-    var owner = OWNER;
+    var _owner = OWNER;
     /** @const {boolean} */
-    var listen = LISTEN;
+    var _listen = LISTEN;
     /** @const {number} */
     var opt = node._opt;
-    OWNER = /** @type {Own} */(node);
-    LISTEN = true;
+    OWNER = owner;
+    LISTEN = listen;
     if (STAGE === Stage.Idle) {
         reset();
         STAGE = Stage.Started;
@@ -1864,8 +1849,8 @@ function startCompute(node, args, src) {
         }
         node._value = node._set(node._value, /** @type {U} */(args));
     }
-    OWNER = owner;
-    LISTEN = listen;
+    OWNER = _owner;
+    LISTEN = _listen;
 }
 
 /**
@@ -1999,7 +1984,7 @@ Computation.prototype._recDispose = function (time) {
      * If age is current, then this computation has already been
      * flagged for update and been enqueued in COMPUTES or RESPONDS.
      */
-    if (this._children !== null && (opt & Opts.MayUpdate) === 0) {
+    if ((opt & (Opts.MayUpdate | Opts.Own)) === Opts.Own) {
         sendDispose(this._children, time);
     }
 };
@@ -2008,7 +1993,7 @@ Computation.prototype._recDispose = function (time) {
  * @protected
  * @override
  * @this {!Computation<T>}
- * @param {!Own} owner
+ * @param {!Receive} owner
  * @param {number} time
  * @returns {void}
  */
@@ -2019,7 +2004,7 @@ Computation.prototype._recMayDispose = function (owner, time) {
     if (this._owner === null) {
         this._owner = owner;
     }
-    if (this._children !== null && (opt & Opts.MayUpdate) === 0) {
+    if ((opt & (Opts.MayUpdate | Opts.Own)) === Opts.Own) {
         sendMayDispose(this, this._children, time);
     }
 };
@@ -2046,11 +2031,12 @@ Computation.prototype._update = function (time) {
     var opt = this._opt;
     /** @const {?Array<!Child>} */
     var children = this._children;
-    if (children !== null && (ln = children.length) !== 0) {
-        for (i = 0; i < ln; i++) {
+    if ((opt & Opts.Own) !== 0) {
+        for (i = 0, ln = children.length; i < ln; i++) {
             children[i]._dispose(time);
         }
         children.length = 0;
+        this._opt &= ~Opts.Own;
     }
     /** @const {?Array<CleanupFn>} */
     var cleanups = this._cleanups;
@@ -2096,7 +2082,7 @@ Computation.prototype._recUpdate = function (time) {
     var opt = this._opt;
     this._age = time;
     this._opt |= Opts.Update;
-    if (this._children !== null) {
+    if ((opt & Opts.Own) !== 0) {
         sendDispose(this._children, time);
     }
     if ((opt & (Opts.Send | Opts.Respond)) === Opts.Send) {
@@ -2122,7 +2108,7 @@ Computation.prototype._recMayUpdate = function (time) {
     /** @const {number} */
     var opt = this._opt;
     this._opt = (opt | Opts.MayUpdate) & ~Opts.MayCleared;
-    if (this._children !== null && (opt & Opts.MayDispose) === 0) {
+    if ((opt & (Opts.MayDispose | Opts.Own)) === Opts.Own) {
         sendMayDispose(this, this._children, time);
     }
     if ((opt & Opts.Send) !== 0) {
@@ -2146,7 +2132,7 @@ Computation.prototype._clearMayUpdate = function (stage, time) {
         }
         this._opt |= Opts.MayCleared;
         if ((this._opt & Opts.MayDispose) !== 0) {
-            /** @type {Receive} */(this._owner)._clearMayUpdate(stage, time);
+            this._owner._clearMayUpdate(stage, time);
             this._opt &= ~Opts.MayDispose;
         }
         if ((this._opt & (Opts.DisposeFlags | Opts.MayUpdate)) === Opts.MayUpdate) {
@@ -2245,6 +2231,18 @@ Collection.prototype.length;
  * @type {?ReadSignal<number>}
  */
 Collection.prototype._length;
+
+/**
+ * @const
+ * @enum {number}
+ */
+export var Args = {
+    Source: 0,
+    Changed: 1,
+    Mutation: 2,
+    MutationArgs: 3,
+    FunctionArgs: 4
+};
 
 /**
  * This array holds state used for collection methods.
@@ -2521,71 +2519,54 @@ makeReactive(DataArray, [Data, Collection], peekVal, getData, setData, getLength
  * @param {number} time
  */
 DataArray.prototype._update = function (time) {
-    /** @type {number} */
-    var ln = this._value.length;
-    /** @const @type {!Array<T>} */
-    var current = this._value;
     /** @const {!Array} */
     var args = this._args;
     /** @const {number} */
     var mut = args[Args.Mutation];
-    /** @type {T|!Array<T>|number|void} */
-    var mutArgs = args[Args.MutationArgs];
-    /** @type {Array<T>} */
-    var items;
-    switch (mut) {
-        case Mutation.Set:
-            this._value = this._set;
-            break;
-        case Mutation.Length:
-            current.length = mutArgs;
-            break;
-        case Mutation.Pop:
-        case Mutation.PopRange:
-            current.length -= mutArgs;
-            break;
-        case Mutation.Push:
-            current[ln] = mutArgs;
-            break;
-        case Mutation.PushRange:
-            // todo
-            break;
-        case Mutation.Shift:
-            current.shift();
-            break;
-        case Mutation.Unshift:
-            current.unshift(mutArgs);
-            break;
-        case Mutation.Insert:
-            current.splice(mutArgs[0], 0, mutArgs[1]);
-            break;
-        case Mutation.Remove:
-        case Mutation.RemoveRange:
-            current.splice(mutArgs[0], mutArgs[1]);
-            break;
-        case Mutation.InsertRange:
-            // todo
-            break;
-        case Mutation.Replace:
-            current[mutArgs[0]] = mutArgs[1];
-            break;
-        case Mutation.ReplaceRange:
-            items = mutArgs[1];
-            for (var i = mutArgs[0], j = 0; j < items.length; i++, j++) {
-                current[i] = items[j];
-            }
-            break;
-        case Mutation.Splice:
-            current.splice.apply(current, mutArgs);
-            break;
-        case Mutation.Reverse:
-            current.reverse();
-            break;
-        case Mutation.Sort:
-            current.sort(mutArgs);
-            break;
-        case Mutation.Custom:
-        // todo
+    if (mut === Mutation.Set) {
+        this._value = this._set;
+    } else {
+        /** @const {T|!Array<T>|number|void} */
+        var mutArgs = args[Args.MutationArgs];
+        /** @const @type {!Array<T>} */
+        var current = this._value;
+        /** @const {number} */
+        var ln = current.length;
+        switch (mut) {
+            case Mutation.Length:
+                current.length = mutArgs;
+                break;
+            case Mutation.Replace:
+                current[mutArgs[0]] = mutArgs[1];
+                break;
+            case Mutation.Pop:
+            case Mutation.PopRange:
+                current.length -= mutArgs;
+                break;
+            case Mutation.Push:
+                current[ln] = mutArgs;
+                break;
+            case Mutation.PushRange:
+                current.push.apply(current, mutArgs);
+                break;
+            case Mutation.Shift:
+                current.shift();
+                break;
+            case Mutation.Unshift:
+                current.unshift(mutArgs);
+                break;
+            case Mutation.Reverse:
+                current.reverse();
+                break;
+            case Mutation.Sort:
+                current.sort(mutArgs);
+                break;
+            case Mutation.Custom:
+                // todo
+                break;
+            default:
+                current.splice.apply(current, mutArgs);
+        }
     }
     this._set = NIL;
     this._opt &= ~(Opts.Update | Opts.MayFlags);
@@ -2608,7 +2589,7 @@ function mutate(node, mutation, args) {
     }
     node._args[Args.Mutation] = mutation;
     node._args[Args.MutationArgs] = args;
-    node.val = MUT;
+    setData.call(node, MUT);
 }
 
 /**
@@ -2618,7 +2599,7 @@ function mutate(node, mutation, args) {
  * @returns {void}
  */
 DataArray.prototype.pop = function () {
-    if (STAGE !== Stage.Idle || this._value.length !== 0) {
+    if (this._value.length !== 0 || STAGE !== Stage.Idle) {
         mutate(this, Mutation.Pop);
     }
 };
@@ -2636,8 +2617,11 @@ DataArray.prototype.push = function (elementN) {
     if (ln === 1) {
         mutate(this, Mutation.Push, elementN);
     } else {
+        /** @type {number} */
+        var i = 0;
+        /** @type {!Array<T|number>} */
         var args = new Array(ln);
-        for (var i = 0; i < ln; i++) {
+        for (; i < ln; i++) {
             args[i] = arguments[i];
         }
         mutate(this, Mutation.PushRange, args);
@@ -2650,7 +2634,7 @@ DataArray.prototype.push = function (elementN) {
  * @returns {void}
  */
 DataArray.prototype.reverse = function () {
-    if (STAGE !== Stage.Idle || this._value.length !== 0) {
+    if (this._value.length !== 0 || STAGE !== Stage.Idle) {
         mutate(this, Mutation.Reverse);
     }
 };
@@ -2662,7 +2646,7 @@ DataArray.prototype.reverse = function () {
  * @returns {void}
  */
 DataArray.prototype.shift = function () {
-    if (STAGE !== Stage.Idle || this._value.length !== 0) {
+    if (this._value.length !== 0 || STAGE !== Stage.Idle) {
         mutate(this, Mutation.Shift);
     }
 };
@@ -2675,7 +2659,7 @@ DataArray.prototype.shift = function () {
  * @returns {void}
  */
 DataArray.prototype.sort = function (compareFn) {
-    if (STAGE !== Stage.Idle || this._value.length !== 0) {
+    if (this._value.length !== 0 || STAGE !== Stage.Idle) {
         mutate(this, Mutation.Sort, compareFn);
     }
 };
@@ -2712,7 +2696,7 @@ DataArray.prototype.unshift = function (elementN) {
         for (var i = 0; i < ln; i++) {
             args[i] = arguments[i];
         }
-        mutate(this, Mutation.InsertRange, [0, args]);
+        mutate(this, Mutation.UnshiftRange, [0, 0, args]);
     }
 };
 
@@ -2722,7 +2706,6 @@ DataArray.prototype.unshift = function (elementN) {
  * @template T,U
  * @constructor
  * @extends {Collection<T,(function(!Array<T>,!Array<U>): !Array<T>)>}
- * @implements {Own}
  * @implements {Receive}
  * @implements {ReadSignal<!Array<T>>}
  * @implements {SignalEnumerable<T>}
@@ -2732,21 +2715,6 @@ DataArray.prototype.unshift = function (elementN) {
  */
 function Enumerable(src, fn, args) {
     Data.call(this, Opts.Static | Opts.Bound, fn, []);
-    /**
-     * @protected
-     * @type {?Array<!Child>}
-     */
-    this._children = null;
-    /**
-     * @protected
-     * @type {?Array<CleanupFn>}
-     */
-    this._cleanups = null;
-    /**
-     * @protected
-     * @type {?Array<RecoverFn>}
-     */
-    this._recovers = null;
     /**
      * @protected
      * @type {number}
@@ -2767,7 +2735,7 @@ function Enumerable(src, fn, args) {
      * @type {!Array<U>}
      */
     this._args = args;
-    startCompute(this, args, src);
+    startCompute(null, false, this, args, src);
 }
 
 makeReactive(Enumerable, [Computation, Collection], peekVal, getComputation, void 0, getLength);

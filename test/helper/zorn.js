@@ -1,3 +1,3 @@
 import assert from 'assert';
 
-export * from '../../src/zorn.js';
+export * from '../../dist/zorn.mjs';
