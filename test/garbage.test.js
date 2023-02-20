@@ -1,7 +1,7 @@
 import assert from 'assert';
 import { root, dispose, effect, cleanup, compute, value } from './helper/zorn.js';
 
-if (globalThis.gc) {
+if (global.gc) {
 
     /**
      * 
@@ -9,7 +9,7 @@ if (globalThis.gc) {
      */
     function collect(callback) {
         setTimeout(function () {
-            globalThis.gc();
+            global.gc();
             callback();
         });
     }

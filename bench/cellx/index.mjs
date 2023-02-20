@@ -22,24 +22,16 @@ function zero() {
   return 0;
 }
 
-/**
-* 
-* @param {string[]} def 
-* @param {function(): any} fallback 
-* @returns {function(): any}
-* @returns 
-*/
-function tryDefine(def, fallback) {
-  try {
-    return new Function(...def);
-  } catch (_) {
-    return fallback;
-  }
+async function collectGarbage() {
+  return new Promise(resolve => {
+    setTimeout(() => {
+      if (global.gc) {
+        global.gc();
+      }
+      resolve();
+    });
+  })
 }
-
-var getHeapUsage = tryDefine(['%CollectHeapUsage()'], zero);
-var collectGarbage = tryDefine(['%CollectGarbage(null)'], zero);
-var optimizeFunctionOnNextCall = tryDefine(['fn', '%OptimizeFunctionOnNextCall(fn)'], zero);
 
 const med = (array) => {
   return array.reduce((a, b) => a + b, 0) / array.length;
@@ -123,7 +115,7 @@ async function main() {
       // Give cellx time to release its global pendingCells array
       await new Promise((resolve) => setTimeout(resolve, 0));
       //current.runs[i] = med(runs) * 1000;
-      collectGarbage();
+      await collectGarbage();
     }
   }
 
@@ -141,7 +133,7 @@ async function main() {
       await new Promise((resolve) => setTimeout(resolve, 0));
 
       current.runs[i] = med(runs) * 1000;
-      collectGarbage();
+      await collectGarbage();
     }
   }
 

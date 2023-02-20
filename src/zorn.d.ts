@@ -1,10 +1,10 @@
-export class ReadSignal<T = any> extends RootSignal {
+export interface ReadSignal<T = any> {
     get val(): T;
 
     get peek(): T;
 }
 
-export class Signal<T = any> extends ReadSignal<T> {
+export interface Signal<T = any> extends ReadSignal<T> {
     set val(val: T): T;
 }
 
@@ -86,7 +86,7 @@ export function batch(callback: () => void): void;
 
 export function stable(): void;
 
-export class SignalCollection<T = any> extends ReadSignal<T[]> {
+export interface SignalCollection<T = any> extends ReadSignal<T[]> {
 
     get length(): ReadSignal<number>;
 
@@ -133,23 +133,23 @@ export class SignalCollection<T = any> extends ReadSignal<T[]> {
     some(callbackFn: (element: T, index: number) => boolean): ReadSignal<boolean>;
 }
 
-export class SignalArray<T = any> extends SignalCollection<T>{
+export interface SignalArray<T = any> extends SignalCollection<T>{
     
     set val(items: T[]): T[];
-    
+
     set length(val: number): number;
     
-    pop(): T | undefined;
+    pop(): void;
     
-    push(...items: T[]): number;
+    push(...items: T[]): void;
     
-    reverse(): this;
+    reverse(): void;
     
-    shift(): T | undefined;
+    shift(): void;
 
-    splice(start: number, deleteCount?: number, ...items: T[]): T[];
+    splice(start: number, deleteCount?: number, ...items: T[]): void;
 
-    sort(compareFn?: (a: T, b: T) => number): this;
-
-    unshift(...items: T[]): number;
+    sort(compareFn?: (a: T, b: T) => number): void;
+    
+    unshift(...items: T[]): void;
 }

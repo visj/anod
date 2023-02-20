@@ -222,7 +222,7 @@ function closureCompile(srcFile, closureFile) {
         " -O=ADVANCED" + 
         " -W=VERBOSE" +
         " --module_resolution=NODE" + 
-        " --externs=" +  externsFile + 
+        " --js " +  externsFile + 
         " --js " + srcFile + 
         " --js " + closureFile;
     exec(cmd, function (err, stdout, stderr) {
