@@ -16,39 +16,39 @@ export type RecoverFn = (err: any) => void;
 
 export type CleanupFn = (final: boolean) => void;
 
-export type Compare<T> = ((a: T, b: T) => boolean) | null;
+export type CompareFn<T> = ((a: T, b: T) => boolean);
 
 export function root<T>(callback: (disposeFn: DisposeFn) => T): T;
 
 export function data<T>(value: T): Signal<T>;
 
-export function value<T>(value: T, eq?: Compare<T>): Signal<T>;
+export function value<T>(value: T, eq?: CompareFn<T> | null): Signal<T>;
 
-export function array<T>(items?: T[], eq?: Compare<T>): SignalArray<T>;
+export function array<T = any>(items?: T[], eq?: CompareFn<T> | null): SignalArray<T>;
 
 export function compute<T>(callback: () => T): ReadSignal<T>;
 
-export function compute<T>(callback: (seed: T, dispose: DisposeFn) => T, seed: T, compareFn?: Compare<T>): ReadSignal<T>;
+export function compute<T>(callback: (seed: T, dispose: DisposeFn) => T, seed: T, eq?: CompareFn<T> | null): ReadSignal<T>;
 
-export function compute<T,U>(callback: (seed: T, dispose: DisposeFn, args: U) => T, seed: T, compareFn: Compare<T>, args: U): ReadSignal<T>;
+export function compute<T,U>(callback: (seed: T, dispose: DisposeFn, args: U) => T, seed: T, eq: CompareFn<T> | null, args: U): ReadSignal<T>;
 
-export function compute<T,U>(callback: (seed: T, dispose: DisposeFn, args: U) => T, seed?: T, compareFn?: Compare<T>, args?: U): ReadSignal<T>;
+export function compute<T,U>(callback: (seed: T, dispose: DisposeFn, args: U) => T, seed?: T, eq?: CompareFn<T> | null, args?: U): ReadSignal<T>;
 
 export function $compute<T>(callback: () => T): ReadSignal<T>;
 
-export function $compute<T>(callback: (seed: T, dispose: DisposeFn) => T, seed: T, compareFn?: Compare<T>): ReadSignal<T>;
+export function $compute<T>(callback: (seed: T, dispose: DisposeFn) => T, seed: T, eq?: CompareFn<T> | null): ReadSignal<T>;
 
-export function $compute<T,U>(callback: (seed: T, dispose: DisposeFn, args: U) => T, seed: T, compareFn: Compare<T>, args: U): ReadSignal<T>;
+export function $compute<T,U>(callback: (seed: T, dispose: DisposeFn, args: U) => T, seed: T, eq: CompareFn<T> | null, args: U): ReadSignal<T>;
 
-export function $compute<T,U>(callback: (seed: T, dispose: DisposeFn, args: U) => T, seed?: T, compareFn?: Compare<T>, args?: U): ReadSignal<T>;
+export function $compute<T,U>(callback: (seed: T, dispose: DisposeFn, args: U) => T, seed?: T, eq?: CompareFn<T> | null, args?: U): ReadSignal<T>;
 
 export function computeWhen<T>(src: Source, callback: () => T): ReadSignal<T>;
 
-export function computeWhen<T>(src: Source, callback: (seed: T, dispose: DisposeFn) => T, seed: T, compareFn?: Compare<T>, defer?: boolean): ReadSignal<T>;
+export function computeWhen<T>(src: Source, callback: (seed: T, dispose: DisposeFn) => T, seed: T, eq?: CompareFn<T> | null, defer?: boolean): ReadSignal<T>;
 
-export function computeWhen<T,U>(src: Source, callback: (seed: T, dispose: DisposeFn, args: U) => T, seed: T, compareFn: Compare<T>, defer: boolean, args: U): ReadSignal<T>;
+export function computeWhen<T,U>(src: Source, callback: (seed: T, dispose: DisposeFn, args: U) => T, seed: T, eq: CompareFn<T> | null, defer: boolean, args: U): ReadSignal<T>;
 
-export function computeWhen<T,U>(src: Source, callback: (seed: T, dispose: DisposeFn, args: U) => T, seed?: T, compareFn?: Compare<T>, defer?: boolean, args?: U): ReadSignal<T>;
+export function computeWhen<T,U>(src: Source, callback: (seed: T, dispose: DisposeFn, args: U) => T, seed?: T, eq?: CompareFn<T> | null, defer?: boolean, args?: U): ReadSignal<T>;
 
 export function effect<T>(callback: () => T): T;
 
@@ -96,11 +96,11 @@ export class SignalCollection<T = any> extends ReadSignal<T[]> {
 
     filter(callbackFn: (element: T, index: number) => boolean): SignalCollection<T>;
 
-    find(callbackFn: (element: T, index: number) => boolean): ReadSignal<T | void>;
+    find(callbackFn: (element: T, index: number) => boolean): ReadSignal<T | undefined>;
 
     findIndex(callbackFn: (element: T, index: number) => boolean): ReadSignal<number>;
 
-    findLast(callbackFn: (element: T, index: number) => boolean): ReadSignal<T | void>;
+    findLast(callbackFn: (element: T, index: number) => boolean): ReadSignal<T | undefined>;
 
     findLastIndex(callbackFn: (element: T, index: number) => boolean): ReadSignal<number>;
 
@@ -128,23 +128,23 @@ export class SignalCollection<T = any> extends ReadSignal<T[]> {
 
     reduceRight<U>(callbackFn: (previousValue: U, currentValue: T, currentIndex: number) => U, initialValue: U): ReadSignal<U>;
 
-    reverse(): SignalCollection<T>;
-
     slice(start?: number, end?: number): SignalCollection<T>;
-
+    
     some(callbackFn: (element: T, index: number) => boolean): ReadSignal<boolean>;
 }
 
 export class SignalArray<T = any> extends SignalCollection<T>{
-
+    
     set val(items: T[]): T[];
-
+    
     set length(val: number): number;
-
+    
     pop(): T | undefined;
-
+    
     push(...items: T[]): number;
-
+    
+    reverse(): this;
+    
     shift(): T | undefined;
 
     splice(start: number, deleteCount?: number, ...items: T[]): T[];

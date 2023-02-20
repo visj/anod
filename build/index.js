@@ -20,7 +20,11 @@ function inlineEnum(code, enumName, enumObj) {
     for (var key in enumObj) {
         var regex = new RegExp(enumName + '\\.' + key + '([^\\w])', 'g');
         code = code.replace(regex, function (_, capture) {
-            return enumObj[key] + '/* ' + enumName + '.' + key + ' */' + capture.trim();
+            var space = '';
+            if (capture[capture.length - 1] === ' ') {
+                space = ' ';
+            }
+            return enumObj[key] + '/* ' + enumName + '.' + key + ' */' + capture.trim() + space;
         });
     }
     return code;
@@ -83,9 +87,8 @@ var distDir = path.join(rootDir, 'dist');
 
 var srcFile = path.join(rootDir, 'src', 'zorn.js');
 var externsFile = path.join(distDir, 'zorn.ext.js');
-var closureFile = path.join(__dirname, 'src', 'closure.js');
 
-var ENUMS = ['Opts', 'Stage'];
+var ENUMS = ['Opts', 'Stage', 'Mutation', 'Args'];
 
 bundle();
 
@@ -134,16 +137,16 @@ function bundle() {
             return 'return { ' + capture
                 .trim()
                 .split(',')
-                .filter(function(s) {
+                .filter(function (s) {
                     return s.trim().length !== 0;
                 })
                 .map(function (s) {
-                return s.trim();
-            }).filter(function (s) {
-                return s !== ',';
-            }).map(function (val) {
-                return val + ': ' + val;
-            }).join(', ') + ' };';
+                    return s.trim();
+                }).filter(function (s) {
+                    return s !== ',';
+                }).map(function (val) {
+                    return val + ': ' + val;
+                }).join(', ') + ' };';
         }).split('\n').join('\n\t') + '\n})();';
 
         var ext = removeSection(srcCode, '__SOURCE__');
@@ -214,7 +217,14 @@ function bundleMinify(srcFile) {
  * @param {string} closureFile 
  */
 function closureCompile(srcFile, closureFile) {
-    var cmd = "closure-compiler --language_out=ECMASCRIPT5 -O=ADVANCED -W=VERBOSE --module_resolution=NODE --externs=" + externsFile + " --js " + srcFile + " --js " + closureFile;
+    var cmd = "closure-compiler" + 
+        " --language_out=ECMASCRIPT5" + 
+        " -O=ADVANCED" + 
+        " -W=VERBOSE" +
+        " --module_resolution=NODE" + 
+        " --externs=" +  externsFile + 
+        " --js " + srcFile + 
+        " --js " + closureFile;
     exec(cmd, function (err, stdout, stderr) {
         fs.rm(closureFile, logError);
         if (err) {

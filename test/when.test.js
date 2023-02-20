@@ -40,12 +40,4 @@ describe("when", function () {
         d2.val++;
         assert.equal(count, 3);
     });
-
-    it("does not evaluate source val when not used", function() {
-        var d1 = value(1);
-        effectWhen(d1, function() {
-            assert.equal(arguments[3], void 0);
-        });
-        d1.val++;
-    });
 });

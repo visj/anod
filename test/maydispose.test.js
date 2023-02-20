@@ -16,7 +16,7 @@ describe("may dispose", function () {
          * If d3 is created inside nested effect, it will be disposed 
          * when parent effect updates.
          */
-        var stop = effect(function (_, stop) {
+        var stop = effect(function (_, __, stop) {
           c1.val;
           effect(function () {
             var d3 = data(d1.peek);
