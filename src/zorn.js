@@ -1037,12 +1037,14 @@ var LISTEN = false;
  * @template T
  * @param {!Function} child
  * @param {!Array<!Function>=} inherits
+ * @param {function(this: Reactive<T>): T=} peek
  * @param {function(this: Reactive<T>): T=} val
  * @param {function(this: Reactive<!Array<T>>): !ReadSignal<number>=} length
  */
 function makeReactive(
     child,
     inherits,
+    peek,
     val,
     length,
 ) {
@@ -1061,9 +1063,9 @@ function makeReactive(
             }
         }
     }
-    if (val !== void 0) {
+    if (peek !== void 0) {
         /** @const {!ObjectPropertyDescriptor} */
-        var descr = { peek: { get: peekVal }, val: { get: val } };
+        var descr = { peek: { get: peek }, val: { get: val } };
         if (length !== void 0) {
             descr.length = { get: length };
         }
@@ -1080,22 +1082,6 @@ function makeReactive(
  */
 function panic(msg) {
     throw new Error(msg);
-}
-
-/**
- * @protected
- * @template T
- * @this {!Child<T>}
- * @returns {T}
- */
-function peekVal() {
-    /** @const {boolean} */
-    var listen = LISTEN;
-    LISTEN = false;
-    /** @const {T} */
-    var val = this.val;
-    LISTEN = listen;
-    return val;
 }
 
 /**
@@ -1654,6 +1640,16 @@ function Data(opt, set, value, eq) {
 }
 
 /**
+ * @protected
+ * @template T
+ * @this {!Child<T>}
+ * @returns {T}
+ */
+function peekData() {
+    return this._value;
+}
+
+/**
  * @template T
  * @this {!Data<T>}
  * @returns {T}
@@ -1665,7 +1661,7 @@ function getData() {
     return this._value;
 }
 
-makeReactive(Data, [], getData);
+makeReactive(Data, [], peekData, getData);
 
 /** @const @lends {Data.prototype} */
 var dataProto = Data.prototype;
@@ -1853,6 +1849,30 @@ function Computation(fn, value, opt, args, eq, src) {
 };
 
 /**
+ * @param {!Child} node
+ * @returns {void}
+ */
+function setCurrent(node) {
+    /** @type {number} */
+    var opt = node._opt;
+    if ((opt & Opts.DisposeFlags) === 0 && STAGE !== Stage.Idle) {
+        if ((opt & (Opts.Update | Opts.MayUpdate | Opts.MayDispose)) !== 0) {
+            node._clearMayUpdate(STAGE, TIME);
+        }
+    }
+}
+
+/**
+ * @template T 
+ * @this {!Computation<T>}
+ * @returns {T}
+ */
+function peekComputation() {
+    setCurrent(this);
+    return this._value;
+}
+
+/**
  * @template T
  * @this {!Computation<T>}
  * @returns {T}
@@ -1871,7 +1891,7 @@ function getComputation() {
     return this._value;
 }
 
-makeReactive(Computation, [Root], getComputation);
+makeReactive(Computation, [Root], peekComputation, getComputation);
 
 /** @const @lends {Computation.prototype} */
 var computationProto = Computation.prototype;
@@ -2281,13 +2301,6 @@ var collectionProto = Collection.prototype;
 /* __EXCLUDE__ */
 
 /**
- * @public
- * @this {!Collection<T>}
- * @returns {!Array<T|!Array<T>|number|(function(T,T): number)|void>}
- */
-Collection.prototype.mut;
-
-/**
  * @readonly
  * @type {!ReadSignal<number>}  
  */
@@ -2330,6 +2343,16 @@ export var Args = {
 Collection.prototype._args;
 
 /* __EXCLUDE__ */
+
+/**
+ * @public
+ * @this {!Collection<T>}
+ * @returns {!Array<T|!Array<T>|number|(function(T,T): number)|void>}
+ */
+collectionProto.mut = function() {
+    setCurrent(this);
+    return [this._mut[0], this._mut[1]];
+};
 
 /**
  * @public
@@ -2608,7 +2631,7 @@ function DataArray(value, eq) {
     this._args = [null, 0, 0];
 }
 
-makeReactive(DataArray, [Data, Collection], getData, getLength);
+makeReactive(DataArray, [Data, Collection], peekData, getData, getLength);
 
 /** @const @lends {DataArray.prototype} */
 var dataArrayProto = DataArray.prototype;
@@ -2627,15 +2650,6 @@ function mutate(node, mut, mutArgs) {
     node._smut[0] = mut;
     node._smut[1] = mutArgs;
     setData.call(node, MUT);
-}
-
-/**
- * @public
- * @this {!DataArray<T>}
- * @returns {!Array<T|!Array<T>|number|(function(T,T): number)|void>}
- */
-dataArrayProto.mut = function() {
-    return [this._mut[0], this._mut[1]];
 }
 
 /**
@@ -2954,7 +2968,7 @@ function Enumerable(src, fn, args) {
     startCompute(null, false, this, this._args, src);
 }
 
-makeReactive(Enumerable, [Computation, Collection], getComputation, getLength);
+makeReactive(Enumerable, [Computation, Collection], peekComputation, getComputation, getLength);
 
 /** @const @lends {Enumerable.prototype} */
 var enumerableProto = Enumerable.prototype;
