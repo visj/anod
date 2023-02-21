@@ -2445,20 +2445,6 @@ collectionProto.includes = function (searchElement) { };
 collectionProto.indexOf = function (searchElement, fromIndex) { };
 
 /**
- * 
- * @param {string} _
- * @param {Array} args
- * @returns {string}
- */
-function join(_, args) {
-    /** @const {Collection} */
-    var src = args[0];
-    /** @const {string|void} */
-    var separator = args[1];
-    return src._value.join(separator);
-};
-
-/**
  * @template T
  * @param {Array<T>} array
  * @param {number} callback
@@ -2489,13 +2475,23 @@ function getIndex(array, callback, target, start, end, dir) {
 }
 
 /**
+ * 
+ * @param {string} _
+ * @param {Array<Collection|string|void>} args
+ * @returns {string}
+ */
+ function join(_, args) {
+    return args[0].val.join(args[1]);
+};
+
+/**
  * @public
  * @this {Collection<T,?>}
  * @param {string=} separator
  * @returns {ReadSignal<string>}
  */
 collectionProto.join = function (separator) {
-    return new Computation(join, '', Opts.Bound, [this, separator], this);
+    return new Computation(join, this.peek.join(separator), Opts.Static | Opts.Bound | Opts.Defer, [this, separator], this);
 };
 
 /**
