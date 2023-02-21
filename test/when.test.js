@@ -1,5 +1,4 @@
-import assert from 'assert';
-import { root, effect, effectWhen, compute, $compute, value } from './helper/zorn.js';
+import { test, root, effect, effectWhen, compute, $compute, value } from './helper/zorn.js';
 
 describe("when", function () {
 
@@ -9,9 +8,9 @@ describe("when", function () {
         effectWhen(d1, function() {
             count++;
         });
-        assert.equal(count, 1);
-        d1.val++;
-        assert.equal(count, 2);
+        test.ok(count === 1);
+        d1.set(d1.peek + 1);
+        test.ok(count === 2);
     });
     
     it("should not record values when reading", function() {
@@ -22,9 +21,9 @@ describe("when", function () {
             count++;
             d2.val;
         });
-        assert.equal(count, 1);
-        d2.val++;
-        assert.equal(count, 1);
+        test.ok(count === 1);
+        d2.set(d2.peek + 1);
+        test.ok(count === 1);
     });
 
     it("accepts an array of dependencies", function() {
@@ -34,10 +33,10 @@ describe("when", function () {
         effectWhen([d1, d2], function() {
             count++;
         });
-        assert.equal(count, 1);
-        d1.val++;
-        assert.equal(count, 2);
-        d2.val++;
-        assert.equal(count, 3);
+        test.ok(count === 1);
+        d1.set(d1.peek + 1);
+        test.ok(count === 2);
+        d2.set(d2.peek + 1);
+        test.ok(count === 3);
     });
 });

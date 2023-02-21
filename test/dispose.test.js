@@ -1,5 +1,4 @@
-import assert from 'assert';
-import { root, batch, effect, $effect, compute, value, dispose } from './helper/zorn.js';
+import { test, root, batch, effect, $effect, compute, value, dispose } from './helper/zorn.js';
 
 describe("dispose", function () {
 
@@ -15,19 +14,19 @@ describe("dispose", function () {
 					return d.val;
 				});
 
-				assert.equal(c, 1);
-				assert.equal(f.val, 0);
+				test.ok(c === 1);
+				test.ok(f.val === 0);
 
-				d.val = 1;
+				d.set(1);
 
-				assert.equal(c, 2);
-				assert.equal(f.val, 1);
+				test.ok(c === 2);
+				test.ok(f.val === 1);
 
 				teardown();
-				d.val = 2;
+				d.set(2);
 
-				assert.equal(c, 2);
-				assert.equal(f.val, void 0);
+				test.ok(c === 2);
+				test.ok(f.val === void 0);
 			});
 		});
 
@@ -44,11 +43,11 @@ describe("dispose", function () {
 					d.val;
 				});
 
-				assert.equal(c, 1);
-				d.val = 1;
-				assert.equal(c, 2);
-				d.val = 2;
-				assert.equal(c, 2);
+				test.ok(c === 1);
+				d.set(1);
+				test.ok(c === 2);
+				d.set(2);
+				test.ok(c === 2);
 			});
 		});
 
@@ -67,12 +66,12 @@ describe("dispose", function () {
 					});
 				});
 
-				assert.equal(c, 1);
+				test.ok(c === 1);
 
-				d.val = 1;
-				assert.equal(c, 2);
-				d.val = 2;
-				assert.equal(c, 2);
+				d.set(1);
+				test.ok(c === 2);
+				d.set(2);
+				test.ok(c === 2);
 			});
 		});
 
@@ -100,11 +99,11 @@ describe("dispose", function () {
 					});
 				});
 				// update d2 to trigger d3 disposal
-				d2.val++;
-				assert.equal(count, 1);
+				d2.set(d2.peek + 1);
+				test.ok(count === 1);
 				// d3 is now disposed so inner computation should not trigger
-				d3.val++;
-				assert.equal(count, 1);
+				d3.set(d3.peek + 1);
+				test.ok(count === 1);
 			});
 		});
 	});
@@ -129,9 +128,9 @@ describe("dispose", function () {
 						count += c1.val;
 					});
 				});
-				d1.val++;
-				d1.val++;
-				assert.equal(count, 1);
+				d1.set(d1.peek + 1);
+				d1.set(d1.peek + 1);
+				test.ok(count === 1);
 			});
 		});
 
@@ -152,9 +151,9 @@ describe("dispose", function () {
 						count += c1.val;
 					});
 				});
-				d1.val++;
-				d1.val++;
-				assert.equal(count, 1);
+				d1.set(d1.peek + 1);
+				d1.set(d1.peek + 1);
+				test.ok(count === 1);
 			});
 		});
 	});
@@ -170,7 +169,7 @@ describe("dispose", function () {
 				if (!d1.val) {
 					dispose(d1);
 					dispose(d2);
-					d3.val++;
+					d3.set(d3.peek + 1);
 				}
 			});
 			$effect(function () {
@@ -182,8 +181,8 @@ describe("dispose", function () {
 				}
 			});
 			count = 0;
-			d1.val = false;
-			assert.equal(count, 2);
+			d1.set(false);
+			test.ok(count === 2);
 		});
 	});
 

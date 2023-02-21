@@ -1,5 +1,4 @@
-import assert from 'assert';
-import { root, effect, compute, value, batch } from './helper/zorn.js';
+import { test, root, effect, compute, value, batch } from './helper/zorn.js';
 
 describe("exceptions within computations", function () {
     it("halt updating", function () {
@@ -15,15 +14,15 @@ describe("exceptions within computations", function () {
                 return b.val;
             });
 
-            assert.throws(function () {
+            test.throws(function () {
                 batch(function () {
-                    a.val = true;
-                    b.val = 2;
+                    a.set(true);
+                    b.set(2);
                 });
             })
 
-            assert.equal(b.val, 2);
-            assert.equal(d.val, 2);
+            test.ok(b.val === 2);
+            test.ok(d.val === 2);
         });
     });
 
@@ -38,20 +37,20 @@ describe("exceptions within computations", function () {
             });
             var d = compute(function () { return b.val });
 
-            assert.throws(function () {
+            test.throws(function () {
                 batch(function () {
-                    a.val = true;
-                    b.val = 2;
+                    a.set(true);
+                    b.set(2);
                 });
             });
 
-            assert.equal(b.val, 2);
-            assert.equal(d.val, 2);
+            test.ok(b.val === 2);
+            test.ok(d.val === 2);
 
-            b.val = 3;
+            b.set(3);
 
-            assert.equal(b.val, 3);
-            assert.equal(d.val, 3);
+            test.ok(b.val === 3);
+            test.ok(d.val === 3);
         });
     });
 });

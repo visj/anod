@@ -1,12 +1,11 @@
-import assert from 'assert';
-import { root, effect, compute, peek, value } from './helper/zorn.js';
+import { test, root, effect, compute, peek, value } from './helper/zorn.js';
 
 describe("peek(...)", function () {
 
     it("returns the value of a data", function () {
         root(function() {
             var d = value(1);
-            assert.equal(d.peek, 1);
+            test.ok(d.peek === 1);
         });
     });
 
@@ -24,16 +23,16 @@ describe("peek(...)", function () {
                 c.val;
             });
 
-            assert.equal(d, 1);
+            test.ok(d === 1);
 
-            b.val = 4;
+            b.set(4);
 
-            assert.equal(d, 1);
+            test.ok(d === 1);
 
-            a.val = 5;
-            c.val = 6;
+            a.set(5);
+            c.set(6);
 
-            assert.equal(d, 3);
+            test.ok(d === 3);
         });
     });
 
@@ -53,13 +52,13 @@ describe("peek(...)", function () {
                 c.val;
             });
 
-            assert.equal(d, 1);
-            b.val = 4;
+            test.ok(d === 1);
+            b.set(4);
 
-            assert.equal(d, 1);
-            a.val = 5;
+            test.ok(d === 1);
+            a.set(5);
 
-            assert.equal(d, 2);
+            test.ok(d === 2);
         });
     });
 })

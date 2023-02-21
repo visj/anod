@@ -391,19 +391,19 @@ function runZorn(layers, done) {
     const end = layer;
     if (BATCHED) {
       zorn.batch(() => {
-        start.a.val = 4;
-        start.b.val = 3;
-        start.c.val = 2;
-        start.d.val = 1;
+        start.a.set(4);
+        start.b.set(3);
+        start.c.set(2);
+        start.d.set(1);
       });
     } else {
-      start.a.val = 4;
+      start.a.set(4);
       end.a.val, end.b.val, end.c.val, end.d.val;
-      start.b.val = 3;
+      start.b.set(3);
       end.a.val, end.b.val, end.c.val, end.d.val;
-      start.c.val = 2;
+      start.c.set(2);
       end.a.val, end.b.val, end.c.val, end.d.val;
-      start.d.val = 1;
+      start.d.set(1);
     }
 
     const solution = [end.a.val, end.b.val, end.c.val, end.d.val];

@@ -1,5 +1,4 @@
-import assert from 'assert';
-import { root, effect, compute, value } from './helper/zorn.js';
+import { test, root, effect, compute, value } from './helper/zorn.js';
 
 describe("Computations which modify data", function () {
     it("batch data while executing computation", function () {
@@ -9,17 +8,17 @@ describe("Computations which modify data", function () {
             var cb;
             effect(function () {
                 if (a.val) {
-                    b.val = 1;
+                    b.set(1);
                     cb = b.val;
-                    a.val = false;
+                    a.set(false);
                 }
             });
 
-            b.val = 0;
-            a.val = true;
+            b.set(0);
+            a.set(true);
 
-            assert.equal(b.val, 1);
-            assert.equal(cb, 0);
+            test.ok(b.val === 1);
+            test.ok(cb === 0);
         });
     });
 
@@ -32,8 +31,8 @@ describe("Computations which modify data", function () {
             effect(function () {
                 if (a.val) {
                     seq += "c";
-                    b.val = 1;
-                    a.val = false;
+                    b.set(1);
+                    a.set(false);
                 }
             });
             effect(function () {
@@ -43,13 +42,13 @@ describe("Computations which modify data", function () {
                 }
             });
 
-            b.val = 0;
+            b.set(0);
             seq = "";
-            a.val = true;
+            a.set(true);
 
-            assert.equal(seq, "cd");
-            assert.equal(b.val, 1);
-            assert.equal(db, 0); // d saw b(0) even though it ran after c whcih modified b() to b(1)
+            test.ok(seq === "cd");
+            test.ok(b.val === 1);
+            test.ok(db === 0); // d saw b(0) even though it ran after c whcih modified b() to b(1)
         });
     });
 
@@ -61,12 +60,12 @@ describe("Computations which modify data", function () {
             effect(function () {
                 seq += a.val;
                 if (a.val < 10) {
-                    a.val++;
+                    a.set(a.peek + 1);
                 }
             });
 
-            assert.equal(seq, "012345678910");
-            assert.equal(a.val, 10);
+            test.ok(seq === "012345678910");
+            test.ok(a.val === 10);
         });
     });
 
@@ -86,15 +85,15 @@ describe("Computations which modify data", function () {
             var a1 = value(0);
             var c1 = value(0);
             var b1 = compute(function () { return a1.val; });
-            effect(function () { c1.val = a1.val; });
+            effect(function () { c1.set(a1.val); });
             var b3 = compute(function () { return a1.val; });
             effect(function () { seq += "c4(" + c1.val + ")"; b1.val; });
             effect(function () { seq += "c5(" + c1.val + ")"; b3.val; });
 
             seq = "";
-            a1.val = 1;
+            a1.set(1);
 
-            assert.equal(seq, "c4(0)c5(0)c4(1)c5(1)");
+            test.ok(seq === "c4(0)c5(0)c4(1)c5(1)");
         });
     });
 })

@@ -1,5 +1,4 @@
-import assert from 'assert';
-import { root, data, compute, effect, cleanup, value } from './helper/zorn.js';
+import { test, root, data, compute, effect, cleanup, value } from './helper/zorn.js';
 
 describe("mayupdate", function () {
   it("does not trigger downstream computations unless changed", function () {
@@ -14,13 +13,13 @@ describe("mayupdate", function () {
         order += 'c1';
         t1.val;
       });
-      assert.equal(order, 't1c1');
+      test.ok(order === 't1c1');
       order = '';
-      d1.val = 1;
-      assert.equal(order, 't1');
+      d1.set(1);
+      test.ok(order === 't1');
       order = '';
-      d1.val++;
-      assert.equal(order, 't1c1');
+      d1.set(d1.peek + 1);
+      test.ok(order === 't1c1');
     });
   });
 
@@ -49,8 +48,8 @@ describe("mayupdate", function () {
         });
       });
       order = '';
-      d1.val = 1;
-      assert.equal(order, 't1c1e[c]2_1e1e2_1');
+      d1.set(1);
+      test.ok(order === 't1c1e[c]2_1e1e2_1');
     });
   });
 
@@ -69,9 +68,9 @@ describe("mayupdate", function () {
         return t1.val + c1.val;
       });
       count = 0;
-      d1.val++
-      assert.equal(count, 1);
-      assert.equal(c2.val, 2);
+      d1.set(d1.peek + 1);
+      test.ok(count === 1);
+      test.ok(c2.val === 2);
     });
   });
 
@@ -100,8 +99,8 @@ describe("mayupdate", function () {
         c4.val; c3.val;
         count++;
       });
-      d1.val++;
-      assert.equal(count, 1);
+      d1.set(d1.peek + 1);
+      test.ok(count === 1);
     });
   });
 

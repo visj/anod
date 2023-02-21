@@ -1,16 +1,15 @@
-import assert from 'assert';
-import { root, compute, value, batch } from './helper/zorn.js';
+import { test, root, compute, value, batch } from './helper/zorn.js';
 
 describe("batch", function () {
 	it("batches changes until end", function () {
 		var d = value(1);
 			
 		batch(function () {
-			d.val = 2;
-			assert.equal(d.val, 1);
+			d.set(2);
+			test.ok(d.val === 1);
 		});
 		
-		assert.equal(d.val, 2);
+		test.ok(d.val === 2);
 	});
 	
 	it("halts propagation within its scope", function () {
@@ -21,11 +20,11 @@ describe("batch", function () {
 			});
 				
 			batch(function () {
-				d.val = 2;
-				assert.equal(f.val, 1);
+				d.set(2);
+				test.ok(f.val === 1);
 			});
 			
-			assert.equal(f.val, 2);
+			test.ok(f.val === 2);
 		});
 	});
 });

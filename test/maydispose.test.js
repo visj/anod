@@ -1,5 +1,4 @@
-import assert from 'assert';
-import { root, batch, data, compute, effect, dispose, $effect, cleanup, value } from './helper/zorn.js';
+import { test, root, batch, data, compute, effect, dispose, $effect, cleanup, value } from './helper/zorn.js';
 
 describe("may dispose", function () {
 
@@ -23,7 +22,7 @@ describe("may dispose", function () {
             root(function () {
               var c3 = compute(function () {
                 d1.val;
-                d3.val = d3.peek + 1;
+                d3.set(d3.peek + 1);
               });
               effect(function () { c3.val; });
               effect(function () {
@@ -36,10 +35,10 @@ describe("may dispose", function () {
         });
         count = 0;
         batch(function() {
-          d1.val++;
-          d2.val++;
+          d1.set(d1.peek + 1);
+          d2.set(d2.peek + 1);
         });
-        assert.equal(count, 2);
+        test.ok(count === 2);
         stop();
         /*
          * In this example however, d3 is created inside parent,
@@ -52,7 +51,7 @@ describe("may dispose", function () {
             root(function () {
               var c3 = compute(function () {
                 d1.val;
-                d3.val = d3.peek + 1;
+                d3.set(d3.peek + 1);
               });
               effect(function () { c3.val; });
               effect(function () {
@@ -64,10 +63,10 @@ describe("may dispose", function () {
         });
         count = 0;
         batch(function() {
-          d1.val++;
-          d2.val++;
+          d1.set(d1.peek + 1);
+          d2.set(d2.peek + 1);
         });
-        assert.equal(count, 3);
+        test.ok(count === 3);
         teardown();
       });
     });
@@ -92,10 +91,10 @@ describe("may dispose", function () {
             });
           }
         });
-        assert.equal(order, 't1c1c2');
+        test.ok(order === 't1c1c2');
         order = '';
-        d1.val++;
-        assert.equal(order, 't1c1');
+        d1.set(d1.peek + 1);
+        test.ok(order === 't1c1');
       });
     });
 
@@ -123,13 +122,13 @@ describe("may dispose", function () {
             });
           }
         });
-        d1.val++;
+        d1.set(d1.peek + 1);
         batch(function () {
-          d2.val++;
-          d1.val++;
+          d2.set(d2.peek + 1);
+          d1.set(d1.peek + 1);
         });
         // c1 is disposed but called from previous effect, should not update
-        assert.equal(count, 1);
+        test.ok(count === 1);
       })
     });
   });

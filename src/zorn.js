@@ -1,3 +1,4 @@
+/* __EXTERNS_FILE__ */
 /**
  * @fileoverview
  * @author Vilhelm Sjölund
@@ -31,114 +32,130 @@ ReadSignal.prototype.val;
 /**
  * @type {T}
  * @readonly
+ * __EXTERNS__
+ * @nosideeffects
+ * __EXTERNS__
  */
 ReadSignal.prototype.peek;
 
 /**
  * @interface
  * @template T
- * @extends {RootSignal}
+ * @extends {ReadSignal<T>}
  */
 function Signal() { }
 
 /**
- * @type {T}
- * @nocollapse
+ * @param {T} value
+ * @returns {void}
  * @throws {Error}
  */
-Signal.prototype.val;
+Signal.prototype.set = function (value) { };
 
 /**
- * @type {T} 
- __EXTERNS__
- * @nosideeffects 
- __EXTERNS__
- * @readonly
- */
-Signal.prototype.peek;
-
-/**
+ * @public
  * @interface
  * @template T
- * @extends {RootSignal}
+ * @extends {ReadSignal<T>}
  */
 function SignalCollection() { }
 
 /**
- * @readonly
- * @type {!Array<T>}
+ * @public
+ * @returns {!Array<T|!Array<T>|number|(function(T,T): number)|void>}
  */
-SignalCollection.prototype.peek;
+SignalCollection.prototype.mut = function() { };
 
 /**
+ * @public
+ * @readonly
  * @type {!ReadSignal<number>}
  */
 SignalCollection.prototype.length;
 
 /**
- * 
+ * @public
+ * @this {!SignalCollection<T>}
  * @param {number} index 
  * @returns {!ReadSignal<T|undefined>}
  */
 SignalCollection.prototype.at = function (index) { };
 
 /**
- * 
+ * @public
+ * @this {!SignalCollection<T>}
  * @param {...(T|!Array<T>)} items
- * @returns {!SignalEnumerable<T>} 
+ * @returns {!SignalCollection<T>} 
  */
 SignalCollection.prototype.concat = function (items) { };
 
 /**
+ * @public
+ * @this {!SignalCollection<T>}
  * @param {function(T,number): boolean} callbackFn
  * @returns {!ReadSignal<boolean>}
  */
 SignalCollection.prototype.every = function (callbackFn) { };
 
 /**
+ * @public
+ * @this {!SignalCollection<T>}
  * @param {function(T,number): boolean} callbackFn
- * @returns {!SignalEnumerable<T>}
+ * @returns {!SignalCollection<T>}
  */
 SignalCollection.prototype.filter = function (callbackFn) { };
 
 /**
+ * @public
+ * @this {!SignalCollection<T>}
  * @param {function(T,number): boolean} callbackFn
  * @returns {!ReadSignal<T|undefined>}
  */
 SignalCollection.prototype.find = function (callbackFn) { };
 
 /**
+ * @public
+ * @this {!SignalCollection<T>}
  * @param {function(T,number): boolean} callbackFn
  * @returns {!ReadSignal<number>}
  */
 SignalCollection.prototype.findIndex = function (callbackFn) { };
 
 /**
+ * @public
+ * @this {!SignalCollection<T>}
  * @param {function(T,number): boolean} callbackFn
  * @returns {!ReadSignal<T|undefined>}
  */
 SignalCollection.prototype.findLast = function (callbackFn) { };
 
 /**
+ * @public
+ * @this {!SignalCollection<T>}
  * @param {function(T,number): boolean} callbackFn
  * @returns {!ReadSignal<number>}
  */
 SignalCollection.prototype.findLastIndex = function (callbackFn) { };
 
 /**
+ * @public
+ * @this {!SignalCollection<T>}
  * @param {function(T,number): void} callbackFn
  * @returns {void} 
  */
 SignalCollection.prototype.forEach = function (callbackFn) { };
 
 /**
+ * @public
+ * @this {!SignalCollection<T>}
  * @param {T} searchElement
  * @returns {!ReadSignal<boolean>}
  */
 SignalCollection.prototype.includes = function (searchElement) { };
 
 /**
- * 
+ * @public
+ * @this {!SignalCollection<T>}
  * @param {T} searchElement 
  * @param {number=} fromIndex
  * @returns {!ReadSignal<number>}
@@ -146,14 +163,16 @@ SignalCollection.prototype.includes = function (searchElement) { };
 SignalCollection.prototype.indexOf = function (searchElement, fromIndex) { };
 
 /**
- * 
+ * @public
+ * @this {!SignalCollection<T>}
  * @param {string=} separator
  * @returns {!ReadSignal<string>}
  */
 SignalCollection.prototype.join = function (separator) { };
 
 /**
- * 
+ * @public
+ * @this {!SignalCollection<T>}
  * @param {T} searchElement 
  * @param {number=} fromIndex
  * @returns {!ReadSignal<number>}
@@ -161,14 +180,18 @@ SignalCollection.prototype.join = function (separator) { };
 SignalCollection.prototype.lastIndexOf = function (searchElement, fromIndex) { };
 
 /**
+ * @public
  * @template U
+ * @this {!SignalCollection<T>}
  * @param {function(T,!ReadSignal<number>): U} callbackFn
- * @returns {!SignalEnumerable<U>}
+ * @returns {!SignalCollection<U>}
  */
 SignalCollection.prototype.map = function (callbackFn) { };
 
 /**
+ * @public
  * @template U
+ * @this {!SignalCollection<T>}
  * @param {function((T|U),T,number): U} callbackFn 
  * @param {U=} initialValue 
  * @returns {!ReadSignal<U>}
@@ -176,7 +199,9 @@ SignalCollection.prototype.map = function (callbackFn) { };
 SignalCollection.prototype.reduce = function (callbackFn, initialValue) { };
 
 /**
+ * @public
  * @template U
+ * @this {!SignalCollection<T>}
  * @param {function((T|U),T,number): U} callbackFn
  * @param {U=} initialValue 
  * @returns {!ReadSignal<U>}
@@ -184,14 +209,17 @@ SignalCollection.prototype.reduce = function (callbackFn, initialValue) { };
 SignalCollection.prototype.reduceRight = function (callbackFn, initialValue) { };
 
 /**
+ * @public
+ * @this {!SignalCollection<T>}
  * @param {number=} start
  * @param {number=} end
- * @returns {!SignalEnumerable<T>}
+ * @returns {!SignalCollection<T>}
  */
 SignalCollection.prototype.slice = function (start, end) { };
 
 /**
- * 
+ * @public
+ * @this {!SignalCollection<T>}
  * @param {function(T,number): boolean} callbackFn
  * @returns {!ReadSignal<boolean>} 
  */
@@ -200,77 +228,70 @@ SignalCollection.prototype.some = function (callbackFn) { };
 /**
  * @interface
  * @template T
- * @extends {ReadSignal<!Array<T>>}
- * @extends {SignalCollection<T>}
- */
-function SignalEnumerable() { }
-
-/**
- * @readonly
- * @nocollapse
- * @type {!Array<T>}
- * @throws {Error}
- */
-SignalEnumerable.prototype.val;
-
-/**
- * @interface
- * @template T
- * @extends {Signal<!Array<T>>}
  * @extends {SignalCollection<T>}
  */
 function SignalArray() { }
 
 /**
- * @throws {Error}
+ * @param {!Array<T>|number} value 
+ * @param {T=} item 
  * @returns {void}
+ * @throws {Error}
+ */
+SignalArray.prototype.set = function (value, item) { };
+
+/**
+ * @returns {void}
+ * @throws {Error}
  */
 SignalArray.prototype.pop = function () { };
 
 /**
- * @throws {Error}
  * @param {...T} elementN
  * @returns {void}
+ * @throws {Error}
  */
 SignalArray.prototype.push = function (elementN) { };
 
 /**
- * @throws {Error}
  * @returns {void}
+ * @throws {Error}
  */
 SignalArray.prototype.shift = function () { };
 
 /**
- * @throws {Error}
  * @returns {void}
+ * @throws {Error}
  */
 SignalArray.prototype.reverse = function () { };
 
 /**
  * 
- * @throws {Error}
  * @param {function(T,T): number=} compareFn
  * @returns {void}
+ * @throws {Error}
  */
 SignalArray.prototype.sort = function (compareFn) { };
 
 /**
  * 
- * @throws {Error}
  * @param {number} start 
  * @param {number=} deleteCount 
  * @param {...T} items
  * @returns {void}
+ * @throws {Error}
  */
 SignalArray.prototype.splice = function (start, deleteCount, items) { };
 
 /**
  * 
- * @throws {Error} 
  * @param {...T} elementN
  * @returns {void}
+ * @throws {Error} 
  */
 SignalArray.prototype.unshift = function (elementN) { };
+
+/* __EXTERNS_FILE__ */
 
 /* __SOURCE__ */
 
@@ -338,28 +359,21 @@ Own.prototype._addRecover = function (recoverFn) { };
 
 /**
  * @protected
- * @interface
- * @extends {Own}
- */
-function OwnOne() { };
-
-/**
- * @protected
  * @type {?Array<!Child>}
  */
-OwnOne.prototype._children;
+Own.prototype._children;
 
 /**
  * @protected
  * @type {?Array<CleanupFn>}
  */
-OwnOne.prototype._cleanups;
+Own.prototype._cleanups;
 
 /**
  * @protected
  * @type {?Array<RecoverFn>}
  */
-OwnOne.prototype._recovers;
+Own.prototype._recovers;
 
 /**
  * @const 
@@ -394,8 +408,7 @@ export var Opts = {
     Respond: 8192,
     Bound: 16384,
     Defer: 32768,
-    Unmount: 65536,
-    Compare: 131072,
+    Compare: 65536,
 };
 
 /**
@@ -416,25 +429,90 @@ export var Stage = {
  * @enum {number}
  */
 export var Mutation = {
-    Set: 0,
-    Length: 1,
-    Pop: 2,
-    Push: 4,
-    PopRange: 3,
-    PushRange: 5,
-    Shift: 6,
-    Unshift: 7,
-    UnshiftRange: 8,
-    Remove: 9,
-    RemoveRange: 10,
-    Insert: 11,
-    InsertRange: 12,
-    Replace: 13,
-    ReplaceRange: 14,
-    ReplaceInsert: 15,
-    Reverse: 16,
-    Sort: 17,
-    Custom: 18,
+    Head: 32,
+    Tail: 64,
+    Range: 128,
+    Remove: 256,
+    Insert: 512,
+    Reorder: 1024,
+    Type: 31,
+    None: 0,
+    /**
+     * 1 | Insert | Reorder
+     */
+    Set: 1 | 512 | 1024,
+    /**
+     * 2 | Remove | Insert
+     */
+    SetAt: 2 | 256 | 512,
+    /**
+     * 3 | Tail | Remove
+     */
+    Pop: 3 | 64,
+    /**
+     * 4 | Tail | Range | Remove
+     */
+    PopRange: 4 | 64 | 128,
+    /**
+     * 5 | Tail | Insert
+     */
+    Push: 5 | 64,
+    /**
+     * 6 | Tail | Range | Insert
+     */
+    PushRange: 6 | 64 | 128,
+    /**
+     * 7 | Head | Remove
+     */
+    Shift: 7 | 32 | 256,
+    /**
+     * 8 | Head | Range | Remove
+     */
+    ShiftRange: 8 | 32 | 128 | 256,
+    /**
+     * 9 | Head | Insert
+     */
+    Unshift: 9 | 32 | 512,
+    /**
+     * 10 | Head | Range | Insert
+     */
+    UnshiftRange: 10 | 32 | 128 | 512,
+    /**
+     * 11 | Remove
+     */
+    RemoveAt: 11 | 256,
+    /**
+     * 12 | Range | Remove
+     */
+    RemoveRange: 12 | 128 | 256,
+    /**
+     * 13 | Insert
+     */
+    InsertAt: 13 | 512,
+    /**
+     * 14 | Range | Insert
+     */
+    InsertRange: 14 | 128 | 512,
+    /**
+     * 15 | Range | Remove | Insert
+     */
+    ReplaceRange: 15 | 128 | 256 | 512,
+    /**
+     * 16 | Tail | Range | Remove | Insert
+     */
+    ReplaceRangeInsert: 16 | 64 | 128 | 256 | 512,
+    /**
+     * 17 | Reorder
+     */
+    Reverse: 17 | 1024,
+    /**
+     * 18 | Reorder
+     */
+    Sort: 18 | 1024,
+    /**
+     * User defined mutation
+     */
+    Custom: 19,
 };
 
 /**
@@ -570,12 +648,6 @@ Receive.prototype._sources;
 Receive.prototype._sourceslots;
 
 /**
- * 
- * @returns {void}
- */
-Receive.prototype._unmount = function () { };
-
-/**
  * @protected
  * @param {number} time
  * @returns {void}
@@ -649,6 +721,7 @@ function value(value, eq) {
 }
 
 /**
+ * @public
  * @template T
  * @param {!Array<T>=} value 
  * @param {(function(!Array<T>,!Array<T>): boolean)=} eq
@@ -661,7 +734,7 @@ function array(value, eq) {
 /**
  * @public
  * @template T,U
- * @param {function(T,Func,U): T} fn 
+ * @param {function(T,U,Func): T} fn 
  * @param {T=} seed 
  * @param {U=} args
  * @param {(function(T,T): boolean)|null=} eq
@@ -674,7 +747,7 @@ function compute(fn, seed, args, eq) {
 /**
  * @public
  * @template T,U
- * @param {function(T,Func,U): T} fn 
+ * @param {function(T,U,Func): T} fn 
  * @param {T=} seed 
  * @param {U=} args
  * @param {(function(T,T): boolean)|null=} eq
@@ -688,7 +761,7 @@ function $compute(fn, seed, args, eq) {
  * @public
  * @template T,U
  * @param {Source} src
- * @param {function(T,Func,U): T} fn 
+ * @param {function(T,U,Func): T} fn 
  * @param {T=} seed 
  * @param {U=} args
  * @param {(function(T,T): boolean)|null=} eq
@@ -702,7 +775,7 @@ function computeWhen(src, fn, seed, args, eq) {
  * @public
  * @template T,U
  * @param {Func} src
- * @param {function(T,Func,U): T} fn 
+ * @param {function(T,U,Func): T} fn 
  * @param {T=} seed 
  * @param {U=} args
  * @param {(function(T,T): boolean)|null=} eq
@@ -740,14 +813,21 @@ function $effect(fn, seed, args) {
  * @public
  * @template T,U
  * @param {Source} src
- * @param {function(T,Func,U): T} fn 
+ * @param {function(T,U,Func): T} fn 
  * @param {T=} seed 
  * @param {boolean=} defer
  * @param {U=} args
  * @returns {T}
  */
 function effectWhen(src, fn, seed, defer, args) {
-    return new Computation(fn, seed, Opts.Static | Opts.Bound | (defer ? Opts.Defer : 0), args, void 0, src)._value;
+    return new Computation(
+        fn,
+        seed,
+        Opts.Static | Opts.Bound | (defer ? Opts.Defer : 0),
+        args,
+        void 0,
+        src
+    )._value;
 }
 
 /**
@@ -761,12 +841,18 @@ function effectWhen(src, fn, seed, defer, args) {
  * @returns {T}
  */
 function $effectWhen(src, fn, seed, defer, args) {
-    return new Computation(evalSource(src, fn), seed, Opts.Bound | (defer ? Opts.Defer : 0), args, void 0)._value;
+    return new Computation(
+        evalSource(src, fn),
+        seed,
+        Opts.Bound | (defer ? Opts.Defer : 0),
+        args
+    )._value;
 }
 
 /**
  * @public
- * @param {!Dispose} node 
+ * @param {!Dispose} node
+ * @returns {void}
  */
 function dispose(node) {
     if ((node._opt & Opts.DisposeFlags) === 0) {
@@ -863,12 +949,14 @@ function recover(fn) {
 function Queue(stage) {
     /**
      * @protected
-     * @const {number}
+     * @const
+     * @type {number}
      */
     this._stage = stage;
     /**
      * @protected
-     * @const {!Array<?Dispose>}
+     * @const
+     * @type {!Array<?Dispose>}
      */
     this._items = [];
     /**
@@ -880,8 +968,9 @@ function Queue(stage) {
 
 /**
  * @protected
- * @param {!Dispose} item
  * @this {!Queue}
+ * @param {!Dispose} item
+ * @returns {void}
  */
 Queue.prototype._add = function (item) {
     this._items[this._count++] = item;
@@ -889,18 +978,23 @@ Queue.prototype._add = function (item) {
 
 /**
  * 
- * @param {number} time 
+ * @param {number} time
+ * @returns {number}
  */
-Queue.prototype._update = function (time) {
+Queue.prototype._run = function (time) {
     STAGE = this._stage;
     /** @type {number} */
     var error = 0;
     for (var /** number */ i = 0; i < this._count; i++) {
         /** @const {?Dispose} */
         var item = this._items[i];
-        if ((item._opt & Opts.Update) !== 0) {
+        if ((item._opt & (Opts.Update | Opts.Dispose)) !== 0) {
             try {
-                item._update(time);
+                if ((item._opt & Opts.Update) !== 0) {
+                    item._update(time);
+                } else {
+                    item._dispose(time);
+                }
             } catch (err) {
                 error = 1;
             } finally {
@@ -915,44 +1009,10 @@ Queue.prototype._update = function (time) {
     return error;
 };
 
-/**
- * @protected
- * @returns {number}
- * @this {!Queue}
- * @param {number} time
- */
-Queue.prototype._dispose = function (time) {
-    STAGE = this._stage;
-    /** @type {number} */
-    var error = 0;
-    for (var /** number */ i = 0; i < this._count; i++) {
-        /** @const {?Dispose} */
-        var item = this._items[i];
-        if ((item._opt & (Opts.Dispose | Opts.Unmount)) !== 0) {
-            try {
-                if ((item._opt & Opts.Dispose) !== 0) {
-                    item._dispose(time);
-                } else {
-                    item._unmount();
-                }
-            } catch (err) {
-                error = 1;
-            } finally {
-                item._opt = Opts.Disposed;
-            }
-        } else {
-            item._opt &= ~Opts.MayFlags;
-        }
-        this._items[i] = null;
-    }
-    this._count = 0;
-    return error;
-};
-
 /** @const {!nil} */
 var NIL = /** @type {!nil} */({});
 /** @const {!Array} */
-var MUT = /** @type {!Array<?>} */([]);
+var MUT = /** @type {!Array} */([]);
 /** @type {number} */
 var TIME = 1;
 /** @type {number} */
@@ -975,47 +1035,51 @@ var LISTEN = false;
 /**
  * @noinline
  * @template T
- * @param {?} child
- * @param {!Array<!Function>} inherits
- * @param {function(this: Reactive<T>): T=} peekVal
- * @param {function(this: Reactive<T>): T=} getVal
- * @param {function(this: Reactive<T>, T): void=} setVal
- * @param {function(this: Reactive<!Array<T>>): !ReadSignal<number>=} getLength
- * @param {function(this: Reactive<!Array<T>>, number): void=} setLength
+ * @param {!Function} child
+ * @param {!Array<!Function>=} inherits
+ * @param {function(this: Reactive<T>): T=} val
+ * @param {function(this: Reactive<!Array<T>>): !ReadSignal<number>=} length
  */
 function makeReactive(
     child,
     inherits,
-    peekVal,
-    getVal,
-    setVal,
-    getLength,
-    setLength
+    val,
+    length,
 ) {
     /**
      * @constructor
-     * @extends {Reactive}
      */
     function ctor() { };
-    /** @const {Reactive} */
+    /** @const @lends {Reactive.prototype} */
     var base = ctor.prototype = {};// new /** @type {?} */(Reactive)();
-    for (var /** number */ i = 0; i < inherits.length; i++) {
-        /** @const {!Object} */
-        var proto = inherits[i].prototype;
-        for (var /** string */ key in proto) {
-            base[key] = proto[key];
+    if (inherits !== void 0) {
+        for (var /** number */ i = 0; i < inherits.length; i++) {
+            /** @const {!Object} */
+            var proto = inherits[i].prototype;
+            for (var /** string */ key in proto) {
+                base[key] = proto[key];
+            }
         }
     }
-    if (peekVal !== void 0) {
+    if (val !== void 0) {
         /** @const {!ObjectPropertyDescriptor} */
-        var descr = { peek: { get: peekVal }, val: { get: getVal, set: setVal } };
-        if (getLength !== void 0) {
-            descr.length = { get: getLength, set: setLength };
+        var descr = { peek: { get: peekVal }, val: { get: val } };
+        if (length !== void 0) {
+            descr.length = { get: length };
         }
         Object.defineProperties(base, descr);
     }
     child.prototype = new ctor();
     child.constructor = child;
+}
+
+/**
+ * @throws {Error}
+ * @param {string=} msg 
+ * @returns {void}
+ */
+function panic(msg) {
+    throw new Error(msg);
 }
 
 /**
@@ -1025,25 +1089,13 @@ function makeReactive(
  * @returns {T}
  */
 function peekVal() {
-    return this._value;
-}
-
-/**
- * 
- * @param {!Dispose} node 
- */
-function unmount(node) {
-    /** @const {number} */
-    var opt = node._opt;
-    if ((opt & Opts.DisposeFlags) === 0) {
-        if (STAGE === Stage.Idle) {
-            node._unmount();
-        } else {
-            // Schedule unmount for next batch
-            node._opt = (opt | Opts.Unmount) & ~Opts.Receive;
-            DISPOSES._add(node);
-        }
-    }
+    /** @const {boolean} */
+    var listen = LISTEN;
+    LISTEN = false;
+    /** @const {T} */
+    var val = this.val;
+    LISTEN = listen;
+    return val;
 }
 
 /**
@@ -1132,22 +1184,22 @@ function start() {
     do {
         time = ++TIME;
         if (disposes._count !== 0) {
-            errors += disposes._dispose(time);
+            errors += disposes._run(time);
         }
         if (changes._count !== 0) {
-            errors += changes._update(time);
+            errors += changes._run(time);
         }
         if (computes._count !== 0) {
-            errors += computes._update(time);
+            errors += computes._run(time);
         }
         if (effects._count !== 0) {
-            errors += effects._update(time);
+            errors += effects._run(time);
         }
         if (errors !== 0) {
-            throw new Error("Zorn: Error");
+            panic("error encountered");
         }
         if (cycle++ > 1e5) {
-            throw new Error("Zorn: Cycle");
+            panic("cycle detected");
         }
     } while (changes._count !== 0 || disposes._count !== 0 || computes._count !== 0 || effects._count !== 0);
 }
@@ -1156,7 +1208,7 @@ function start() {
  * @struct
  * @protected
  * @constructor
- * @implements {OwnOne}
+ * @implements {Own}
  * @implements {RootSignal}
  */
 function Root() {
@@ -1184,7 +1236,7 @@ function Root() {
 
 /**
  * @protected
- * @param {!OwnOne} owner
+ * @param {!Own} owner
  * @param {number} time
  */
 function disposeOwner(owner, time) {
@@ -1212,6 +1264,11 @@ function disposeOwner(owner, time) {
         owner._recovers = null;
 }
 
+makeReactive(Root);
+
+/** @const */
+var rootProto = Root.prototype;
+
 /**
  * @protected
  * @override
@@ -1219,16 +1276,17 @@ function disposeOwner(owner, time) {
  * @param {number} time
  * @returns {void}
  */
-Root.prototype._dispose = function (time) {
+rootProto._dispose = function (time) {
     disposeOwner(this, time);
 }
 
 /**
  * @protected
+ * @this {!Root}
  * @param {!Child} child 
  * @returns {void}
  */
-Root.prototype._addChild = function (child) {
+rootProto._addChild = function (child) {
     this._opt |= Opts.Own;
     if (this._children === null) {
         this._children = [child];
@@ -1239,10 +1297,11 @@ Root.prototype._addChild = function (child) {
 
 /**
  * @protected
+ * @this {!Root}
  * @param {CleanupFn} cleanupFn
  * @returns {void}
  */
-Root.prototype._addCleanup = function (cleanupFn) {
+rootProto._addCleanup = function (cleanupFn) {
     if (this._cleanups === null) {
         this._cleanups = [cleanupFn];
     } else {
@@ -1252,10 +1311,11 @@ Root.prototype._addCleanup = function (cleanupFn) {
 
 /**
  * @protected
+ * @this {!Root}
  * @param {RecoverFn} recoverFn
  * @returns {void}
  */
-Root.prototype._addRecover = function (recoverFn) {
+rootProto._addRecover = function (recoverFn) {
     if (this._recovers === null) {
         this._recovers = [recoverFn];
     } else {
@@ -1338,11 +1398,8 @@ function removeReceiver(send, slot) {
  */
 function removeSender(receive, slot) {
     if (receive._opt !== Opts.Disposed) {
-        /** @type {boolean} */
-        var orphan;
         if (slot === -1) {
             receive._source1 = null;
-            orphan = (receive._opt & Opts.ReceiveMany) === 0;
         } else {
             /** @const {?Array<!Send>|void} */
             var sources = receive._sources;
@@ -1364,15 +1421,8 @@ function removeSender(receive, slot) {
                 }
             }
             if (ln === 0) {
-                if (receive._source1 === null) {
-                    orphan = true;
-                } else {
-                    receive._opt &= ~Opts.ReceiveMany;
-                }
+                receive._opt &= ~Opts.ReceiveMany;
             }
-        }
-        if (orphan) {
-            unmount(receive);
         }
     }
 }
@@ -1535,7 +1585,7 @@ Reactive.prototype._update;
  * @param {number} time 
  * @returns {void}
  */
-Reactive.prototype._clearMayUpdate = function(stage, time) { };
+Reactive.prototype._clearMayUpdate = function (stage, time) { };
 
 /**
  * @struct
@@ -1615,10 +1665,16 @@ function getData() {
     return this._value;
 }
 
+makeReactive(Data, [], getData);
+
+/** @const @lends {Data.prototype} */
+var dataProto = Data.prototype;
+
 /**
  * @template T
  * @this {!Data<T>}
  * @param {T} value
+ * @returns {void}
  */
 function setData(value) {
     /** @const {number} */
@@ -1648,7 +1704,7 @@ function setData(value) {
                 }
             }
             if (this._set !== NIL && value !== this._set) {
-                throw new Error("Zorn: Conflict");
+                panic("conflicting values");
             }
             this._set = value;
             if (stage === Stage.Idle) {
@@ -1663,7 +1719,13 @@ function setData(value) {
     }
 }
 
-makeReactive(Data, [], peekVal, getData, setData);
+/**
+ * @param {T} value
+ * @this {!Data<T>}
+ * @throws {Error}
+ * @returns {void}
+ */
+dataProto.set = setData;
 
 /**
  * @protected
@@ -1671,7 +1733,7 @@ makeReactive(Data, [], peekVal, getData, setData);
  * @this {!Data<T>}
  * @param {number} time
  */
-Data.prototype._dispose = function (time) {
+dataProto._dispose = function (time) {
     disposeSender(this);
     this._set = null;
     this._value = void 0;
@@ -1683,7 +1745,7 @@ Data.prototype._dispose = function (time) {
  * @param {number} time
  * @returns {void}
  */
-Data.prototype._recDispose = function (time) {
+dataProto._recDispose = function (time) {
     this._opt = Opts.Dispose;
 };
 
@@ -1694,7 +1756,7 @@ Data.prototype._recDispose = function (time) {
  * @param {number} time
  * @returns {void}
  */
-Data.prototype._recMayDispose = function (owner, time) {
+dataProto._recMayDispose = function (owner, time) {
     this._opt |= Opts.MayDispose;
     if (this._owner === null) {
         this._owner = owner;
@@ -1703,10 +1765,11 @@ Data.prototype._recMayDispose = function (owner, time) {
 
 /**
  * @protected
+ * @this {!Data<T>}
  * @param {number} time
  * @returns {void}
  */
-Data.prototype._update = function (time) {
+dataProto._update = function (time) {
     this._value = this._set;
     this._set = NIL;
     this._opt &= ~(Opts.Update | Opts.MayFlags);
@@ -1721,7 +1784,7 @@ Data.prototype._update = function (time) {
  * @protected
  * @constructor
  * @extends {Data<T,(function(T,U): T)>}
- * @implements {OwnOne}
+ * @implements {Own}
  * @implements {Receive}
  * @implements {ReadSignal<T>}
  * @param {function(T,U,Func): T} fn 
@@ -1808,7 +1871,10 @@ function getComputation() {
     return this._value;
 }
 
-makeReactive(Computation, [Root, Data], peekVal, getComputation);
+makeReactive(Computation, [Root], getComputation);
+
+/** @const @lends {Computation.prototype} */
+var computationProto = Computation.prototype;
 
 /**
  * @template T,U
@@ -1862,12 +1928,12 @@ function evalDispose(node, fn) {
     /**
      * @returns {void}
      */
-    var disposer = function () {
+    function disposer() {
         dispose(node);
     };
     return function (seed, args) {
         return fn(seed, args, disposer);
-    }
+    };
 }
 
 /**
@@ -1885,7 +1951,7 @@ function evalSource(src, fn) {
         src();
         LISTEN = false;
         return fn(seed, args, disposer);
-    }
+    };
 }
 
 /**
@@ -1960,11 +2026,14 @@ function disposeReceiver(node) {
  * @param {number} time
  * @returns {void}
  */
-Computation.prototype._dispose = function (time) {
+computationProto._dispose = function (time) {
     disposeOwner(this, time);
     disposeSender(this);
     disposeReceiver(this);
-    this._unmount();
+    this._set =
+        this._args =
+        this._sources =
+        this._sourceslots = /** @type {?} */(null);
     this._value = void 0;
 };
 
@@ -1975,7 +2044,7 @@ Computation.prototype._dispose = function (time) {
  * @param {number} time
  * @returns {void}
  */
-Computation.prototype._recDispose = function (time) {
+computationProto._recDispose = function (time) {
     /** @const {number} */
     var opt = this._opt;
     this._age = time;
@@ -1997,7 +2066,7 @@ Computation.prototype._recDispose = function (time) {
  * @param {number} time
  * @returns {void}
  */
-Computation.prototype._recMayDispose = function (owner, time) {
+computationProto._recMayDispose = function (owner, time) {
     /** @const {number} */
     var opt = this._opt;
     this._opt = (opt | Opts.MayDispose) & ~Opts.MayCleared;
@@ -2012,11 +2081,11 @@ Computation.prototype._recMayDispose = function (owner, time) {
 /**
  * @protected
  * @override
- * @this {Computation<T>}
+ * @this {!Computation<T>}
  * @param {number} time
  * @returns {void}
  */
-Computation.prototype._update = function (time) {
+computationProto._update = function (time) {
     /** @type {number} */
     var i;
     /** @type {number} */
@@ -2064,9 +2133,6 @@ Computation.prototype._update = function (time) {
         sendUpdate(this, time);
     }
     this._opt &= ~(Opts.UpdateFlags | Opts.MayFlags);
-    if ((this._opt & Opts.Receive) !== 0) {
-        this._opt &= ~Opts.Unmount;
-    }
     OWNER = owner;
     LISTEN = listen;
 };
@@ -2077,7 +2143,7 @@ Computation.prototype._update = function (time) {
  * @param {number} time
  * @returns {void}
  */
-Computation.prototype._recUpdate = function (time) {
+computationProto._recUpdate = function (time) {
     /** @const {number} */
     var opt = this._opt;
     this._age = time;
@@ -2104,7 +2170,7 @@ Computation.prototype._recUpdate = function (time) {
  * @param {number} time
  * @returns {void}
  */
-Computation.prototype._recMayUpdate = function (time) {
+computationProto._recMayUpdate = function (time) {
     /** @const {number} */
     var opt = this._opt;
     this._opt = (opt | Opts.MayUpdate) & ~Opts.MayCleared;
@@ -2120,15 +2186,15 @@ Computation.prototype._recMayUpdate = function (time) {
  * @protected
  * @override
  * @throws {Error}
- * @this {Computation<T>}
+ * @this {!Computation<T>}
  * @param {number} stage
  * @param {number} time
  * @returns {void} 
  */
-Computation.prototype._clearMayUpdate = function (stage, time) {
+computationProto._clearMayUpdate = function (stage, time) {
     if (stage === Stage.Computes) {
         if ((this._opt & Opts.MayCleared) !== 0) {
-            throw new Error("cyclic dependency");
+            panic("cyclic dependency");
         }
         this._opt |= Opts.MayCleared;
         if ((this._opt & Opts.MayDispose) !== 0) {
@@ -2169,21 +2235,10 @@ Computation.prototype._clearMayUpdate = function (stage, time) {
     }
     if ((this._opt & Opts.Update) !== 0 && this._age === time) {
         if ((this._opt & Opts.Updated) !== 0) {
-            throw new Error("cyclic dependency");
+            panic("cyclic dependency");
         }
         this._update(time);
     }
-};
-
-/**
- * @protected
- * @returns {void}
- */
-Computation.prototype._unmount = function () {
-    disposeSender(this);
-    this._set =
-        this._sources =
-        this._sourceslots = /** @type {?} */(null);
 };
 
 /**
@@ -2211,18 +2266,29 @@ function getLength() {
 /**
  * @struct
  * @protected
- * @abstract
  * @template T,U
  * @constructor
  * @extends {Data<!Array<T>,U>}
+ * @implements {SignalCollection<T>}
  */
 function Collection() { }
 
 makeReactive(Collection, [Data]);
 
+/** @const @lends {Collection.prototype} */
+var collectionProto = Collection.prototype;
+
 /* __EXCLUDE__ */
 
 /**
+ * @public
+ * @this {!Collection<T>}
+ * @returns {!Array<T|!Array<T>|number|(function(T,T): number)|void>}
+ */
+Collection.prototype.mut;
+
+/**
+ * @readonly
  * @type {!ReadSignal<number>}  
  */
 Collection.prototype.length;
@@ -2233,21 +2299,27 @@ Collection.prototype.length;
 Collection.prototype._length;
 
 /**
+ * @protected
+ * @type {!Array<T|!Array<T>|number|(function(T,T): number)|void>}
+ */
+Collection.prototype._mut;
+
+/**
  * @const
  * @enum {number}
  */
 export var Args = {
     Source: 0,
     Changed: 1,
-    Mutation: 2,
-    MutationArgs: 3,
-    FunctionArgs: 4
+    Mut: 2,
+    MutArgs: 3,
+    Params: 4
 };
 
 /**
  * This array holds state used for collection methods.
  * It has this structure:
- * [0] - {Collection} The Collection source
+ * [0] - {Array} The source value
  * [1] - {0 | 1} Value has changed
  * [2] - {Mutation} The mutation type
  * [3] - {Args} The mutation arguments
@@ -2260,78 +2332,97 @@ Collection.prototype._args;
 /* __EXCLUDE__ */
 
 /**
- * 
+ * @public
+ * @this {!Collection<T,?>}
  * @param {number} index 
  * @returns {!ReadSignal<T|undefined>}
  */
-Collection.prototype.at = function (index) {
+collectionProto.at = function (index) {
 
 };
 
 /**
- * 
+ * @public
+ * @this {!Collection<T,?>}
  * @param {...(T|!Array<T>)} items
- * @returns {!SignalEnumerable<T>} 
+ * @returns {!SignalCollection<T>} 
  */
-Collection.prototype.concat = function (items) {
+collectionProto.concat = function (items) {
 
 };
 
 /**
+ * @public
+ * @this {!Collection<T,?>}
  * @param {function(T,number): boolean} callbackFn
  * @returns {!ReadSignal<boolean>}
  */
-Collection.prototype.every = function (callbackFn) { };
+collectionProto.every = function (callbackFn) { };
 
 /**
+ * @public
+ * @this {!Collection<T,?>}
  * @param {function(T,number): boolean} callbackFn
- * @returns {!SignalEnumerable<T>}
+ * @returns {!SignalCollection<T>}
  */
-Collection.prototype.filter = function (callbackFn) { };
+collectionProto.filter = function (callbackFn) { };
 
 /**
- * @param {function(T,number): boolean} callbackFn
- * @returns {!ReadSignal<T|undefined>}
- */
-Collection.prototype.find = function (callbackFn) { };
-
-/**
- * @param {function(T,number): boolean} callbackFn
- * @returns {!ReadSignal<number>}
- */
-Collection.prototype.findIndex = function (callbackFn) { };
-
-/**
+ * @public
+ * @this {!Collection<T,?>}
  * @param {function(T,number): boolean} callbackFn
  * @returns {!ReadSignal<T|undefined>}
  */
-Collection.prototype.findLast = function (callbackFn) { };
+collectionProto.find = function (callbackFn) { };
 
 /**
+ * @public
+ * @this {!Collection<T,?>}
  * @param {function(T,number): boolean} callbackFn
  * @returns {!ReadSignal<number>}
  */
-Collection.prototype.findLastIndex = function (callbackFn) { };
+collectionProto.findIndex = function (callbackFn) { };
 
 /**
+ * @public
+ * @this {!Collection<T,?>}
+ * @param {function(T,number): boolean} callbackFn
+ * @returns {!ReadSignal<T|undefined>}
+ */
+collectionProto.findLast = function (callbackFn) { };
+
+/**
+ * @public
+ * @this {!Collection<T,?>}
+ * @param {function(T,number): boolean} callbackFn
+ * @returns {!ReadSignal<number>}
+ */
+collectionProto.findLastIndex = function (callbackFn) { };
+
+/**
+ * @public
+ * @this {!Collection<T,?>}
  * @param {function(T,number): void} callbackFn
  * @returns {void} 
  */
-Collection.prototype.forEach = function (callbackFn) { };
+collectionProto.forEach = function (callbackFn) { };
 
 /**
+ * @public
+ * @this {!Collection<T,?>}
  * @param {T} searchElement
  * @returns {!ReadSignal<boolean>}
  */
-Collection.prototype.includes = function (searchElement) { };
+collectionProto.includes = function (searchElement) { };
 
 /**
- * 
+ * @public
+ * @this {!Collection<T,?>}
  * @param {T} searchElement 
  * @param {number=} fromIndex
  * @returns {!ReadSignal<number>}
  */
-Collection.prototype.indexOf = function (searchElement, fromIndex) { };
+collectionProto.indexOf = function (searchElement, fromIndex) { };
 
 /**
  * 
@@ -2384,15 +2475,17 @@ function findCallback(array, start, end, dir, callback) {
 }
 
 /**
- * 
+ * @public
+ * @this {!Collection<T,?>}
  * @param {string=} separator
  * @returns {!ReadSignal<string>}
  */
-Collection.prototype.join = function (separator) {
+collectionProto.join = function (separator) {
     return new Computation(join, '', Opts.Bound, [this, separator], void 0, this);
 };
 
 /**
+ * 
  * @template T
  * @param {number} _ 
  * @param {Array} args 
@@ -2406,80 +2499,85 @@ function lastIndexOf(_, args) {
 }
 
 /**
- * 
+ * @public
+ * @this {!Collection<T,?>}
  * @param {T} searchElement 
  * @param {number=} fromIndex
  * @returns {!ReadSignal<number>}
  */
-Collection.prototype.lastIndexOf = function (searchElement, fromIndex) {
+collectionProto.lastIndexOf = function (searchElement, fromIndex) {
     return new Computation(lastIndexOf, -1, Opts.Bound, [this, searchElement, fromIndex], void 0, this);
 };
 
 /**
+ * @public
  * @template U
+ * @this {!Collection<T,?>}
  * @param {function(T,!ReadSignal<number>): U} callbackFn
- * @returns {!SignalEnumerable<U>}
+ * @returns {!SignalCollection<U>}
  */
-Collection.prototype.map = function (callbackFn) { };
+collectionProto.map = function (callbackFn) { };
 
 /**
+ * @public
  * @template U
+ * @this {!Collection<T,?>}
  * @param {function((T|U),T,number): U} callbackFn 
  * @param {U=} initialValue 
  * @returns {!ReadSignal<U>}
  */
-Collection.prototype.reduce = function (callbackFn, initialValue) { };
+collectionProto.reduce = function (callbackFn, initialValue) { };
 
 /**
+ * @public
  * @template U
+ * @this {!Collection<T,?>}
  * @param {function((T|U),T,number): U} callbackFn 
  * @param {U=} initialValue 
  * @returns {!ReadSignal<U>}
  */
-Collection.prototype.reduceRight = function (callbackFn, initialValue) { };
+collectionProto.reduceRight = function (callbackFn, initialValue) { };
 
 /**
+ * @public
  * @template T
  * @param {Array<T>} seed 
  * @param {Array} args 
  * @returns 
  */
 function slice(seed, args) {
-    args[1] = 1;
-    /** @const @type {Collection<T>} */
-    var src = args[0];
-    /** @type {number} */
-    var start = args[3];
-    /** @type {number} */
-    var end = args[4];
-    return src._value.slice(
-        /** @type {number|void} */(args[3]),
-        /** @type {number|void} */(args[4])
-    );
+    args[Args.Changed] = 1;
+    /** @const @type {!Collection<T>} */
+    var src = args[Args.Source];
+    /** @const {!Array<number>} */
+    var params = args[Args.Params];
+    return src.val.slice(params[0], params[1]);
 }
 
 /**
+ * @public
+ * @this {!Collection<T,?>}
  * @param {number=} start
  * @param {number=} end
- * @returns {!SignalEnumerable<T>}
+ * @returns {!SignalCollection<T>}
  */
-Collection.prototype.slice = function (start, end) {
-    return new Enumerable(this, slice, [this, 0, 0, start, end]);
+collectionProto.slice = function (start, end) {
+    return new Enumerable(this, slice, [start, end]);
 };
 
 /**
- * 
+ * @public
+ * @this {!Collection<T,?>}
  * @param {function(T,number): boolean} callbackFn
  * @returns {!ReadSignal<boolean>} 
  */
-Collection.prototype.some = function (callbackFn) { };
+collectionProto.some = function (callbackFn) { };
 
 /**
  * @struct
- * @protected
  * @template T
  * @constructor
- * @extends {Collection<T,?>}
+ * @extends {Collection<T,nil>}
  * @implements {SignalArray<T>}
  * @param {!Array<T>=} value
  * @param {(function(!Array<T>,!Array<T>): boolean)|null=} eq
@@ -2495,79 +2593,128 @@ function DataArray(value, eq) {
     this._length = null;
     /**
      * @protected
+     * @type {!Array<T|!Array<T>|number|(function(T,T): number)>}
+     */
+    this._mut = [];
+    /**
+     * @protected
+     * @type {!Array<T|!Array<T>|number|(function(T,T): number)>}
+     */
+    this._smut = [];
+    /**
+     * @protected
      * @type {!Array}
      */
     this._args = [null, 0, 0];
 }
 
+makeReactive(DataArray, [Data, Collection], getData, getLength);
+
+/** @const @lends {DataArray.prototype} */
+var dataArrayProto = DataArray.prototype;
+
 /**
  * @template T
- * @this {!DataArray<T>}
- * @param {number} value 
+ * @param {!DataArray<T>} node
+ * @param {number} mut 
+ * @param {T|!Array<T>|number|(function(T,T): number)=} mutArgs 
  * @returns {void}
  */
-function setLength(value) {
-    mutate(this, Mutation.Length, value);
+function mutate(node, mut, mutArgs) {
+    if (node._set !== NIL) {
+        panic("conflicting mutation");
+    }
+    node._smut[0] = mut;
+    node._smut[1] = mutArgs;
+    setData.call(node, MUT);
 }
 
-makeReactive(DataArray, [Data, Collection], peekVal, getData, setData, getLength, setLength);
+/**
+ * @public
+ * @this {!DataArray<T>}
+ * @returns {!Array<T|!Array<T>|number|(function(T,T): number)|void>}
+ */
+dataArrayProto.mut = function() {
+    return [this._mut[0], this._mut[1]];
+}
+
+/**
+ * @public
+ * @override
+ * @this {!DataArray<T>}
+ * @param {!Array<T>|number} value 
+ * @param {T=} item 
+ * @returns {void}
+ */
+dataArrayProto.set = function (value, item) {
+    /** @const {number} */
+    var ln = arguments.length;
+    if (ln === 1) {
+        mutate(this, Mutation.Set, value);
+    } else if (ln > 0) {
+        mutate(this, Mutation.SetAt, [value, item]);
+    }
+};
 
 /**
  * @protected
  * @override
  * @this {!DataArray<T>}
  * @param {number} time
+ * @returns {void}
  */
-DataArray.prototype._update = function (time) {
-    /** @const {!Array} */
-    var args = this._args;
+dataArrayProto._update = function (time) {
+    /** @const {!Array<T|!Array<T>|number|(function(T,T): number)|void>} */
+    var smut = this._smut;
     /** @const {number} */
-    var mut = args[Args.Mutation];
-    if (mut === Mutation.Set) {
-        this._value = this._set;
-    } else {
-        /** @const {T|!Array<T>|number|void} */
-        var mutArgs = args[Args.MutationArgs];
-        /** @const @type {!Array<T>} */
-        var current = this._value;
-        /** @const {number} */
-        var ln = current.length;
-        switch (mut) {
-            case Mutation.Length:
-                current.length = mutArgs;
-                break;
-            case Mutation.Replace:
-                current[mutArgs[0]] = mutArgs[1];
-                break;
-            case Mutation.Pop:
-            case Mutation.PopRange:
-                current.length -= mutArgs;
-                break;
-            case Mutation.Push:
-                current[ln] = mutArgs;
-                break;
-            case Mutation.PushRange:
-                current.push.apply(current, mutArgs);
-                break;
-            case Mutation.Shift:
-                current.shift();
-                break;
-            case Mutation.Unshift:
-                current.unshift(mutArgs);
-                break;
-            case Mutation.Reverse:
-                current.reverse();
-                break;
-            case Mutation.Sort:
-                current.sort(mutArgs);
-                break;
-            case Mutation.Custom:
-                // todo
-                break;
-            default:
-                current.splice.apply(current, mutArgs);
-        }
+    var mut = smut[0];
+    /** @const {T|!Array<T>|number|(function(T,T): number)|void} */
+    var mutArgs = smut[1];
+    /** @const @type {!Array<T>} */
+    var array = this._value;
+    switch (mut) {
+        case Mutation.Set:
+            this._value = mutArgs;
+            break;
+        case Mutation.SetAt:
+            array[mutArgs[0]] = mutArgs[1];
+            break;
+        case Mutation.Pop:
+            array.length--;
+            break;
+        case Mutation.PopRange:
+            array.length -= mutArgs;
+            break;
+        case Mutation.Push:
+            array[array.length] = mutArgs;
+            break;
+        case Mutation.PushRange:
+            array.push.apply(array, mutArgs);
+            break;
+        case Mutation.Shift:
+            array.shift();
+            break;
+        case Mutation.Unshift:
+            array.unshift(mutArgs);
+            break;
+        case Mutation.UnshiftRange:
+            array.unshift.apply(array, mutArgs);
+            break;
+        case Mutation.Reverse:
+            array.reverse();
+            break;
+        case Mutation.Sort:
+            array.sort(mutArgs);
+            break;
+        case Mutation.Custom:
+            // todo
+            break;
+        default:
+            array.splice.apply(array, mutArgs);
     }
+    this._smut = this._mut;
+    this._smut[1] = void 0;
+    this._mut = smut;
     this._set = NIL;
     this._opt &= ~(Opts.Update | Opts.MayFlags);
     if ((this._opt & Opts.Send) !== 0) {
@@ -2576,30 +2723,13 @@ DataArray.prototype._update = function (time) {
 };
 
 /**
- * @template T
- * @throws {Error}
- * @param {!DataArray<T>} node 
- * @param {number} mutation 
- * @param {T|Array<T>|number=} args 
- * @returns {void}
- */
-function mutate(node, mutation, args) {
-    if (node._set !== NIL) {
-        throw new Error('conflicting mutation');
-    }
-    node._args[Args.Mutation] = mutation;
-    node._args[Args.MutationArgs] = args;
-    setData.call(node, MUT);
-}
-
-/**
  * @public
  * @this {!DataArray<T>}
  * @throws {Error}
  * @returns {void}
  */
-DataArray.prototype.pop = function () {
-    if (this._value.length !== 0 || STAGE !== Stage.Idle) {
+dataArrayProto.pop = function () {
+    if (this._value.length !== 0) {
         mutate(this, Mutation.Pop);
     }
 };
@@ -2611,30 +2741,33 @@ DataArray.prototype.pop = function () {
  * @throws {Error}
  * @returns {void}
  */
-DataArray.prototype.push = function (elementN) {
+dataArrayProto.push = function (elementN) {
+    /** @const {!Arguments} */
+    var args = arguments;
     /** @const {number} */
-    var ln = arguments.length;
+    var ln = args.length;
     if (ln === 1) {
         mutate(this, Mutation.Push, elementN);
-    } else {
+    } else if (ln > 0) {
         /** @type {number} */
         var i = 0;
-        /** @type {!Array<T|number>} */
-        var args = new Array(ln);
+        /** @const {!Array<T|number>} */
+        var params = new Array(ln);
         for (; i < ln; i++) {
-            args[i] = arguments[i];
+            params[i] = args[i];
         }
-        mutate(this, Mutation.PushRange, args);
+        mutate(this, Mutation.PushRange, params);
     }
 };
 
 /**
+ * @public
  * @this {!DataArray<T>}
  * @throws {Error}
  * @returns {void}
  */
-DataArray.prototype.reverse = function () {
-    if (this._value.length !== 0 || STAGE !== Stage.Idle) {
+dataArrayProto.reverse = function () {
+    if (this._value.length !== 0) {
         mutate(this, Mutation.Reverse);
     }
 };
@@ -2645,8 +2778,8 @@ DataArray.prototype.reverse = function () {
  * @throws {Error}
  * @returns {void}
  */
-DataArray.prototype.shift = function () {
-    if (this._value.length !== 0 || STAGE !== Stage.Idle) {
+dataArrayProto.shift = function () {
+    if (this._value.length !== 0) {
         mutate(this, Mutation.Shift);
     }
 };
@@ -2658,8 +2791,8 @@ DataArray.prototype.shift = function () {
  * @throws {Error}
  * @returns {void}
  */
-DataArray.prototype.sort = function (compareFn) {
-    if (this._value.length !== 0 || STAGE !== Stage.Idle) {
+dataArrayProto.sort = function (compareFn) {
+    if (this._value.length !== 0) {
         mutate(this, Mutation.Sort, compareFn);
     }
 };
@@ -2673,10 +2806,86 @@ DataArray.prototype.sort = function (compareFn) {
  * @throws {Error}
  * @returns {void}
  */
-DataArray.prototype.splice = function (start, deleteCount, items) {
+dataArrayProto.splice = function (start, deleteCount, items) {
+    /** @const {!Arguments} */
+    var args = arguments;
     /** @const {number} */
-    var ln = arguments.length;
-
+    var ln = args.length;
+    if (ln > 0) {
+        /** @type {number} */
+        var mut;
+        /** @const {number} */
+        var length = this._value.length;
+        /** @type {!Array<number|T|!Array<T>>} */
+        var params;
+        if (start < 0) {
+            if ((start += length) < 0) {
+                start = 0;
+            }
+        } else if (start >= length) {
+            if (ln < 3) {
+                return;
+            }
+            start = length;
+            deleteCount = 0;
+        }
+        if (deleteCount >= length - start) {
+            deleteCount = length - start;
+        }
+        if ((0 | deleteCount) > 0) {
+            if (ln > 2) {
+                if (ln - 2 === deleteCount) {
+                    if (deleteCount === 1) {
+                        return mutate(this, Mutation.SetAt, [start, items]);
+                    }
+                    mut = Mutation.ReplaceRange;
+                } else {
+                    mut = Mutation.ReplaceRangeInsert;
+                }
+            } else {
+                if (length === 0) {
+                    return;
+                }
+                if (start === 0) {
+                    if (deleteCount === 1) {
+                        return mutate(this, Mutation.Shift);
+                    }
+                    mut = Mutation.ShiftRange;
+                } else {
+                    if (deleteCount === 1) {
+                        mut = Mutation.RemoveAt;
+                    } else {
+                        mut = Mutation.RemoveRange;
+                    }
+                }
+            }
+        } else {
+            if (ln < 3) {
+                return;
+            }
+            if (ln === 3) {
+                if (start === 0) {
+                    return mutate(this, Mutation.Unshift, items);
+                }
+                mut = Mutation.InsertAt;
+            } else {
+                mut = Mutation.InsertRange;
+            }
+        }
+        if ((mut & Mutation.Insert) !== 0) {
+            if ((mut & Mutation.Range) !== 0) {
+                params = [start, deleteCount];
+                for (var i = 2; i < ln; i++) {
+                    params[i] = args[i];
+                }
+            } else {
+                params = [start, deleteCount, items];
+            }
+        } else {
+            mutate(this, mut, [start, deleteCount]);
+        }
+        mutate(this, mut, params);
+    }
 };
 
 /**
@@ -2686,30 +2895,32 @@ DataArray.prototype.splice = function (start, deleteCount, items) {
  * @throws {Error} 
  * @returns {void}
  */
-DataArray.prototype.unshift = function (elementN) {
+dataArrayProto.unshift = function (elementN) {
     /** @const {number} */
     var ln = arguments.length;
     if (ln === 1) {
         mutate(this, Mutation.Unshift, elementN);
-    } else {
+    } else if (ln > 0) {
+        /** @type {number} */
+        var i = 0;
+        /** @const {!Array<T>} */
         var args = new Array(ln);
-        for (var i = 0; i < ln; i++) {
+        for (; i < ln; i++) {
             args[i] = arguments[i];
         }
-        mutate(this, Mutation.UnshiftRange, [0, 0, args]);
+        mutate(this, Mutation.UnshiftRange, args);
     }
 };
 
 /**
  * @struct
- * @protected
+ * @public
  * @template T,U
  * @constructor
  * @extends {Collection<T,(function(!Array<T>,!Array<U>): !Array<T>)>}
  * @implements {Receive}
- * @implements {ReadSignal<!Array<T>>}
- * @implements {SignalEnumerable<T>}
- * @param {!Send<!Array>} src
+ * @implements {SignalCollection<T>}
+ * @param {Source} src
  * @param {function(!Array<T>,U): !Array<T>} fn
  * @param {!Array<U>} args
  */
@@ -2732,13 +2943,21 @@ function Enumerable(src, fn, args) {
     this._source1slot = 0;
     /**
      * @protected
+     * @type {!Array<T|!Array<T>|number|(function(T,T): number)|void>}
+     */
+    this._mut = [Mutation.None];
+    /**
+     * @protected
      * @type {!Array<U>}
      */
-    this._args = args;
-    startCompute(null, false, this, args, src);
+    this._args = [src, 1, Mutation.None, void 0, args];
+    startCompute(null, false, this, this._args, src);
 }
 
-makeReactive(Enumerable, [Computation, Collection], peekVal, getComputation, void 0, getLength);
+makeReactive(Enumerable, [Computation, Collection], getComputation, getLength);
+
+/** @const @lends {Enumerable.prototype} */
+var enumerableProto = Enumerable.prototype;
 
 /* __EXCLUDE__ */
 
@@ -2779,20 +2998,12 @@ Enumerable.prototype._recMayUpdate;
 
 /**
  * @protected
- * @returns {void}
- */
-Enumerable.prototype._unmount = function () {
-
-};
-
-/**
- * @protected
  * @override
  * @this {!Enumerable<T>}
  * @param {number} time 
  * @returns {void}
  */
-Enumerable.prototype._update = function (time) {
+enumerableProto._update = function (time) {
     /** @const {?Own} */
     var owner = OWNER;
     /** @const {boolean} */
@@ -2802,6 +3013,8 @@ Enumerable.prototype._update = function (time) {
     OWNER = null;
     LISTEN = false;
     args[Args.Changed] = 0;
+    args[Args.Mut] = this._mut[0];
+    args[Args.MutArgs] = this._mut[1];
     this._opt |= Opts.Updated;
     this._value = this._set(this._value, args);
     if (args[Args.Changed] === 1) {
@@ -2819,7 +3032,9 @@ export {
     compute, $compute,
     computeWhen, $computeWhen,
     effect, $effect,
-    effectWhen, $effectWhen
+    effectWhen, $effectWhen,
+    Root, Data, Computation,
+    Collection, Enumerable, DataArray,
 };
 
 /* __SOURCE__ */

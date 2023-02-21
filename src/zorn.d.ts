@@ -5,7 +5,7 @@ export interface ReadSignal<T = any> {
 }
 
 export interface Signal<T = any> extends ReadSignal<T> {
-    set val(val: T): T;
+    set(val: T): void;
 }
 
 type Source = ReadSignal | ReadSignal[] | readonly ReadSignal[];
@@ -86,9 +86,139 @@ export function batch(callback: () => void): void;
 
 export function stable(): void;
 
+export const enum Mutation {
+    Head = 32,
+    Tail = 64,
+    Range = 128,
+    Remove = 256,
+    Insert = 512,
+    Reorder = 1024,
+    Type = 31,
+    /**
+     * 1 | Insert | Reorder
+     */
+    Set = 1537,
+    /**
+     * 2 | Remove | Insert
+     */
+    SetAt = 770,
+    /**
+     * 3 | Tail | Remove
+     */
+    Pop = 67,
+    /**
+     * 4 | Tail | Range | Remove
+     */
+    PopRange = 196,
+    /**
+     * 5 | Tail | Insert
+     */
+    Push = 69,
+    /**
+     * 6 | Tail | Range | Insert
+     */
+    PushRange = 198,
+    /**
+     * 7 | Head | Remove
+     */
+    Shift = 295,
+    /**
+     * 8 | Head | Range | Remove
+     */
+    ShiftRange = 424,
+    /**
+     * 9 | Head | Insert
+     */
+    Unshift = 553,
+    /**
+     * 10 | Head | Range | Insert
+     */
+    UnshiftRange = 682,
+    /**
+     * 11 | Remove
+     */
+    RemoveAt = 267,
+    /**
+     * 12 | Range | Remove
+     */
+    RemoveRange = 396,
+    /**
+     * 13 | Insert
+     */
+    InsertAt = 525,
+    /**
+     * 14 | Range | Insert
+     */
+    InsertRange = 654,
+    /**
+     * 15 | Range | Remove | Insert
+     */
+    ReplaceRange = 911,
+    /**
+     * 16 | Tail | Range | Remove | Insert
+     */
+    ReplaceRangeInsert = 976,
+    /**
+     * 17 | Reorder
+     */
+    Reverse = 1041,
+    /**
+     * 18 | Reorder
+     */
+    Sort = 1042,
+    /**
+     * User defined mutation
+     */
+    Custom = 19,
+}
+
+type MutArg<M extends Mutation, T> = [M, T];
+
+type MutSet<T> = MutArg<Mutation.Set, T[]>;
+
+type MutSetAt<T> = MutArg<Mutation.SetAt, [number, T]>;
+
+type MutPop = MutArg<Mutation.Pop, undefined>;
+
+type MutPopRange = MutArg<Mutation.PopRange, number>;
+
+type MutPush<T> = MutArg<Mutation.Push, T>;
+
+type MutPushRange<T> = MutArg<Mutation.PushRange, T[]>;
+
+type MutShift = MutArg<Mutation.Shift, undefined>;
+
+type MutShiftRange = MutArg<Mutation.ShiftRange, number>;
+
+type MutUnshift<T> = MutArg<Mutation.Unshift, T>;
+
+type MutUnshiftRange<T> = MutArg<Mutation.UnshiftRange, T[]>;
+
+type MutRemoveAt = MutArg<Mutation.RemoveAt, number>;
+
+type MutRemoveRange = MutArg<Mutation.RemoveRange, [number, number]>;
+
+type MutInsertAt<T> = MutArg<Mutation.InsertAt, [number, 0, T]>;
+
+type MutInsertRange<T> = MutArg<Mutation.InsertRange, [number, 0, T[]]>;
+
+type MutReplaceRange<T> = MutArg<Mutation.ReplaceRange, [number, number, T[]]>;
+
+type MutReplaceRangeInsert<T> = MutArg<Mutation.ReplaceRangeInsert, [number, number, T[]]>;
+
+type MutReverse = MutArg<Mutation.Reverse, undefined>;
+
+type MutSort<T> = MutArg<Mutation.Sort, (a: T, b: T) => number>;
+
+type Mut<T> = MutSet<T> | MutSetAt<T> | MutPop | MutPopRange | MutPush<T> | MutPushRange<T> | MutShift | MutShiftRange | MutUnshift<T> | MutUnshiftRange<T> | MutRemoveAt | MutRemoveRange | MutInsertAt<T> | MutInsertRange<T> | MutReplaceRange<T> | MutReplaceRangeInsert<T>;
+
 export interface SignalCollection<T = any> extends ReadSignal<T[]> {
 
     get length(): ReadSignal<number>;
+
+    mut(): Mut<T>;
+
+    at(index: number): ReadSignal<T>;
 
     concat(...items: (T | T[])[]): SignalCollection<T>;
 
@@ -134,10 +264,10 @@ export interface SignalCollection<T = any> extends ReadSignal<T[]> {
 }
 
 export interface SignalArray<T = any> extends SignalCollection<T>{
-    
-    set val(items: T[]): T[];
 
-    set length(val: number): number;
+    set(items: T[]): void;
+
+    set(index: number, item: T): void;
     
     pop(): void;
     

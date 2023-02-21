@@ -155,26 +155,29 @@ function bundle() {
         ext = removeMarker(ext, '__EXCLUDE__');
         ext = removeEmptyLines(ext);
 
-        var closureCode = removeSection(srcCode, '__EXTERNS__');
-        closureCode = closureCode.replace(CommentRegex, '');
-        closureCode = removeEmptyLines(closureCode);
+        var js = removeSection(srcCode, '__EXTERNS__');
+        js = js.replace(CommentRegex, '');
+        js = removeEmptyLines(js);
+
+        var closureFile = removeSection(srcCode, '__EXTERNS_FILE__');
+        closureFile = closureFile.replace(CommentRegex, '');
+        closureFile = removeEmptyLines(closureFile);
         if (nodist) {
             write = function () {
-                writeBundle(mjs, cjs, iife, closureCode, ext);
+                writeBundle(mjs, cjs, iife, js, ext, closureFile);
             }
         } else {
-            writeBundle(mjs, cjs, iife, closureCode, ext);
+            writeBundle(mjs, cjs, iife, js, ext, closureFile);
         }
     });
 }
 
-function writeBundle(mjs, cjs, iife, closureCode, ext) {
+function writeBundle(mjs, cjs, iife, js, ext, closureCode) {
 
-    var closureFile = path.join(distDir, 'zorn.js')
+    fs.writeFile(path.join(distDir, 'zorn.js'), js, logError);
     fs.writeFile(path.join(distDir, 'zorn.mjs'), mjs, logError);
     fs.writeFile(path.join(distDir, 'zorn.cjs'), cjs, logError);
     fs.writeFile(path.join(distDir, 'zorn.iife.js'), iife, logError);
-    fs.writeFile(closureFile, closureCode, logError);
     fs.writeFile(path.join(distDir, 'zorn.ext.js'), ext, function (err) {
         if (err) {
             console.error(err);
@@ -183,7 +186,7 @@ function writeBundle(mjs, cjs, iife, closureCode, ext) {
         if (process.argv.some(function (arg) {
             return arg === '--minify' || arg === '-m';
         })) {
-            bundleMinify(closureFile);
+            bundleMinify(closureCode);
         }
     });
     fs.copyFile(path.join(rootDir, 'src', 'zorn.d.ts'), path.join(rootDir, 'dist', 'zorn.d.ts'), logError);
@@ -191,24 +194,40 @@ function writeBundle(mjs, cjs, iife, closureCode, ext) {
 
 /**
  * 
- * @param {string} srcFile 
+ * @param {string} code 
  */
-function bundleMinify(srcFile) {
+function bundleMinify(code) {
     var api = Object.keys(zorn).filter(function (key) {
         return !ENUMS.includes(key);
     });
     var entry = [
-        'import { ' + api.join(', ') + ' } from "' + path.join(__dirname, '..', 'dist', 'zorn.js') + '";',
+        'import { ' + api.join(', ') + ' } from "./__zorn__";',
         api.map(function (key) {
             return "window['" + key + "'] = " + key + ";";
         }).join('\n'),
     ].join('\n');
+    var zornFile = path.join(__dirname, '__zorn__.js');
     var closureFile = path.join(__dirname, '__closure__.js');
+    var wrote = false;
     fs.writeFile(closureFile, entry, function (err) {
         if (err) {
             return console.error(err);
         }
-        closureCompile(srcFile, closureFile);
+        if (wrote) {
+            closureCompile(zornFile, closureFile);
+        } else {
+            wrote = true;
+        }
+    });
+    fs.writeFile(zornFile, code, function (err) {
+        if (err) {
+            return console.error(err);
+        }
+        if (wrote) {
+            closureCompile(zornFile, closureFile);
+        } else {
+            wrote = true;
+        }
     });
 }
 
@@ -227,6 +246,7 @@ function closureCompile(srcFile, closureFile) {
         " --js " + closureFile;
     exec(cmd, function (err, stdout, stderr) {
         fs.rm(closureFile, logError);
+        fs.rm(srcFile, logError);
         if (err) {
             console.error(err);
             return;

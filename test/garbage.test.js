@@ -1,5 +1,4 @@
-import assert from 'assert';
-import { root, dispose, effect, cleanup, compute, value } from './helper/zorn.js';
+import { test, root, dispose, effect, cleanup, compute, value } from './helper/zorn.js';
 
 if (global.gc) {
 
@@ -22,7 +21,7 @@ if (global.gc) {
                 d1.val;
             }));
             collect(function () {
-                assert.notEqual(ref.deref(), void 0);
+                test.ok(ref.deref() !== void 0);
                 done();
             });
         });
@@ -34,7 +33,7 @@ if (global.gc) {
             }));
             dispose(d1);
             collect(function () {
-                assert.equal(ref.deref(), void 0);
+                test.ok(ref.deref() === void 0);
                 done();
             });
         });

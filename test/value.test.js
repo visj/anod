@@ -1,20 +1,14 @@
-import assert from 'assert';
-import { root, compute, value } from './helper/zorn.js';
+import { test, root, compute, value } from './helper/zorn.js';
 
 describe("value", function () {
     it("takes and returns an initial value", function () {
-        assert.equal(value(1).val, 1);
+        test.ok(value(1).val === 1);
     });
 
     it("can be set by passing in a new value", function () {
         var d = value(1);
-        d.val = 2;
-        assert.equal(d.val, 2);
-    });
-
-    it("returns value being set", function () {
-        var d = value(1);
-        assert.equal(d.val = 2, 2);
+        d.set(2);
+        test.ok(d.val === 2);
     });
 
     it("does not propagate if set to equal value", function () {
@@ -26,9 +20,9 @@ describe("value", function () {
                 return ++e;
             });
 
-            assert.equal(f.val, 1);
-            d.val = 1;
-            assert.equal(f.val, 1);
+            test.ok(f.val === 1);
+            d.set(1);
+            test.ok(f.val === 1);
         });
     });
 
@@ -41,11 +35,11 @@ describe("value", function () {
                 return ++e;
             });
 
-            assert.equal(f.val, 1);
-            d.val = 1;
-            assert.equal(f.val, 1);
-            d.val = 2;
-            assert.equal(f.val, 2);
+            test.ok(f.val === 1);
+            d.set(1);
+            test.ok(f.val === 1);
+            d.set(2);
+            test.ok(f.val === 2);
         });
     });
 
@@ -60,11 +54,11 @@ describe("value", function () {
                 return ++e;
             });
 
-            assert.equal(f.val, 1);
-            d.val = [1];
-            assert.equal(f.val, 1);
-            d.val = [2];
-            assert.equal(f.val, 2);
+            test.ok(f.val === 1);
+            d.set([1]);
+            test.ok(f.val === 1);
+            d.set([2]);
+            test.ok(f.val === 2);
         });
     });
 });

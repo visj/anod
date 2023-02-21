@@ -1,12 +1,11 @@
-import assert from 'assert';
-import { root, effect, compute, $compute, value } from './helper/zorn.js';
+import { test, root, effect, compute, $compute, value } from './helper/zorn.js';
 
 describe("compute()", function () {
     describe("creation", function () {
         it("returns initial value of wrapped function", function () {
             root(function () {
                 var f = compute(function () { return 1; });
-                assert.equal(f.val, 1);
+                test.ok(f.val === 1);
             });
         });
     });
@@ -18,7 +17,7 @@ describe("compute()", function () {
                 effect(function () {
                     calls++;
                 });
-                assert.equal(calls, 1);
+                test.ok(calls === 1);
             });
         });
 
@@ -31,7 +30,7 @@ describe("compute()", function () {
 
                 f.val; f.val; f.val;
 
-                assert.equal(calls, 1);
+                test.ok(calls === 1);
             });
         });
     });
@@ -48,8 +47,8 @@ describe("compute()", function () {
 
                 fevals = 0;
 
-                d.val++;
-                assert.equal(fevals, 1);
+                d.set(d.peek + 1);
+                test.ok(fevals === 1);
             });
         });
 
@@ -65,7 +64,7 @@ describe("compute()", function () {
                 fevals = 0;
 
                 d.val;
-                assert.equal(fevals, 0);
+                test.ok(fevals === 0);
             });
         });
 
@@ -76,8 +75,8 @@ describe("compute()", function () {
                     return d.val;
                 });
 
-                d.val = 2;
-                assert.equal(f.val, 2);
+                d.set(2);
+                test.ok(f.val === 2);
             });
         });
     });
@@ -100,38 +99,38 @@ describe("compute()", function () {
         it("updates on active dependencies", function () {
             root(function () {
                 init();
-                t.val = 5;
-                assert.equal(fevals, 1);
-                assert.equal(f.val, 5);
+                t.set(5);
+                test.ok(fevals === 1);
+                test.ok(f.val === 5);
             });
         });
 
         it("does not update on inactive dependencies", function () {
             root(function () {
                 init();
-                e.val = 5;
-                assert.equal(fevals, 0);
-                assert.equal(f.val, 1);
+                e.set(5);
+                test.ok(fevals === 0);
+                test.ok(f.val === 1);
             });
         });
 
         it("deactivates obsolete dependencies", function () {
             root(function () {
                 init();
-                i.val = false;
+                i.set(false);
                 fevals = 0;
-                t.val = 5;
-                assert.equal(fevals, 0);
+                t.set(5);
+                test.ok(fevals === 0);
             });
         });
 
         it("activates new dependencies", function () {
             root(function () {
                 init();
-                i.val = false;
+                i.set(false);
                 fevals = 0;
-                e.val = 5;
-                assert.equal(fevals, 1);
+                e.set(5);
+                test.ok(fevals === 1);
             });
         });
     });
@@ -145,8 +144,8 @@ describe("compute()", function () {
                     d = value(1);
                 });
                 fevals = 0;
-                d.val = 2;
-                assert.equal(fevals, 0);
+                d.set(2);
+                test.ok(fevals === 0);
             });
         });
     });
@@ -155,7 +154,7 @@ describe("compute()", function () {
         it("reads as undefined", function () {
             root(function () {
                 var f = compute(function () { });
-                assert(f.val == null);
+                test.ok(f.val == null);
             });
         });
     });
@@ -167,9 +166,9 @@ describe("compute()", function () {
                 var f = compute(function (v) {
                     return v + a.val;
                 }, 5);
-                assert.equal(f.val, 10);
-                a.val = 6;
-                assert.equal(f.val, 16);
+                test.ok(f.val === 10);
+                a.set(6);
+                test.ok(f.val === 16);
             });
         });
     });
@@ -194,7 +193,7 @@ describe("compute()", function () {
         it("does not cause re-evaluation", function () {
             root(function () {
                 init();
-                assert.equal(fcount, 1);
+                test.ok(fcount === 1);
             });
         });
 
@@ -202,7 +201,7 @@ describe("compute()", function () {
             root(function () {
                 init();
                 f.val;
-                assert.equal(gcount, 1);
+                test.ok(gcount === 1);
             });
         });
 
@@ -210,17 +209,17 @@ describe("compute()", function () {
             root(function () {
                 init();
                 g.val;
-                assert.equal(gcount, 1);
+                test.ok(gcount === 1);
             });
         });
 
         it("occurs when computation updates", function () {
             root(function () {
                 init();
-                d.val = 2;
-                assert.equal(fcount, 2);
-                assert.equal(gcount, 2);
-                assert.equal(g.val, 2);
+                d.set(2);
+                test.ok(fcount === 2);
+                test.ok(gcount === 2);
+                test.ok(g.val === 2);
             });
         });
     });
@@ -229,10 +228,10 @@ describe("compute()", function () {
         it("throws when continually setting a direct dependency", function () {
             root(function () {
                 var d = value(1);
-                assert.throws(function () {
+                test.throws(function () {
                     effect(function () {
                         d.val;
-                        d.val++;
+                        d.set(d.peek + 1);
                     });
                 });
             });
@@ -245,10 +244,10 @@ describe("compute()", function () {
                 var f2 = compute(function () { return f1.val; });
                 var f3 = compute(function () { return f2.val; });
 
-                assert.throws(function () {
+                test.throws(function () {
                     compute(function () {
                         f3.val;
-                        d.val++;
+                        d.set(d.peek + 1);
                     });
                 });
             });
@@ -262,8 +261,8 @@ describe("compute()", function () {
                 var f = compute(function () {
                     return f ? f.val : d.val;
                 });
-                assert.throws(function () {
-                    d.val = 0;
+                test.throws(function () {
+                    d.set(0);
                 });
             });
         });
@@ -288,9 +287,9 @@ describe("compute()", function () {
                 effect(function () { b1.val, b2.val; seq += "c1"; });
 
                 seq = "";
-                a1.val++;
+                a1.set(a1.peek + 1);
 
-                assert.equal(seq, "b1b2c1");
+                test.ok(seq === "b1b2c1");
             });
         });
 
@@ -318,8 +317,8 @@ describe("compute()", function () {
                 });
 
                 gcount = 0;
-                d.val++;
-                assert.equal(gcount, 1);
+                d.set(d.peek + 1);
+                test.ok(gcount === 1);
             });
         });
 
@@ -353,8 +352,8 @@ describe("compute()", function () {
                 });
 
                 hcount = 0;
-                d.val++;
-                assert.equal(hcount, 1);
+                d.set(d.peek + 1);
+                test.ok(hcount === 1);
             });
         });
     });

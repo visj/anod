@@ -1,5 +1,4 @@
-import assert from 'assert';
-import { root, effect, compute, value, dispose } from './helper/zorn.js';
+import { test, root, effect, compute, value, dispose } from './helper/zorn.js';
 
 describe("compute() with subcomputations", function () {
 
@@ -24,10 +23,10 @@ describe("compute() with subcomputations", function () {
 
             outerCount = innerCount = 0;
 
-            d.val = 2;
+            d.set(2);
 
-            assert.equal(innerCount, 1);
-            assert.equal(outerCount, 0);
+            test.ok(innerCount === 1);
+            test.ok(outerCount === 0);
         });
     });
 
@@ -61,16 +60,16 @@ describe("compute() with subcomputations", function () {
         it("creates child on initialization", function () {
             root(function () {
                 init();
-                assert.equal(h.val, 2);
+                test.ok(h.val === 2);
             });
         });
 
         it("does not depend on child's dependencies", function () {
             root(function () {
                 init();
-                e.val = 3;
-                assert.equal(outerCount, 1);
-                assert.equal(innerCount, 2);
+                e.set(3);
+                test.ok(outerCount === 1);
+                test.ok(innerCount === 2);
             });
         });
 
@@ -78,8 +77,8 @@ describe("compute() with subcomputations", function () {
             root(function (teardown) {
                 init();
                 teardown();
-                e.val = 3;
-                assert.equal(g.val, void 0);
+                e.set(3);
+                test.ok(g.val === void 0);
             });
         });
     });
@@ -99,11 +98,11 @@ describe("compute() with subcomputations", function () {
                     return b.val.c.val;
                 });
 
-                assert.equal(d.val, 1);
-                a.val = 2;
-                assert.equal(d.val, 2);
-                a.val = 3;
-                assert.equal(d.val, 3);
+                test.ok(d.val === 1);
+                a.set(2);
+                test.ok(d.val === 2);
+                a.set(3);
+                test.ok(d.val === 3);
             });
         });
     });
@@ -128,11 +127,11 @@ describe("compute() with subcomputations", function () {
                     return { e: e };
                 });
 
-                assert.equal(d.val.e.val, 1);
-                a.val = 2;
-                assert.equal(d.val.e.val, 2);
-                a.val = 3;
-                assert.equal(d.val.e.val, 3);
+                test.ok(d.val.e.val === 1);
+                a.set(2);
+                test.ok(d.val.e.val === 2);
+                a.set(3);
+                test.ok(d.val.e.val === 3);
             });
         });
     });

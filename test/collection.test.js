@@ -1,5 +1,4 @@
-import assert from 'assert';
-import { root, array, dispose, cleanup, effect, compute, value } from './helper/zorn.js';
+import { test, root, array, dispose, cleanup, effect, compute, value } from './helper/zorn.js';
 
 
 describe("collection", function () {
@@ -11,29 +10,22 @@ describe("collection", function () {
         var count = 0;
         effect(function () {
             count++;
-            assert.deepEqual(s1.val, d1.peek.slice(1));
-            assert.deepEqual(s2.val, s1.peek.slice(1));
+            test.equals(s1.val, d1.peek.slice(1));
+            test.equals(s2.val, s1.peek.slice(1));
         });
-        d1.val = [4, 5, 6];
-        d1.val = [7, 8, 9];
-        assert.equal(count, 3);
+        d1.set([4, 5, 6]);
+        d1.set([7, 8, 9]);
+        test.ok(count === 3);
     });
 
     describe("length", function() {
         it("returns a readonly signal when accessed", function() {
             var d1 = array([1, 2, 3]);
             var c1 = d1.length;
-            assert.equal(c1.val, 3);
-            d1.val = [4];
-            assert.equal(c1.val, 1);
+            test.ok(c1.val === 3);
+            d1.set([4]);
+            test.ok(c1.val === 1);
         });
-
-        it("can be set to a new value", function() {
-            var d1 = array([1, 2, 3]);
-            d1.length = 2;
-            assert.deepEqual(d1.val, [1, 2]);
-        });
-
 
         it("works like a computation", function() {
             var d1 = array([1, 2, 3]);
@@ -41,9 +33,9 @@ describe("collection", function () {
             var c2 = compute(function() {
                 return c1.val;
             });
-            assert.equal(c2.val, 3);
-            d1.val = [4];
-            assert.equal(c2.val, 1);
+            test.ok(c2.val === 3);
+            d1.set([4]);
+            test.ok(c2.val === 1);
         });
 
         it("does not evaluate unless changed", function() {
@@ -57,11 +49,11 @@ describe("collection", function () {
                 count++;
                 c2.val;
             })
-            assert.equal(count, 1);
-            d1.val = [4,5,6];
-            assert.equal(count, 1);
-            d1.val = [4,5,6,7];
-            assert.equal(count, 2);
+            test.ok(count === 1);
+            d1.set([4,5,6]);
+            test.ok(count === 1);
+            d1.set([4,5,6,7]);
+            test.ok(count === 2);
         });
 
         it("does not cause array signal to be read", function() {
@@ -76,11 +68,11 @@ describe("collection", function () {
                 count++;
                 c1.val;
             })
-            assert.equal(count, 2);
-            d1.val = [4,5,6];
-            assert.equal(count, 2);
-            d1.val = [4,5,6,7];
-            assert.equal(count, 3);
+            test.ok(count === 2);
+            d1.set([4,5,6]);
+            test.ok(count === 2);
+            d1.set([4,5,6,7]);
+            test.ok(count === 3);
         });
     });
 });

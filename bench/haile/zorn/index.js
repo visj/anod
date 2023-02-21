@@ -264,7 +264,7 @@ function updateComputations1to1(n, sources) {
     var s1 = sources[0],
         c = zorn.effect(function () { return s1.val; });
     for (var i = 0; i < n; i++) {
-        s1.val++;
+        s1.set(s1.peek + 1);
     }
 }
 
@@ -273,7 +273,7 @@ function updateComputations2to1(n, sources) {
         s2 = sources[1],
         c = zorn.effect(function () { return s1.val + s2.val; });
     for (var i = 0; i < n; i++) {
-        s1.val++;
+        s1.set(s1.peek + 1);
     }
 }
 
@@ -284,7 +284,7 @@ function updateComputations4to1(n, sources) {
         s4 = sources[3],
         c = zorn.effect(function () { return s1.val + s2.val + s3.val + s4.val; });
     for (var i = 0; i < n; i++) {
-        s1.val++;
+        s1.set(s1.peek + 1);
     }
 }
 
@@ -298,7 +298,7 @@ function updateComputations1000to1(n, sources) {
             return sum;
         });
     for (var i = 0; i < n; i++) {
-        s1.val++;
+        s1.set(s1.peek + 1);
     }
 }
 
@@ -307,7 +307,7 @@ function updateComputations1to2(n, sources) {
         c1 = zorn.effect(function () { return s1.val; }),
         c2 = zorn.effect(function () { return s1.val; });
     for (var i = 0; i < n / 2; i++) {
-        s1.val++;
+        s1.set(s1.peek + 1);
     }
 }
 
@@ -318,7 +318,7 @@ function updateComputations1to4(n, sources) {
         c3 = zorn.effect(function () { return s1.val; }),
         c4 = zorn.effect(function () { return s1.val; });
     for (var i = 0; i < n / 4; i++) {
-        s1.val++;
+        s1.set(s1.peek + 1);
     }
 }
 
@@ -334,7 +334,7 @@ function updateComputations1to1000(n, sources) {
     calls = 0;
     var ln = n / 1000;
     for (var i = 0; i < ln; i++) {
-        s1.val++;
+        s1.set(s1.peek + 1);
     }
     if (calls !== ln * 1000) {
         throw new Error('calls !== ln: ' + calls + ' !== ' + ln);
