@@ -1853,7 +1853,7 @@ function Computation(fn, value, opt, args, eq, src) {
  * @returns {void}
  */
 function setCurrent(node) {
-    /** @type {number} */
+    /** @const {number} */
     var opt = node._opt;
     if ((opt & Opts.DisposeFlags) === 0 && STAGE !== Stage.Idle) {
         if ((opt & (Opts.Update | Opts.MayUpdate | Opts.MayDispose)) !== 0) {
@@ -1878,7 +1878,7 @@ function peekComputation() {
  * @returns {T}
  */
 function getComputation() {
-    /** @type {number} */
+    /** @const {number} */
     var opt = this._opt;
     if ((opt & Opts.DisposeFlags) === 0 && STAGE !== Stage.Idle) {
         if ((opt & (Opts.Update | Opts.MayUpdate | Opts.MayDispose)) !== 0) {
@@ -1903,6 +1903,7 @@ var computationProto = Computation.prototype;
  * @param {Receive<T,U>} node 
  * @param {U=} args
  * @param {Source=} src
+ * @returns {void}
  */
 function startCompute(owner, listen, node, args, src) {
     /** @const {?Own} */
@@ -1945,12 +1946,8 @@ function startCompute(owner, listen, node, args, src) {
  * @returns {function(T,U): T}
  */
 function evalDispose(node, fn) {
-    /**
-     * @returns {void}
-     */
-    function disposer() {
-        dispose(node);
-    };
+    /** @type {Func} */
+    var disposer = function() { dispose(node); };
     return function (seed, args) {
         return fn(seed, args, disposer);
     };
@@ -1977,6 +1974,7 @@ function evalSource(src, fn) {
 /**
  * @param {!Receive} node
  * @param {Source|Func} sources 
+ * @returns {void}
  */
 function initSource(node, sources) {
     if (Array.isArray(sources)) {
