@@ -75,4 +75,86 @@ describe("collection", function () {
             test.ok(count === 3);
         });
     });
+
+    describe("some", function() {
+        it("behaves like Array#some", function() {
+            var d1 = array([1, 2, 3]);
+            var c1 = d1.some(function(x) { return x > 2; });
+            test.ok(c1.val === true);
+            d1.set([1, 2, 1]);
+            test.ok(c1.val === false);
+        });
+
+        it("uses mutation information to avoid re-evaluating", function() {
+            var d1 = array([1, 2, 3]);
+            var count = 0;
+            d1.some(function(x) { 
+                count++;
+                return x > 2;
+            });
+            test.ok(count === 3);
+            d1.push(4);
+            test.ok(count === 3);
+        });
+
+        it("re-evaluates if necessary", function() {
+            var d1 = array([1, 2, 3, 4, 5]);
+            var count = 0;
+            d1.some(function(x) { 
+                count++;
+                return x > 3;
+            });
+            test.ok(count === 4);
+            d1.push(6);
+            // Array is now [1, 2, 3, 4, 5, 6]
+            //                index --^
+            test.ok(count === 4);
+            d1.splice(2, 1, 5);
+            // Array is now [1, 2, 5, 4, 5, 6]
+            //             index --^
+            test.ok(count === 5);
+            d1.unshift(3);
+            // Array is now [3, 1, 2, 5, 4, 5, 6]
+            //       start --^        ^-- index
+            test.ok(count === 9);
+        });
+
+        it("does not re-evaluate removals when previously not found", function() {
+            var d1 = array([1, 2, 3]);
+            var count = 0;
+            d1.some(function(x) { 
+                count++;
+                return x > 3;
+            });
+            test.ok(count === 3);
+            d1.splice(1, 1);
+            test.ok(count === 3);
+        });
+
+        it("works when emptying array", function() {
+            var d1 = array([1, 2, 3]);
+            var count = 0;
+            d1.some(function(x) { 
+                count++;
+                return x > 3;
+            });
+            test.ok(count === 3);
+            d1.splice(0, 3);
+            test.ok(count === 3);
+        });
+
+        it ("works when emptying array and previously was true", function() {
+            var d1 = array([1, 2, 3]);
+            var count = 0;
+            var c1 = d1.some(function(x) { 
+                count++;
+                return x > 2;
+            });
+            test.ok(count === 3);
+            test.ok(c1.val);
+            d1.splice(0, 3);
+            test.ok(count === 3);
+            test.ok(!c1.val);
+        });
+    });
 });

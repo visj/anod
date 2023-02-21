@@ -1,4 +1,4 @@
-export * from '../../dist/zorn.mjs';
+export * from '../../dist/zorn.min.mjs';
 
 export var test = {
     ok: function(ok, msg) {
