@@ -30,49 +30,49 @@ export function compute<T>(callback: () => T): ReadSignal<T>;
 
 export function compute<T>(callback: (seed: T, dispose: DisposeFn) => T, seed: T, eq?: CompareFn<T> | null): ReadSignal<T>;
 
-export function compute<T,U>(callback: (seed: T, dispose: DisposeFn, args: U) => T, seed: T, eq: CompareFn<T> | null, args: U): ReadSignal<T>;
+export function compute<T, U>(callback: (seed: T, dispose: DisposeFn, args: U) => T, seed: T, eq: CompareFn<T> | null, args: U): ReadSignal<T>;
 
-export function compute<T,U>(callback: (seed: T, dispose: DisposeFn, args: U) => T, seed?: T, eq?: CompareFn<T> | null, args?: U): ReadSignal<T>;
+export function compute<T, U>(callback: (seed: T, dispose: DisposeFn, args: U) => T, seed?: T, eq?: CompareFn<T> | null, args?: U): ReadSignal<T>;
 
 export function $compute<T>(callback: () => T): ReadSignal<T>;
 
 export function $compute<T>(callback: (seed: T, dispose: DisposeFn) => T, seed: T, eq?: CompareFn<T> | null): ReadSignal<T>;
 
-export function $compute<T,U>(callback: (seed: T, dispose: DisposeFn, args: U) => T, seed: T, eq: CompareFn<T> | null, args: U): ReadSignal<T>;
+export function $compute<T, U>(callback: (seed: T, dispose: DisposeFn, args: U) => T, seed: T, eq: CompareFn<T> | null, args: U): ReadSignal<T>;
 
-export function $compute<T,U>(callback: (seed: T, dispose: DisposeFn, args: U) => T, seed?: T, eq?: CompareFn<T> | null, args?: U): ReadSignal<T>;
+export function $compute<T, U>(callback: (seed: T, dispose: DisposeFn, args: U) => T, seed?: T, eq?: CompareFn<T> | null, args?: U): ReadSignal<T>;
 
 export function computeWhen<T>(src: Source, callback: () => T): ReadSignal<T>;
 
 export function computeWhen<T>(src: Source, callback: (seed: T, dispose: DisposeFn) => T, seed: T, eq?: CompareFn<T> | null, defer?: boolean): ReadSignal<T>;
 
-export function computeWhen<T,U>(src: Source, callback: (seed: T, dispose: DisposeFn, args: U) => T, seed: T, eq: CompareFn<T> | null, defer: boolean, args: U): ReadSignal<T>;
+export function computeWhen<T, U>(src: Source, callback: (seed: T, dispose: DisposeFn, args: U) => T, seed: T, eq: CompareFn<T> | null, defer: boolean, args: U): ReadSignal<T>;
 
-export function computeWhen<T,U>(src: Source, callback: (seed: T, dispose: DisposeFn, args: U) => T, seed?: T, eq?: CompareFn<T> | null, defer?: boolean, args?: U): ReadSignal<T>;
+export function computeWhen<T, U>(src: Source, callback: (seed: T, dispose: DisposeFn, args: U) => T, seed?: T, eq?: CompareFn<T> | null, defer?: boolean, args?: U): ReadSignal<T>;
 
 export function effect<T>(callback: () => T): T;
 
 export function effect<T>(callback: (seed: T, dispose: DisposeFn) => T, seed: T): T;
 
-export function effect<T,U>(callback: (seed: T, dispose: DisposeFn, args: U) => T, seed: T, args: U): T;
+export function effect<T, U>(callback: (seed: T, dispose: DisposeFn, args: U) => T, seed: T, args: U): T;
 
-export function effect<T,U>(callback: (seed: T, dispose: DisposeFn, args: U) => T, seed?: T, args?: U): T;
+export function effect<T, U>(callback: (seed: T, dispose: DisposeFn, args: U) => T, seed?: T, args?: U): T;
 
 export function $effect<T>(callback: () => T): T;
 
 export function $effect<T>(callback: (seed: T, dispose: DisposeFn) => T, seed: T): T;
 
-export function $effect<T,U>(callback: (seed: T, dispose: DisposeFn, args: U) => T, seed: T, args: U): T;
+export function $effect<T, U>(callback: (seed: T, dispose: DisposeFn, args: U) => T, seed: T, args: U): T;
 
-export function $effect<T,U>(callback: (seed: T, dispose: DisposeFn, args: U) => T, seed?: T, args?: U): T;
+export function $effect<T, U>(callback: (seed: T, dispose: DisposeFn, args: U) => T, seed?: T, args?: U): T;
 
 export function effectWhen<T>(src: Source, callback: () => T): T;
 
 export function effectWhen<T>(src: Source, callback: (seed: T, dispose: DisposeFn) => T, seed: T, defer?: boolean): T;
 
-export function effectWhen<T,U>(src: Source, callback: (seed: T, dispose: DisposeFn, args: U) => T, seed: T, defer: boolean, args: U): T;
+export function effectWhen<T, U>(src: Source, callback: (seed: T, dispose: DisposeFn, args: U) => T, seed: T, defer: boolean, args: U): T;
 
-export function effectWhen<T,U>(src: Source, callback: (seed: T, dispose: DisposeFn, args: U) => T, seed?: T, defer?: boolean, args?: U): T;
+export function effectWhen<T, U>(src: Source, callback: (seed: T, dispose: DisposeFn, args: U) => T, seed?: T, defer?: boolean, args?: U): T;
 
 export function cleanup(cleanupFn: CleanupFn): void;
 
@@ -172,7 +172,7 @@ export const enum Mutation {
     Custom = 19,
 }
 
-type MutArg<M extends Mutation, T> = [M, T];
+type MutArg<M extends Mutation, T> = [mut: M, start: number, end: number, args: T];
 
 type MutSet<T> = MutArg<Mutation.Set, T[]>;
 
@@ -210,7 +210,25 @@ type MutReverse = MutArg<Mutation.Reverse, undefined>;
 
 type MutSort<T> = MutArg<Mutation.Sort, (a: T, b: T) => number>;
 
-type Mut<T> = MutSet<T> | MutSetAt<T> | MutPop | MutPopRange | MutPush<T> | MutPushRange<T> | MutShift | MutShiftRange | MutUnshift<T> | MutUnshiftRange<T> | MutRemoveAt | MutRemoveRange | MutInsertAt<T> | MutInsertRange<T> | MutReplaceRange<T> | MutReplaceRangeInsert<T>;
+type Mut<T> = MutSet<T>
+    | MutSetAt<T>
+    | MutPop
+    | MutPopRange
+    | MutPush<T>
+    | MutPushRange<T>
+    | MutShift
+    | MutShiftRange
+    | MutUnshift<T>
+    | MutUnshiftRange<T>
+    | MutRemoveAt
+    | MutRemoveRange
+    | MutInsertAt<T>
+    | MutInsertRange<T>
+    | MutReplaceRange<T>
+    | MutReplaceRangeInsert<T>
+    | MutReverse
+    | MutSort<T>
+    | MutArg<Mutation.Custom, unknown>;
 
 export interface SignalCollection<T = any> extends ReadSignal<T[]> {
 
@@ -259,27 +277,27 @@ export interface SignalCollection<T = any> extends ReadSignal<T[]> {
     reduceRight<U>(callbackFn: (previousValue: U, currentValue: T, currentIndex: number) => U, initialValue: U): ReadSignal<U>;
 
     slice(start?: number, end?: number): SignalCollection<T>;
-    
+
     some(callbackFn: (element: T, index: number) => boolean): ReadSignal<boolean>;
 }
 
-export interface SignalArray<T = any> extends SignalCollection<T>{
+export interface SignalArray<T = any> extends SignalCollection<T> {
 
     set(items: T[]): void;
 
     set(index: number, item: T): void;
-    
+
     pop(): void;
-    
+
     push(...items: T[]): void;
-    
+
     reverse(): void;
-    
+
     shift(): void;
 
     splice(start: number, deleteCount?: number, ...items: T[]): void;
 
     sort(compareFn?: (a: T, b: T) => number): void;
-    
+
     unshift(...items: T[]): void;
 }

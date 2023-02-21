@@ -64,7 +64,7 @@ function SignalCollection() { }
  * @public
  * @returns {!Array<T|!Array<T>|number|(function(T,T): number)|void>}
  */
-SignalCollection.prototype.mut = function() { };
+SignalCollection.prototype.mut = function () { };
 
 /**
  * @public
@@ -680,18 +680,14 @@ function root(fn) {
     var orphan = fn.length === 0;
     /** @const {?Root} */
     var node = orphan ? _root : new Root();
-    /** @const {Func|void} */
+    /** @const {Func} */
     var disposer = orphan ? void 0 : function () {
         dispose(/** @type {!Root} */(node));
     };
     ROOT = OWNER = node;
     LISTEN = false;
     try {
-        return (
-            orphan ?
-               /** @type {function(): T} */(fn)() :
-                fn(/** @type {Func} */(disposer))
-        );
+        return fn(disposer);
     } finally {
         ROOT = _root;
         OWNER = owner;
@@ -1009,7 +1005,10 @@ Queue.prototype._run = function (time) {
     return error;
 };
 
-/** @const {!nil} */
+/** 
+ * @const 
+ * @type {!nil}
+ */
 var NIL = /** @type {!nil} */({});
 /** @const {!Array} */
 var MUT = /** @type {!Array} */([]);
@@ -1947,7 +1946,7 @@ function startCompute(owner, listen, node, args, src) {
  */
 function evalDispose(node, fn) {
     /** @type {Func} */
-    var disposer = function() { dispose(node); };
+    var disposer = function () { dispose(node); };
     return function (seed, args) {
         return fn(seed, args, disposer);
     };
@@ -2328,6 +2327,17 @@ export var Args = {
 };
 
 /**
+ * @const
+ * @enum {number}
+ */
+export var Mut = {
+    Mutation: 0,
+    Start: 1,
+    End: 2,
+    Args: 3,
+}
+
+/**
  * This array holds state used for collection methods.
  * It has this structure:
  * [0] - {Array} The source value
@@ -2347,7 +2357,7 @@ Collection.prototype._args;
  * @this {!Collection<T>}
  * @returns {!Array<T|!Array<T>|number|(function(T,T): number)|void>}
  */
-collectionProto.mut = function() {
+collectionProto.mut = function () {
     setCurrent(this);
     return [this._mut[0], this._mut[1]];
 };
@@ -2587,12 +2597,24 @@ collectionProto.slice = function (start, end) {
 };
 
 /**
+ * @template T
+ * @param {boolean} seed 
+ * @param {!Array<!Collection<T>|(function(T,number): boolean)>} args 
+ * @returns {boolean}
+ */
+function some(seed, args) {
+
+}
+
+/**
  * @public
  * @this {!Collection<T,?>}
  * @param {function(T,number): boolean} callbackFn
  * @returns {!ReadSignal<boolean>} 
  */
-collectionProto.some = function (callbackFn) { };
+collectionProto.some = function (callbackFn) {
+    return new Computation(some, void 0, Opts.Bound | Opts.Defer, [this, callbackFn], void 0, this);
+};
 
 /**
  * @struct
@@ -2638,15 +2660,20 @@ var dataArrayProto = DataArray.prototype;
  * @template T
  * @param {!DataArray<T>} node
  * @param {number} mut 
- * @param {T|!Array<T>|number|(function(T,T): number)=} mutArgs 
+ * @param {number} start
+ * @param {number} end
+ * @param {T|!Array<T>|number|(function(T,T): number)=} args 
  * @returns {void}
  */
-function mutate(node, mut, mutArgs) {
+function mutate(node, mut, start, end, args) {
     if (node._set !== NIL) {
         panic("conflicting mutation");
     }
-    node._smut[0] = mut;
-    node._smut[1] = mutArgs;
+    var smut = node._smut;
+    smut[Mut.Mutation] = mut;
+    smut[Mut.Start] = start;
+    smut[Mut.End] = end;
+    smut[Mut.Args] = args;
     setData.call(node, MUT);
 }
 
@@ -2662,9 +2689,9 @@ dataArrayProto.set = function (value, item) {
     /** @const {number} */
     var ln = arguments.length;
     if (ln === 1) {
-        mutate(this, Mutation.Set, value);
+        mutate(this, Mutation.Set, 0, ln, value);
     } else if (ln > 0) {
-        mutate(this, Mutation.SetAt, [value, item]);
+        mutate(this, Mutation.SetAt, value, value, [value, item]);
     }
 };
 
@@ -2679,9 +2706,9 @@ dataArrayProto._update = function (time) {
     /** @const {!Array<T|!Array<T>|number|(function(T,T): number)|void>} */
     var smut = this._smut;
     /** @const {number} */
-    var mut = smut[0];
+    var mut = smut[Mut.Mutation];
     /** @const {T|!Array<T>|number|(function(T,T): number)|void} */
-    var mutArgs = smut[1];
+    var mutArgs = smut[Mut.Args];
     /** @const @type {!Array<T>} */
     var array = this._value;
     switch (mut) {
@@ -2741,8 +2768,10 @@ dataArrayProto._update = function (time) {
  * @returns {void}
  */
 dataArrayProto.pop = function () {
-    if (this._value.length !== 0) {
-        mutate(this, Mutation.Pop);
+    /** @const {number} */
+    var length = this._value.length;
+    if (length !== 0) {
+        mutate(this, Mutation.Pop, length - 1, length - 1);
     }
 };
 
@@ -2758,8 +2787,10 @@ dataArrayProto.push = function (elementN) {
     var args = arguments;
     /** @const {number} */
     var ln = args.length;
+    /** @const {number} */
+    var length = this._value.length;
     if (ln === 1) {
-        mutate(this, Mutation.Push, elementN);
+        mutate(this, Mutation.Push, length, length, elementN);
     } else if (ln > 0) {
         /** @type {number} */
         var i = 0;
@@ -2768,7 +2799,7 @@ dataArrayProto.push = function (elementN) {
         for (; i < ln; i++) {
             params[i] = args[i];
         }
-        mutate(this, Mutation.PushRange, params);
+        mutate(this, Mutation.PushRange, length, length + ln - 1, params);
     }
 };
 
@@ -2779,8 +2810,10 @@ dataArrayProto.push = function (elementN) {
  * @returns {void}
  */
 dataArrayProto.reverse = function () {
-    if (this._value.length !== 0) {
-        mutate(this, Mutation.Reverse);
+    /** @const {number} */
+    var length = this._value.length;
+    if (length !== 0) {
+        mutate(this, Mutation.Reverse, 0, length - 1);
     }
 };
 
@@ -2791,8 +2824,10 @@ dataArrayProto.reverse = function () {
  * @returns {void}
  */
 dataArrayProto.shift = function () {
-    if (this._value.length !== 0) {
-        mutate(this, Mutation.Shift);
+    /** @const {number} */
+    var length = this._value.length;
+    if (length !== 0) {
+        mutate(this, Mutation.Shift, 0, 0);
     }
 };
 
@@ -2804,8 +2839,10 @@ dataArrayProto.shift = function () {
  * @returns {void}
  */
 dataArrayProto.sort = function (compareFn) {
-    if (this._value.length !== 0) {
-        mutate(this, Mutation.Sort, compareFn);
+    /** @const {number} */
+    var length = this._value.length;
+    if (length !== 0) {
+        mutate(this, Mutation.Sort, 0, length - 1, compareFn);
     }
 };
 
@@ -2848,7 +2885,7 @@ dataArrayProto.splice = function (start, deleteCount, items) {
             if (ln > 2) {
                 if (ln - 2 === deleteCount) {
                     if (deleteCount === 1) {
-                        return mutate(this, Mutation.SetAt, [start, items]);
+                        return mutate(this, start, start, Mutation.SetAt, [start, items]);
                     }
                     mut = Mutation.ReplaceRange;
                 } else {
@@ -2860,7 +2897,7 @@ dataArrayProto.splice = function (start, deleteCount, items) {
                 }
                 if (start === 0) {
                     if (deleteCount === 1) {
-                        return mutate(this, Mutation.Shift);
+                        return mutate(this, 0, 0, Mutation.Shift);
                     }
                     mut = Mutation.ShiftRange;
                 } else {
@@ -2877,7 +2914,7 @@ dataArrayProto.splice = function (start, deleteCount, items) {
             }
             if (ln === 3) {
                 if (start === 0) {
-                    return mutate(this, Mutation.Unshift, items);
+                    return mutate(this, 0, 0, Mutation.Unshift, items);
                 }
                 mut = Mutation.InsertAt;
             } else {
@@ -2894,9 +2931,11 @@ dataArrayProto.splice = function (start, deleteCount, items) {
                 params = [start, deleteCount, items];
             }
         } else {
-            mutate(this, mut, [start, deleteCount]);
+            mutate(this, mut, start, start + deleteCount, [start, deleteCount]);
         }
-        mutate(this, mut, params);
+        start = params[0];
+        deleteCount = params[1];
+        mutate(this, mut, start, start - deleteCount + params.length, params);
     }
 };
 
@@ -2911,7 +2950,7 @@ dataArrayProto.unshift = function (elementN) {
     /** @const {number} */
     var ln = arguments.length;
     if (ln === 1) {
-        mutate(this, Mutation.Unshift, elementN);
+        mutate(this, 0, 0, Mutation.Unshift, elementN);
     } else if (ln > 0) {
         /** @type {number} */
         var i = 0;
@@ -2920,7 +2959,7 @@ dataArrayProto.unshift = function (elementN) {
         for (; i < ln; i++) {
             args[i] = arguments[i];
         }
-        mutate(this, Mutation.UnshiftRange, args);
+        mutate(this, 0, this._value.length, Mutation.UnshiftRange, args);
     }
 };
 
