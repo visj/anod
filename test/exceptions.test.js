@@ -21,8 +21,8 @@ describe("exceptions within computations", function () {
                 });
             })
 
-            test.ok(b.val === 2);
-            test.ok(d.val === 2);
+            test.equals(b.val , 2);
+            test.equals(d.val , 2);
         });
     });
 
@@ -44,13 +44,13 @@ describe("exceptions within computations", function () {
                 });
             });
 
-            test.ok(b.val === 2);
-            test.ok(d.val === 2);
+            test.equals(b.val , 2);
+            test.equals(d.val , 2);
 
             b.set(3);
 
-            test.ok(b.val === 3);
-            test.ok(d.val === 3);
+            test.equals(b.val , 3);
+            test.equals(d.val , 3);
         });
     });
 });

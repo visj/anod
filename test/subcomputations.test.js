@@ -25,8 +25,8 @@ describe("compute() with subcomputations", function () {
 
             d.set(2);
 
-            test.ok(innerCount === 1);
-            test.ok(outerCount === 0);
+            test.equals(innerCount , 1);
+            test.equals(outerCount , 0);
         });
     });
 
@@ -60,7 +60,7 @@ describe("compute() with subcomputations", function () {
         it("creates child on initialization", function () {
             root(function () {
                 init();
-                test.ok(h.val === 2);
+                test.equals(h.val , 2);
             });
         });
 
@@ -68,8 +68,8 @@ describe("compute() with subcomputations", function () {
             root(function () {
                 init();
                 e.set(3);
-                test.ok(outerCount === 1);
-                test.ok(innerCount === 2);
+                test.equals(outerCount , 1);
+                test.equals(innerCount , 2);
             });
         });
 
@@ -78,7 +78,7 @@ describe("compute() with subcomputations", function () {
                 init();
                 teardown();
                 e.set(3);
-                test.ok(g.val === void 0);
+                test.equals(g.val , void 0);
             });
         });
     });
@@ -98,11 +98,11 @@ describe("compute() with subcomputations", function () {
                     return b.val.c.val;
                 });
 
-                test.ok(d.val === 1);
+                test.equals(d.val , 1);
                 a.set(2);
-                test.ok(d.val === 2);
+                test.equals(d.val , 2);
                 a.set(3);
-                test.ok(d.val === 3);
+                test.equals(d.val , 3);
             });
         });
     });
@@ -127,11 +127,11 @@ describe("compute() with subcomputations", function () {
                     return { e: e };
                 });
 
-                test.ok(d.val.e.val === 1);
+                test.equals(d.val.e.val , 1);
                 a.set(2);
-                test.ok(d.val.e.val === 2);
+                test.equals(d.val.e.val , 2);
                 a.set(3);
-                test.ok(d.val.e.val === 3);
+                test.equals(d.val.e.val , 3);
             });
         });
     });

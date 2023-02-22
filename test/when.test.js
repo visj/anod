@@ -8,9 +8,9 @@ describe("when", function () {
         effectWhen(d1, function() {
             count++;
         });
-        test.ok(count === 1);
+        test.equals(count , 1);
         d1.set(d1.peek + 1);
-        test.ok(count === 2);
+        test.equals(count , 2);
     });
     
     it("should not record values when reading", function() {
@@ -21,9 +21,9 @@ describe("when", function () {
             count++;
             d2.val;
         });
-        test.ok(count === 1);
+        test.equals(count , 1);
         d2.set(d2.peek + 1);
-        test.ok(count === 1);
+        test.equals(count , 1);
     });
 
     it("accepts an array of dependencies", function() {
@@ -33,10 +33,10 @@ describe("when", function () {
         effectWhen([d1, d2], function() {
             count++;
         });
-        test.ok(count === 1);
+        test.equals(count , 1);
         d1.set(d1.peek + 1);
-        test.ok(count === 2);
+        test.equals(count , 2);
         d2.set(d2.peek + 1);
-        test.ok(count === 3);
+        test.equals(count , 3);
     });
 });

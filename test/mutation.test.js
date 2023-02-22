@@ -17,8 +17,8 @@ describe("Computations which modify data", function () {
             b.set(0);
             a.set(true);
 
-            test.ok(b.val === 1);
-            test.ok(cb === 0);
+            test.equals(b.val , 1);
+            test.equals(cb , 0);
         });
     });
 
@@ -46,9 +46,9 @@ describe("Computations which modify data", function () {
             seq = "";
             a.set(true);
 
-            test.ok(seq === "cd");
-            test.ok(b.val === 1);
-            test.ok(db === 0); // d saw b(0) even though it ran after c whcih modified b() to b(1)
+            test.equals(seq , "cd");
+            test.equals(b.val , 1);
+            test.equals(db , 0); // d saw b(0) even though it ran after c whcih modified b() to b(1)
         });
     });
 
@@ -64,8 +64,8 @@ describe("Computations which modify data", function () {
                 }
             });
 
-            test.ok(seq === "012345678910");
-            test.ok(a.val === 10);
+            test.equals(seq , "012345678910");
+            test.equals(a.val , 10);
         });
     });
 
@@ -93,7 +93,7 @@ describe("Computations which modify data", function () {
             seq = "";
             a1.set(1);
 
-            test.ok(seq === "c4(0)c5(0)c4(1)c5(1)");
+            test.equals(seq , "c4(0)c5(0)c4(1)c5(1)");
         });
     });
 })

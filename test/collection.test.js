@@ -7,9 +7,9 @@ describe("collection", function () {
         it("returns a readonly signal when accessed", function () {
             var d1 = array([1, 2, 3]);
             var c1 = d1.length;
-            test.ok(c1.val === 3);
+            test.equals(c1.val , 3);
             d1.set([4]);
-            test.ok(c1.val === 1);
+            test.equals(c1.val , 1);
         });
 
         it("works like a computation", function () {
@@ -18,9 +18,9 @@ describe("collection", function () {
             var c2 = compute(function () {
                 return c1.val;
             });
-            test.ok(c2.val === 3);
+            test.equals(c2.val , 3);
             d1.set([4]);
-            test.ok(c2.val === 1);
+            test.equals(c2.val , 1);
         });
 
         it("does not evaluate unless changed", function () {
@@ -33,12 +33,12 @@ describe("collection", function () {
             effect(function () {
                 count++;
                 c2.val;
-            })
-            test.ok(count === 1);
+            });
+            test.equals(count , 1);
             d1.set([4, 5, 6]);
-            test.ok(count === 1);
+            test.equals(count , 1);
             d1.set([4, 5, 6, 7]);
-            test.ok(count === 2);
+            test.equals(count , 2);
         });
 
         it("does not cause array signal to be read", function () {
@@ -52,12 +52,57 @@ describe("collection", function () {
             effect(function () {
                 count++;
                 c1.val;
-            })
-            test.ok(count === 2);
+            });
+            test.equals(count , 2);
             d1.set([4, 5, 6]);
-            test.ok(count === 2);
+            test.equals(count , 2);
             d1.set([4, 5, 6, 7]);
-            test.ok(count === 3);
+            test.equals(count , 3);
+        });
+    });
+
+    describe("join", function() {
+        it("behaves like Array#join", function () {
+            var d1 = array([1, 2, 3]);
+            var c1 = d1.join();
+            test.equals(c1.val, d1.peek.join());
+            d1.set([4, 5, 6]);
+            test.equals(c1.val, d1.peek.join());
+        });
+
+        it("works with a separator", function () {
+            var d1 = array([1, 2, 3]);
+            var c1 = d1.join(",");
+            test.equals(c1.val, d1.peek.join(","));
+            d1.set([4, 5, 6]);
+            test.equals(c1.val, d1.peek.join(","));
+        });
+
+        it("accepts a signal as a separator", function () {
+            var d1 = array([1, 2, 3]);
+            var d2 = value(",");
+            var c1 = d1.join(d2);
+            test.equals(c1.val, d1.peek.join(","));
+            d1.set([4, 5, 6]);
+            test.equals(c1.val, d1.peek.join(","));
+            d2.set("-");
+            test.equals(c1.val, d1.peek.join("-"));
+        });
+
+        it("does not evaluate unless changed", function () {
+            var d1 = array([1, 2, 3]);
+            var d2 = value(",");
+            var count = 0;
+            var c1 = d1.join(d2);
+            effect(function () {
+                count++;
+                c1.val;
+            });
+            test.equals(count , 1);
+            d1.set([1, 2, 3]);
+            test.equals(count , 1);
+            d2.set("-");
+            test.equals(count , 2);
         });
     });
 
@@ -69,7 +114,6 @@ describe("collection", function () {
             d1.set([4, 5, 6]);
             test.equals(c1.val, d1.peek.slice(1));
         });
-
 
         it("works without arguments", function () {
             var d1 = array([1, 2, 3]);
@@ -103,9 +147,9 @@ describe("collection", function () {
             var c1 = d1.slice();
             var s1 = c1.val;
             d1.set([4, 5, 6]);
-            test.ok(c1.val === s1);
+            test.equals(c1.val , s1);
             d1.splice(1, 1, 7);
-            test.ok(c1.val === s1);
+            test.equals(c1.val , s1);
         });
 
         it("should re-evaluate when an array element is changed", function () {
@@ -123,7 +167,7 @@ describe("collection", function () {
             d1.set([7, 8, 9]);
             test.equals(s1.val, d1.peek.slice(1));
             test.equals(s2.val, s1.peek.slice(1));
-            test.ok(count === 3);
+            test.equals(count , 3);
         });
 
         it("accepts signals as arguments", function () {
@@ -136,15 +180,29 @@ describe("collection", function () {
             d2.set(2);
             test.equals(c1.val, d1.peek.slice(d2.peek));
         });
-    })
+
+        it("works when splicing beyond the range of the previous slice", function() {
+            var d1 = array([1, 2, 3]);
+            var s1 = d1.slice(1, 3);
+            var s2 = s1.slice(1, 3);
+            d1.splice(1, 1, 4, 5, 6);
+            /*
+             * d1 is here [1, 4, 5, 6, 3]
+             * s1 is here [4, 5]
+             * s2 is here [5]
+             */
+            test.equals(s1.val, d1.peek.slice(1, 3));
+            test.equals(s2.val, s1.peek.slice(1, 3));
+        });
+    });
 
     describe("some", function () {
         it("behaves like Array#some", function () {
             var d1 = array([1, 2, 3]);
             var c1 = d1.some(function (x) { return x > 2; });
-            test.ok(c1.val === true);
+            test.equals(c1.val, true);
             d1.set([1, 2, 1]);
-            test.ok(c1.val === false);
+            test.equals(c1.val, false);
         });
 
         it("uses mutation information to avoid re-evaluating", function () {
@@ -154,9 +212,9 @@ describe("collection", function () {
                 count++;
                 return x > 2;
             });
-            test.ok(count === 3);
+            test.equals(count, 3);
             d1.push(4);
-            test.ok(count === 3);
+            test.equals(count , 3);
         });
 
         it("re-evaluates if necessary", function () {
@@ -188,9 +246,52 @@ describe("collection", function () {
                 count++;
                 return x > 3;
             });
-            test.ok(count === 3);
+            test.equals(count , 3);
             d1.splice(1, 1);
-            test.ok(count === 3);
+            test.equals(count , 3);
+        });
+
+        it("re-evaluates removals when previously found", function () {
+            var d1 = array([1, 2, 3]);
+            var count = 0;
+            d1.some(function (x) {
+                count++;
+                return x > 2;
+            });
+            test.equals(count, 3);
+            d1.splice(1, 1);
+            // Since the found value last round was after the removed index,
+            // starting from where we removed, since we didn't find anything before that.
+            test.equals(count , 4);
+        });
+
+        it("re-evaluates when both inserting and removing", function() {
+            var d1 = array([1, 2, 3]);
+            var count = 0;
+            d1.some(function (x) {
+                count++;
+                return x > 2;
+            });
+            test.equals(count, 3);
+            d1.splice(1, 1, 4);
+            test.equals(count, 4);
+        });
+
+        it("traverses to the end of the array when previous found value was removed", function () {
+            var d1 = array([1, 2, 3, 4, 5, 6]);
+            var count = 0;
+            var c1 = d1.some(function (x) {
+                count++;
+                return x > 2;
+            });
+            test.equals(count, 3);
+            d1.splice(2, 2, 1, 1, 1, 1);
+            /*
+             * Array is now [1, 2, 1, 1, 1, 1, 5, 6]
+                *          index --^
+             */
+            test.equals(count, 8);
+            test.equals(c1.val, true);
         });
 
         it("works when emptying array", function () {
@@ -200,9 +301,9 @@ describe("collection", function () {
                 count++;
                 return x > 3;
             });
-            test.ok(count === 3);
+            test.equals(count , 3);
             d1.splice(0, 3);
-            test.ok(count === 3);
+            test.equals(count , 3);
         });
 
         it("works when emptying array and previously was true", function () {
@@ -212,10 +313,10 @@ describe("collection", function () {
                 count++;
                 return x > 2;
             });
-            test.ok(count === 3);
+            test.equals(count , 3);
             test.ok(c1.val);
             d1.splice(0, 3);
-            test.ok(count === 3);
+            test.equals(count , 3);
             test.ok(!c1.val);
         });
     });

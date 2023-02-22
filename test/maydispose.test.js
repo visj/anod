@@ -38,7 +38,7 @@ describe("may dispose", function () {
           d1.set(d1.peek + 1);
           d2.set(d2.peek + 1);
         });
-        test.ok(count === 2);
+        test.equals(count , 2);
         stop();
         /*
          * In this example however, d3 is created inside parent,
@@ -66,7 +66,7 @@ describe("may dispose", function () {
           d1.set(d1.peek + 1);
           d2.set(d2.peek + 1);
         });
-        test.ok(count === 3);
+        test.equals(count , 3);
         teardown();
       });
     });
@@ -91,10 +91,10 @@ describe("may dispose", function () {
             });
           }
         });
-        test.ok(order === 't1c1c2');
+        test.equals(order , 't1c1c2');
         order = '';
         d1.set(d1.peek + 1);
-        test.ok(order === 't1c1');
+        test.equals(order , 't1c1');
       });
     });
 
@@ -128,7 +128,7 @@ describe("may dispose", function () {
           d1.set(d1.peek + 1);
         });
         // c1 is disposed but called from previous effect, should not update
-        test.ok(count === 1);
+        test.equals(count , 1);
       })
     });
   });

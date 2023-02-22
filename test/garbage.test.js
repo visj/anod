@@ -33,7 +33,7 @@ if (global.gc) {
             }));
             dispose(d1);
             collect(function () {
-                test.ok(ref.deref() === void 0);
+                test.equals(ref.deref() , void 0);
                 done();
             });
         });

@@ -5,7 +5,7 @@ describe("peek(...)", function () {
     it("returns the value of a data", function () {
         root(function() {
             var d = value(1);
-            test.ok(d.peek === 1);
+            test.equals(d.peek , 1);
         });
     });
 
@@ -23,16 +23,16 @@ describe("peek(...)", function () {
                 c.val;
             });
 
-            test.ok(d === 1);
+            test.equals(d , 1);
 
             b.set(4);
 
-            test.ok(d === 1);
+            test.equals(d , 1);
 
             a.set(5);
             c.set(6);
 
-            test.ok(d === 3);
+            test.equals(d , 3);
         });
     });
 
@@ -52,13 +52,13 @@ describe("peek(...)", function () {
                 c.val;
             });
 
-            test.ok(d === 1);
+            test.equals(d , 1);
             b.set(4);
 
-            test.ok(d === 1);
+            test.equals(d , 1);
             a.set(5);
 
-            test.ok(d === 2);
+            test.equals(d , 2);
         });
     });
 })

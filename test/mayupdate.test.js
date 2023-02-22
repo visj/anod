@@ -13,13 +13,13 @@ describe("mayupdate", function () {
         order += 'c1';
         t1.val;
       });
-      test.ok(order === 't1c1');
+      test.equals(order , 't1c1');
       order = '';
       d1.set(1);
-      test.ok(order === 't1');
+      test.equals(order , 't1');
       order = '';
       d1.set(d1.peek + 1);
-      test.ok(order === 't1c1');
+      test.equals(order , 't1c1');
     });
   });
 
@@ -49,7 +49,7 @@ describe("mayupdate", function () {
       });
       order = '';
       d1.set(1);
-      test.ok(order === 't1c1e[c]2_1e1e2_1');
+      test.equals(order , 't1c1e[c]2_1e1e2_1');
     });
   });
 
@@ -69,8 +69,8 @@ describe("mayupdate", function () {
       });
       count = 0;
       d1.set(d1.peek + 1);
-      test.ok(count === 1);
-      test.ok(c2.val === 2);
+      test.equals(count , 1);
+      test.equals(c2.val , 2);
     });
   });
 
@@ -100,7 +100,7 @@ describe("mayupdate", function () {
         count++;
       });
       d1.set(d1.peek + 1);
-      test.ok(count === 1);
+      test.equals(count , 1);
     });
   });
 

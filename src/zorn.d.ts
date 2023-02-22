@@ -155,11 +155,11 @@ export const enum Mutation {
     /**
      * 15 | Range | Remove | Insert
      */
-    ReplaceRange = 911,
+    Replace = 911,
     /**
      * 16 | Tail | Range | Remove | Insert
      */
-    ReplaceRangeInsert = 976,
+    ReplaceInsert = 976,
     /**
      * 17 | Reorder
      */
@@ -204,9 +204,9 @@ type MutInsertAt<T> = MutType<Mutation.InsertAt, [number, 0, T]>;
 
 type MutInsertRange<T> = MutType<Mutation.InsertRange, [number, 0, T[]]>;
 
-type MutReplaceRange<T> = MutType<Mutation.ReplaceRange, [number, number, T[]]>;
+type MutReplaceRange<T> = MutType<Mutation.Replace, [number, number, T[]]>;
 
-type MutReplaceRangeInsert<T> = MutType<Mutation.ReplaceRangeInsert, [number, number, T[]]>;
+type MutReplaceRangeInsert<T> = MutType<Mutation.ReplaceInsert, [number, number, T[]]>;
 
 type MutReverse = MutType<Mutation.Reverse, undefined>;
 

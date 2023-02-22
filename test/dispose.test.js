@@ -14,19 +14,19 @@ describe("dispose", function () {
 					return d.val;
 				});
 
-				test.ok(c === 1);
-				test.ok(f.val === 0);
+				test.equals(c , 1);
+				test.equals(f.val , 0);
 
 				d.set(1);
 
-				test.ok(c === 2);
-				test.ok(f.val === 1);
+				test.equals(c , 2);
+				test.equals(f.val , 1);
 
 				teardown();
 				d.set(2);
 
-				test.ok(c === 2);
-				test.ok(f.val === void 0);
+				test.equals(c , 2);
+				test.equals(f.val , void 0);
 			});
 		});
 
@@ -43,11 +43,11 @@ describe("dispose", function () {
 					d.val;
 				});
 
-				test.ok(c === 1);
+				test.equals(c , 1);
 				d.set(1);
-				test.ok(c === 2);
+				test.equals(c , 2);
 				d.set(2);
-				test.ok(c === 2);
+				test.equals(c , 2);
 			});
 		});
 
@@ -66,12 +66,12 @@ describe("dispose", function () {
 					});
 				});
 
-				test.ok(c === 1);
+				test.equals(c , 1);
 
 				d.set(1);
-				test.ok(c === 2);
+				test.equals(c , 2);
 				d.set(2);
-				test.ok(c === 2);
+				test.equals(c , 2);
 			});
 		});
 
@@ -100,10 +100,10 @@ describe("dispose", function () {
 				});
 				// update d2 to trigger d3 disposal
 				d2.set(d2.peek + 1);
-				test.ok(count === 1);
+				test.equals(count , 1);
 				// d3 is now disposed so inner computation should not trigger
 				d3.set(d3.peek + 1);
-				test.ok(count === 1);
+				test.equals(count , 1);
 			});
 		});
 	});
@@ -130,7 +130,7 @@ describe("dispose", function () {
 				});
 				d1.set(d1.peek + 1);
 				d1.set(d1.peek + 1);
-				test.ok(count === 1);
+				test.equals(count , 1);
 			});
 		});
 
@@ -153,7 +153,7 @@ describe("dispose", function () {
 				});
 				d1.set(d1.peek + 1);
 				d1.set(d1.peek + 1);
-				test.ok(count === 1);
+				test.equals(count , 1);
 			});
 		});
 	});
@@ -182,7 +182,7 @@ describe("dispose", function () {
 			});
 			count = 0;
 			d1.set(false);
-			test.ok(count === 2);
+			test.equals(count , 2);
 		});
 	});
 

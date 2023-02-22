@@ -1,4 +1,4 @@
-import { test, root, batch, array, dispose, cleanup, effect, compute, value } from './helper/zorn.js';
+import { test, root, batch, array, dispose, cleanup, effect, compute, value, Mutation } from './helper/zorn.js';
 
 describe("array", function () {
 
@@ -52,7 +52,7 @@ describe("array", function () {
                     a.val;
                 })
                 a.set();
-                test.ok(count === 1);
+                test.equals(count , 1);
             });
         });
 
@@ -71,7 +71,7 @@ describe("array", function () {
                     a.val;
                 })
                 a.pop();
-                test.ok(count === 1);
+                test.equals(count , 1);
             });
 
             it("throws if mutation is set", function() {
@@ -113,15 +113,76 @@ describe("array", function () {
                     });
                 });
             });
+
+            it("works for empty arrays", function() {
+                var a = array([]);
+                a.push(1);
+                test.equals(a.val, [1]);
+            });
+
+            it("works with multiple items for empty arrays", function() {
+                var a = array([]);
+                a.push(1, 2, 3);
+                test.equals(a.val, [1, 2, 3]);
+            });
         });
 
         describe("splice", function() {
+
+            it("should remove an element", function() {
+                var a = array([1, 2, 3]);
+                a.splice(1, 1);
+                test.equals(a.val, [1, 3]);
+                test.equals(a.mut()[0], Mutation.RemoveAt);
+            });
+
+            it("should insert an element", function() {
+                var a = array([1, 2, 3]);
+                a.splice(1, 0, 4);
+                test.equals(a.val, [1, 4, 2, 3]);
+                test.equals(a.mut()[0], Mutation.InsertAt);
+            });
+
+            it("should replace an element", function() {
+                var a = array([1, 2, 3]);
+                a.splice(1, 1, 4);
+                test.equals(a.val, [1, 4, 3]);
+                test.equals(a.mut()[0], Mutation.SetAt);
+            });
+
+            it("converts insertion at index 0 as unshift", function() {
+                var a = array([1, 2, 3]);
+                a.splice(0, 0, 4);
+                test.equals(a.val, [4, 1, 2, 3]);
+                test.equals(a.mut()[0], Mutation.Unshift);
+            });
+
+            it("converts insertion at index length as push", function() {
+                var a = array([1, 2, 3]);
+                a.splice(3, 0, 4);
+                test.equals(a.val, [1, 2, 3, 4]);
+                test.equals(a.mut()[0], Mutation.Push);
+            });
+
+            it("should insert multiple elements", function() {
+                var a = array([1, 2, 3]);
+                a.splice(1, 0, 4, 5);
+                test.equals(a.val, [1, 4, 5, 2, 3]);
+                test.equals(a.mut()[0], Mutation.InsertRange);
+            });
+
+            it("should remove multiple elements and replace with one", function() {
+                var a = array([1, 2, 3, 4, 5]);
+                a.splice(1, 3, 6);
+                test.equals(a.val, [1, 6, 5]);
+                test.equals(a.mut()[0], Mutation.ReplaceInsert);
+            });
 
             it("correctly infers replace insert params", function() {
                 var a = array([1, 2, 3]);
                 a.splice(1, 1, 4, 5);
                 test.equals(a.val, [1, 4, 5, 3]);
-                test.equals(a.mut()[0], 976);
+                test.equals(a.mut()[0], Mutation.ReplaceInsert);
             });
         });
     });

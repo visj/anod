@@ -10,9 +10,9 @@ describe("cleanup", function () {
                 called = true;
             });
         });
-        test.ok(called === false);
+        test.equals(called , false);
         d.set(d.peek + 1);
-        test.ok(called === true);
+        test.equals(called , true);
     });
 
     it("can be called from within a subcomputation", function () {
@@ -26,9 +26,9 @@ describe("cleanup", function () {
                 });
             });
         });
-        test.ok(called === false);
+        test.equals(called , false);
         d.set(d.peek + 1);
-        test.ok(called === true);
+        test.equals(called , true);
     });
 
     it("accepts multiple cleanup functions", function () {
@@ -43,9 +43,9 @@ describe("cleanup", function () {
                 called++;
             });
         });
-        test.ok(called === 0);
+        test.equals(called , 0);
         d.set(d.peek + 1);
-        test.ok(called === 2);
+        test.equals(called , 2);
     });
 
     it("runs cleanups in order", function () {
@@ -60,9 +60,9 @@ describe("cleanup", function () {
                 called += 'b';
             });
         });
-        test.ok(called === '');
+        test.equals(called , '');
         d.set(d.peek + 1);
-        test.ok(called === 'ab');
+        test.equals(called , 'ab');
     });
 
     it("can be run within root scope", function () {
@@ -73,7 +73,7 @@ describe("cleanup", function () {
             });
 
             teardown();
-            test.ok(called === true);
+            test.equals(called , true);
         });
     });
 
@@ -88,13 +88,13 @@ describe("cleanup", function () {
                     called++;
                 });
             });
-            test.ok(called === 0);
+            test.equals(called , 0);
             d.set(d.peek + 1);
-            test.ok(called === 1);
+            test.equals(called , 1);
             teardown();
-            test.ok(called === 2);
+            test.equals(called , 2);
             d.set(d.peek + 1);
-            test.ok(called === 2);
+            test.equals(called , 2);
         });
     });
 });

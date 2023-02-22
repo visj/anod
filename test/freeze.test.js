@@ -6,10 +6,10 @@ describe("batch", function () {
 			
 		batch(function () {
 			d.set(2);
-			test.ok(d.val === 1);
+			test.equals(d.val , 1);
 		});
 		
-		test.ok(d.val === 2);
+		test.equals(d.val , 2);
 	});
 	
 	it("halts propagation within its scope", function () {
@@ -21,10 +21,10 @@ describe("batch", function () {
 				
 			batch(function () {
 				d.set(2);
-				test.ok(f.val === 1);
+				test.equals(f.val , 1);
 			});
 			
-			test.ok(f.val === 2);
+			test.equals(f.val , 2);
 		});
 	});
 });

@@ -1561,6 +1561,9 @@ function Data(opt, set, value, eq) {
  * @returns {T}
  */
 function peekData() {
+    if ((this._opt & (Opts.DisposeFlags | Opts.MayDispose) === Opts.MayDispose)) {
+        this._owner._clearMayUpdate(STAGE, TIME);
+    }
     return this._value;
 }
 
@@ -1754,7 +1757,7 @@ function Computation(fn, value, opt, args, src, eq) {
     } else {
         this._opt &= ~Opts.Defer;
         if (src !== void 0) {
-            initSource(this, src);
+            logSource(this, src);
         }
     }
 };
@@ -1779,9 +1782,11 @@ function peekComputation() {
 function getComputation() {
     /** @const {number} */
     var opt = this._opt;
-    if ((opt & Opts.DisposeFlags) === 0 && STAGE !== Stage.Idle) {
+    /** @const {number} */
+    var stage = STAGE;
+    if ((opt & Opts.DisposeFlags) === 0 && stage !== Stage.Idle) {
         if ((opt & (Opts.Update | Opts.MayUpdate | Opts.MayDispose)) !== 0) {
-            this._clearMayUpdate(STAGE, TIME);
+            this._clearMayUpdate(stage, TIME);
         }
         if ((this._opt & Opts.DisposeFlags) === 0 && SCOPE._listen) {
             logRead(this, /** @type {Receive} */(SCOPE._owner));
@@ -1828,7 +1833,7 @@ function evalSource(src, fn) {
  * @param {Source} sources 
  * @returns {void}
  */
-function initSource(node, sources) {
+function logSource(node, sources) {
     if (Array.isArray(sources)) {
         /** @const {number} */
         var ln = sources.length;
@@ -1967,7 +1972,7 @@ Computation.prototype._init = function (src) {
         STAGE = Stage.Started;
         try {
             if ((opt & Opts.Bound) !== 0) {
-                initSource(this, /** @type {Source} */(src));
+                logSource(this, /** @type {Source} */(src));
             }
             this._value = this._set(this._value, this._args);
             if (CHANGES._count !== 0 || DISPOSES._count !== 0) {
@@ -1980,7 +1985,7 @@ Computation.prototype._init = function (src) {
         }
     } else {
         if ((opt & Opts.Bound) !== 0) {
-            initSource(this, /** @type {Source} */(src));
+            logSource(this, /** @type {Source} */(src));
         }
         this._value = this._set(this._value, this._args);
     }
@@ -2106,47 +2111,45 @@ Computation.prototype._recMayUpdate = function (time) {
  */
 Computation.prototype._clearMayUpdate = function (stage, time) {
     if ((this._opt & Opts.DisposeFlags) === 0) {
-        if (stage === Stage.Computes && (this._opt & (Opts.MayDispose | Opts.MayUpdate) !== 0)) {
-            if ((this._opt & Opts.MayCleared) !== 0) {
-                panic("cyclic dependency");
-            }
-            this._opt |= Opts.MayCleared;
-            if ((this._opt & Opts.MayDispose) !== 0) {
-                this._owner._clearMayUpdate(stage, time);
-                this._opt &= ~Opts.MayDispose;
-            }
-            if ((this._opt & (Opts.DisposeFlags | Opts.MayUpdate)) === Opts.MayUpdate) {
-                check: {
-                    /** @type {?Send} */
-                    var source1 = this._source1;
-                    if (source1 !== null && (source1._opt & Opts.MayUpdate) !== 0) {
-                        source1._clearMayUpdate(stage, time);
-                        if (this._age === time) {
-                            break check;
-                        }
+        if ((this._opt & Opts.MayCleared) !== 0) {
+            panic("cyclic dependency");
+        }
+        this._opt |= Opts.MayCleared;
+        if ((this._opt & Opts.MayDispose) !== 0) {
+            this._owner._clearMayUpdate(stage, time);
+            this._opt &= ~Opts.MayDispose;
+        }
+        if ((this._opt & (Opts.DisposeFlags | Opts.MayUpdate)) === Opts.MayUpdate) {
+            check: {
+                /** @type {?Send} */
+                var source1 = this._source1;
+                if (source1 !== null && (source1._opt & Opts.MayUpdate) !== 0) {
+                    source1._clearMayUpdate(stage, time);
+                    if (this._age === time) {
+                        break check;
                     }
-                    if ((this._opt & (Opts.ReceiveMany | Opts.MayUpdate)) === (Opts.ReceiveMany | Opts.MayUpdate)) {
-                        /** @type {number} */
-                        var ln;
-                        /** @const {?Array<Send>} */
-                        var sources = this._sources;
-                        if (sources !== null && (ln = sources.length) > 0) {
-                            for (var /** number */ i = 0; i < ln; i++) {
-                                source1 = sources[i];
-                                if ((source1._opt & Opts.MayUpdate) !== 0) {
-                                    source1._clearMayUpdate(stage, time);
-                                    if (this._age === time) {
-                                        break check;
-                                    }
+                }
+                if ((this._opt & (Opts.ReceiveMany | Opts.MayUpdate)) === (Opts.ReceiveMany | Opts.MayUpdate)) {
+                    /** @type {number} */
+                    var ln;
+                    /** @const {?Array<Send>} */
+                    var sources = this._sources;
+                    if (sources !== null && (ln = sources.length) > 0) {
+                        for (var /** number */ i = 0; i < ln; i++) {
+                            source1 = sources[i];
+                            if ((source1._opt & Opts.MayUpdate) !== 0) {
+                                source1._clearMayUpdate(stage, time);
+                                if (this._age === time) {
+                                    break check;
                                 }
                             }
                         }
                     }
                 }
-                this._opt &= ~Opts.MayUpdate;
             }
-            this._opt &= ~Opts.MayCleared;
+            this._opt &= ~Opts.MayUpdate;
         }
+        this._opt &= ~Opts.MayCleared;
         if ((this._opt & Opts.Update) !== 0 && this._age === time) {
             if ((this._opt & Opts.Updated) !== 0) {
                 panic("cyclic dependency");
@@ -2229,11 +2232,11 @@ export var Mutation = {
     /**
      * 15 | Range | Remove | Insert
      */
-    ReplaceRange: 15 | 128 | 256 | 512,
+    Replace: 15 | 128 | 256 | 512,
     /**
      * 16 | Tail | Range | Remove | Insert
      */
-    ReplaceRangeInsert: 16 | 64 | 128 | 256 | 512,
+    ReplaceInsert: 16 | 64 | 128 | 256 | 512,
     /**
      * 17 | Reorder
      */
@@ -2290,6 +2293,8 @@ function index(i, length, empty) {
         } else {
             i += length;
         }
+    } else if (i > length) {
+        i = length;
     }
     return i;
 }
@@ -2399,6 +2404,7 @@ Collection.prototype.mut = function () {
  * @template T
  * @param {T|undefined} seed 
  * @param {Array} args 
+ * @returns {T|undefined}
  */
 function at(seed, args) {
     /** @const {Collection<T>} */
@@ -2507,13 +2513,12 @@ Collection.prototype.indexOf = function (searchElement, fromIndex) { };
  * @template T
  * @param {Array<T>} array 
  * @param {T} item 
- * @param {T} target 
  * @param {number} start 
  * @param {number} end 
  * @param {number} dir
  * @returns {number} 
  */
-function findByValue(array, item, target, start, end, dir) {
+function findByValue(array, item, start, end, dir) {
     for (; start !== end; start += dir) {
         if (array[start] === item) {
             return start;
@@ -2548,7 +2553,7 @@ function findByCallback(array, fn, target, start, end, dir) {
  * @returns {string}
  */
 function join(_, args) {
-    return args[0].peek.join(args[1] ? args[2].val : args[2]);
+    return args[0].val.join(args[1] ? args[2].val : args[2]);
 };
 
 /**
@@ -2558,7 +2563,7 @@ function join(_, args) {
  * @returns {Signal<string>}
  */
 Collection.prototype.join = function (separator) {
-    return new Computation(join, '', Opts.Static | Opts.Bound, [this, isReactive(separator), separator], this);
+    return new Computation(join, '', Opts.Static, [this, isReactive(separator), separator]);
 };
 
 /**
@@ -2628,10 +2633,15 @@ function copy(seed, args) {
     var srcArray = src.val;
     /** @type {Array} */
     var mut = src.mut();
+    /** @const {number} */
+    var length = srcArray.length;
     if (mut[Mut.Type] === Mutation.Set || args[Col.Changed] === Col.Init) {
-        sliceArray(srcArray, seed, 0, srcArray.length);
+        sliceArray(srcArray, seed, 0, length);
     } else {
         applyMutation(seed, mut);
+    }
+    if (seed.length !== length) {
+        seed.length = length;
     }
     return seed;
 }
@@ -2654,7 +2664,7 @@ function slice(seed, args) {
     var src = args[Col.Source];
     /** @const {Array<T>} */
     var srcArray = src.val;
-    /** @const {number} */
+    /** @type {number} */
     var length = srcArray.length;
     /** @const {Array<Signal<number>|number>} */
     var params = args[Col.Args];
@@ -2691,6 +2701,10 @@ function slice(seed, args) {
     } else {
         args[Col.Changed] = Col.NoChange;
     }
+    length = end - start;
+    if (seed.length !== length) {
+        seed.length = length;
+    }
     return seed;
 }
 
@@ -2704,12 +2718,9 @@ function slice(seed, args) {
 function sliceArray(source, target, from, to) {
     /** @type {number} */
     var i = 0;
-    /** @const {number} */
-    var ln = to - from;
     for (; from < to; from++) {
         target[i++] = source[from];
     }
-    target.length = ln;
 }
 
 /**
@@ -3211,9 +3222,9 @@ DataArray.prototype.splice = function (start, deleteCount, items) {
                     if (deleteCount === 1) {
                         return mutate(this, Mutation.SetAt, start, start, [start, items]);
                     }
-                    mut = Mutation.ReplaceRange;
+                    mut = Mutation.Replace;
                 } else {
-                    mut = Mutation.ReplaceRangeInsert;
+                    mut = Mutation.ReplaceInsert;
                 }
             } else {
                 if (length === 0) {
@@ -3247,11 +3258,26 @@ DataArray.prototype.splice = function (start, deleteCount, items) {
         }
         if ((mut & Mutation.Insert) !== 0) {
             if ((mut & Mutation.Range) !== 0) {
+                /** @type {number} */
+                var i;
+                if (start === length || start === 0) {
+                    params = new Array(ln);
+                    for (i = 0; i < ln; i++) {
+                        params[i] = args[i];
+                    }
+                    return (start === 0 ? 
+                        mutate(this, Mutation.PushRange, length, length + ln - 1, params) :
+                        mutate(this, Mutation.PushRange, length, length + ln - 1, params)
+                    );
+                }
                 params = [start, deleteCount];
                 for (var i = 2; i < ln; i++) {
                     params[i] = args[i];
                 }
             } else {
+                if (start === length) {
+
+                }
                 params = [start, deleteCount, items];
             }
         } else {

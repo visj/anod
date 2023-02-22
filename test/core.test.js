@@ -5,7 +5,7 @@ describe("compute()", function () {
         it("returns initial value of wrapped function", function () {
             root(function () {
                 var f = compute(function () { return 1; });
-                test.ok(f.val === 1);
+                test.equals(f.val , 1);
             });
         });
     });
@@ -17,7 +17,7 @@ describe("compute()", function () {
                 effect(function () {
                     calls++;
                 });
-                test.ok(calls === 1);
+                test.equals(calls , 1);
             });
         });
 
@@ -30,7 +30,7 @@ describe("compute()", function () {
 
                 f.val; f.val; f.val;
 
-                test.ok(calls === 1);
+                test.equals(calls , 1);
             });
         });
     });
@@ -48,7 +48,7 @@ describe("compute()", function () {
                 fevals = 0;
 
                 d.set(d.peek + 1);
-                test.ok(fevals === 1);
+                test.equals(fevals , 1);
             });
         });
 
@@ -64,7 +64,7 @@ describe("compute()", function () {
                 fevals = 0;
 
                 d.val;
-                test.ok(fevals === 0);
+                test.equals(fevals , 0);
             });
         });
 
@@ -76,7 +76,7 @@ describe("compute()", function () {
                 });
 
                 d.set(2);
-                test.ok(f.val === 2);
+                test.equals(f.val , 2);
             });
         });
     });
@@ -100,8 +100,8 @@ describe("compute()", function () {
             root(function () {
                 init();
                 t.set(5);
-                test.ok(fevals === 1);
-                test.ok(f.val === 5);
+                test.equals(fevals , 1);
+                test.equals(f.val , 5);
             });
         });
 
@@ -109,8 +109,8 @@ describe("compute()", function () {
             root(function () {
                 init();
                 e.set(5);
-                test.ok(fevals === 0);
-                test.ok(f.val === 1);
+                test.equals(fevals , 0);
+                test.equals(f.val , 1);
             });
         });
 
@@ -120,7 +120,7 @@ describe("compute()", function () {
                 i.set(false);
                 fevals = 0;
                 t.set(5);
-                test.ok(fevals === 0);
+                test.equals(fevals , 0);
             });
         });
 
@@ -130,7 +130,7 @@ describe("compute()", function () {
                 i.set(false);
                 fevals = 0;
                 e.set(5);
-                test.ok(fevals === 1);
+                test.equals(fevals , 1);
             });
         });
     });
@@ -145,7 +145,7 @@ describe("compute()", function () {
                 });
                 fevals = 0;
                 d.set(2);
-                test.ok(fevals === 0);
+                test.equals(fevals , 0);
             });
         });
     });
@@ -166,9 +166,9 @@ describe("compute()", function () {
                 var f = compute(function (v) {
                     return v + a.val;
                 }, 5);
-                test.ok(f.val === 10);
+                test.equals(f.val , 10);
                 a.set(6);
-                test.ok(f.val === 16);
+                test.equals(f.val , 16);
             });
         });
     });
@@ -193,7 +193,7 @@ describe("compute()", function () {
         it("does not cause re-evaluation", function () {
             root(function () {
                 init();
-                test.ok(fcount === 1);
+                test.equals(fcount , 1);
             });
         });
 
@@ -201,7 +201,7 @@ describe("compute()", function () {
             root(function () {
                 init();
                 f.val;
-                test.ok(gcount === 1);
+                test.equals(gcount , 1);
             });
         });
 
@@ -209,7 +209,7 @@ describe("compute()", function () {
             root(function () {
                 init();
                 g.val;
-                test.ok(gcount === 1);
+                test.equals(gcount , 1);
             });
         });
 
@@ -217,9 +217,9 @@ describe("compute()", function () {
             root(function () {
                 init();
                 d.set(2);
-                test.ok(fcount === 2);
-                test.ok(gcount === 2);
-                test.ok(g.val === 2);
+                test.equals(fcount , 2);
+                test.equals(gcount , 2);
+                test.equals(g.val , 2);
             });
         });
     });
@@ -289,7 +289,7 @@ describe("compute()", function () {
                 seq = "";
                 a1.set(a1.peek + 1);
 
-                test.ok(seq === "b1b2c1");
+                test.equals(seq , "b1b2c1");
             });
         });
 
@@ -318,7 +318,7 @@ describe("compute()", function () {
 
                 gcount = 0;
                 d.set(d.peek + 1);
-                test.ok(gcount === 1);
+                test.equals(gcount , 1);
             });
         });
 
@@ -353,7 +353,7 @@ describe("compute()", function () {
 
                 hcount = 0;
                 d.set(d.peek + 1);
-                test.ok(hcount === 1);
+                test.equals(hcount , 1);
             });
         });
     });

@@ -2,13 +2,13 @@ import { test, root, effect, compute, value, batch } from './helper/zorn.js';
 
 describe("data", function () {
     it("takes and returns an initial value", function () {
-        test.ok(value(1).val === 1);
+        test.equals(value(1).val , 1);
     });
 
     it("can be set by passing in a new value", function () {
         var d = value(1);
         d.set(2);
-        test.ok(d.val === 2);
+        test.equals(d.val , 2);
     });
 
     it("does not throw if set to the same value twice in a batch", function () {
@@ -17,7 +17,7 @@ describe("data", function () {
             d.set(2);
             d.set(2);
         });
-        test.ok(d.val === 2);
+        test.equals(d.val , 2);
     });
 
     it("throws if set to two different values in a batch", function () {
@@ -37,7 +37,7 @@ describe("data", function () {
                 d.set(2);
                 d.set(2);
             });
-            test.ok(d.val === 2);
+            test.equals(d.val , 2);
         });
     });
 
