@@ -174,7 +174,7 @@ export const enum Mutation {
     Custom = 19,
 }
 
-type MutType<M extends Mutation, T> = [mut: M, start: number, end: number, args: T];
+type MutType<M extends Mutation, T> = readonly [mut: M, start: number, end: number, args: T];
 
 type MutSet<T> = MutType<Mutation.Set, T[]>;
 

@@ -62,12 +62,6 @@ function IterableSignal() { }
 
 /**
  * @public
- * @returns {Array}
- */
-IterableSignal.prototype.mut = function () { };
-
-/**
- * @public
  * @readonly
  * @type {Signal<number>}
  */
@@ -75,8 +69,14 @@ IterableSignal.prototype.length;
 
 /**
  * @public
+ * @returns {Array}
+ */
+IterableSignal.prototype.mut = function () { };
+
+/**
+ * @public
  * @this {IterableSignal<T>}
- * @param {number} index 
+ * @param {Signal<number>|number} index 
  * @returns {Signal<T|undefined>}
  */
 IterableSignal.prototype.at = function (index) { };
@@ -84,7 +84,7 @@ IterableSignal.prototype.at = function (index) { };
 /**
  * @public
  * @this {IterableSignal<T>}
- * @param {...(T|!Array<T>)} items
+ * @param {...(T|Array<T>|IterableSignal<T>)} items
  * @returns {IterableSignal<T>} 
  */
 IterableSignal.prototype.concat = function (items) { };
@@ -148,7 +148,7 @@ IterableSignal.prototype.forEach = function (callbackFn) { };
 /**
  * @public
  * @this {IterableSignal<T>}
- * @param {T} searchElement
+ * @param {Signal<T>|T} searchElement
  * @returns {Signal<boolean>}
  */
 IterableSignal.prototype.includes = function (searchElement) { };
@@ -156,8 +156,8 @@ IterableSignal.prototype.includes = function (searchElement) { };
 /**
  * @public
  * @this {IterableSignal<T>}
- * @param {T} searchElement 
- * @param {number=} fromIndex
+ * @param {Signal<T>|T} searchElement 
+ * @param {Signal<number>|number=} fromIndex
  * @returns {Signal<number>}
  */
 IterableSignal.prototype.indexOf = function (searchElement, fromIndex) { };
@@ -165,7 +165,7 @@ IterableSignal.prototype.indexOf = function (searchElement, fromIndex) { };
 /**
  * @public
  * @this {IterableSignal<T>}
- * @param {string=} separator
+ * @param {Signal<string>|string=} separator
  * @returns {Signal<string>}
  */
 IterableSignal.prototype.join = function (separator) { };
@@ -173,8 +173,8 @@ IterableSignal.prototype.join = function (separator) { };
 /**
  * @public
  * @this {IterableSignal<T>}
- * @param {T} searchElement 
- * @param {number=} fromIndex
+ * @param {Signal<T>|T} searchElement 
+ * @param {Signal<number>|number=} fromIndex
  * @returns {Signal<number>}
  */
 IterableSignal.prototype.lastIndexOf = function (searchElement, fromIndex) { };
@@ -193,7 +193,7 @@ IterableSignal.prototype.map = function (callbackFn) { };
  * @template U
  * @this {IterableSignal<T>}
  * @param {function((T|U),T,number): U} callbackFn 
- * @param {U=} initialValue 
+ * @param {Signal<U>|U=} initialValue 
  * @returns {Signal<U>}
  */
 IterableSignal.prototype.reduce = function (callbackFn, initialValue) { };
@@ -203,7 +203,7 @@ IterableSignal.prototype.reduce = function (callbackFn, initialValue) { };
  * @template U
  * @this {IterableSignal<T>}
  * @param {function((T|U),T,number): U} callbackFn
- * @param {U=} initialValue 
+ * @param {Signal<U>|U=} initialValue 
  * @returns {Signal<U>}
  */
 IterableSignal.prototype.reduceRight = function (callbackFn, initialValue) { };
@@ -545,6 +545,7 @@ Send.prototype._nodeslots;
  * @protected
  * @interface
  * @template T,U
+ * @extends {Own}
  * @extends {Send<T,U>}
  */
 function Receive() { }
@@ -650,7 +651,7 @@ function value(value, eq) {
  * @public
  * @template T
  * @param {Array<T>=} value 
- * @param {(function(!Array<T>,!Array<T>): boolean)=} eq
+ * @param {(function(Array<T>,Array<T>): boolean)=} eq
  * @returns {ArraySignal<T>}
  */
 function array(value, eq) {
@@ -937,6 +938,8 @@ Queue.prototype._run = function (time) {
     return error;
 };
 
+/** @const {function(...?): ?} */
+var NOOP = function () { };
 /** @const  {nil} */
 var NIL = /** @type {nil} */({});
 /** @const {Array} */
@@ -961,15 +964,16 @@ var SCOPE = /** @type {Context} */({
 });
 
 /**
- * @param {Function} ctor 
+ * @param {Function} ctor
+ * @param {Function} instance 
  * @param {Array<Function>} inherits 
  * @param {function(): *=} peek
  * @param {function(): *=} val
  * @returns {void}
  */
-function extend(ctor, inherits, peek, val) {
-    /** @const {Reactive} */
-    var base = new Reactive();
+function extendReactive(ctor, instance, inherits, peek, val) {
+    /** @const */
+    var base = new instance();
     for (var /** number */ i = 0; i < inherits.length; i++) {
         /** @const */
         var proto = inherits[i].prototype;
@@ -1002,7 +1006,7 @@ function reset() {
 /**
  * @protected
  * @param {Send} from 
- * @param {Receive|!Receive} to
+ * @param {Receive} to
  */
 function logRead(from, to) {
     from._opt |= Opts.Send;
@@ -1214,6 +1218,89 @@ Root.prototype._addRecover = function (recoverFn) {
 
 /**
  * @protected
+ * @template T
+ * @constructor
+ * @implements {Child}
+ */
+function Reactive() { }
+
+/* __EXCLUDE__ */
+
+/**
+ * @type {T}
+ * @nocollapse
+ * @throws {Error}
+ */
+Reactive.prototype.val;
+
+/**
+ * @type {T}
+ * @readonly
+ */
+Reactive.prototype.peek;
+
+/**
+ * @protected
+ * @type {number}
+ */
+Reactive.prototype._opt;
+
+/**
+ * @protected
+ * @param {number} time
+ * @returns {void}
+ */
+Reactive.prototype._dispose;
+
+/**
+ * @protected
+ * @type {?Receive}
+ */
+Reactive.prototype._owner;
+
+/**
+ * @protected
+ * @param {number} time
+ * @returns {void}
+ */
+Reactive.prototype._recDispose;
+
+/**
+ * @protected
+ * @param {Receive} Own
+ * @param {number} time
+ * @returns {void}
+ */
+Reactive.prototype._recMayDispose;
+
+/**
+ * @protected
+ * @param {number} time
+ * @returns {void}
+ */
+Reactive.prototype._update;
+
+/* __EXCLUDE__ */
+
+/**
+ * @protected
+ * @param {number} stage
+ * @param {number} time 
+ * @returns {void}
+ */
+Reactive.prototype._clearMayUpdate = NOOP;
+
+/**
+* 
+* @param {*} ctor 
+* @returns {boolean}
+*/
+function isReactive(ctor) {
+    return ctor instanceof Reactive;
+}
+
+/**
+ * @protected
  * @param {Send} send
  */
 function disposeSender(send) {
@@ -1402,89 +1489,6 @@ function sendMayDispose(owner, children, time) {
 }
 
 /**
- * 
- * @param {*} ctor 
- * @returns {boolean}
- */
-function isReactive(ctor) {
-    return ctor instanceof Reactive;
-}
-
-/**
- * @protected
- * @template T
- * @constructor
- * @implements {Child}
- */
-function Reactive() { }
-
-/* __EXCLUDE__ */
-
-/**
- * @type {T}
- * @nocollapse
- * @throws {Error}
- */
-Reactive.prototype.val;
-
-/**
- * @type {T}
- * @readonly
- */
-Reactive.prototype.peek;
-
-/**
- * @protected
- * @type {number}
- */
-Reactive.prototype._opt;
-
-/**
- * @protected
- * @param {number} time
- * @returns {void}
- */
-Reactive.prototype._dispose;
-
-/**
- * @protected
- * @type {?Receive}
- */
-Reactive.prototype._owner;
-
-/**
- * @protected
- * @param {number} time
- * @returns {void}
- */
-Reactive.prototype._recDispose;
-
-/**
- * @protected
- * @param {Receive} Own
- * @param {number} time
- * @returns {void}
- */
-Reactive.prototype._recMayDispose;
-
-/**
- * @protected
- * @param {number} time
- * @returns {void}
- */
-Reactive.prototype._update;
-
-/* __EXCLUDE__ */
-
-/**
- * @protected
- * @param {number} stage
- * @param {number} time 
- * @returns {void}
- */
-Reactive.prototype._clearMayUpdate = function (stage, time) { };
-
-/**
  * @struct
  * @template T,U
  * @protected
@@ -1572,7 +1576,7 @@ function getData() {
     return this._value;
 }
 
-extend(Data, [Reactive], peekData, getData);
+extendReactive(Data, Reactive, [], peekData, getData);
 
 /**
  * @template T
@@ -1746,26 +1750,14 @@ function Computation(fn, value, opt, args, src, eq) {
      */
     this._args = args;
     if ((opt & Opts.Defer) === 0) {
-        startCompute(this, this, args, src);
+        this._init(src);
     } else {
         this._opt &= ~Opts.Defer;
-        initSource(this, /** @type {Source} */(src));
-    }
-};
-
-/**
- * @param {Child} node
- * @returns {void}
- */
-function setCurrent(node) {
-    /** @const {number} */
-    var opt = node._opt;
-    if ((opt & Opts.DisposeFlags) === 0 && STAGE !== Stage.Idle) {
-        if ((opt & (Opts.Update | Opts.MayUpdate | Opts.MayDispose)) !== 0) {
-            node._clearMayUpdate(STAGE, TIME);
+        if (src !== void 0) {
+            initSource(this, src);
         }
     }
-}
+};
 
 /**
  * @template T 
@@ -1773,7 +1765,9 @@ function setCurrent(node) {
  * @returns {T}
  */
 function peekComputation() {
-    setCurrent(this);
+    if ((this._opt & Opts.DisposeFlags) === 0 && (this._opt & (Opts.Update | Opts.MayDispose | Opts.MayUpdate)) !== 0) {
+        this._clearMayUpdate(STAGE, TIME);
+    }
     return this._value;
 }
 
@@ -1796,50 +1790,7 @@ function getComputation() {
     return this._value;
 }
 
-extend(Computation, [Reactive, Root], peekComputation, getComputation);
-
-/**
- * @template T,U
- * @param {Own} owner
- * @param {Receive<T,U>} node 
- * @param {U=} args
- * @param {Source=} src
- * @returns {void}
- */
-function startCompute(owner, node, args, src) {
-    /** @const {?Own} */
-    var _owner = SCOPE._owner;
-    /** @const {boolean} */
-    var _listen = SCOPE._listen;
-    /** @const {number} */
-    var opt = node._opt;
-    SCOPE._owner = owner;
-    SCOPE._listen = true;
-    if (STAGE === Stage.Idle) {
-        reset();
-        STAGE = Stage.Started;
-        try {
-            if ((opt & Opts.Bound) !== 0) {
-                initSource(node, /** @type {Source} */(src));
-            }
-            node._value = node._set(node._value, /** @type {U} */(args));
-            if (CHANGES._count !== 0 || DISPOSES._count !== 0) {
-                start();
-            }
-        } finally {
-            STAGE = Stage.Idle;
-            SCOPE._owner = null;
-            SCOPE._listen = false;
-        }
-    } else {
-        if ((opt & Opts.Bound) !== 0) {
-            initSource(this, /** @type {Source} */(src));
-        }
-        node._value = node._set(node._value, /** @type {U} */(args));
-    }
-    SCOPE._owner = _owner;
-    SCOPE._listen = _listen;
-}
+extendReactive(Computation, Reactive, [Root], peekComputation, getComputation);
 
 /**
  * @template T,U
@@ -1998,6 +1949,46 @@ Computation.prototype._recMayDispose = function (owner, time) {
 };
 
 /**
+ * @this {Computation<T>}
+ * @param {Source=} src
+ * @returns {void} 
+ */
+Computation.prototype._init = function (src) {
+    /** @const {?Own} */
+    var _owner = SCOPE._owner;
+    /** @const {boolean} */
+    var _listen = SCOPE._listen;
+    /** @const {number} */
+    var opt = this._opt;
+    SCOPE._owner = this;
+    SCOPE._listen = true;
+    if (STAGE === Stage.Idle) {
+        reset();
+        STAGE = Stage.Started;
+        try {
+            if ((opt & Opts.Bound) !== 0) {
+                initSource(this, /** @type {Source} */(src));
+            }
+            this._value = this._set(this._value, this._args);
+            if (CHANGES._count !== 0 || DISPOSES._count !== 0) {
+                start();
+            }
+        } finally {
+            STAGE = Stage.Idle;
+            SCOPE._owner = null;
+            SCOPE._listen = false;
+        }
+    } else {
+        if ((opt & Opts.Bound) !== 0) {
+            initSource(this, /** @type {Source} */(src));
+        }
+        this._value = this._set(this._value, this._args);
+    }
+    SCOPE._owner = _owner;
+    SCOPE._listen = _listen;
+};
+
+/**
  * @protected
  * @override
  * @this {Computation<T>}
@@ -2114,52 +2105,54 @@ Computation.prototype._recMayUpdate = function (time) {
  * @returns {void} 
  */
 Computation.prototype._clearMayUpdate = function (stage, time) {
-    if (stage === Stage.Computes) {
-        if ((this._opt & Opts.MayCleared) !== 0) {
-            panic("cyclic dependency");
-        }
-        this._opt |= Opts.MayCleared;
-        if ((this._opt & Opts.MayDispose) !== 0) {
-            this._owner._clearMayUpdate(stage, time);
-            this._opt &= ~Opts.MayDispose;
-        }
-        if ((this._opt & (Opts.DisposeFlags | Opts.MayUpdate)) === Opts.MayUpdate) {
-            check: {
-                /** @type {?Send} */
-                var source1 = this._source1;
-                if (source1 !== null && (source1._opt & Opts.MayUpdate) !== 0) {
-                    source1._clearMayUpdate(stage, time);
-                    if (this._age === time) {
-                        break check;
+    if ((this._opt & Opts.DisposeFlags) === 0) {
+        if (stage === Stage.Computes && (this._opt & (Opts.MayDispose | Opts.MayUpdate) !== 0)) {
+            if ((this._opt & Opts.MayCleared) !== 0) {
+                panic("cyclic dependency");
+            }
+            this._opt |= Opts.MayCleared;
+            if ((this._opt & Opts.MayDispose) !== 0) {
+                this._owner._clearMayUpdate(stage, time);
+                this._opt &= ~Opts.MayDispose;
+            }
+            if ((this._opt & (Opts.DisposeFlags | Opts.MayUpdate)) === Opts.MayUpdate) {
+                check: {
+                    /** @type {?Send} */
+                    var source1 = this._source1;
+                    if (source1 !== null && (source1._opt & Opts.MayUpdate) !== 0) {
+                        source1._clearMayUpdate(stage, time);
+                        if (this._age === time) {
+                            break check;
+                        }
                     }
-                }
-                if ((this._opt & (Opts.ReceiveMany | Opts.MayUpdate)) === (Opts.ReceiveMany | Opts.MayUpdate)) {
-                    /** @type {number} */
-                    var ln;
-                    /** @const {?Array<Send>} */
-                    var sources = this._sources;
-                    if (sources !== null && (ln = sources.length) > 0) {
-                        for (var /** number */ i = 0; i < ln; i++) {
-                            source1 = sources[i];
-                            if ((source1._opt & Opts.MayUpdate) !== 0) {
-                                source1._clearMayUpdate(stage, time);
-                                if (this._age === time) {
-                                    break check;
+                    if ((this._opt & (Opts.ReceiveMany | Opts.MayUpdate)) === (Opts.ReceiveMany | Opts.MayUpdate)) {
+                        /** @type {number} */
+                        var ln;
+                        /** @const {?Array<Send>} */
+                        var sources = this._sources;
+                        if (sources !== null && (ln = sources.length) > 0) {
+                            for (var /** number */ i = 0; i < ln; i++) {
+                                source1 = sources[i];
+                                if ((source1._opt & Opts.MayUpdate) !== 0) {
+                                    source1._clearMayUpdate(stage, time);
+                                    if (this._age === time) {
+                                        break check;
+                                    }
                                 }
                             }
                         }
                     }
                 }
+                this._opt &= ~Opts.MayUpdate;
             }
-            this._opt &= ~Opts.MayUpdate;
+            this._opt &= ~Opts.MayCleared;
         }
-        this._opt &= ~Opts.MayCleared;
-    }
-    if ((this._opt & Opts.Update) !== 0 && this._age === time) {
-        if ((this._opt & Opts.Updated) !== 0) {
-            panic("cyclic dependency");
+        if ((this._opt & Opts.Update) !== 0 && this._age === time) {
+            if ((this._opt & Opts.Updated) !== 0) {
+                panic("cyclic dependency");
+            }
+            this._update(time);
         }
-        this._update(time);
     }
 };
 
@@ -2259,7 +2252,9 @@ export var Mutation = {
  * @const
  * @enum {number}
  */
-export var CollectionSlot = {
+export var Col = {
+    Init: -2,
+    NoChange: 0,
     Source: 0,
     Changed: 1,
     Mut: 2,
@@ -2270,7 +2265,7 @@ export var CollectionSlot = {
  * @const
  * @enum {number}
  */
-export var MutSlot = {
+export var Mut = {
     Type: 0,
     Start: 1,
     End: 2,
@@ -2281,21 +2276,55 @@ export var MutSlot = {
 
 /**
  * 
+ * @param {number|void} i 
  * @param {number} length
- * @param {number=} val 
+ * @param {number} empty
  * @returns {number}
  */
-function index(length, val) {
-    if (val == null) {
-        val = 0;
-    } else if (val < 0) {
-        if (val < -length) {
-            val = 0;
+function index(i, length, empty) {
+    if (i == null) {
+        i = empty;
+    } else if (i < 0) {
+        if (i < -length) {
+            i = 0;
         } else {
-            val += length;
+            i += length;
         }
     }
-    return val;
+    return i;
+}
+
+/**
+ * @struct
+ * @protected
+ * @template T,U
+ * @constructor
+ * @extends {Data<Array<T>,U>}
+ * @implements {IterableSignal<T>}
+ */
+function Collection() { }
+
+Collection.prototype = new Reactive();
+
+/**
+ * 
+ * @param {Function} ctor 
+ * @param {Array<Function>} inherits 
+ * @param {function(): *} peekVal 
+ * @param {function(): *} getVal 
+ */
+function extendCollection(ctor, inherits, peekVal, getVal) {
+    extendReactive(ctor, Collection, inherits, peekVal, getVal);
+    Object.defineProperties(ctor.prototype, { length: { get: getLength } });
+}
+
+/**
+ * 
+ * @param {*} obj 
+ * @returns {boolean}
+ */
+function isCollection(obj) {
+    return obj instanceof Collection;
 }
 
 /**
@@ -2315,24 +2344,10 @@ function readLength(_, src) {
  */
 function getLength() {
     if (this._length === null) {
-        this._length = new Computation(readLength, this._value.length, Opts.Static | Opts.Bound | Opts.Defer, this, this);
+        this._length = new Computation(readLength, this.peek.length, Opts.Static | Opts.Bound | Opts.Defer, this, this);
     }
     return this._length;
 }
-
-/**
- * @struct
- * @protected
- * @template T,U
- * @constructor
- * @extends {Data<Array<T>,U>}
- * @implements {IterableSignal<T>}
- */
-function Collection() { }
-
-Collection.prototype = new Reactive();
-
-Object.defineProperties(Collection.prototype, { length: { get: getLength } });
 
 /* __EXCLUDE__ */
 
@@ -2374,24 +2389,41 @@ Collection.prototype._args;
  * @returns {Array}
  */
 Collection.prototype.mut = function () {
-    setCurrent(this);
+    if ((this._opt & (Opts.DisposeFlags)) === 0 && (this._opt & (Opts.Update | Opts.MayDispose | Opts.MayUpdate)) !== 0) {
+        this._clearMayUpdate(STAGE, TIME);
+    }
     return this._mut;
 };
 
 /**
+ * @template T
+ * @param {T|undefined} seed 
+ * @param {Array} args 
+ */
+function at(seed, args) {
+    /** @const {Collection<T>} */
+    var src = args[0];
+    /** @const {Array<T>} */
+    var srcArray = src.val;
+    /** @const {number} */
+    var index = args[1] ? args[2].val : args[2];
+    return index >= 0 && index < srcArray.length ? srcArray[index] : void 0;
+}
+
+/**
  * @public
  * @this {Collection<T,?>}
- * @param {number} index 
+ * @param {Signal<number>|number} index 
  * @returns {Signal<T|undefined>}
  */
 Collection.prototype.at = function (index) {
-
+    return new Computation(at, void 0, Opts.Static | Opts.Bound, [this, isReactive(index), index], this);
 };
 
 /**
  * @public
  * @this {Collection<T,?>}
- * @param {...(T|!Array<T>)} items
+ * @param {...(T|Array<T>|IterableSignal<T>)} items
  * @returns {IterableSignal<T>} 
  */
 Collection.prototype.concat = function (items) {
@@ -2457,7 +2489,7 @@ Collection.prototype.forEach = function (callbackFn) { };
 /**
  * @public
  * @this {Collection<T,?>}
- * @param {T} searchElement
+ * @param {Signal<T>|T} searchElement
  * @returns {Signal<boolean>}
  */
 Collection.prototype.includes = function (searchElement) { };
@@ -2465,40 +2497,201 @@ Collection.prototype.includes = function (searchElement) { };
 /**
  * @public
  * @this {Collection<T,?>}
- * @param {T} searchElement 
- * @param {number=} fromIndex
+ * @param {Signal<T>|T} searchElement 
+ * @param {Signal<number>|number=} fromIndex
  * @returns {Signal<number>}
  */
 Collection.prototype.indexOf = function (searchElement, fromIndex) { };
 
 /**
  * @template T
- * @param {Array<T>} array
- * @param {number} callback
- * @param {T|(function(T,number): boolean)} target 
- * @param {number=} start 
- * @param {number=} end 
- * @param {number=} dir 
- * @returns {number}
+ * @param {Array<T>} array 
+ * @param {T} item 
+ * @param {T} target 
+ * @param {number} start 
+ * @param {number} end 
+ * @param {number} dir
+ * @returns {number} 
  */
-function getIndex(array, callback, target, start, end, dir) {
-    start = start == null ? 0 : start;
-    end = end == null ? array.length : end;
-    dir = dir == null ? 1 : dir;
-    if (callback === 1) {
-        for (; start !== end; start += dir) {
-            if (target(array[start], start)) {
-                return start;
-            }
-        }
-    } else {
-        for (; start !== end; start += dir) {
-            if (array[start] === target) {
-                return start;
-            }
+function findByValue(array, item, target, start, end, dir) {
+    for (; start !== end; start += dir) {
+        if (array[start] === item) {
+            return start;
         }
     }
     return -1;
+}
+
+/**
+ * @template T
+ * @param {Array<T>} array 
+ * @param {function(T,number): boolean} fn 
+ * @param {boolean} target 
+ * @param {number} start 
+ * @param {number} end 
+ * @param {number} dir 
+ * @returns {number}
+ */
+function findByCallback(array, fn, target, start, end, dir) {
+    for (; start !== end; start += dir) {
+        if (fn(array[start], start) === target) {
+            return start;
+        }
+    }
+    return -1;
+}
+
+/**
+ * 
+ * @param {string} _
+ * @param {Array} args
+ * @returns {string}
+ */
+function join(_, args) {
+    return args[0].peek.join(args[1] ? args[2].val : args[2]);
+};
+
+/**
+ * @public
+ * @this {Collection<T,?>}
+ * @param {Signal<string>|string=} separator
+ * @returns {Signal<string>}
+ */
+Collection.prototype.join = function (separator) {
+    return new Computation(join, '', Opts.Static | Opts.Bound, [this, isReactive(separator), separator], this);
+};
+
+/**
+ * 
+ * @template T
+ * @param {number} _ 
+ * @param {Array} args 
+ * @returns {number}
+ */
+function lastIndexOf(_, args) {
+    return /** @type {Collection<T>} */(args[0])._value.lastIndexOf(
+        /** @type {T} */(args[1]),
+        /** @type {number|void} */(args[2])
+    );
+}
+
+/**
+ * @public
+ * @this {Collection<T,?>}
+ * @param {Signal<T>|T} searchElement 
+ * @param {Signal<number>|number=} fromIndex
+ * @returns {Signal<number>}
+ */
+Collection.prototype.lastIndexOf = function (searchElement, fromIndex) {
+    return new Computation(lastIndexOf, -2, Opts.Static | Opts.Bound, [this, searchElement, fromIndex], this);
+};
+
+/**
+ * @public
+ * @template U
+ * @this {Collection<T,?>}
+ * @param {function(T,!Signal<number>): U} callbackFn
+ * @returns {IterableSignal<U>}
+ */
+Collection.prototype.map = function (callbackFn) { };
+
+/**
+ * @public
+ * @template U
+ * @this {Collection<T,?>}
+ * @param {function((T|U),T,number): U} callbackFn 
+ * @param {Signal<U>|U=} initialValue 
+ * @returns {Signal<U>}
+ */
+Collection.prototype.reduce = function (callbackFn, initialValue) { };
+
+/**
+ * @public
+ * @template U
+ * @this {Collection<T,?>}
+ * @param {function((T|U),T,number): U} callbackFn 
+ * @param {Signal<U>|U=} initialValue 
+ * @returns {Signal<U>}
+ */
+Collection.prototype.reduceRight = function (callbackFn, initialValue) { };
+
+/**
+ * @template T
+ * @param {Array<T>} seed 
+ * @param {Array} args
+ * @returns {Array<T>}
+ */
+function copy(seed, args) {
+    /** @const {Collection<T>} */
+    var src = args[Col.Source];
+    /** @const {Array<T>} */
+    var srcArray = src.val;
+    /** @type {Array} */
+    var mut = src.mut();
+    if (mut[Mut.Type] === Mutation.Set || args[Col.Changed] === Col.Init) {
+        sliceArray(srcArray, seed, 0, srcArray.length);
+    } else {
+        applyMutation(seed, mut);
+    }
+    return seed;
+}
+
+/**
+ * @template T
+ * @param {Array<T>} seed
+ * @param {Array} args [
+ *  StartReactive: boolean,
+ *  Start: Signal<number>|number,
+ *  PrevStart: number,
+ *  EndReactive: boolean,
+ *  End: Signal<number>|number,
+ *  PrevEnd: number,
+ * ] 
+ * @returns 
+ */
+function slice(seed, args) {
+    /** @const {Collection<T>} */
+    var src = args[Col.Source];
+    /** @const {Array<T>} */
+    var srcArray = src.val;
+    /** @const {number} */
+    var length = srcArray.length;
+    /** @const {Array<Signal<number>|number>} */
+    var params = args[Col.Args];
+    /** @const {Array} */
+    var mut = src.mut();
+    /** @const {number} */
+    var mutStart = mut[Mut.Start];
+    /** @const {number} */
+    var mutEnd = mut[Mut.End];
+    /** @const {number} */
+    var prevStart = /** @type {number} */(params[2]);
+    /** @const {number} */
+    var prevEnd = /** @type {number} */(params[5]);
+    /** @const {number}  */
+    var start = params[2] = index(params[0] ? /** @type {Signal<number>} */(params[1]).val : /** @type {number} */(params[1]), length, 0);
+    /** @type {number} */
+    var end = params[5] = index(params[3] ? /** @type {Signal<number>} */(params[4]).val : /** @type {number} */(params[4]), length, length);
+    if (end <= start) {
+        /** @const {number} */
+        var ln = seed.length;
+        if (ln === 0) {
+            args[Col.Changed] = Col.NoChange;
+        }
+        seed.length = 0;
+    } else if (
+        mut[Mut.Type] === Mutation.Set ||
+        args[Col.Changed] === Col.Init ||
+        prevStart !== start ||
+        prevEnd !== end
+    ) {
+        sliceArray(srcArray, seed, start, end);
+    } else if (!(mutEnd <= start || mutStart >= end)) {
+        sliceArray(srcArray, seed, mutStart, mutEnd + 1);
+    } else {
+        args[Col.Changed] = Col.NoChange;
+    }
+    return seed;
 }
 
 /**
@@ -2520,139 +2713,6 @@ function sliceArray(source, target, from, to) {
 }
 
 /**
- * 
- * @param {string} _
- * @param {Array<Collection|string|void>} args
- * @returns {string}
- */
-function join(_, args) {
-    return args[0].peek.join(args[1]);
-};
-
-/**
- * @public
- * @this {Collection<T,?>}
- * @param {string=} separator
- * @returns {Signal<string>}
- */
-Collection.prototype.join = function (separator) {
-    return new Computation(join, '', Opts.Static | Opts.Bound, [this, separator], this);
-};
-
-/**
- * 
- * @template T
- * @param {number} _ 
- * @param {Array} args 
- * @returns {number}
- */
-function lastIndexOf(_, args) {
-    return /** @type {Collection<T>} */(args[0])._value.lastIndexOf(
-        /** @type {T} */(args[1]),
-        /** @type {number|void} */(args[2])
-    );
-}
-
-/**
- * @public
- * @this {Collection<T,?>}
- * @param {T} searchElement 
- * @param {number=} fromIndex
- * @returns {Signal<number>}
- */
-Collection.prototype.lastIndexOf = function (searchElement, fromIndex) {
-    return new Computation(lastIndexOf, -2, Opts.Static | Opts.Bound, [this, searchElement, fromIndex], this);
-};
-
-/**
- * @public
- * @template U
- * @this {Collection<T,?>}
- * @param {function(T,!Signal<number>): U} callbackFn
- * @returns {IterableSignal<U>}
- */
-Collection.prototype.map = function (callbackFn) { };
-
-/**
- * @public
- * @template U
- * @this {Collection<T,?>}
- * @param {function((T|U),T,number): U} callbackFn 
- * @param {U=} initialValue 
- * @returns {Signal<U>}
- */
-Collection.prototype.reduce = function (callbackFn, initialValue) { };
-
-/**
- * @public
- * @template U
- * @this {Collection<T,?>}
- * @param {function((T|U),T,number): U} callbackFn 
- * @param {U=} initialValue 
- * @returns {Signal<U>}
- */
-Collection.prototype.reduceRight = function (callbackFn, initialValue) { };
-
-/**
- * @template T
- * @param {Array<T>} seed 
- * @param {Array} args
- * @returns {Array<T>}
- */
-function copy(seed, args) {
-    /** @const @type {Collection<T>} */
-    var src = args[CollectionSlot.Source];
-    /** @type {Array} */
-    var mut = src.mut();
-    if (mut[MutSlot.Type] === Mutation.Set) {
-        /** @const {Array<T>} */
-        var srcArray = src.peek;
-        sliceArray(srcArray, seed, 0, srcArray.length);
-    } else {
-        applyMutation(seed, mut);
-    }
-    return seed;
-}
-
-/**
- * @template T
- * @param {Array<T>} seed 
- * @param {Array} args 
- * @returns 
- */
-function slice(seed, args) {
-    /** @const {Collection<T>} */
-    var src = args[CollectionSlot.Source];
-    /** @const {Array<T>} */
-    var srcArray = src.val;
-    /** @const {Array<number>} */
-    var params = args[CollectionSlot.Args];
-    /** @const {Array} */
-    var mut = src.mut();
-    /** @const {number} */
-    var mutStart = mut[MutSlot.Start];
-    /** @const {number} */
-    var mutEnd = mut[MutSlot.End];
-    /** @const {number}  */
-    var start = index(val(params[0]));
-    /** @type {number} */
-    var end = index(val(params[1]));
-    if (end <= start) {
-        /** @const {number} */
-        var ln = seed.length;
-        if (ln === 0) {
-            args[CollectionSlot.Changed] = 0;
-        }
-        seed.length = 0;
-    } else if (!(mutEnd <= start || mutStart >= end)) {
-        sliceArray(srcArray, seed, mutStart, mutEnd);
-    } else {
-        args[CollectionSlot.Changed] = 0;
-    }
-    return seed;
-}
-
-/**
  * @public
  * @this {Collection<T,?>}
  * @param {Signal<number>|number=} start
@@ -2665,30 +2725,42 @@ Collection.prototype.slice = function (start, end) {
     if (ln === 0) {
         return new Enumerable(this, copy);
     }
-    return new Enumerable(this, slice, [start, end]);
+    return new Enumerable(this, slice, [isReactive(start), start, 0, isReactive(end), end, 0]);
 };
 
 /**
  * @param {boolean} seed 
- * @param {Array} params 
+ * @param {Array} args [
+ *  source: Collection,
+ *  init: -2 | 0,
+ *  index: number,
+ *  callbackFn: function(T, number): boolean
+ * ]
  * @returns {boolean}
  */
-function some(seed, params) {
+function some(seed, args) {
     /** @const {Collection} */
-    var src = params[0];
-    /** @type {number} */
-    var index = params[1]
+    var src = args[0];
+    /** @const {Array} */
+    var srcArray = src.val;
+    /** @const {Array} */
+    var mut = src.mut();
     /** @type {number} */
     var start = 0;
-    if (index !== -2) {
-        /** @const {Array} */
-        var mut = src.mut();
-        start = mut[1];
-        if (seed ? index < start : (mut[MutSlot.Type] & Mutation.Insert) === 0) {
+    if (args[1] === Col.Init) {
+        args[1] = 0;
+    } else if (mut[Mut.Type] !== Mutation.Set) {
+        start = mut[Mut.Start];
+        /*
+         * Either we found a match on the previous iteration and this cycle
+         * only mutated indices after the match position, or we didn't find
+         * any match last time and we have not inserted any new elements.
+         */
+        if (seed ? args[2] < start : (mut[Mut.Type] & Mutation.Insert) === 0) {
             return seed;
         }
     }
-    return (params[1] = getIndex(src.val, 1, params[2], start)) !== -1;
+    return (args[2] = findByCallback(srcArray, args[3], true, start, srcArray.length, 1)) !== -1;
 }
 
 /**
@@ -2698,21 +2770,26 @@ function some(seed, params) {
  * @returns {Signal<boolean>} 
  */
 Collection.prototype.some = function (callbackFn) {
-    return new Computation(some, false, Opts.Bound | Opts.Static, [this, -2, callbackFn], this);
+    return new Computation(some, false, Opts.Bound | Opts.Static, [this, Col.Init, 0, callbackFn], this);
 };
 
 /**
  * @struct
  * @template T
  * @constructor
- * @extends {Collection<T,nil>}
+ * @extends {Data<T,nil>}
  * @implements {ArraySignal<T>}
  * @param {Array<T>=} value
- * @param {(function(!Array<T>,!Array<T>): boolean)|falsy=} eq
+ * @param {(function(Array<T>,Array<T>): boolean)|falsy=} eq
  */
 function DataArray(value, eq) {
     value = value || [];
     Data.call(this, Opts.Respond, NIL, value, eq);
+    /**
+     * @protected
+     * @type {Array}
+     */
+    this._mut = [Mutation.Set, 0, value.length, 0];
     /**
      * @protected
      * @type {?Computation<number>}
@@ -2722,15 +2799,179 @@ function DataArray(value, eq) {
      * @protected
      * @type {Array}
      */
-    this._mut = [Mutation.Set, 0, value.length, 0];
-    /**
-     * @protected
-     * @type {Array}
-     */
     this._smut = [];
 }
 
-extend(DataArray, [Collection, Data], peekData, getData);
+extendCollection(DataArray, [Data], peekData, getData);
+
+/* __EXCLUDE__ */
+
+/**
+ * @public
+ * @readonly
+ * @type {Signal<number>}
+ */
+DataArray.prototype.length;
+
+/**
+ * @public
+ * @returns {Array}
+ */
+DataArray.prototype.mut;
+
+/**
+ * @public
+ * @this {IterableSignal<T>}
+ * @param {Signal<number>|number} index 
+ * @returns {Signal<T|undefined>}
+ */
+DataArray.prototype.at;
+
+/**
+ * @public
+ * @this {IterableSignal<T>}
+ * @param {...(T|Array<T>|IterableSignal<T>)} items
+ * @returns {IterableSignal<T>} 
+ */
+DataArray.prototype.concat;
+
+/**
+ * @public
+ * @this {IterableSignal<T>}
+ * @param {function(T,number): boolean} callbackFn
+ * @returns {Signal<boolean>}
+ */
+DataArray.prototype.every;
+
+/**
+ * @public
+ * @this {IterableSignal<T>}
+ * @param {function(T,number): boolean} callbackFn
+ * @returns {IterableSignal<T>}
+ */
+DataArray.prototype.filter;
+
+/**
+ * @public
+ * @this {IterableSignal<T>}
+ * @param {function(T,number): boolean} callbackFn
+ * @returns {Signal<T|undefined>}
+ */
+DataArray.prototype.find;
+
+/**
+ * @public
+ * @this {IterableSignal<T>}
+ * @param {function(T,number): boolean} callbackFn
+ * @returns {Signal<number>}
+ */
+DataArray.prototype.findIndex;
+
+/**
+ * @public
+ * @this {IterableSignal<T>}
+ * @param {function(T,number): boolean} callbackFn
+ * @returns {Signal<T|undefined>}
+ */
+DataArray.prototype.findLast;
+
+/**
+ * @public
+ * @this {IterableSignal<T>}
+ * @param {function(T,number): boolean} callbackFn
+ * @returns {Signal<number>}
+ */
+DataArray.prototype.findLastIndex;
+
+/**
+ * @public
+ * @this {IterableSignal<T>}
+ * @param {function(T,number): void} callbackFn
+ * @returns {void} 
+ */
+DataArray.prototype.forEach;
+
+/**
+ * @public
+ * @this {IterableSignal<T>}
+ * @param {Signal<T>|T} searchElement
+ * @returns {Signal<boolean>}
+ */
+DataArray.prototype.includes;
+
+/**
+ * @public
+ * @this {IterableSignal<T>}
+ * @param {Signal<T>|T} searchElement 
+ * @param {Signal<number>|number=} fromIndex
+ * @returns {Signal<number>}
+ */
+DataArray.prototype.indexOf;
+
+/**
+ * @public
+ * @this {IterableSignal<T>}
+ * @param {Signal<string>|string=} separator
+ * @returns {Signal<string>}
+ */
+DataArray.prototype.join;
+
+/**
+ * @public
+ * @this {IterableSignal<T>}
+ * @param {Signal<T>|T} searchElement 
+ * @param {Signal<number>|number=} fromIndex
+ * @returns {Signal<number>}
+ */
+DataArray.prototype.lastIndexOf;
+
+/**
+ * @public
+ * @template U
+ * @this {IterableSignal<T>}
+ * @param {function(T,!Signal<number>): U} callbackFn
+ * @returns {IterableSignal<U>}
+ */
+DataArray.prototype.map;
+
+/**
+ * @public
+ * @template U
+ * @this {IterableSignal<T>}
+ * @param {function((T|U),T,number): U} callbackFn 
+ * @param {Signal<U>|U=} initialValue 
+ * @returns {Signal<U>}
+ */
+DataArray.prototype.reduce;
+
+/**
+ * @public
+ * @template U
+ * @this {IterableSignal<T>}
+ * @param {function((T|U),T,number): U} callbackFn
+ * @param {Signal<U>|U=} initialValue 
+ * @returns {Signal<U>}
+ */
+DataArray.prototype.reduceRight;
+
+/**
+ * @public
+ * @this {IterableSignal<T>}
+ * @param {Signal<number>|number=} start
+ * @param {Signal<number>|number=} end
+ * @returns {IterableSignal<T>}
+ */
+DataArray.prototype.slice;
+
+/**
+ * @public
+ * @this {IterableSignal<T>}
+ * @param {function(T,number): boolean} callbackFn
+ * @returns {Signal<boolean>} 
+ */
+DataArray.prototype.some;
+
+/* __EXCLUDE__ */
 
 /**
  * @template T
@@ -2738,7 +2979,7 @@ extend(DataArray, [Collection, Data], peekData, getData);
  * @param {number} mut 
  * @param {number} start
  * @param {number} end
- * @param {T|!Array<T>|number|(function(T,T): number)=} args 
+ * @param {T|Array<T>|number|(function(T,T): number)=} args 
  * @returns {void}
  */
 function mutate(node, mut, start, end, args) {
@@ -2746,10 +2987,10 @@ function mutate(node, mut, start, end, args) {
         panic("conflicting mutation");
     }
     var smut = node._smut;
-    smut[MutSlot.Type] = mut;
-    smut[MutSlot.Start] = start;
-    smut[MutSlot.End] = end;
-    smut[MutSlot.Args] = args;
+    smut[Mut.Type] = mut;
+    smut[Mut.Start] = start;
+    smut[Mut.End] = end;
+    smut[Mut.Args] = args;
     setData.call(node, MUT);
 }
 
@@ -2760,10 +3001,10 @@ function mutate(node, mut, start, end, args) {
  */
 function applyMutation(array, mut) {
     /** @const {?} */
-    var args = mut[MutSlot.Args];
-    switch (mut[MutSlot.Type]) {
+    var args = mut[Mut.Args];
+    switch (mut[Mut.Type]) {
         case Mutation.SetAt:
-            array[mut[MutSlot.Start]] = args;
+            array[args[0]] = args[1];
             break;
         case Mutation.Pop:
             array.length--;
@@ -2812,7 +3053,7 @@ DataArray.prototype.set = function (value, item) {
     /** @const {number} */
     var ln = arguments.length;
     if (ln === 1) {
-        mutate(this, Mutation.Set, 0, this._value.length - 1, value);
+        mutate(this, Mutation.Set, 0, value.length - 1, value);
     } else if (ln > 0) {
         mutate(this, Mutation.SetAt, /** @type {number} */(value), /** @type {number} */(value), [value, item]);
     }
@@ -2831,13 +3072,13 @@ DataArray.prototype._update = function (time) {
     /** @const {Array} */
     var smut = this._smut;
     /** @const {number} */
-    var type = smut[MutSlot.Type];
+    var type = smut[Mut.Type];
     if (type === Mutation.Set) {
-        this._value = smut[MutSlot.Args];
+        this._value = smut[Mut.Args];
     } else {
         applyMutation(this._value, smut);
     }
-    mut[MutSlot.Args] = 0;
+    mut[Mut.Args] = 0;
     this._smut = mut;
     this._mut = smut;
     this._set = NIL;
@@ -2951,9 +3192,9 @@ DataArray.prototype.splice = function (start, deleteCount, items) {
         var mut;
         /** @const {number} */
         var length = this._value.length;
-        /** @type {Array<number|T|!Array<T>>} */
+        /** @type {Array<T|Array<T>|number>} */
         var params;
-        start = index(start);
+        start = index(start, length, 0);
         if (start >= length) {
             if (ln < 3) {
                 return;
@@ -3051,7 +3292,7 @@ DataArray.prototype.unshift = function (elementN) {
  * @public
  * @template T,U
  * @constructor
- * @extends {Collection<T,(function(Array<T>,U): Array<T>)>}
+ * @extends {Computation<T,U>}
  * @implements {Receive}
  * @implements {IterableSignal<T>}
  * @param {Source} src
@@ -3059,36 +3300,189 @@ DataArray.prototype.unshift = function (elementN) {
  * @param {U=} args
  */
 function Enumerable(src, fn, args) {
-    Data.call(this, Opts.Static, fn, []);
+    Computation.call(this, fn, [], Opts.Static | Opts.Defer, [src, Col.Init, this._mut, args]);
     /**
      * @protected
-     * @type {number}
-     */
-    this._age = 0;
-    /**
-     * @protected
-     * @type {?Send}
-     */
-    this._source1 = null;
-    /**
-     * @protected
-     * @type {number}
-     */
-    this._source1slot = 0;
-    /**
-     * @protected
-     * @type {Array<T|!Array<T>|number|(function(T,T): number)|void>}
+     * @type {Array}
      */
     this._mut = [Mutation.Set, 0, 0, 0];
     /**
      * @protected
-     * @type {Array<U>}
+     * @type {?Computation<number>}
      */
-    this._args = [src, 1, this._mut, args];
-    startCompute(null, this, this._args);
+    this._length = null;
+    this._init(src);
 }
 
-extend(Enumerable, [Collection, Computation], peekComputation, getComputation);
+extendCollection(Enumerable, [Computation], peekComputation, getComputation);
+
+/* __EXCLUDE__ */
+
+/**
+ * @public
+ * @readonly
+ * @type {Signal<number>}
+ */
+Enumerable.prototype.length;
+
+/**
+ * @public
+ * @returns {Array}
+ */
+Enumerable.prototype.mut;
+
+/**
+ * @public
+ * @this {IterableSignal<T>}
+ * @param {Signal<number>|number} index 
+ * @returns {Signal<T|undefined>}
+ */
+Enumerable.prototype.at;
+
+/**
+ * @public
+ * @this {IterableSignal<T>}
+ * @param {...(T|Array<T>|IterableSignal<T>)} items
+ * @returns {IterableSignal<T>} 
+ */
+Enumerable.prototype.concat;
+
+/**
+ * @public
+ * @this {IterableSignal<T>}
+ * @param {function(T,number): boolean} callbackFn
+ * @returns {Signal<boolean>}
+ */
+Enumerable.prototype.every;
+
+/**
+ * @public
+ * @this {IterableSignal<T>}
+ * @param {function(T,number): boolean} callbackFn
+ * @returns {IterableSignal<T>}
+ */
+Enumerable.prototype.filter;
+
+/**
+ * @public
+ * @this {IterableSignal<T>}
+ * @param {function(T,number): boolean} callbackFn
+ * @returns {Signal<T|undefined>}
+ */
+Enumerable.prototype.find;
+
+/**
+ * @public
+ * @this {IterableSignal<T>}
+ * @param {function(T,number): boolean} callbackFn
+ * @returns {Signal<number>}
+ */
+Enumerable.prototype.findIndex;
+
+/**
+ * @public
+ * @this {IterableSignal<T>}
+ * @param {function(T,number): boolean} callbackFn
+ * @returns {Signal<T|undefined>}
+ */
+Enumerable.prototype.findLast;
+
+/**
+ * @public
+ * @this {IterableSignal<T>}
+ * @param {function(T,number): boolean} callbackFn
+ * @returns {Signal<number>}
+ */
+Enumerable.prototype.findLastIndex;
+
+/**
+ * @public
+ * @this {IterableSignal<T>}
+ * @param {function(T,number): void} callbackFn
+ * @returns {void} 
+ */
+Enumerable.prototype.forEach;
+
+/**
+ * @public
+ * @this {IterableSignal<T>}
+ * @param {Signal<T>|T} searchElement
+ * @returns {Signal<boolean>}
+ */
+Enumerable.prototype.includes;
+
+/**
+ * @public
+ * @this {IterableSignal<T>}
+ * @param {Signal<T>|T} searchElement 
+ * @param {Signal<number>|number=} fromIndex
+ * @returns {Signal<number>}
+ */
+Enumerable.prototype.indexOf;
+
+/**
+ * @public
+ * @this {IterableSignal<T>}
+ * @param {Signal<string>|string=} separator
+ * @returns {Signal<string>}
+ */
+Enumerable.prototype.join;
+
+/**
+ * @public
+ * @this {IterableSignal<T>}
+ * @param {Signal<T>|T} searchElement 
+ * @param {Signal<number>|number=} fromIndex
+ * @returns {Signal<number>}
+ */
+Enumerable.prototype.lastIndexOf;
+
+/**
+ * @public
+ * @template U
+ * @this {IterableSignal<T>}
+ * @param {function(T,!Signal<number>): U} callbackFn
+ * @returns {IterableSignal<U>}
+ */
+Enumerable.prototype.map;
+
+/**
+ * @public
+ * @template U
+ * @this {IterableSignal<T>}
+ * @param {function((T|U),T,number): U} callbackFn 
+ * @param {Signal<U>|U=} initialValue 
+ * @returns {Signal<U>}
+ */
+Enumerable.prototype.reduce;
+
+/**
+ * @public
+ * @template U
+ * @this {IterableSignal<T>}
+ * @param {function((T|U),T,number): U} callbackFn
+ * @param {Signal<U>|U=} initialValue 
+ * @returns {Signal<U>}
+ */
+Enumerable.prototype.reduceRight;
+
+/**
+ * @public
+ * @this {IterableSignal<T>}
+ * @param {Signal<number>|number=} start
+ * @param {Signal<number>|number=} end
+ * @returns {IterableSignal<T>}
+ */
+Enumerable.prototype.slice;
+
+/**
+ * @public
+ * @this {IterableSignal<T>}
+ * @param {function(T,number): boolean} callbackFn
+ * @returns {Signal<boolean>} 
+ */
+Enumerable.prototype.some;
+
 /* __EXCLUDE__ */
 
 /**
@@ -3096,35 +3490,19 @@ extend(Enumerable, [Collection, Computation], peekComputation, getComputation);
  * @param {Child} child
  * @returns {void}
  */
-Enumerable.prototype._addChild;
+Enumerable.prototype._addChild = NOOP;
 
 /**
  * @protected
  * @param {CleanupFn} cleanupFn 
  */
-Enumerable.prototype._addCleanup;
+Enumerable.prototype._addCleanup = NOOP;
 
 /**
  * @protected
  * @param {RecoverFn} recoverFn 
  */
-Enumerable.prototype._addRecover;
-
-/**
- * @protected
- * @this {Enumerable<T>}
- * @param {number} time 
- */
-Enumerable.prototype._recUpdate;
-
-/**
- * @protected
- * @override
- * @param {number} time 
- */
-Enumerable.prototype._recMayUpdate;
-
-/* __EXCLUDE__ */
+Enumerable.prototype._addRecover = NOOP;
 
 /**
  * @protected
@@ -3142,10 +3520,10 @@ Enumerable.prototype._update = function (time) {
     var args = this._args;
     SCOPE._owner = null;
     SCOPE._listen = false;
-    args[CollectionSlot.Changed] = 1;
     this._opt |= Opts.Updated;
+    args[Col.Changed] = Col.Changed;
     this._value = this._set(this._value, args);
-    if (args[CollectionSlot.Changed] === 1) {
+    if (args[Col.Changed] === Col.Changed) {
         sendUpdate(this, time);
     }
     this._opt &= ~(Opts.UpdateFlags | Opts.MayFlags);
