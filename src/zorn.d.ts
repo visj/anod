@@ -1,16 +1,16 @@
-export interface ReadSignal<T = any> {
+export interface Signal<T = any> {
     get val(): T;
 
     get peek(): T;
 }
 
-export interface Signal<T = any> extends ReadSignal<T> {
+export interface DataSignal<T = any> extends Signal<T> {
     set(val: T): void;
 }
 
 type falsy = false | 0 | '' | null;
 
-type Source = ReadSignal | ReadSignal[] | readonly ReadSignal[];
+type Source = Signal | Signal[] | readonly Signal[];
 
 export type DisposeFn = () => void;
 
@@ -22,35 +22,35 @@ export type CompareFn<T> = ((a: T, b: T) => boolean) | falsy;
 
 export function root<T>(callback: (disposeFn: DisposeFn) => T): T;
 
-export function data<T>(value: T): Signal<T>;
+export function data<T>(value: T): DataSignal<T>;
 
-export function value<T>(value: T, eq?: CompareFn<T>): Signal<T>;
+export function value<T>(value: T, eq?: CompareFn<T>): DataSignal<T>;
 
-export function array<T = any>(items?: T[], eq?: CompareFn<T>): SignalArray<T>;
+export function array<T = any>(items?: T[], eq?: CompareFn<T>): ArraySignal<T>;
 
-export function compute<T>(callback: () => T): ReadSignal<T>;
+export function compute<T>(callback: () => T): Signal<T>;
 
-export function compute<T>(callback: (seed: T, dispose: DisposeFn) => T, seed: T, eq?: CompareFn<T>): ReadSignal<T>;
+export function compute<T>(callback: (seed: T, dispose: DisposeFn) => T, seed: T, eq?: CompareFn<T>): Signal<T>;
 
-export function compute<T, U>(callback: (seed: T, dispose: DisposeFn, args: U) => T, seed: T, eq: CompareFn<T>, args: U): ReadSignal<T>;
+export function compute<T, U>(callback: (seed: T, dispose: DisposeFn, args: U) => T, seed: T, eq: CompareFn<T>, args: U): Signal<T>;
 
-export function compute<T, U>(callback: (seed: T, dispose: DisposeFn, args: U) => T, seed?: T, eq?: CompareFn<T>, args?: U): ReadSignal<T>;
+export function compute<T, U>(callback: (seed: T, dispose: DisposeFn, args: U) => T, seed?: T, eq?: CompareFn<T>, args?: U): Signal<T>;
 
-export function $compute<T>(callback: () => T): ReadSignal<T>;
+export function $compute<T>(callback: () => T): Signal<T>;
 
-export function $compute<T>(callback: (seed: T, dispose: DisposeFn) => T, seed: T, eq?: CompareFn<T>): ReadSignal<T>;
+export function $compute<T>(callback: (seed: T, dispose: DisposeFn) => T, seed: T, eq?: CompareFn<T>): Signal<T>;
 
-export function $compute<T, U>(callback: (seed: T, dispose: DisposeFn, args: U) => T, seed: T, eq: CompareFn<T>, args: U): ReadSignal<T>;
+export function $compute<T, U>(callback: (seed: T, dispose: DisposeFn, args: U) => T, seed: T, eq: CompareFn<T>, args: U): Signal<T>;
 
-export function $compute<T, U>(callback: (seed: T, dispose: DisposeFn, args: U) => T, seed?: T, eq?: CompareFn<T>, args?: U): ReadSignal<T>;
+export function $compute<T, U>(callback: (seed: T, dispose: DisposeFn, args: U) => T, seed?: T, eq?: CompareFn<T>, args?: U): Signal<T>;
 
-export function computeWhen<T>(src: Source, callback: () => T): ReadSignal<T>;
+export function computeWhen<T>(src: Source, callback: () => T): Signal<T>;
 
-export function computeWhen<T>(src: Source, callback: (seed: T, dispose: DisposeFn) => T, seed: T, eq?: CompareFn<T>, defer?: boolean): ReadSignal<T>;
+export function computeWhen<T>(src: Source, callback: (seed: T, dispose: DisposeFn) => T, seed: T, eq?: CompareFn<T>, defer?: boolean): Signal<T>;
 
-export function computeWhen<T, U>(src: Source, callback: (seed: T, dispose: DisposeFn, args: U) => T, seed: T, eq: CompareFn<T>, defer: boolean, args: U): ReadSignal<T>;
+export function computeWhen<T, U>(src: Source, callback: (seed: T, dispose: DisposeFn, args: U) => T, seed: T, eq: CompareFn<T>, defer: boolean, args: U): Signal<T>;
 
-export function computeWhen<T, U>(src: Source, callback: (seed: T, dispose: DisposeFn, args: U) => T, seed?: T, eq?: CompareFn<T>, defer?: boolean, args?: U): ReadSignal<T>;
+export function computeWhen<T, U>(src: Source, callback: (seed: T, dispose: DisposeFn, args: U) => T, seed?: T, eq?: CompareFn<T>, defer?: boolean, args?: U): Signal<T>;
 
 export function effect<T>(callback: () => T): T;
 
@@ -80,7 +80,7 @@ export function cleanup(cleanupFn: CleanupFn): void;
 
 export function recover(recoverFn: RecoverFn): void;
 
-export function dispose(val: ReadSignal): void;
+export function dispose(val: Signal): void;
 
 export function peek<T>(callback: () => T): T;
 
@@ -174,43 +174,43 @@ export const enum Mutation {
     Custom = 19,
 }
 
-type MutArg<M extends Mutation, T> = [mut: M, start: number, end: number, args: T];
+type MutType<M extends Mutation, T> = [mut: M, start: number, end: number, args: T];
 
-type MutSet<T> = MutArg<Mutation.Set, T[]>;
+type MutSet<T> = MutType<Mutation.Set, T[]>;
 
-type MutSetAt<T> = MutArg<Mutation.SetAt, [number, T]>;
+type MutSetAt<T> = MutType<Mutation.SetAt, [number, T]>;
 
-type MutPop = MutArg<Mutation.Pop, undefined>;
+type MutPop = MutType<Mutation.Pop, undefined>;
 
-type MutPopRange = MutArg<Mutation.PopRange, number>;
+type MutPopRange = MutType<Mutation.PopRange, number>;
 
-type MutPush<T> = MutArg<Mutation.Push, T>;
+type MutPush<T> = MutType<Mutation.Push, T>;
 
-type MutPushRange<T> = MutArg<Mutation.PushRange, T[]>;
+type MutPushRange<T> = MutType<Mutation.PushRange, T[]>;
 
-type MutShift = MutArg<Mutation.Shift, undefined>;
+type MutShift = MutType<Mutation.Shift, undefined>;
 
-type MutShiftRange = MutArg<Mutation.ShiftRange, number>;
+type MutShiftRange = MutType<Mutation.ShiftRange, number>;
 
-type MutUnshift<T> = MutArg<Mutation.Unshift, T>;
+type MutUnshift<T> = MutType<Mutation.Unshift, T>;
 
-type MutUnshiftRange<T> = MutArg<Mutation.UnshiftRange, T[]>;
+type MutUnshiftRange<T> = MutType<Mutation.UnshiftRange, T[]>;
 
-type MutRemoveAt = MutArg<Mutation.RemoveAt, number>;
+type MutRemoveAt = MutType<Mutation.RemoveAt, number>;
 
-type MutRemoveRange = MutArg<Mutation.RemoveRange, [number, number]>;
+type MutRemoveRange = MutType<Mutation.RemoveRange, [number, number]>;
 
-type MutInsertAt<T> = MutArg<Mutation.InsertAt, [number, 0, T]>;
+type MutInsertAt<T> = MutType<Mutation.InsertAt, [number, 0, T]>;
 
-type MutInsertRange<T> = MutArg<Mutation.InsertRange, [number, 0, T[]]>;
+type MutInsertRange<T> = MutType<Mutation.InsertRange, [number, 0, T[]]>;
 
-type MutReplaceRange<T> = MutArg<Mutation.ReplaceRange, [number, number, T[]]>;
+type MutReplaceRange<T> = MutType<Mutation.ReplaceRange, [number, number, T[]]>;
 
-type MutReplaceRangeInsert<T> = MutArg<Mutation.ReplaceRangeInsert, [number, number, T[]]>;
+type MutReplaceRangeInsert<T> = MutType<Mutation.ReplaceRangeInsert, [number, number, T[]]>;
 
-type MutReverse = MutArg<Mutation.Reverse, undefined>;
+type MutReverse = MutType<Mutation.Reverse, undefined>;
 
-type MutSort<T> = MutArg<Mutation.Sort, (a: T, b: T) => number>;
+type MutSort<T> = MutType<Mutation.Sort, (a: T, b: T) => number>;
 
 type Mut<T> = MutSet<T>
     | MutSetAt<T>
@@ -230,60 +230,60 @@ type Mut<T> = MutSet<T>
     | MutReplaceRangeInsert<T>
     | MutReverse
     | MutSort<T>
-    | MutArg<Mutation.Custom, unknown>;
+    | MutType<Mutation.Custom, unknown>;
 
-export interface SignalCollection<T = any> extends ReadSignal<T[]> {
+export interface IterableSignal<T = any> extends Signal<T[]> {
 
-    get length(): ReadSignal<number>;
+    get length(): Signal<number>;
 
     mut(): Mut<T>;
 
-    at(index: number): ReadSignal<T>;
+    at(index: number): Signal<T>;
 
-    concat(...items: (T | T[])[]): SignalCollection<T>;
+    concat(...items: (T | T[])[]): IterableSignal<T>;
 
-    every(callbackFn: (element: T, index: number) => boolean): ReadSignal<boolean>;
+    every(callbackFn: (element: T, index: number) => boolean): Signal<boolean>;
 
-    filter(callbackFn: (element: T, index: number) => boolean): SignalCollection<T>;
+    filter(callbackFn: (element: T, index: number) => boolean): IterableSignal<T>;
 
-    find(callbackFn: (element: T, index: number) => boolean): ReadSignal<T | undefined>;
+    find(callbackFn: (element: T, index: number) => boolean): Signal<T | undefined>;
 
-    findIndex(callbackFn: (element: T, index: number) => boolean): ReadSignal<number>;
+    findIndex(callbackFn: (element: T, index: number) => boolean): Signal<number>;
 
-    findLast(callbackFn: (element: T, index: number) => boolean): ReadSignal<T | undefined>;
+    findLast(callbackFn: (element: T, index: number) => boolean): Signal<T | undefined>;
 
-    findLastIndex(callbackFn: (element: T, index: number) => boolean): ReadSignal<number>;
+    findLastIndex(callbackFn: (element: T, index: number) => boolean): Signal<number>;
 
     forEach(callbackFn: (element: T, index: number) => void): void;
 
-    includes(searchElement: T, fromIndex?: number): ReadSignal<boolean>;
+    includes(searchElement: T, fromIndex?: number): Signal<boolean>;
 
-    indexOf(searchElement: T, fromIndex?: number): ReadSignal<number>;
+    indexOf(searchElement: T, fromIndex?: number): Signal<number>;
 
-    join(separator?: string): ReadSignal<string>;
+    join(separator?: string): Signal<string>;
 
-    lastIndexOf(searchElement: T, fromIndex?: number): ReadSignal<number>;
+    lastIndexOf(searchElement: T, fromIndex?: number): Signal<number>;
 
-    map<U>(callbackFn: (element: T, index: ReadSignal<number>) => U): SignalCollection<U>;
+    map<U>(callbackFn: (element: T, index: Signal<number>) => U): IterableSignal<U>;
 
-    reduce(callbackFn: (previousValue: T, currentValue: T, currentIndex: number) => T): ReadSignal<T>;
+    reduce(callbackFn: (previousValue: T, currentValue: T, currentIndex: number) => T): Signal<T>;
 
-    reduce(callbackFn: (previousValue: T, currentValue: T, currentIndex: number) => T, initialValue: T): ReadSignal<T>;
+    reduce(callbackFn: (previousValue: T, currentValue: T, currentIndex: number) => T, initialValue: T): Signal<T>;
 
-    reduce<U>(callbackFn: (previousValue: U, currentValue: T, currentIndex: number) => U, initialValue: U): ReadSignal<U>;
+    reduce<U>(callbackFn: (previousValue: U, currentValue: T, currentIndex: number) => U, initialValue: U): Signal<U>;
 
-    reduceRight(callbackFn: (previousValue: T, currentValue: T, currentIndex: number) => T): ReadSignal<T>;
+    reduceRight(callbackFn: (previousValue: T, currentValue: T, currentIndex: number) => T): Signal<T>;
 
-    reduceRight(callbackFn: (previousValue: T, currentValue: T, currentIndex: number) => T, initialValue: T): ReadSignal<T>;
+    reduceRight(callbackFn: (previousValue: T, currentValue: T, currentIndex: number) => T, initialValue: T): Signal<T>;
 
-    reduceRight<U>(callbackFn: (previousValue: U, currentValue: T, currentIndex: number) => U, initialValue: U): ReadSignal<U>;
+    reduceRight<U>(callbackFn: (previousValue: U, currentValue: T, currentIndex: number) => U, initialValue: U): Signal<U>;
 
-    slice(start?: number, end?: number): SignalCollection<T>;
+    slice(start?: number, end?: number): IterableSignal<T>;
 
-    some(callbackFn: (element: T, index: number) => boolean): ReadSignal<boolean>;
+    some(callbackFn: (element: T, index: number) => boolean): Signal<boolean>;
 }
 
-export interface SignalArray<T = any> extends SignalCollection<T> {
+export interface ArraySignal<T = any> extends IterableSignal<T> {
 
     set(items: T[]): void;
 
