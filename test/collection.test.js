@@ -3,21 +3,6 @@ import { test, root, array, dispose, cleanup, effect, compute, value } from './h
 
 describe("collection", function () {
 
-    it("should re-evaluate when an array element is changed", function () {
-        var d1 = array([1, 2, 3]);
-        var s1 = d1.slice(1);
-        var s2 = s1.slice(1);
-        var count = 0;
-        effect(function () {
-            count++;
-            test.equals(s1.val, d1.peek.slice(1));
-            test.equals(s2.val, s1.peek.slice(1));
-        });
-        d1.set([4, 5, 6]);
-        d1.set([7, 8, 9]);
-        test.ok(count === 3);
-    });
-
     describe("length", function() {
         it("returns a readonly signal when accessed", function() {
             var d1 = array([1, 2, 3]);
@@ -75,6 +60,59 @@ describe("collection", function () {
             test.ok(count === 3);
         });
     });
+
+    describe("slice", function() {
+        it("behaves like Array#slice", function() {
+            var d1 = array([1, 2, 3]);
+            var c1 = d1.slice(1);
+            test.equals(c1.val, d1.peek.slice(1));
+            d1.set([4, 5, 6]);
+            test.equals(c1.val, d1.peek.slice(1));
+        });
+
+
+        it("works without arguments", function() {
+            var d1 = array([1, 2, 3]);
+            var c1 = d1.slice();
+            test.equals(c1.val, d1.peek.slice());
+            d1.set([4, 5, 6]);
+            test.equals(c1.val, d1.peek.slice());
+        });
+
+        it("returns a copy of the array", function() {
+            var d1 = array([1, 2, 3]);
+            var c1 = d1.slice();
+            test.ok(c1.val !== d1.peek);
+        });
+
+        it("reuses the same array on changes", function() {
+            var d1 = array([1, 2, 3]);
+            var c1 = d1.slice();
+            var s1 = c1.val;
+            d1.set([4, 5, 6]);
+            test.ok(c1.val === s1);
+            d1.splice(1, 1, 7);
+            test.ok(c1.val === s1);
+        });
+
+        it("should re-evaluate when an array element is changed", function () {
+            var d1 = array([1, 2, 3]);
+            var s1 = d1.slice(1);
+            var s2 = s1.slice(1);
+            var count = 0;
+            effect(function () {
+                count++;
+                s2.val;
+            });
+            d1.set([4, 5, 6]);
+            test.equals(s1.val, d1.peek.slice(1));
+            test.equals(s2.val, s1.peek.slice(1));
+            d1.set([7, 8, 9]);
+            test.equals(s1.val, d1.peek.slice(1));
+            test.equals(s2.val, s1.peek.slice(1));
+            test.ok(count === 3);
+        });
+    })
 
     describe("some", function() {
         it("behaves like Array#some", function() {
