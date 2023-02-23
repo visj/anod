@@ -88,132 +88,67 @@ export function batch(callback: () => void): void;
 
 export function stable(): void;
 
-export const enum Mutation {
-    Head = 32,
-    Tail = 64,
-    Range = 128,
-    Remove = 256,
-    Insert = 512,
-    Reorder = 1024,
-    Type = 31,
-    /**
-     * 1 | Insert | Reorder
-     */
-    Set = 1537,
-    /**
-     * 2 | Remove | Insert
-     */
-    SetAt = 770,
-    /**
-     * 3 | Tail | Remove
-     */
-    Pop = 67,
-    /**
-     * 4 | Tail | Range | Remove
-     */
-    PopRange = 196,
-    /**
-     * 5 | Tail | Insert
-     */
-    Push = 69,
-    /**
-     * 6 | Tail | Range | Insert
-     */
-    PushRange = 198,
-    /**
-     * 7 | Head | Remove
-     */
-    Shift = 295,
-    /**
-     * 8 | Head | Range | Remove
-     */
-    ShiftRange = 424,
-    /**
-     * 9 | Head | Insert
-     */
-    Unshift = 553,
-    /**
-     * 10 | Head | Range | Insert
-     */
-    UnshiftRange = 682,
-    /**
-     * 11 | Remove
-     */
-    RemoveAt = 267,
-    /**
-     * 12 | Range | Remove
-     */
-    RemoveRange = 396,
-    /**
-     * 13 | Insert
-     */
-    InsertAt = 525,
-    /**
-     * 14 | Range | Insert
-     */
-    InsertRange = 654,
-    /**
-     * 15 | Range | Remove | Insert
-     */
-    Replace = 911,
-    /**
-     * 16 | Tail | Range | Remove | Insert
-     */
-    ReplaceInsert = 976,
-    /**
-     * 17 | Reorder
-     */
-    Reverse = 1041,
-    /**
-     * 18 | Reorder
-     */
-    Sort = 1042,
-    /**
-     * User defined mutation
-     */
-    Custom = 19,
+export const enum Mut {
+    Clear = 0,
+    RemoveOne = 1,
+    RemoveRange = 2,
+    Remove = 3,
+    InsertOne = 4,
+    InsertRange = 8,
+    Insert = 12,
+    ReplaceOne = 16,
+    ReplaceRange = 32,
+    Replace = 48,
+    Range = 42,
+    Head = 64,
+    Tail = 128,
+    Sides = 192,
+    Reverse = 256,
+    Sort = 512,
+    Assign = 1023,
+    Custom = 1024,
 }
 
-type MutType<M extends Mutation, T> = readonly [mut: M, start: number, end: number, args: T];
+type MutTuple<M extends Mut, T> = readonly [mut: M, start: number, end: number, args: T];
 
-type MutSet<T> = MutType<Mutation.Set, T[]>;
+type MutSet<T> = MutTuple<Mut.Assign, T[]>;
 
-type MutSetAt<T> = MutType<Mutation.SetAt, [number, T]>;
+type MutReplace<T> = MutTuple<Mut.Replace, [number, T]>;
 
-type MutPop = MutType<Mutation.Pop, undefined>;
+type MutPop = MutTuple<Mut.RemoveOne | Mut.Tail, undefined>;
 
-type MutPopRange = MutType<Mutation.PopRange, number>;
+type MutPopRange = MutTuple<Mut.RemoveRange | Mut.Tail, number>;
 
-type MutPush<T> = MutType<Mutation.Push, T>;
+type MutPush<T> = MutTuple<Mut.InsertOne | Mut.Tail, T>;
 
-type MutPushRange<T> = MutType<Mutation.PushRange, T[]>;
+type MutPushRange<T> = MutTuple<Mut.InsertRange | Mut.Tail, T[]>;
 
-type MutShift = MutType<Mutation.Shift, undefined>;
+type MutShift = MutTuple<Mut.RemoveOne | Mut.Head, undefined>;
 
-type MutShiftRange = MutType<Mutation.ShiftRange, number>;
+type MutShiftRange = MutTuple<Mut.RemoveRange | Mut.Head, number>;
 
-type MutUnshift<T> = MutType<Mutation.Unshift, T>;
+type MutUnshift<T> = MutTuple<Mut.InsertOne | Mut.Head, T>;
 
-type MutUnshiftRange<T> = MutType<Mutation.UnshiftRange, T[]>;
+type MutUnshiftRange<T> = MutTuple<Mut.InsertRange | Mut.Head, T[]>;
 
-type MutRemoveAt = MutType<Mutation.RemoveAt, number>;
+type MutRemoveAt = MutTuple<Mut.Remove, number>;
 
-type MutRemoveRange = MutType<Mutation.RemoveRange, [number, number]>;
+type MutRemoveRange = MutTuple<Mut.RemoveRange, [number, number]>;
 
-type MutInsertAt<T> = MutType<Mutation.InsertAt, [number, 0, T]>;
+type MutInsertAt<T> = MutTuple<Mut.Insert, [number, 0, T]>;
 
-type MutInsertRange<T> = MutType<Mutation.InsertRange, [number, 0, T[]]>;
+type MutInsertRange<T> = MutTuple<Mut.InsertRange, [number, 0, T[]]>;
 
-type MutReplaceRange<T> = MutType<Mutation.Replace, [number, number, T[]]>;
+type MutReplaceRange<T> = MutTuple<Mut.Replace, [number, number, T[]]>;
 
-type MutReplaceRangeInsert<T> = MutType<Mutation.ReplaceInsert, [number, number, T[]]>;
+type MutReverse = MutTuple<Mut.Reverse, undefined>;
 
-type MutReverse = MutType<Mutation.Reverse, undefined>;
+type MutSort<T> = MutTuple<Mut.Sort, (a: T, b: T) => number>;
 
-type MutSort<T> = MutType<Mutation.Sort, (a: T, b: T) => number>;
+type MutClear = MutTuple<Mut.Clear, undefined>;
 
-type Mut<T> = MutSet<T>
-    | MutSetAt<T>
+type Mutation<T> = MutSet<T>
+    | MutReplace<T>
     | MutPop
     | MutPopRange
     | MutPush<T>
@@ -227,16 +162,16 @@ type Mut<T> = MutSet<T>
     | MutInsertAt<T>
     | MutInsertRange<T>
     | MutReplaceRange<T>
-    | MutReplaceRangeInsert<T>
     | MutReverse
     | MutSort<T>
-    | MutType<Mutation.Custom, unknown>;
+    | MutTuple<Mut.Custom, unknown>
+    | MutClear;
 
 export interface IterableSignal<T = any> extends Signal<T[]> {
 
     get length(): Signal<number>;
 
-    mut(): Mut<T>;
+    mut(): Mutation<T>;
 
     at(index: number): Signal<T>;
 

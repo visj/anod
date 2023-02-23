@@ -2162,100 +2162,35 @@ Computation.prototype._clearMayUpdate = function (stage, time) {
 /* __EXCLUDE__ */
 
 /**
- * @const
+ * @const 
  * @enum {number}
  */
-export var Mutation = {
-    Head: 32,
-    Tail: 64,
-    Range: 128,
-    Remove: 256,
-    Insert: 512,
-    Reorder: 1024,
-    Type: 31,
-    /**
-     * 1 | Range | Remove | Insert | Reorder
-     */
-    Set: 1 | 128 | 256 | 512 | 1024,
-    /**
-     * 2 | Remove | Insert
-     */
-    SetAt: 2 | 256 | 512,
-    /**
-     * 3 | Tail | Remove
-     */
-    Pop: 3 | 64,
-    /**
-     * 4 | Tail | Range | Remove
-     */
-    PopRange: 4 | 64 | 128,
-    /**
-     * 5 | Tail | Insert
-     */
-    Push: 5 | 64 | 512,
-    /**
-     * 6 | Tail | Range | Insert
-     */
-    PushRange: 6 | 64 | 512 | 128,
-    /**
-     * 7 | Head | Remove
-     */
-    Shift: 7 | 32 | 256,
-    /**
-     * 8 | Head | Range | Remove
-     */
-    ShiftRange: 8 | 32 | 128 | 256,
-    /**
-     * 9 | Head | Insert
-     */
-    Unshift: 9 | 32 | 512,
-    /**
-     * 10 | Head | Range | Insert
-     */
-    UnshiftRange: 10 | 32 | 128 | 512,
-    /**
-     * 11 | Remove
-     */
-    RemoveAt: 11 | 256,
-    /**
-     * 12 | Range | Remove
-     */
-    RemoveRange: 12 | 128 | 256,
-    /**
-     * 13 | Insert
-     */
-    InsertAt: 13 | 512,
-    /**
-     * 14 | Range | Insert
-     */
-    InsertRange: 14 | 128 | 512,
-    /**
-     * 15 | Range | Remove | Insert
-     */
-    Replace: 15 | 128 | 256 | 512,
-    /**
-     * 16 | Tail | Range | Remove | Insert
-     */
-    ReplaceInsert: 16 | 64 | 128 | 256 | 512,
-    /**
-     * 17 | Reorder
-     */
-    Reverse: 17 | 1024,
-    /**
-     * 18 | Reorder
-     */
-    Sort: 18 | 1024,
-    /**
-     * User defined mutation
-     */
-    Custom: 19,
+export var Mut = {
+    RemoveOne: 1,
+    RemoveRange: 2,
+    Remove: 3,
+    InsertOne: 4,
+    InsertRange: 8,
+    Insert: 12,
+    ReplaceOne: 16,
+    ReplaceRange: 32,
+    Replace: 48,
+    Range: 42,
+    Head: 64,
+    Tail: 128,
+    Sides: 192,
+    Reverse: 256,
+    Sort: 512,
+    Resize: 1024,
+    Clear: 2048,
+    Custom: 4096,
 };
 
 /**
  * @const
  * @enum {number}
  */
-export var Col = {
+export var ColIndex = {
     Init: -2,
     NoChange: 0,
     Source: 0,
@@ -2268,7 +2203,7 @@ export var Col = {
  * @const
  * @enum {number}
  */
-export var Mut = {
+export var MutIndex = {
     Type: 0,
     Start: 1,
     End: 2,
@@ -2299,12 +2234,34 @@ function index(i, length, empty) {
     return i;
 }
 
+/* __EXCLUDE__ */
+
+/**
+ * @interface
+ */
+function Indexed() { }
+
+/**
+ * @protected
+ * @type {?Signal<number>}
+ */
+Indexed.prototype._length;
+
+/**
+ * @protected
+ * @type {Array}
+ */
+Indexed.prototype._mut;
+
+/* __EXCLUDE__ */
+
 /**
  * @struct
  * @protected
  * @template T,U
  * @constructor
  * @extends {Data<Array<T>,U>}
+ * @implements {Indexed}
  * @implements {IterableSignal<T>}
  */
 function Collection() { }
@@ -2363,6 +2320,7 @@ function getLength() {
 Collection.prototype.length;
 
 /**
+ * @protected
  * @type {?Signal<number>}
  */
 Collection.prototype._length;
@@ -2374,15 +2332,8 @@ Collection.prototype._length;
 Collection.prototype._mut;
 
 /**
- * This array holds state used for collection methods.
- * It has this structure:
- * [0] - {Array} The source value
- * [1] - {0 | 1} Value has changed
- * [2] - {Mutation} The mutation type
- * [3] - {Args} The mutation arguments
- * [...] - {...T} Function parameters
+ * @protected
  * @type {Array}
- * 
  */
 Collection.prototype._args;
 
@@ -2628,18 +2579,14 @@ Collection.prototype.reduceRight = function (callbackFn, initialValue) { };
  */
 function copy(seed, args) {
     /** @const {Collection<T>} */
-    var src = args[Col.Source];
+    var src = args[ColIndex.Source];
     /** @const {Array<T>} */
     var srcArray = src.val;
     /** @type {Array} */
     var mut = src.mut();
     /** @const {number} */
     var length = srcArray.length;
-    if (mut[Mut.Type] === Mutation.Set || args[Col.Changed] === Col.Init) {
-        sliceArray(srcArray, seed, 0, length);
-    } else {
-        applyMutation(seed, mut);
-    }
+    applyMutation(seed, mut);
     if (seed.length !== length) {
         seed.length = length;
     }
@@ -2661,66 +2608,62 @@ function copy(seed, args) {
  */
 function slice(seed, args) {
     /** @const {Collection<T>} */
-    var src = args[Col.Source];
+    var src = args[ColIndex.Source];
     /** @const {Array<T>} */
     var srcArray = src.val;
     /** @type {number} */
     var length = srcArray.length;
     /** @const {Array<Signal<number>|number>} */
-    var params = args[Col.Args];
+    var params = args[ColIndex.Args];
     /** @const {Array} */
-    var mut = src.mut();
+    var srcMut = src.mut();
     /** @const {number} */
-    var mutStart = mut[Mut.Start];
+    var mutStart = srcMut[MutIndex.Start];
     /** @const {number} */
-    var mutEnd = mut[Mut.End];
+    var mutEnd = srcMut[MutIndex.End];
     /** @const {number} */
     var prevStart = /** @type {number} */(params[2]);
     /** @const {number} */
     var prevEnd = /** @type {number} */(params[5]);
-    /** @const {number}  */
+    /** @type {number}  */
     var start = params[2] = index(params[0] ? /** @type {Signal<number>} */(params[1]).val : /** @type {number} */(params[1]), length, 0);
     /** @type {number} */
-    var end = params[5] = index(params[3] ? /** @type {Signal<number>} */(params[4]).val : /** @type {number} */(params[4]), length, length);
+    var end = params[5] = index(params[3] ? /** @type {Signal<number>} */(params[4]).val : /** @type {number} */(params[4]), length, length - 1);
+    length = 1 + end - start;
+    /** @const {Array} */
+    var mut = this._mut;
     if (end <= start) {
         /** @const {number} */
         var ln = seed.length;
         if (ln === 0) {
-            args[Col.Changed] = Col.NoChange;
+            args[ColIndex.Changed] = ColIndex.NoChange;
         }
         seed.length = 0;
-    } else if (
-        mut[Mut.Type] === Mutation.Set ||
-        args[Col.Changed] === Col.Init ||
-        prevStart !== start ||
-        prevEnd !== end
-    ) {
-        sliceArray(srcArray, seed, start, end);
-    } else if (!(mutEnd <= start || mutStart >= end)) {
-        sliceArray(srcArray, seed, mutStart, mutEnd + 1);
-    } else {
-        args[Col.Changed] = Col.NoChange;
+        mutType = Mut.Clear;
+    } else if (prevStart !== -1) {
+        if (!(mutEnd <= start || mutStart >= end)) {
+            if (mutStart > start) {
+                start = mutStart;
+            }
+            if (mutEnd < end) {
+                end = mutEnd;
+            }
+        } else if (prevStart === start && prevEnd === end) {
+            args[ColIndex.Changed] = ColIndex.NoChange;
+            return seed;
+        }
     }
-    length = end - start;
+    mut[MutIndex.Type] = Mut.ReplaceRange | (length !== seed.length ? Mut.Resize : 0);
+    mut[MutIndex.Start] = start;
+    mut[MutIndex.End] = end;
+    mut[MutIndex.Args] = srcArray;
+    for (prevStart = 0; start <= end; start++, prevStart++) {
+        seed[prevStart] = srcArray[start];
+    }
     if (seed.length !== length) {
         seed.length = length;
     }
     return seed;
-}
-
-/**
- * @template T
- * @param {Array<T>} source 
- * @param {Array<T>} target 
- * @param {number} from
- * @param {number} to
- */
-function sliceArray(source, target, from, to) {
-    /** @type {number} */
-    var i = 0;
-    for (; from < to; from++) {
-        target[i++] = source[from];
-    }
 }
 
 /**
@@ -2736,7 +2679,7 @@ Collection.prototype.slice = function (start, end) {
     if (ln === 0) {
         return new Enumerable(this, copy);
     }
-    return new Enumerable(this, slice, [isReactive(start), start, 0, isReactive(end), end, 0]);
+    return new Enumerable(this, slice, [isReactive(start), start, -1, isReactive(end), end, -1]);
 };
 
 /**
@@ -2758,16 +2701,16 @@ function some(seed, args) {
     var mut = src.mut();
     /** @type {number} */
     var start = 0;
-    if (args[1] === Col.Init) {
+    if (args[1] === ColIndex.Init) {
         args[1] = 0;
-    } else if (mut[Mut.Type] !== Mutation.Set) {
-        start = mut[Mut.Start];
+    } else {
+        start = mut[MutIndex.Start];
         /*
          * Either we found a match on the previous iteration and this cycle
          * only mutated indices after the match position, or we didn't find
          * any match last time and we have not inserted any new elements.
          */
-        if (seed ? args[2] < start : (mut[Mut.Type] & Mutation.Insert) === 0) {
+        if (seed ? args[2] < start : (mut[MutIndex.Type] & Mut.Insert) === 0) {
             return seed;
         }
     }
@@ -2781,7 +2724,7 @@ function some(seed, args) {
  * @returns {Signal<boolean>} 
  */
 Collection.prototype.some = function (callbackFn) {
-    return new Computation(some, false, Opts.Bound | Opts.Static, [this, Col.Init, 0, callbackFn], this);
+    return new Computation(some, false, Opts.Bound | Opts.Static, [this, ColIndex.Init, 0, callbackFn], this);
 };
 
 /**
@@ -2789,6 +2732,7 @@ Collection.prototype.some = function (callbackFn) {
  * @template T
  * @constructor
  * @extends {Data<T,nil>}
+ * @implements {Indexed}
  * @implements {ArraySignal<T>}
  * @param {Array<T>=} value
  * @param {(function(Array<T>,Array<T>): boolean)|falsy=} eq
@@ -2800,7 +2744,7 @@ function DataArray(value, eq) {
      * @protected
      * @type {Array}
      */
-    this._mut = [Mutation.Set, 0, value.length, 0];
+    this._mut = [Mut.ReplaceRange, 0, value.length - 1, 0];
     /**
      * @protected
      * @type {?Computation<number>}
@@ -2998,10 +2942,10 @@ function mutate(node, mut, start, end, args) {
         panic("conflicting mutation");
     }
     var smut = node._smut;
-    smut[Mut.Type] = mut;
-    smut[Mut.Start] = start;
-    smut[Mut.End] = end;
-    smut[Mut.Args] = args;
+    smut[MutIndex.Type] = mut;
+    smut[MutIndex.Start] = start;
+    smut[MutIndex.End] = end;
+    smut[MutIndex.Args] = args;
     setData.call(node, MUT);
 }
 
@@ -3012,39 +2956,56 @@ function mutate(node, mut, start, end, args) {
  */
 function applyMutation(array, mut) {
     /** @const {?} */
-    var args = mut[Mut.Args];
-    switch (mut[Mut.Type]) {
-        case Mutation.SetAt:
-            array[args[0]] = args[1];
+    var args = mut[MutIndex.Args];
+    var type = mut[MutIndex.Type];
+    switch (type) {
+        case Mut.Clear:
+            array.length = 0;
             break;
-        case Mutation.Pop:
+        case Mut.RemoveOne | Mut.Tail:
             array.length--;
             break;
-        case Mutation.PopRange:
-            array.length -= args
+        case Mut.RemoveRange | Mut.Tail:
+            array.length -= args;
             break;
-        case Mutation.Push:
+        case Mut.InsertOne | Mut.Tail:
             array[array.length] = args;
             break;
-        case Mutation.PushRange:
+        case Mut.InsertRange | Mut.Tail:
             array.push.apply(array, args);
             break;
-        case Mutation.Shift:
+        case Mut.ReplaceOne:
+            array[mut[MutIndex.Start]] = args;
+            break;
+        case Mut.ReplaceRange:
+        case Mut.ReplaceRange | Mut.Resize:
+            /** @type {number} */
+            var start = mut[MutIndex.Start];
+            /** @type {number} */
+            var end = mut[MutIndex.End];
+            for (var i = 0; start <= end; start++, i++) {
+                array[start] = args[i];
+            }
+            if ((type & Mut.Resize) !== 0) {
+                array.length = args.length;
+            }
+            break;
+        case Mut.RemoveOne | Mut.Head:
             array.shift();
             break;
-        case Mutation.Unshift:
+        case Mut.InsertOne | Mut.Head:
             array.unshift(args);
             break;
-        case Mutation.UnshiftRange:
+        case Mut.InsertRange | Mut.Head:
             array.unshift.apply(array, args);
             break;
-        case Mutation.Reverse:
+        case Mut.Reverse:
             array.reverse();
             break;
-        case Mutation.Sort:
+        case Mut.Sort:
             array.sort(args);
             break;
-        case Mutation.Custom:
+        case Mut.Custom:
             // todo
             break;
         default:
@@ -3064,9 +3025,11 @@ DataArray.prototype.set = function (value, item) {
     /** @const {number} */
     var ln = arguments.length;
     if (ln === 1) {
-        mutate(this, Mutation.Set, 0, value.length - 1, value);
+        /** @const {number} */
+        var length = value.length;
+        mutate(this, Mut.ReplaceRange | (length !== this._value.length ? Mut.Resize : 0), 0, length - 1, value);
     } else if (ln > 0) {
-        mutate(this, Mutation.SetAt, /** @type {number} */(value), /** @type {number} */(value), [value, item]);
+        mutate(this, Mut.ReplaceOne, /** @type {number} */(value), /** @type {number} */(value), item);
     }
 };
 
@@ -3082,14 +3045,10 @@ DataArray.prototype._update = function (time) {
     var mut = this._mut;
     /** @const {Array} */
     var smut = this._smut;
-    /** @const {number} */
-    var type = smut[Mut.Type];
-    if (type === Mutation.Set) {
-        this._value = smut[Mut.Args];
-    } else {
+    if (this._value !== smut[MutIndex.Args]) {
         applyMutation(this._value, smut);
     }
-    mut[Mut.Args] = 0;
+    mut[MutIndex.Args] = 0;
     this._smut = mut;
     this._mut = smut;
     this._set = NIL;
@@ -3109,7 +3068,7 @@ DataArray.prototype.pop = function () {
     /** @const {number} */
     var length = this._value.length;
     if (length !== 0) {
-        mutate(this, Mutation.Pop, length - 1, length - 1);
+        mutate(this, Mut.RemoveOne | Mut.Tail, length - 1, length - 1);
     }
 };
 
@@ -3128,7 +3087,7 @@ DataArray.prototype.push = function (elementN) {
     /** @const {number} */
     var length = this._value.length;
     if (ln === 1) {
-        mutate(this, Mutation.Push, length, length, elementN);
+        mutate(this, Mut.InsertOne | Mut.Tail, length, length, elementN);
     } else if (ln > 0) {
         /** @type {number} */
         var i = 0;
@@ -3137,7 +3096,7 @@ DataArray.prototype.push = function (elementN) {
         for (; i < ln; i++) {
             params[i] = args[i];
         }
-        mutate(this, Mutation.PushRange, length, length + ln - 1, params);
+        mutate(this, Mut.InsertRange | Mut.Tail, length, length + ln - 1, params);
     }
 };
 
@@ -3151,7 +3110,7 @@ DataArray.prototype.reverse = function () {
     /** @const {number} */
     var length = this._value.length;
     if (length !== 0) {
-        mutate(this, Mutation.Reverse, 0, length - 1);
+        mutate(this, Mut.Reverse, 0, length - 1);
     }
 };
 
@@ -3165,7 +3124,7 @@ DataArray.prototype.shift = function () {
     /** @const {number} */
     var length = this._value.length;
     if (length !== 0) {
-        mutate(this, Mutation.Shift, 0, 0);
+        mutate(this, Mut.RemoveOne | Mut.Head, 0, 0);
     }
 };
 
@@ -3180,7 +3139,7 @@ DataArray.prototype.sort = function (compareFn) {
     /** @const {number} */
     var length = this._value.length;
     if (length !== 0) {
-        mutate(this, Mutation.Sort, 0, length - 1, compareFn);
+        mutate(this, Mut.Sort, 0, length - 1, compareFn);
     }
 };
 
@@ -3200,92 +3159,93 @@ DataArray.prototype.splice = function (start, deleteCount, items) {
     var ln = args.length;
     if (ln > 0) {
         /** @type {number} */
-        var mut;
+        var mut = 0;
         /** @const {number} */
         var length = this._value.length;
+        /** @const {number} */
+        var insertCount = ln > 2 ? ln - 2 : 0;
         /** @type {Array<T|Array<T>|number>} */
         var params;
         start = index(start, length, 0);
-        if (start >= length) {
-            if (ln < 3) {
-                return;
-            }
-            start = length;
+        if (start === length) {
             deleteCount = 0;
-        }
-        if (deleteCount >= length - start) {
+        } else if (ln < 2 || deleteCount >= length - start) {
             deleteCount = length - start;
         }
-        if ((0 | deleteCount) > 0) {
-            if (ln > 2) {
-                if (ln - 2 === deleteCount) {
-                    if (deleteCount === 1) {
-                        return mutate(this, Mutation.SetAt, start, start, [start, items]);
-                    }
-                    mut = Mutation.Replace;
+        if (insertCount === 0 && deleteCount === 0) {
+            return;
+        }
+        if (deleteCount !== length || insertCount !== 0) {
+            if (insertCount > 0 && deleteCount > 0) {
+                if (insertCount > 1 && deleteCount > 1) {
+                    mut |= Mut.ReplaceRange;
                 } else {
-                    mut = Mutation.ReplaceInsert;
+                    mut |= Mut.ReplaceOne;
                 }
-            } else {
-                if (length === 0) {
-                    return;
-                }
-                if (start === 0) {
-                    if (deleteCount === 1) {
-                        return mutate(this, Mutation.Shift, 0, 0);
-                    }
-                    mut = Mutation.ShiftRange;
-                } else {
-                    if (deleteCount === 1) {
-                        mut = Mutation.RemoveAt;
+                /** @const {number} */
+                var diff = insertCount - deleteCount;
+                if (diff >= 1) {
+                    if (diff > 1) {
+                        mut |= Mut.InsertRange;
                     } else {
-                        mut = Mutation.RemoveRange;
+                        mut |= Mut.InsertOne;
+                    }
+                } else if (diff <= -1) {
+                    if (diff < -1) {
+                        mut |= Mut.RemoveRange;
+                    } else {
+                        mut |= Mut.RemoveOne;
                     }
                 }
-            }
-        } else {
-            if (ln < 3) {
-                return;
-            }
-            if (ln === 3) {
-                if (start === 0) {
-                    return mutate(this, Mutation.Unshift, 0, 0, items);
+            } else if (insertCount > 0) {
+                if (insertCount > 1) {
+                    mut |= Mut.InsertRange;
+                } else {
+                    mut |= Mut.InsertOne;
                 }
-                mut = Mutation.InsertAt;
             } else {
-                mut = Mutation.InsertRange;
+                if (deleteCount > 1) {
+                    mut |= Mut.RemoveRange;
+                } else {
+                    mut |= Mut.RemoveOne;
+                }
             }
-        }
-        if ((mut & Mutation.Insert) !== 0) {
-            if ((mut & Mutation.Range) !== 0) {
+            if (start === 0) {
+                mut |= Mut.Head;
+            } else if (start === length || deleteCount >= (length - start)) {
+                mut |= Mut.Tail;
+            }
+            if (
+                mut === Mut.ReplaceOne || (
+                    (mut & (Mut.ReplaceOne | Mut.Range)) === 0 &&
+                    ((mut & Mut.Sides) !== 0)
+                )
+            ) {
+                if ((mut & (Mut.ReplaceOne | Mut.InsertOne)) !== 0) {
+                    params = items;
+                }
+            } else {
                 /** @type {number} */
-                var i;
-                if (start === length || start === 0) {
-                    params = new Array(ln);
-                    for (i = 0; i < ln; i++) {
-                        params[i] = args[i];
-                    }
-                    return (start === 0 ? 
-                        mutate(this, Mutation.PushRange, length, length + ln - 1, params) :
-                        mutate(this, Mutation.PushRange, length, length + ln - 1, params)
-                    );
+                var i = 0;
+                /** @type {number} */
+                var j = (
+                    mut === (Mut.InsertRange | Mut.Tail) ||
+                    mut === (Mut.InsertRange | Mut.Head) ||
+                    mut === Mut.ReplaceRange
+                ) ? 2 : 0;
+                params = new Array(ln - j);
+                for (; j < ln; i++, j++) {
+                    params[i] = args[j];
                 }
-                params = [start, deleteCount];
-                for (var i = 2; i < ln; i++) {
-                    params[i] = args[i];
-                }
-            } else {
-                if (start === length) {
-
-                }
-                params = [start, deleteCount, items];
             }
-        } else {
-            return mutate(this, mut, start, start + deleteCount, [start, deleteCount]);
         }
-        start = params[0];
-        deleteCount = params[1];
-        mutate(this, mut, start, start - deleteCount + ln - 3, params);
+        mutate(
+            this,
+            mut,
+            start,
+            start + (deleteCount > insertCount ? deleteCount : insertCount) - 1,
+            params
+        );
     }
 };
 
@@ -3297,19 +3257,21 @@ DataArray.prototype.splice = function (start, deleteCount, items) {
  * @returns {void}
  */
 DataArray.prototype.unshift = function (elementN) {
+    /** @const {Arguments} */
+    var args = arguments;
     /** @const {number} */
-    var ln = arguments.length;
+    var ln = args.length;
     if (ln === 1) {
-        mutate(this, Mutation.Unshift, 0, 0, elementN);
+        mutate(this, Mut.InsertOne | Mut.Head, 0, 0, elementN);
     } else if (ln > 0) {
         /** @type {number} */
         var i = 0;
         /** @const {Array<T>} */
-        var args = new Array(ln);
+        var params = new Array(ln);
         for (; i < ln; i++) {
-            args[i] = arguments[i];
+            params[i] = args[i];
         }
-        mutate(this, Mutation.UnshiftRange, 0, ln - 1, args);
+        mutate(this, Mut.InsertRange | Mut.Head, 0, ln - 1, params);
     }
 };
 
@@ -3320,18 +3282,19 @@ DataArray.prototype.unshift = function (elementN) {
  * @constructor
  * @extends {Computation<T,U>}
  * @implements {Receive}
+ * @implements {Indexed}
  * @implements {IterableSignal<T>}
  * @param {Source} src
  * @param {function(Array<T>,U): Array<T>} fn
  * @param {U=} args
  */
 function Enumerable(src, fn, args) {
-    Computation.call(this, fn, [], Opts.Static | Opts.Defer, [src, Col.Init, this._mut, args]);
+    Computation.call(this, fn, [], Opts.Static | Opts.Defer, [src, ColIndex.Init, this._mut, args]);
     /**
      * @protected
      * @type {Array}
      */
-    this._mut = [Mutation.Set, 0, 0, 0];
+    this._mut = [0, 0, 0, 0];
     /**
      * @protected
      * @type {?Computation<number>}
@@ -3547,9 +3510,9 @@ Enumerable.prototype._update = function (time) {
     SCOPE._owner = null;
     SCOPE._listen = false;
     this._opt |= Opts.Updated;
-    args[Col.Changed] = Col.Changed;
+    args[ColIndex.Changed] = ColIndex.Changed;
     this._value = this._set(this._value, args);
-    if (args[Col.Changed] === Col.Changed) {
+    if (args[ColIndex.Changed] === ColIndex.Changed) {
         sendUpdate(this, time);
     }
     this._opt &= ~(Opts.UpdateFlags | Opts.MayFlags);

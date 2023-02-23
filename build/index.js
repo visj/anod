@@ -7,7 +7,6 @@ import { exec } from 'child_process';
 var CommentRegex = /\/\*[^*][\s\S]*?\*\/|\/\/.*[^\S\r\n]*/g;
 var AllCommentsRegex = /\/\*[\s\S]*?\*\/|\/\/.*[^\S\r\n]*/g;
 var ExportRegex = /export\s\{([\$\w\,\s]+)\s*\};?/;
-var ImportRegex = /import\s*\{([\$\w\,\s]+)\s*\}\s*from\s*['"]([\w\.\/]+)['"];?/g;
 
 /**
  * 
@@ -88,7 +87,7 @@ var distDir = path.join(rootDir, 'dist');
 var srcFile = path.join(rootDir, 'src', 'zorn.js');
 var externsFile = path.join(distDir, 'zorn.ext.js');
 
-var ENUMS = ['Opts', 'Stage', 'Mutation', 'Col', 'Mut'];
+var ENUMS = ['Opts', 'Stage', 'MutType', 'Mut', 'ColIndex', 'MutIndex'];
 
 bundle();
 
@@ -120,13 +119,12 @@ function bundle() {
             return;
         }
         var srcCode = data.toString();
-        ENUMS.forEach(function (enumName) {
-            srcCode = inlineEnum(srcCode, enumName, zorn[enumName]);
-        });
 
         var code = removeSection(srcCode, '__EXCLUDE__');
         code = code.replace(AllCommentsRegex, '');
-        code = code.replace(ImportRegex, '');
+        ENUMS.forEach(function (enumName) {
+            srcCode = inlineEnum(srcCode, enumName, zorn[enumName]);
+        });
         code = removeEmptyLines(code);
 
         var mjs = code;

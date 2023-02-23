@@ -1,5 +1,5 @@
 export * from '../../src/zorn.js';
-export { Mutation  } from '../../src/zorn.js';
+export { Mut  } from '../../src/zorn.js';
 
 export var test = {
     /**

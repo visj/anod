@@ -1,4 +1,4 @@
-import { test, root, batch, array, dispose, cleanup, effect, compute, value, Mutation } from './helper/zorn.js';
+import { test, root, batch, array, dispose, cleanup, effect, compute, value, Mut } from './helper/zorn.js';
 
 describe("array", function () {
 
@@ -133,56 +133,56 @@ describe("array", function () {
                 var a = array([1, 2, 3]);
                 a.splice(1, 1);
                 test.equals(a.val, [1, 3]);
-                test.equals(a.mut()[0], Mutation.RemoveAt);
+                test.equals(a.mut()[0], Mut.RemoveOne);
             });
 
             it("should insert an element", function() {
                 var a = array([1, 2, 3]);
                 a.splice(1, 0, 4);
                 test.equals(a.val, [1, 4, 2, 3]);
-                test.equals(a.mut()[0], Mutation.InsertAt);
+                test.equals(a.mut()[0], Mut.InsertOne);
             });
 
             it("should replace an element", function() {
                 var a = array([1, 2, 3]);
                 a.splice(1, 1, 4);
                 test.equals(a.val, [1, 4, 3]);
-                test.equals(a.mut()[0], Mutation.SetAt);
+                test.equals(a.mut()[0], Mut.ReplaceOne);
             });
 
             it("converts insertion at index 0 as unshift", function() {
                 var a = array([1, 2, 3]);
                 a.splice(0, 0, 4);
                 test.equals(a.val, [4, 1, 2, 3]);
-                test.equals(a.mut()[0], Mutation.Unshift);
+                test.equals(a.mut()[0], Mut.InsertOne | Mut.Head);
             });
 
             it("converts insertion at index length as push", function() {
                 var a = array([1, 2, 3]);
                 a.splice(3, 0, 4);
                 test.equals(a.val, [1, 2, 3, 4]);
-                test.equals(a.mut()[0], Mutation.Push);
+                test.equals(a.mut()[0], Mut.InsertOne | Mut.Tail);
             });
 
             it("should insert multiple elements", function() {
                 var a = array([1, 2, 3]);
-                a.splice(1, 0, 4, 5);
-                test.equals(a.val, [1, 4, 5, 2, 3]);
-                test.equals(a.mut()[0], Mutation.InsertRange);
+                a.splice(1, 0, 4, 5, 6);
+                test.equals(a.val, [1, 4, 5, 6, 2, 3]);
+                test.equals(a.mut()[0], Mut.InsertRange);
             });
 
             it("should remove multiple elements and replace with one", function() {
                 var a = array([1, 2, 3, 4, 5]);
                 a.splice(1, 3, 6);
                 test.equals(a.val, [1, 6, 5]);
-                test.equals(a.mut()[0], Mutation.ReplaceInsert);
+                test.equals(a.mut()[0], Mut.ReplaceOne | Mut.RemoveRange);
             });
 
             it("correctly infers replace insert params", function() {
                 var a = array([1, 2, 3]);
                 a.splice(1, 1, 4, 5);
                 test.equals(a.val, [1, 4, 5, 3]);
-                test.equals(a.mut()[0], Mutation.ReplaceInsert);
+                test.equals(a.mut()[0], Mut.ReplaceOne | Mut.InsertOne);
             });
         });
     });
