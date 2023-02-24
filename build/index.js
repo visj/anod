@@ -87,7 +87,7 @@ var distDir = path.join(rootDir, 'dist');
 var srcFile = path.join(rootDir, 'src', 'zorn.js');
 var externsFile = path.join(distDir, 'zorn.ext.js');
 
-var ENUMS = ['Opts', 'Stage', 'MutType', 'Mut', 'ColIndex', 'MutIndex'];
+var ENUMS = ['Opt', 'Stage', 'MutType', 'Mut', 'ColIndex', 'MutIndex'];
 
 bundle();
 

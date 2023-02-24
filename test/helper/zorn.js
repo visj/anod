@@ -1,4 +1,5 @@
 export * from '../../src/zorn.js';
+//export * from '../../dist/zorn.min.mjs';
 export { Mut  } from '../../src/zorn.js';
 
 export var test = {
