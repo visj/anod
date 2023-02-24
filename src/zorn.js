@@ -2607,62 +2607,62 @@ function copy(seed, args) {
  * @returns 
  */
 function slice(seed, args) {
-    /** @const {Collection<T>} */
-    var src = args[ColIndex.Source];
-    /** @const {Array<T>} */
-    var srcArray = src.val;
-    /** @type {number} */
-    var length = srcArray.length;
-    /** @const {Array<Signal<number>|number>} */
-    var params = args[ColIndex.Args];
-    /** @const {Array} */
-    var srcMut = src.mut();
-    /** @const {number} */
-    var mutStart = srcMut[MutIndex.Start];
-    /** @const {number} */
-    var mutEnd = srcMut[MutIndex.End];
-    /** @const {number} */
-    var prevStart = /** @type {number} */(params[2]);
-    /** @const {number} */
-    var prevEnd = /** @type {number} */(params[5]);
-    /** @type {number}  */
-    var start = params[2] = index(params[0] ? /** @type {Signal<number>} */(params[1]).val : /** @type {number} */(params[1]), length, 0);
-    /** @type {number} */
-    var end = params[5] = index(params[3] ? /** @type {Signal<number>} */(params[4]).val : /** @type {number} */(params[4]), length, length - 1);
-    length = 1 + end - start;
-    /** @const {Array} */
-    var mut = this._mut;
-    if (end <= start) {
-        /** @const {number} */
-        var ln = seed.length;
-        if (ln === 0) {
-            args[ColIndex.Changed] = ColIndex.NoChange;
-        }
-        seed.length = 0;
-        mutType = Mut.Clear;
-    } else if (prevStart !== -1) {
-        if (!(mutEnd <= start || mutStart >= end)) {
-            if (mutStart > start) {
-                start = mutStart;
-            }
-            if (mutEnd < end) {
-                end = mutEnd;
-            }
-        } else if (prevStart === start && prevEnd === end) {
-            args[ColIndex.Changed] = ColIndex.NoChange;
-            return seed;
-        }
-    }
-    mut[MutIndex.Type] = Mut.ReplaceRange | (length !== seed.length ? Mut.Resize : 0);
-    mut[MutIndex.Start] = start;
-    mut[MutIndex.End] = end;
-    mut[MutIndex.Args] = srcArray;
-    for (prevStart = 0; start <= end; start++, prevStart++) {
-        seed[prevStart] = srcArray[start];
-    }
-    if (seed.length !== length) {
-        seed.length = length;
-    }
+    // /** @const {Collection<T>} */
+    // var src = args[ColIndex.Source];
+    // /** @const {Array<T>} */
+    // var srcArray = src.val;
+    // /** @type {number} */
+    // var length = srcArray.length;
+    // /** @const {Array<Signal<number>|number>} */
+    // var params = args[ColIndex.Args];
+    // /** @const {Array} */
+    // var srcMut = src.mut();
+    // /** @const {number} */
+    // var mutStart = srcMut[MutIndex.Start];
+    // /** @const {number} */
+    // var mutEnd = srcMut[MutIndex.End];
+    // /** @const {number} */
+    // var prevStart = /** @type {number} */(params[2]);
+    // /** @const {number} */
+    // var prevEnd = /** @type {number} */(params[5]);
+    // /** @type {number}  */
+    // var start = params[2] = index(params[0] ? /** @type {Signal<number>} */(params[1]).val : /** @type {number} */(params[1]), length, 0);
+    // /** @type {number} */
+    // var end = params[5] = index(params[3] ? /** @type {Signal<number>} */(params[4]).val : /** @type {number} */(params[4]), length, length - 1);
+    // length = 1 + end - start;
+    // /** @const {Array} */
+    // var mut = this._mut;
+    // if (end <= start) {
+    //     /** @const {number} */
+    //     var ln = seed.length;
+    //     if (ln === 0) {
+    //         args[ColIndex.Changed] = ColIndex.NoChange;
+    //     }
+    //     seed.length = 0;
+    //     mutType = Mut.Clear;
+    // } else if (prevStart !== -1) {
+    //     if (!(mutEnd <= start || mutStart >= end)) {
+    //         if (mutStart > start) {
+    //             start = mutStart;
+    //         }
+    //         if (mutEnd < end) {
+    //             end = mutEnd;
+    //         }
+    //     } else if (prevStart === start && prevEnd === end) {
+    //         args[ColIndex.Changed] = ColIndex.NoChange;
+    //         return seed;
+    //     }
+    // }
+    // mut[MutIndex.Type] = Mut.ReplaceRange | (length !== seed.length ? Mut.Resize : 0);
+    // mut[MutIndex.Start] = start;
+    // mut[MutIndex.End] = end;
+    // mut[MutIndex.Args] = srcArray;
+    // for (prevStart = 0; start <= end; start++, prevStart++) {
+    //     seed[prevStart] = srcArray[start];
+    // }
+    // if (seed.length !== length) {
+    //     seed.length = length;
+    // }
     return seed;
 }
 
