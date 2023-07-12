@@ -1,4 +1,4 @@
-import { test, root, batch, data, compute, effect, dispose, $effect, cleanup, value } from './helper/zorn.js';
+import { test, root, batch, peek, data, compute, computeWhen, effect, dispose, $effect, cleanup, value } from './helper/zorn.js';
 
 describe("may dispose", function () {
 
@@ -24,7 +24,9 @@ describe("may dispose", function () {
                 d1.val;
                 d3.set(d3.peek + 1);
               });
-              effect(function () { c3.val; });
+              effect(function () { 
+                c3.val;
+              });
               effect(function () {
                 d3.val;
                 count++;

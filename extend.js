@@ -3,28 +3,21 @@
  * @param {Function} ctor 
  * @param {Array<Function>} supers 
  */
-function extend(ctor, supers) {
+ function extend(ctor, supers) {
     var proto;
-    var parent;
     var construct;
-    for (var i = 0, ln = supers.length; i < ln; i++) {
-        proto = function() { };
-        construct = function() { };
-        construct.prototype = supers[i].prototype;
-        proto.prototype = new construct();
-        if (i === 0) {
-            parent = proto;
-        } else {
-            construct = function() { };
-            construct.prototype = new parent();
-            proto = proto.prototype;
-            for (var key in proto) {
-                construct.prototype[key] = proto[key];
-            }
-            parent = construct;
+    var ln = supers.length;
+    var parent = supers[0];
+    for (var i = 1; i < ln; i++) {
+        construct = function () { };
+        construct.prototype = Object.create(parent);
+        proto = supers[i].prototype;
+        for (var key in proto) {
+            construct.prototype[key] = proto[key];
         }
+        parent = construct;
     }
-    ctor.prototype = new parent();
+    ctor.prototype = Object.create(parent);
     ctor.constructor = ctor;
 }
 

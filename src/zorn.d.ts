@@ -1,224 +1,203 @@
 export interface Signal<T = any> {
-    get val(): T;
+    val(): T;
 
-    get peek(): T;
+    peek(): T;
 }
 
 export interface DataSignal<T = any> extends Signal<T> {
     set(val: T): void;
 }
 
-type falsy = false | 0 | '' | null;
+type unset = void | undefined;
 
 type Source = Signal | Signal[] | readonly Signal[];
 
-export type DisposeFn = () => void;
+type isArray<T> = T extends any[] ? true : T extends readonly any[] ? true : false;
 
-export type RecoverFn = (err: any) => void;
+export type Value<T> = T | Signal<T>;
 
-export type CleanupFn = (final: boolean) => void;
+export type Func<T = any> = (...args: any[]) => T;
 
-export type CompareFn<T> = ((a: T, b: T) => boolean) | falsy;
+export type Dispose = () => void;
 
-export function root<T>(callback: (disposeFn: DisposeFn) => T): T;
+export type Recover = (err: unknown) => void;
+
+export type Cleanup = (final: boolean) => void;
+
+export type Equal<T> = false | ((a: T, b: T) => boolean);
+
+export function root<T>(fn: (dispose: Dispose) => T): T;
 
 export function data<T>(value: T): DataSignal<T>;
 
-export function value<T>(value: T, eq?: CompareFn<T>): DataSignal<T>;
+export function value<T>(value: T, eq?: Equal<T>): DataSignal<T>;
 
-export function array<T = any>(items?: T[], eq?: CompareFn<T>): ArraySignal<T>;
+export function array<T = unknown>(items?: T[], eq?: Equal<T>): ArraySignal<T>;
 
 export function compute<T>(callback: () => T): Signal<T>;
 
-export function compute<T>(callback: (seed: T, dispose: DisposeFn) => T, seed: T, eq?: CompareFn<T>): Signal<T>;
+export function compute<T>(callback: (seed: T) => T, seed: T): Signal<T>;
 
-export function compute<T, U>(callback: (seed: T, dispose: DisposeFn, args: U) => T, seed: T, eq: CompareFn<T>, args: U): Signal<T>;
+export function compute<T, U>(callback: (seed: T, args: U) => T, seed: T, args: U, eq?: Equal<T>): Signal<T>;
 
-export function compute<T, U>(callback: (seed: T, dispose: DisposeFn, args: U) => T, seed?: T, eq?: CompareFn<T>, args?: U): Signal<T>;
+export function compute<T, U>(callback: (seed?: T, args?: U) => T, seed?: T, args?: U, eq?: Equal<T>): Signal<T>;
 
 export function $compute<T>(callback: () => T): Signal<T>;
 
-export function $compute<T>(callback: (seed: T, dispose: DisposeFn) => T, seed: T, eq?: CompareFn<T>): Signal<T>;
+export function $compute<T>(callback: (seed: T) => T, seed: T): Signal<T>;
 
-export function $compute<T, U>(callback: (seed: T, dispose: DisposeFn, args: U) => T, seed: T, eq: CompareFn<T>, args: U): Signal<T>;
+export function $compute<T, U>(callback: (seed: T, args: U) => T, seed: T, args: U, eq?: Equal<T>): Signal<T>;
 
-export function $compute<T, U>(callback: (seed: T, dispose: DisposeFn, args: U) => T, seed?: T, eq?: CompareFn<T>, args?: U): Signal<T>;
+export function $compute<T, U>(callback: (seed?: T, args?: U) => T, seed?: T, args?: U, eq?: Equal<T>): Signal<T>;
 
 export function computeWhen<T>(src: Source, callback: () => T): Signal<T>;
 
-export function computeWhen<T>(src: Source, callback: (seed: T, dispose: DisposeFn) => T, seed: T, eq?: CompareFn<T>, defer?: boolean): Signal<T>;
+export function computeWhen<T>(src: Source, callback: (seed: T) => T, seed: T, defer?: false): Signal<T>;
 
-export function computeWhen<T, U>(src: Source, callback: (seed: T, dispose: DisposeFn, args: U) => T, seed: T, eq: CompareFn<T>, defer: boolean, args: U): Signal<T>;
+export function computeWhen<T, U>(src: Source, callback: (seed: T, args: U) => T, seed: T, defer: false | unset, args: U, eq?: Equal<T>): Signal<T>;
 
-export function computeWhen<T, U>(src: Source, callback: (seed: T, dispose: DisposeFn, args: U) => T, seed?: T, eq?: CompareFn<T>, defer?: boolean, args?: U): Signal<T>;
+export function computeWhen<T, U>(src: Source, callback: (seed: T, args: U) => T, seed?: T, defer?: boolean, args?: U, eq?: Equal<T>): Signal<T>;
 
 export function effect<T>(callback: () => T): T;
 
-export function effect<T>(callback: (seed: T, dispose: DisposeFn) => T, seed: T): T;
+export function effect<T>(callback: (seed: T) => T, seed: T): T;
 
-export function effect<T, U>(callback: (seed: T, dispose: DisposeFn, args: U) => T, seed: T, args: U): T;
+export function effect<T, U>(callback: (seed: T, args: U) => T, seed: T, args: U): T;
 
-export function effect<T, U>(callback: (seed: T, dispose: DisposeFn, args: U) => T, seed?: T, args?: U): T;
+export function effect<T, U>(callback: (seed: T, args: U) => T, seed?: T, args?: U): T;
 
 export function $effect<T>(callback: () => T): T;
 
-export function $effect<T>(callback: (seed: T, dispose: DisposeFn) => T, seed: T): T;
+export function $effect<T>(callback: (seed: T) => T, seed: T): T;
 
-export function $effect<T, U>(callback: (seed: T, dispose: DisposeFn, args: U) => T, seed: T, args: U): T;
+export function $effect<T, U>(callback: (seed: T, args: U) => T, seed: T, args: U): T;
 
-export function $effect<T, U>(callback: (seed: T, dispose: DisposeFn, args: U) => T, seed?: T, args?: U): T;
+export function $effect<T, U>(callback: (seed: T, args: U) => T, seed?: T, args?: U): T;
 
 export function effectWhen<T>(src: Source, callback: () => T): T;
 
-export function effectWhen<T>(src: Source, callback: (seed: T, dispose: DisposeFn) => T, seed: T, defer?: boolean): T;
+export function effectWhen<T>(src: Source, callback: (seed: T) => T, seed: T, defer?: false): T;
 
-export function effectWhen<T, U>(src: Source, callback: (seed: T, dispose: DisposeFn, args: U) => T, seed: T, defer: boolean, args: U): T;
+export function effectWhen<T, U>(src: Source, callback: (seed: T, args: U) => T, seed: T, defer: false | unset, args: U): T;
 
-export function effectWhen<T, U>(src: Source, callback: (seed: T, dispose: DisposeFn, args: U) => T, seed?: T, defer?: boolean, args?: U): T;
-
-export function cleanup(cleanupFn: CleanupFn): void;
-
-export function recover(recoverFn: RecoverFn): void;
-
-export function dispose(val: Signal): void;
-
-export function peek<T>(callback: () => T): T;
-
-export function batch(callback: () => void): void;
+export function effectWhen<T, U>(src: Source, callback: (seed: T, args: U) => T, seed?: T, defer?: false, args?: U): T;
 
 export function stable(): void;
 
+export function peek<T>(callback: Func<T>): T;
+
+export function batch(callback: Func): void;
+
+export function cleanup(callback: Cleanup): void;
+
+export function recover(callback: Recover): void;
+
+export function dispose(val: Signal): void;
+
 export const enum Mut {
-    Clear = 0,
-    RemoveOne = 1,
-    RemoveRange = 2,
-    Remove = 3,
-    InsertOne = 4,
-    InsertRange = 8,
-    Insert = 12,
-    ReplaceOne = 16,
-    ReplaceRange = 32,
-    Replace = 48,
-    Range = 42,
-    Head = 64,
-    Tail = 128,
-    Sides = 192,
-    Reverse = 256,
-    Sort = 512,
-    Assign = 1023,
-    Custom = 1024,
+    Custom = -1,
+    ArgCount = 1,
+    ArgParam = 2,
+    ArgArray = 4,
+    ArgSplice = 8,
+    RemoveOne = 16,
+    RemoveRange = 32,
+    InsertOne = 64,
+    InsertRange = 128,
+    ReplaceOne = 256,
+    ReplaceRange = 512,
+    Head = 1024,
+    Tail = 2048,
+    Assign = 4096,
+    Sort = 8192,
+    Reverse = 16384,
 }
 
-type MutTuple<M extends Mut, T> = readonly [mut: M, start: number, end: number, args: T];
+export namespace MutType {
+    export const Pop: Mut.RemoveOne | Mut.Tail | Mut.ArgParam;
+    export const PopRange: Mut.RemoveRange | Mut.Tail | Mut.ArgArray;
+    export const Push: Mut.InsertOne | Mut.Tail | Mut.ArgParam;
+    export const PushRange: Mut.InsertRange | Mut.Tail | Mut.ArgArray;
+}
 
-type MutSet<T> = MutTuple<Mut.Assign, T[]>;
+type MutParam<M extends Mut, T> =
+    M extends Mut.ArgCount ? number :
+    M extends Mut.ArgParam ? T :
+    M extends Mut.ArgArray ? readonly T[] :
+    M extends Mut.ArgSplice ? readonly [number, number, ...T[]] : never;
 
-type MutReplace<T> = MutTuple<Mut.Replace, [number, T]>;
+type MutStruct<M extends Mut, T = never> = Readonly<{
+    mut: readonly [
+        mut: M,
+        index: number,
+        params: MutParam<M, T>,
+        deleteCount: number,
+        insertCount: number,
+        replaceCount: number,
+    ],
+    args: MutParam<M, T>
+}>;
 
-type MutPop = MutTuple<Mut.RemoveOne | Mut.Tail, undefined>;
+type Mutation<T> =
+    MutStruct<typeof MutType.Pop> |
+    MutStruct<typeof MutType.PopRange> |
+    MutStruct<typeof MutType.Push, T> |
+    MutStruct<typeof MutType.PushRange, T>;
 
-type MutPopRange = MutTuple<Mut.RemoveRange | Mut.Tail, number>;
+export type Compare<T> = (a: T, b: T) => number;
 
-type MutPush<T> = MutTuple<Mut.InsertOne | Mut.Tail, T>;
-
-type MutPushRange<T> = MutTuple<Mut.InsertRange | Mut.Tail, T[]>;
-
-type MutShift = MutTuple<Mut.RemoveOne | Mut.Head, undefined>;
-
-type MutShiftRange = MutTuple<Mut.RemoveRange | Mut.Head, number>;
-
-type MutUnshift<T> = MutTuple<Mut.InsertOne | Mut.Head, T>;
-
-type MutUnshiftRange<T> = MutTuple<Mut.InsertRange | Mut.Head, T[]>;
-
-type MutRemoveAt = MutTuple<Mut.Remove, number>;
-
-type MutRemoveRange = MutTuple<Mut.RemoveRange, [number, number]>;
-
-type MutInsertAt<T> = MutTuple<Mut.Insert, [number, 0, T]>;
-
-type MutInsertRange<T> = MutTuple<Mut.InsertRange, [number, 0, T[]]>;
-
-type MutReplaceRange<T> = MutTuple<Mut.Replace, [number, number, T[]]>;
-
-type MutReverse = MutTuple<Mut.Reverse, undefined>;
-
-type MutSort<T> = MutTuple<Mut.Sort, (a: T, b: T) => number>;
-
-type MutClear = MutTuple<Mut.Clear, undefined>;
-
-type Mutation<T> = MutSet<T>
-    | MutReplace<T>
-    | MutPop
-    | MutPopRange
-    | MutPush<T>
-    | MutPushRange<T>
-    | MutShift
-    | MutShiftRange
-    | MutUnshift<T>
-    | MutUnshiftRange<T>
-    | MutRemoveAt
-    | MutRemoveRange
-    | MutInsertAt<T>
-    | MutInsertRange<T>
-    | MutReplaceRange<T>
-    | MutReverse
-    | MutSort<T>
-    | MutTuple<Mut.Custom, unknown>
-    | MutClear;
-
-export interface IterableSignal<T = any> extends Signal<T[]> {
-
-    get length(): Signal<number>;
+export interface IterableSignal<T = unknown> extends Signal<T[]> {
 
     mut(): Mutation<T>;
 
-    at(index: number): Signal<T>;
+    length(): Signal<number>;
 
-    concat(...items: (T | T[])[]): IterableSignal<T>;
+    at(index: Value<number>): Signal<T>;
 
-    every(callbackFn: (element: T, index: number) => boolean): Signal<boolean>;
+    concat(...items: (Value<T> | T[] | IterableSignal<T>)[]): IterableSignal<T>;
 
-    filter(callbackFn: (element: T, index: number) => boolean): IterableSignal<T>;
+    every(callback: (element: T, index: number) => boolean): Signal<boolean>;
 
-    find(callbackFn: (element: T, index: number) => boolean): Signal<T | undefined>;
+    filter(callback: (element: T, index: number) => boolean): IterableSignal<T>;
 
-    findIndex(callbackFn: (element: T, index: number) => boolean): Signal<number>;
+    find(callback: (element: T, index: number) => boolean): Signal<T | undefined>;
 
-    findLast(callbackFn: (element: T, index: number) => boolean): Signal<T | undefined>;
+    findIndex(callback: (element: T, index: number) => boolean): Signal<number>;
 
-    findLastIndex(callbackFn: (element: T, index: number) => boolean): Signal<number>;
+    findLast(callback: (element: T, index: number) => boolean): Signal<T | undefined>;
 
-    forEach(callbackFn: (element: T, index: number) => void): void;
+    findLastIndex(callback: (element: T, index: number) => boolean): Signal<number>;
 
-    includes(searchElement: T, fromIndex?: number): Signal<boolean>;
+    forEach(callback: (element: T, index: number) => void): void;
 
-    indexOf(searchElement: T, fromIndex?: number): Signal<number>;
+    includes(searchElement: Value<T>, fromIndex?: Value<number>): Signal<boolean>;
 
-    join(separator?: string): Signal<string>;
+    indexOf(searchElement: Value<T>, fromIndex?: Value<number>): Signal<number>;
 
-    lastIndexOf(searchElement: T, fromIndex?: number): Signal<number>;
+    join(separator?: Value<string>): Signal<string>;
 
-    map<U>(callbackFn: (element: T, index: Signal<number>) => U): IterableSignal<U>;
+    lastIndexOf(searchElement: Value<T>, fromIndex?: Value<number>): Signal<number>;
 
-    reduce(callbackFn: (previousValue: T, currentValue: T, currentIndex: number) => T): Signal<T>;
+    map<U>(callback: (element: T, index: Signal<number>) => U): IterableSignal<U>;
 
-    reduce(callbackFn: (previousValue: T, currentValue: T, currentIndex: number) => T, initialValue: T): Signal<T>;
+    reduce(callback: (previousValue: T, currentValue: T, currentIndex: number) => T): Signal<T>;
 
-    reduce<U>(callbackFn: (previousValue: U, currentValue: T, currentIndex: number) => U, initialValue: U): Signal<U>;
+    reduce(callback: (previousValue: T, currentValue: T, currentIndex: number) => T, initialValue: Value<T>): Signal<T>;
 
-    reduceRight(callbackFn: (previousValue: T, currentValue: T, currentIndex: number) => T): Signal<T>;
+    reduce<U>(callback: (previousValue: U, currentValue: T, currentIndex: number) => U, initialValue: Value<U>): Signal<U>;
 
-    reduceRight(callbackFn: (previousValue: T, currentValue: T, currentIndex: number) => T, initialValue: T): Signal<T>;
+    reduceRight(callback: (previousValue: T, currentValue: T, currentIndex: number) => T): Signal<T>;
 
-    reduceRight<U>(callbackFn: (previousValue: U, currentValue: T, currentIndex: number) => U, initialValue: U): Signal<U>;
+    reduceRight(callback: (previousValue: T, currentValue: T, currentIndex: number) => T, initialValue: Value<T>): Signal<T>;
 
-    slice(start?: number, end?: number): IterableSignal<T>;
+    reduceRight<U>(callback: (previousValue: U, currentValue: T, currentIndex: number) => U, initialValue: Value<U>): Signal<U>;
 
-    some(callbackFn: (element: T, index: number) => boolean): Signal<boolean>;
+    slice(start?: Value<number>, end?: Value<number>): IterableSignal<T>;
+
+    some(callback: (element: T, index: number) => boolean): Signal<boolean>;
 }
 
-export interface ArraySignal<T = any> extends IterableSignal<T> {
+export interface ArraySignal<T = unknown> extends IterableSignal<T> {
 
     set(items: T[]): void;
 
@@ -234,7 +213,7 @@ export interface ArraySignal<T = any> extends IterableSignal<T> {
 
     splice(start: number, deleteCount?: number, ...items: T[]): void;
 
-    sort(compareFn?: (a: T, b: T) => number): void;
+    sort(compare?: Compare<T>): void;
 
     unshift(...items: T[]): void;
 }

@@ -121,10 +121,11 @@ function bundle() {
         var srcCode = data.toString();
 
         var code = removeSection(srcCode, '__EXCLUDE__');
-        code = code.replace(AllCommentsRegex, '');
         ENUMS.forEach(function (enumName) {
+            code = inlineEnum(code, enumName, zorn[enumName]);
             srcCode = inlineEnum(srcCode, enumName, zorn[enumName]);
         });
+        code = code.replace(AllCommentsRegex, '');
         code = removeEmptyLines(code);
 
         var mjs = code;
@@ -171,7 +172,6 @@ function bundle() {
 }
 
 function writeBundle(mjs, cjs, iife, js, ext, closureCode) {
-
     fs.writeFile(path.join(distDir, 'zorn.js'), js, logError);
     fs.writeFile(path.join(distDir, 'zorn.mjs'), mjs, logError);
     fs.writeFile(path.join(distDir, 'zorn.cjs'), cjs, logError);

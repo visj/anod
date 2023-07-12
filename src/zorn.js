@@ -307,9 +307,6 @@ var RecoverFn;
 /** @typedef {Send|Array<Send>} */
 var Source;
 
-/** @typedef {boolean|number|null|void} */
-var falsy;
-
 /** 
  * @interface
  */
@@ -484,11 +481,11 @@ Child.prototype._update = function (time) { };
 
 /**
  * @protected
- * @param {number} stage
  * @param {number} time
+ * @param {number} stage
  * @returns {void} 
  */
-Child.prototype._clearMayState = function (stage, time) { };
+Child.prototype._clearMayState = function (time, stage) { };
 
 /**
  * @protected
@@ -504,6 +501,12 @@ function Send() { }
  * @type {T}
  */
 Send.prototype._value;
+
+/**
+ * @protected
+ * @type {number}
+ */
+Send.prototype._age;
 
 /**
  * @protected
@@ -549,12 +552,6 @@ Send.prototype._nodeslots;
  * @extends {Send<T,U>}
  */
 function Receive() { }
-
-/**
- * @protected
- * @type {number}
- */
-Receive.prototype._age;
 
 /**
  * @protected
@@ -613,12 +610,16 @@ function root(fn) {
     var orphan = fn.length === 0;
     /** @const {Root} */
     var node = orphan ? _root : new Root();
+    /** @const {Func} */
+    var disposer = /** @type {Func} */(
+        orphan ? void 0 : function () {
+            dispose(node);
+        }
+    );
     SCOPE._root = SCOPE._owner = node;
     SCOPE._listen = false;
     try {
-        return fn(/** @type {Func} */(orphan ? void 0 : function () {
-            dispose(node);
-        }));
+        return fn(disposer);
     } finally {
         SCOPE._root = _root;
         SCOPE._owner = owner;
@@ -633,7 +634,7 @@ function root(fn) {
  * @returns {DataSignal<T>}
  */
 function data(value) {
-    return new Data(Opt.Respond, NIL, value, 0);
+    return new Data(Opt.Respond, value);
 }
 
 /**
@@ -644,7 +645,7 @@ function data(value) {
  * @returns {DataSignal<T>}
  */
 function value(value, eq) {
-    return new Data(0, NIL, value, eq);
+    return new Data(0, value, void 0, eq);
 }
 
 /**
@@ -664,7 +665,7 @@ function array(value, eq) {
  * @param {function(T,U,Func): T} fn 
  * @param {T=} seed 
  * @param {U=} args
- * @param {(function(T,T): boolean)|null=} eq
+ * @param {(function(T,T): boolean)|boolean=} eq
  * @returns {Signal<T>}
  */
 function compute(fn, seed, args, eq) {
@@ -677,7 +678,7 @@ function compute(fn, seed, args, eq) {
  * @param {function(T,U,Func): T} fn 
  * @param {T=} seed 
  * @param {U=} args
- * @param {(function(T,T): boolean)|null=} eq
+ * @param {(function(T,T): boolean)|boolean=} eq
  * @returns {Signal<T>}
  */
 function $compute(fn, seed, args, eq) {
@@ -691,7 +692,7 @@ function $compute(fn, seed, args, eq) {
  * @param {function(T,U,Func): T} fn 
  * @param {T=} seed 
  * @param {U=} args
- * @param {(function(T,T): boolean)|null=} eq
+ * @param {(function(T,T): boolean)|boolean=} eq
  * @returns {Signal<T>}
  */
 function computeWhen(src, fn, seed, args, eq) {
@@ -705,7 +706,7 @@ function computeWhen(src, fn, seed, args, eq) {
  * @param {function(T,U,Func): T} fn 
  * @param {T=} seed 
  * @param {U=} args
- * @param {(function(T,T): boolean)|null=} eq
+ * @param {(function(T,T): boolean)|boolean=} eq
  * @returns {Signal<T>}
  */
 function $computeWhen(src, fn, seed, args, eq) {
@@ -1280,15 +1281,15 @@ Reactive.prototype._recMayDispose;
  */
 Reactive.prototype._update;
 
-/* __EXCLUDE__ */
-
 /**
  * @protected
- * @param {number} stage
  * @param {number} time 
+ * @param {number} stage
  * @returns {void}
  */
-Reactive.prototype._clearMayState = NOOP;
+Reactive.prototype._clearMayState;
+
+/* __EXCLUDE__ */
 
 /**
 * 
@@ -1497,16 +1498,17 @@ function sendMayDispose(owner, children, time) {
  * @implements {Send<T,U>}
  * @implements {DataSignal<T>}
  * @param {number} opt
- * @param {U} set
  * @param {T} value
- * @param {(function(T,T): boolean)|falsy=} eq
+ * @param {U=} set
+ * @param {(function(T,T): boolean)|boolean=} eq
  */
-function Data(opt, set, value, eq) {
+function Data(opt, value, set, eq) {
+    opt |= eq === false ? Opt.Respond : ((eq === void 0) ? 0 : Opt.Compare);
     /**
      * @protected
      * @type {number}
      */
-    this._opt = opt | (eq == false ? Opt.Respond : ((eq === void 0) ? 0 : Opt.Compare));
+    this._opt = opt;
     /**
      * @protected
      * @type {T}
@@ -1514,14 +1516,24 @@ function Data(opt, set, value, eq) {
     this._value = value;
     /**
      * @protected
+     * @type {number}
+     */
+    this._age = -1;
+    /**
+     * @protected
      * @type {?Receive}
      */
     this._owner = null;
     /**
      * @protected
-     * @type {function(T,T): boolean}
+     * @type {U}
      */
-    this._eq = /** @type {function(T,T): boolean} */(eq);
+    this._set = set;
+    /**
+     * @protected
+     * @type {(function(T,T): boolean)|null}
+     */
+    this._eq = (opt & Opt.Compare) === 0 ? null : /** @type {function(T,T): boolean} */(eq);
     /**
      * @protected
      * @type {?Receive}
@@ -1542,15 +1554,9 @@ function Data(opt, set, value, eq) {
      * @type {?Array<number>}
      */
     this._nodeslots = null;
-    /**
-     * @protected
-     * @type {U}
-     */
-    this._set = set;
-    /** @const {?Own} */
-    var owner = SCOPE._owner;
-    if (owner !== null) {
-        owner._addChild(this);
+
+    if (SCOPE._owner !== null) {
+        SCOPE._owner._addChild(this);
     }
 }
 
@@ -1561,8 +1567,15 @@ function Data(opt, set, value, eq) {
  * @returns {T}
  */
 function peekData() {
-    if ((this._opt & (Opt.DisposeFlags | Opt.MayDispose) === Opt.MayDispose)) {
-        this._owner._clearMayState(STAGE, TIME);
+    /** @const {number} */
+    var opt = this._opt;
+    if (
+        (opt & Opt.DisposeFlags) === 0 && (
+            (opt & (Opt.MayUpdate | Opt.MayDispose)) !== 0 ||
+            ((opt & Opt.Update) !== 0 && this._age === TIME)
+        )
+    ) {
+        this._clearMayState(TIME, STAGE);
     }
     return this._value;
 }
@@ -1573,8 +1586,28 @@ function peekData() {
  * @returns {T}
  */
 function getData() {
-    if ((this._opt & Opt.DisposeFlags) === 0 && SCOPE._listen) {
-        logRead(this, /** @type {Receive} */(SCOPE._owner));
+    /** @const {number} */
+    var opt = this._opt;
+    log: if ((opt & Opt.DisposeFlags) === 0) {
+        /** @const {number} */
+        var time = TIME;
+        /** @const {number} */
+        var stage = STAGE;
+        if (
+            (
+                (opt & (Opt.MayUpdate | Opt.MayDispose)) !== 0 ||
+                ((opt & Opt.Update) !== 0 && this._age === time)
+            ) && stage === Stage.Computes
+
+        ) {
+            this._clearMayState(time, stage);
+            if ((this._opt & Opt.DisposeFlags) !== 0) {
+                break log;
+            }
+        }
+        if (SCOPE._listen) {
+            logRead(this, /** @type {Receive} */(SCOPE._owner));
+        }
     }
     return this._value;
 }
@@ -1590,7 +1623,7 @@ extendReactive(Data, Reactive, [], peekData, getData);
 function setData(value) {
     /** @const {number} */
     var opt = this._opt;
-    set: if ((opt & Opt.DisposeFlags) === 0) {
+    if ((opt & Opt.DisposeFlags) === 0) {
         if (
             (opt & Opt.Respond) !== 0 || (
                 ((opt & Opt.Compare) === 0) ?
@@ -1598,30 +1631,29 @@ function setData(value) {
                     !this._eq(value, this._value)
             )
         ) {
-            /** @const {number} */
+            /** @type {number} */
             var time = TIME;
             /** @const {number} */
             var stage = STAGE;
-            if (stage === Stage.Computes && (opt & Opt.MayDispose) !== 0) {
-                if ((opt & Opt.MayCleared) !== 0) {
-                    // cyclical Ownship ??
-                    throw new Error();
-                }
-                this._opt |= Opt.MayCleared;
-                this._owner._clearMayState(stage, time);
-                this._opt &= ~(Opt.MayFlags);
+            if ((opt & Opt.MayDispose) !== 0 && stage === Stage.Computes) {
+                this._clearMayState(time, stage);
                 if ((this._opt & Opt.DisposeFlags) !== 0) {
-                    break set;
+                    return;
                 }
             }
-            if (this._set !== NIL && value !== this._set) {
+            // schedule data for update next tick
+            time++;
+            if (this._age === time && value !== this._set) {
                 panic("conflicting values");
             }
+            this._age = time;
             this._set = value;
             if (stage === Stage.Idle) {
                 reset();
-                this._update(TIME + 1);
-                exec();
+                this._update(time);
+                if (COMPUTES._count !== 0 || EFFECTS._count !== 0) {
+                    exec();
+                }
             } else {
                 this._opt |= Opt.Update;
                 CHANGES._add(this);
@@ -1657,6 +1689,7 @@ Data.prototype._dispose = function (time) {
  * @returns {void}
  */
 Data.prototype._recDispose = function (time) {
+    this._age = time;
     this._opt = Opt.Dispose;
 };
 
@@ -1690,6 +1723,28 @@ Data.prototype._update = function (time) {
 };
 
 /**
+ * @protected
+ * @this {Data<T>}
+ * @param {number} time 
+ * @param {number} stage
+ * @returns {void} 
+ */
+Data.prototype._clearMayState = function (time, stage) {
+    /** @const {Own} */
+    var owner = this._owner;
+    if ((owner._opt & (Opt.MayUpdate | Opt.MayDispose)) !== 0) {
+        if ((this._opt & Opt.MayCleared) !== 0) {
+            // cyclical Ownship ??
+            throw new Error();
+        }
+        this._opt |= Opt.MayCleared;
+        owner._clearMayState(time, stage);
+    }
+    this._opt &= ~Opt.MayFlags;
+
+};
+
+/**
  * @struct
  * @template T,U
  * @protected
@@ -1703,10 +1758,10 @@ Data.prototype._update = function (time) {
  * @param {number} opt
  * @param {U=} args
  * @param {Source=} src
- * @param {(function(T,T): boolean)|falsy=} eq
+ * @param {(function(T,T): boolean)|boolean=} eq
  */
 function Computation(fn, value, opt, args, src, eq) {
-    Data.call(this, opt, fn.length < 3 ? fn : evalDispose(this, fn), value, eq);
+    Data.call(this, opt, value, fn.length < 3 ? fn : evalDispose(this, fn), eq);
     /**
      * @protected
      * @type {?Array<Child>}
@@ -1722,11 +1777,6 @@ function Computation(fn, value, opt, args, src, eq) {
      * @type {?Array<RecoverFn>}
      */
     this._recovers = null;
-    /**
-     * @protected
-     * @type {number}
-     */
-    this._age = 0;
     /**
      * @protected
      * @type {?Send}
@@ -1769,7 +1819,7 @@ function Computation(fn, value, opt, args, src, eq) {
  */
 function peekComputation() {
     if ((this._opt & Opt.DisposeFlags) === 0 && (this._opt & (Opt.Update | Opt.MayDispose | Opt.MayUpdate)) !== 0) {
-        this._clearMayState(STAGE, TIME);
+        this._clearMayState(TIME, STAGE);
     }
     return this._value;
 }
@@ -1786,7 +1836,7 @@ function getComputation() {
     var stage = STAGE;
     if ((opt & Opt.DisposeFlags) === 0 && stage !== Stage.Idle) {
         if ((opt & (Opt.Update | Opt.MayUpdate | Opt.MayDispose)) !== 0) {
-            this._clearMayState(stage, TIME);
+            this._clearMayState(TIME, stage);
         }
         if ((this._opt & Opt.DisposeFlags) === 0 && SCOPE._listen) {
             logRead(this, /** @type {Receive} */(SCOPE._owner));
@@ -2065,7 +2115,7 @@ Computation.prototype._recUpdate = function (time) {
     /** @const {number} */
     var opt = this._opt;
     this._age = time;
-    this._opt |= Opt.Update;
+    this._opt |= (Opt.Update | Opt.MayUpdate);
     if ((opt & Opt.Own) !== 0) {
         sendDispose(this._children, time);
     }
@@ -2105,18 +2155,18 @@ Computation.prototype._recMayUpdate = function (time) {
  * @override
  * @throws {Error}
  * @this {Computation<T>}
- * @param {number} stage
  * @param {number} time
+ * @param {number} stage
  * @returns {void} 
  */
-Computation.prototype._clearMayState = function (stage, time) {
+Computation.prototype._clearMayState = function (time, stage) {
     if ((this._opt & Opt.DisposeFlags) === 0) {
         if ((this._opt & Opt.MayCleared) !== 0) {
             panic("cyclic dependency");
         }
         this._opt |= Opt.MayCleared;
         if ((this._opt & Opt.MayDispose) !== 0) {
-            this._owner._clearMayState(stage, time);
+            this._owner._clearMayState(time, stage);
             this._opt &= ~Opt.MayDispose;
         }
         if ((this._opt & (Opt.DisposeFlags | Opt.MayUpdate)) === Opt.MayUpdate) {
@@ -2124,7 +2174,7 @@ Computation.prototype._clearMayState = function (stage, time) {
                 /** @type {?Send} */
                 var source1 = this._source1;
                 if (source1 !== null && (source1._opt & Opt.MayUpdate) !== 0) {
-                    source1._clearMayState(stage, time);
+                    source1._clearMayState(time, stage);
                     if (this._age === time) {
                         break check;
                     }
@@ -2138,7 +2188,7 @@ Computation.prototype._clearMayState = function (stage, time) {
                         for (var /** number */ i = 0; i < ln; i++) {
                             source1 = sources[i];
                             if ((source1._opt & Opt.MayUpdate) !== 0) {
-                                source1._clearMayState(stage, time);
+                                source1._clearMayState(time, stage);
                                 if (this._age === time) {
                                     break check;
                                 }
@@ -2220,18 +2270,7 @@ export var MutIndex = {
  * @returns {number}
  */
 function index(i, length, empty) {
-    if (i == null) {
-        i = empty;
-    } else if (i < 0) {
-        if (i < -length) {
-            i = 0;
-        } else {
-            i += length;
-        }
-    } else if (i > length) {
-        i = length;
-    }
-    return i;
+    return i == null ? empty : i < 0 ? i < -length ? 0 : length + i : i > length ? length : i;
 }
 
 /* __EXCLUDE__ */
@@ -2346,7 +2385,7 @@ Collection.prototype._args;
  */
 Collection.prototype.mut = function () {
     if ((this._opt & (Opt.DisposeFlags)) === 0 && (this._opt & (Opt.Update | Opt.MayDispose | Opt.MayUpdate)) !== 0) {
-        this._clearMayState(STAGE, TIME);
+        this._clearMayState(TIME, STAGE);
     }
     return this._mut;
 };
@@ -2731,30 +2770,24 @@ Collection.prototype.some = function (callbackFn) {
  * @struct
  * @template T
  * @constructor
- * @extends {Data<T,nil>}
+ * @extends {Data<Array<T>,Array<T|Array<T>|number|void>>}
  * @implements {Indexed}
  * @implements {ArraySignal<T>}
  * @param {Array<T>=} value
- * @param {(function(Array<T>,Array<T>): boolean)|falsy=} eq
+ * @param {(function(Array<T>,Array<T>): boolean)|boolean=} eq
  */
 function DataArray(value, eq) {
-    value = value || [];
-    Data.call(this, Opt.Respond, NIL, value, eq);
+    Data.call(this, Opt.Respond, value || [], [0, 0, 0, 0], eq);
     /**
      * @protected
      * @type {Array}
      */
-    this._mut = [Mut.ReplaceRange, 0, value.length - 1, 0];
+    this._mut = [Mut.ReplaceRange, 0, this._value.length - 1, 0];
     /**
      * @protected
      * @type {?Computation<number>}
      */
     this._length = null;
-    /**
-     * @protected
-     * @type {Array}
-     */
-    this._smut = [];
 }
 
 extendCollection(DataArray, [Data], peekData, getData);
@@ -2938,15 +2971,15 @@ DataArray.prototype.some;
  * @returns {void}
  */
 function mutate(node, mut, start, end, args) {
-    if (node._set !== NIL) {
+    if (node._age === TIME + 1) {
         panic("conflicting mutation");
     }
-    var smut = node._smut;
-    smut[MutIndex.Type] = mut;
-    smut[MutIndex.Start] = start;
-    smut[MutIndex.End] = end;
-    smut[MutIndex.Args] = args;
-    setData.call(node, MUT);
+    var set = node._set;
+    set[MutIndex.Type] = mut;
+    set[MutIndex.Start] = start;
+    set[MutIndex.End] = end;
+    set[MutIndex.Args] = args;
+    setData.call(node, set);
 }
 
 /**
@@ -3044,14 +3077,13 @@ DataArray.prototype._update = function (time) {
     /** @const {Array} */
     var mut = this._mut;
     /** @const {Array} */
-    var smut = this._smut;
-    if (this._value !== smut[MutIndex.Args]) {
-        applyMutation(this._value, smut);
+    var set = this._set;
+    if (this._value !== set[MutIndex.Args]) {
+        applyMutation(this._value, set);
     }
     mut[MutIndex.Args] = 0;
-    this._smut = mut;
-    this._mut = smut;
-    this._set = NIL;
+    this._set = mut;
+    this._mut = set;
     this._opt &= ~(Opt.Update | Opt.MayFlags);
     if ((this._opt & Opt.Send) !== 0) {
         sendUpdate(this, time);
@@ -3172,80 +3204,79 @@ DataArray.prototype.splice = function (start, deleteCount, items) {
         } else if (ln < 2 || deleteCount >= length - start) {
             deleteCount = length - start;
         }
-        if (insertCount === 0 && deleteCount === 0) {
-            return;
-        }
-        if (deleteCount !== length || insertCount !== 0) {
-            if (insertCount > 0 && deleteCount > 0) {
-                if (insertCount > 1 && deleteCount > 1) {
-                    mut |= Mut.ReplaceRange;
-                } else {
-                    mut |= Mut.ReplaceOne;
-                }
-                /** @const {number} */
-                var diff = insertCount - deleteCount;
-                if (diff >= 1) {
-                    if (diff > 1) {
+        if (insertCount !== 0 || deleteCount !== 0) {
+            if (deleteCount !== length || insertCount !== 0) {
+                if (insertCount > 0 && deleteCount > 0) {
+                    if (insertCount > 1 && deleteCount > 1) {
+                        mut |= Mut.ReplaceRange;
+                    } else {
+                        mut |= Mut.ReplaceOne;
+                    }
+                    /** @const {number} */
+                    var diff = insertCount - deleteCount;
+                    if (diff >= 1) {
+                        if (diff > 1) {
+                            mut |= Mut.InsertRange;
+                        } else {
+                            mut |= Mut.InsertOne;
+                        }
+                    } else if (diff <= -1) {
+                        if (diff < -1) {
+                            mut |= Mut.RemoveRange;
+                        } else {
+                            mut |= Mut.RemoveOne;
+                        }
+                    }
+                } else if (insertCount > 0) {
+                    if (insertCount > 1) {
                         mut |= Mut.InsertRange;
                     } else {
                         mut |= Mut.InsertOne;
                     }
-                } else if (diff <= -1) {
-                    if (diff < -1) {
+                } else {
+                    if (deleteCount > 1) {
                         mut |= Mut.RemoveRange;
                     } else {
                         mut |= Mut.RemoveOne;
                     }
                 }
-            } else if (insertCount > 0) {
-                if (insertCount > 1) {
-                    mut |= Mut.InsertRange;
+                if (start === 0) {
+                    mut |= Mut.Head;
+                } else if (start === length || deleteCount >= (length - start)) {
+                    mut |= Mut.Tail;
+                }
+                if (
+                    mut === Mut.ReplaceOne || (
+                        (mut & (Mut.ReplaceOne | Mut.Range)) === 0 &&
+                        ((mut & Mut.Sides) !== 0)
+                    )
+                ) {
+                    if ((mut & (Mut.ReplaceOne | Mut.InsertOne)) !== 0) {
+                        params = items;
+                    }
                 } else {
-                    mut |= Mut.InsertOne;
-                }
-            } else {
-                if (deleteCount > 1) {
-                    mut |= Mut.RemoveRange;
-                } else {
-                    mut |= Mut.RemoveOne;
-                }
-            }
-            if (start === 0) {
-                mut |= Mut.Head;
-            } else if (start === length || deleteCount >= (length - start)) {
-                mut |= Mut.Tail;
-            }
-            if (
-                mut === Mut.ReplaceOne || (
-                    (mut & (Mut.ReplaceOne | Mut.Range)) === 0 &&
-                    ((mut & Mut.Sides) !== 0)
-                )
-            ) {
-                if ((mut & (Mut.ReplaceOne | Mut.InsertOne)) !== 0) {
-                    params = items;
-                }
-            } else {
-                /** @type {number} */
-                var i = 0;
-                /** @type {number} */
-                var j = (
-                    mut === (Mut.InsertRange | Mut.Tail) ||
-                    mut === (Mut.InsertRange | Mut.Head) ||
-                    mut === Mut.ReplaceRange
-                ) ? 2 : 0;
-                params = new Array(ln - j);
-                for (; j < ln; i++, j++) {
-                    params[i] = args[j];
+                    /** @type {number} */
+                    var i = 0;
+                    /** @type {number} */
+                    var j = (
+                        mut === (Mut.InsertRange | Mut.Tail) ||
+                        mut === (Mut.InsertRange | Mut.Head) ||
+                        mut === Mut.ReplaceRange
+                    ) ? 2 : 0;
+                    params = new Array(ln - j);
+                    for (; j < ln; i++, j++) {
+                        params[i] = args[j];
+                    }
                 }
             }
+            mutate(
+                this,
+                mut,
+                start,
+                start + (deleteCount > insertCount ? deleteCount : insertCount) - 1,
+                params
+            );
         }
-        mutate(
-            this,
-            mut,
-            start,
-            start + (deleteCount > insertCount ? deleteCount : insertCount) - 1,
-            params
-        );
     }
 };
 
