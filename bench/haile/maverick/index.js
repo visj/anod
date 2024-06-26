@@ -1,41 +1,22 @@
-function zero() {
-    return 0;
-  }
-  
-  /**
-  * 
-  * @param {string[]} def 
-  * @param {function(): any} fallback 
-  * @returns {function(): any}
-  * @returns 
-  */
-  function tryDefine(def, fallback) {
-    try {
-        return new Function(...def);
-    } catch (_) {
-        return fallback;
-    }
-  }
-  
-  var getHeapUsage = tryDefine(['%CollectHeapUsage()'], zero);
-  var collectGarbage = tryDefine(['%CollectGarbage(null)'], zero);
-  var optimizeFunctionOnNextCall = tryDefine(['fn', '%OptimizeFunctionOnNextCall(fn)'], zero);
-  
-  var now = typeof process === 'undefined' ? browserNow : nodeNow;
-  
-  var COUNT = 1e6;
-  
-  var lines = [];
-  
-  function log(msg) {
+import { root, signal, effect, tick } from "@maverick-js/signals";
+
+function now() {
+    return performance.now();
+}
+
+var COUNT = 1e6;
+
+var lines = [];
+
+function log(msg) {
     lines.push(msg);
-  }
-  
-  main();
-  
-  console.log(lines.join("\n"));
-  
-  function main() {
+}
+
+main();
+
+console.log(lines.join("\n"));
+
+function main() {
     var createTotal = 0;
     createTotal += bench(createDataSignals, COUNT, COUNT);
     createTotal += bench(createComputations0to1, COUNT, 0);
@@ -43,7 +24,6 @@ function zero() {
     createTotal += bench(createComputations2to1, COUNT / 2, COUNT);
     createTotal += bench(createComputations4to1, COUNT / 4, COUNT);
     createTotal += bench(createComputations1000to1, COUNT / 1000, COUNT);
-    //total += bench1(createComputations8, COUNT, 8 * COUNT);
     createTotal += bench(createComputations1to2, COUNT, COUNT / 2);
     createTotal += bench(createComputations1to4, COUNT, COUNT / 4);
     createTotal += bench(createComputations1to8, COUNT, COUNT / 8);
@@ -61,80 +41,72 @@ function zero() {
     log(`create total: ${createTotal.toFixed(0)}`);
     log(`update total: ${updateTotal.toFixed(0)}`);
     log(`total: ${(createTotal + updateTotal).toFixed(0)}`);
-  }
-  
-  function bench(fn, count, scount) {
+}
+
+function bench(fn, count, scount) {
     var time = run(fn, count, scount);
     printRes(fn.name, { ms: time, mem: 0 });
     return time;
-  }
-  
-  function printRes(name, res) {
+}
+
+function printRes(name, res) {
     log(`${name.padEnd(30)} ${res.ms.toFixed(1).padStart(5)} ${(res.mem / 1000).toFixed(0).padStart(10)}`);
-  }
-  
-  function run(fn, n, scount) {
+}
+
+function run(fn, n, scount) {
     // prep n * arity sources
     var start,
         end;
-  
-    maverick.root(function () {
+
+    root(function (dispose) {
         // run 3 times to warm up 
         var sources = createDataSignals(scount, []);
         fn(n / 100, sources);
         sources = createDataSignals(scount, []);
         fn(n / 100, sources);
         sources = createDataSignals(scount, []);
-        optimizeFunctionOnNextCall(fn);
         fn(n / 100, sources);
         sources = createDataSignals(scount, []);
         for (var i = 0; i < scount; i++) {
             sources[i]();
             sources[i]();
-            optimizeFunctionOnNextCall(sources[i]);
             sources[i]();
         }
-  
-        // start GC clean
-        collectGarbage(null);
-  
-        start = now();
-  
-        fn(n, sources);
-  
-        // end GC clean
-        sources = null;
-        collectGarbage(null);
-  
-        end = now();
+        dispose();
     });
-  
+    root(function (dispose) {
+        var sources = createDataSignals(scount, []);
+        start = now();
+        fn(n, sources);
+        end = now();
+        sources = null;
+        dispose();
+    });
     return end - start;
-  }
-  
-  function createDataSignals(n, sources) {
+}
+
+function createDataSignals(n, sources) {
     for (var i = 0; i < n; i++) {
-        sources[i] = maverick.signal(i);
+        sources[i] = signal(i);
     }
     return sources;
-  }
-  
-  function createComputations0to1(n, sources) {
+}
+
+function createComputations0to1(n, sources) {
     for (var i = 0; i < n; i++) {
         createComputation0(i);
     }
-  }
-  
-  function createComputations1to1000(n, sources) {
+}
+
+function createComputations1to1000(n, sources) {
     for (var i = 0; i < n / 1000; i++) {
         for (var j = 0; j < 1000; j++) {
             createComputation1(sources[i]);
         }
-        //sources[i] = null;
     }
-  }
-  
-  function createComputations1to8(n, sources) {
+}
+
+function createComputations1to8(n, sources) {
     for (var i = 0; i < n / 8; i++) {
         createComputation1(sources[i]);
         createComputation1(sources[i]);
@@ -144,47 +116,41 @@ function zero() {
         createComputation1(sources[i]);
         createComputation1(sources[i]);
         createComputation1(sources[i]);
-        //sources[i] = null;
     }
-  }
-  
-  function createComputations1to4(n, sources) {
+}
+
+function createComputations1to4(n, sources) {
     for (var i = 0; i < n / 4; i++) {
         createComputation1(sources[i]);
         createComputation1(sources[i]);
         createComputation1(sources[i]);
         createComputation1(sources[i]);
-        //sources[i] = null;
     }
-  }
-  
-  function createComputations1to2(n, sources) {
+}
+
+function createComputations1to2(n, sources) {
     for (var i = 0; i < n / 2; i++) {
         createComputation1(sources[i]);
         createComputation1(sources[i]);
-        //sources[i] = null;
     }
-  }
-  
-  function createComputations1to1(n, sources) {
+}
+
+function createComputations1to1(n, sources) {
     for (var i = 0; i < n; i++) {
         createComputation1(sources[i]);
-        //sources[i] = null;
     }
-  }
-  
-  function createComputations2to1(n, sources) {
+}
+
+function createComputations2to1(n, sources) {
     for (var i = 0; i < n; i++) {
         createComputation2(
             sources[i * 2],
             sources[i * 2 + 1]
         );
-        //sources[i * 2] = null;
-        //sources[i * 2 + 1] = null;
     }
-  }
-  
-  function createComputations4to1(n, sources) {
+}
+
+function createComputations4to1(n, sources) {
     for (var i = 0; i < n; i++) {
         createComputation4(
             sources[i * 4],
@@ -192,174 +158,116 @@ function zero() {
             sources[i * 4 + 2],
             sources[i * 4 + 3]
         );
-        //sources[i * 4] = null;
-        //sources[i * 4 + 1] = null;
-        //sources[i * 4 + 2] = null;
-        //sources[i * 4 + 3] = null;
     }
-  }
-  
-  function createComputations8(n, sources) {
-    for (var i = 0; i < n; i++) {
-        createComputation8(
-            sources[i * 8],
-            sources[i * 8 + 1],
-            sources[i * 8 + 2],
-            sources[i * 8 + 3],
-            sources[i * 8 + 4],
-            sources[i * 8 + 5],
-            sources[i * 8 + 6],
-            sources[i * 8 + 7]
-        );
-        sources[i * 8] = null;
-        sources[i * 8 + 1] = null;
-        sources[i * 8 + 2] = null;
-        sources[i * 8 + 3] = null;
-        sources[i * 8 + 4] = null;
-        sources[i * 8 + 5] = null;
-        sources[i * 8 + 6] = null;
-        sources[i * 8 + 7] = null;
-    }
-  }
-  
-  // only create n / 100 computations, as otherwise takes too long
-  function createComputations1000to1(n, sources) {
+}
+
+function createComputations1000to1(n, sources) {
     for (var i = 0; i < n; i++) {
         createComputation1000(sources, i * 1000);
     }
-  }
-  
-  function createComputation0(i) {
-    maverick.effect(function () { return i; });
-  }
-  
-  function createComputation1(s1) {
-    maverick.effect(function () { return s1(); });
-  }
-  
-  function createComputation2(s1, s2) {
-    maverick.effect(function () { return s1() + s2(); });
-  }
-  
-  function createComputation4(s1, s2, s3, s4) {
-    maverick.effect(function () { return s1() + s2() + s3() + s4(); });
-  }
-  
-  function createComputation8(s1, s2, s3, s4, s5, s6, s7, s8) {
-    maverick.effect(function () { return s1() + s2() + s3() + s4() + s5() + s6() + s7() + s8(); });
-  }
-  
-  function createComputation1000(ss, offset) {
-    maverick.effect(function () {
+}
+
+function createComputation0(i) {
+    effect(function () { return i; });
+}
+
+function createComputation1(s1) {
+    effect(function () { return s1(); });
+}
+
+function createComputation2(s1, s2) {
+    effect(function () { return s1() + s2(); });
+}
+
+function createComputation4(s1, s2, s3, s4) {
+    effect(function () { return s1() + s2() + s3() + s4(); });
+}
+
+function createComputation1000(ss, offset) {
+    effect(function () {
         var sum = 0;
         for (var i = 0; i < 1000; i++) {
             sum += ss[offset + i]();
         }
         return sum;
     });
-  }
-  
-  function updateComputations1to1(n, sources) {
-    var s1 = sources[0],
-        c = maverick.effect(function () { return s1(); });
+}
+
+function updateComputations1to1(n, sources) {
+    var s1 = sources[0];
+    effect(function () { return s1(); });
     for (var i = 0; i < n; i++) {
-        s1.set(s1() + 1);
-        maverick.tick();
+        s1.set(i);
     }
-  }
-  
-  function updateComputations2to1(n, sources) {
+    tick();
+}
+
+function updateComputations2to1(n, sources) {
     var s1 = sources[0],
-        s2 = sources[1],
-        c = maverick.effect(function () { return s1() + s2(); });
+        s2 = sources[1];
+    effect(function () { return s1() + s2(); });
     for (var i = 0; i < n; i++) {
-        s1.set(s1() + 1);
-        maverick.tick();
+        s1.set(i);
     }
-  }
-  
-  function updateComputations4to1(n, sources) {
+    tick();
+}
+
+function updateComputations4to1(n, sources) {
     var s1 = sources[0],
         s2 = sources[1],
         s3 = sources[2],
-        s4 = sources[3],
-        c = maverick.effect(function () { return s1() + s2() + s3() + s4(); });
+        s4 = sources[3];
+    effect(function () { return s1() + s2() + s3() + s4(); });
     for (var i = 0; i < n; i++) {
-        s1.set(s1() + 1);
-        maverick.tick();
+        s1.set(i);
     }
-  }
-  
-  function updateComputations1000to1(n, sources) {
-    var s1 = sources[0],
-        c = maverick.effect(function () {
-            var sum = 0;
-            for (var i = 0; i < 1000; i++) {
-                sum += sources[i]();
-            }
-            return sum;
-        });
-    for (var i = 0; i < n; i++) {
-        s1.set(s1() + 1);
-        maverick.tick();
-    }
-  }
-  
-  function updateComputations1to2(n, sources) {
-    var s1 = sources[0],
-        c1 = maverick.effect(function () { return s1(); }),
-        c2 = maverick.effect(function () { return s1(); });
-    for (var i = 0; i < n / 2; i++) {
-        s1.set(s1() + 1);
-        maverick.tick();
-    }
-  }
-  
-  function updateComputations1to4(n, sources) {
-    var s1 = sources[0],
-        c1 = maverick.effect(function () { return s1(); }),
-        c2 = maverick.effect(function () { return s1(); }),
-        c3 = maverick.effect(function () { return s1(); }),
-        c4 = maverick.effect(function () { return s1(); });
-    for (var i = 0; i < n / 4; i++) {
-        s1.set(s1() + 1);
-        maverick.tick();
-    }
-  }
-  
-  function updateComputations1to1000(n, sources) {
+    tick();
+}
+
+function updateComputations1000to1(n, sources) {
     var s1 = sources[0];
-    var calls = 0;
-    for (var i = 0; i < 1000; i++) {
-        maverick.effect(function () { 
-            calls++;
-            return s1(); 
-        });
-    }
-    calls = 0;
-    var ln = n / 1000;
-    for (var i = 0; i < ln; i++) {
-        s1.set(s1() + 1);
-        maverick.tick();
-    }
-    if (calls !== ln * 1000) {
-        throw new Error('calls !== ln: ' + calls + ' !== ' + ln);
-    }
-  }
-  
-  function browserNow() {
-    return performance.now();
-  }
-  
-  function nodeNow() {
-    var hrt = process.hrtime();
-    return hrt[0] * 1000 + hrt[1] / 1e6;
-  }
-  
-  function repeat(n, val) {
-    var arr = [];
+    effect(function () {
+        var sum = 0;
+        for (var i = 0; i < 1000; i++) {
+            sum += sources[i]();
+        }
+        return sum;
+    });
     for (var i = 0; i < n; i++) {
-        arr[i] = val;
+        s1.set(i);
     }
-    return arr;
-  }
+    tick();
+}
+
+function updateComputations1to2(n, sources) {
+    var s1 = sources[0];
+    effect(function () { return s1(); });
+    effect(function () { return s1(); });
+    for (var i = 0; i < n / 2; i++) {
+        s1.set(i);
+    }
+    tick();
+}
+
+function updateComputations1to4(n, sources) {
+    var s1 = sources[0];
+    effect(function () { return s1(); });
+    effect(function () { return s1(); });
+    effect(function () { return s1(); });
+    effect(function () { return s1(); });
+    for (var i = 0; i < n / 4; i++) {
+        s1.set(i);
+    }
+    tick();
+}
+
+function updateComputations1to1000(n, sources) {
+    var s1 = sources[0];
+    for (var i = 0; i < 1000; i++) {
+        effect(function () { return s1(); });
+    }
+    for (var i = 0; i < n / 1000; i++) {
+        s1.set(i);
+    }
+    tick();
+}

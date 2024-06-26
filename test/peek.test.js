@@ -1,11 +1,11 @@
-import { test, root, effect, compute, peek, value } from './helper/zorn.js';
+import { test, root, compute, sample, value } from './helper/zorn.js';
 
 describe("peek(...)", function () {
 
     it("returns the value of a data", function () {
         root(function() {
             var d = value(1);
-            test.equals(d.peek , 1);
+            test.equals(d.peek() , 1);
         });
     });
 
@@ -16,21 +16,21 @@ describe("peek(...)", function () {
             var c = value(3);
             var d = 0;
             
-            effect(function () {
+            compute(function () {
                 d++; 
-                a.val;
-                b.peek;
-                c.val;
+                a.val();
+                b.peek();
+                c.val();
             });
 
             test.equals(d , 1);
 
-            b.set(4);
+            b.update(4);
 
             test.equals(d , 1);
 
-            a.set(5);
-            c.set(6);
+            a.update(5);
+            c.update(6);
 
             test.equals(d , 3);
         });
@@ -43,20 +43,20 @@ describe("peek(...)", function () {
             var c = value(3);
             var d = 0;
             
-            effect(function () {
+            compute(function () {
                 d++; 
-                a.val;
-                peek(function() {
-                    a.val; b.val;
+                a.val();
+                sample(function() {
+                    a.val(); b.val();
                 });
-                c.val;
+                c.val();
             });
 
             test.equals(d , 1);
-            b.set(4);
+            b.update(4);
 
             test.equals(d , 1);
-            a.set(5);
+            a.update(5);
 
             test.equals(d , 2);
         });

@@ -1,4 +1,4 @@
-import { signal, effect } from "@preact/signals-core";
+import { createSignal, createMemo, createRoot } from "solid-js";
 
 function now() {
     return performance.now();
@@ -57,7 +57,7 @@ function run(fn, n, scount) {
     // prep n * arity sources
     var start,
         end;
-    function warmup() {
+    createRoot(function (dispose) {
         // run 3 times to warm up 
         var sources = createDataSignals(scount, []);
         fn(n / 100, sources);
@@ -67,23 +67,26 @@ function run(fn, n, scount) {
         fn(n / 100, sources);
         sources = createDataSignals(scount, []);
         for (var i = 0; i < scount; i++) {
-            sources[i].value;
-            sources[i].value;
-            sources[i].value;
+            sources[i][0]();
+            sources[i][0]();
+            sources[i][0]();
         }
-    }
-    warmup();
-    var sources = createDataSignals(scount, []);
-    start = now();
-    fn(n, sources);
-    end = now();
-    sources = null;
+        dispose();
+    });
+    createRoot(function(dispose) {
+        var sources = createDataSignals(scount, []);
+        start = now();
+        fn(n, sources);
+        end = now();
+        sources = null;
+        dispose();
+    });
     return end - start;
 }
 
 function createDataSignals(n, sources) {
     for (var i = 0; i < n; i++) {
-        sources[i] = signal(i);
+        sources[i] = createSignal(i);
     }
     return sources;
 }
@@ -157,7 +160,6 @@ function createComputations4to1(n, sources) {
     }
 }
 
-// only create n / 100 computations, as otherwise takes too long
 function createComputations1000to1(n, sources) {
     for (var i = 0; i < n; i++) {
         createComputation1000(sources, i * 1000);
@@ -165,28 +167,26 @@ function createComputations1000to1(n, sources) {
 }
 
 function createComputation0(i) {
-    effect(function () { return i; });
+    createMemo(function () { return i; });
 }
 
 function createComputation1(s1) {
-    effect(function () {
-        return s1.value;
-    });
+    createMemo(function () { return s1[0](); });
 }
 
 function createComputation2(s1, s2) {
-    effect(function () { return s1.value + s2.value; });
+    createMemo(function () { return s1[0]() + s2[0](); });
 }
 
 function createComputation4(s1, s2, s3, s4) {
-    effect(function () { return s1.value + s2.value + s3.value + s4.value; });
+    createMemo(function () { return s1[0]() + s2[0]() + s3[0]() + s4[0](); });
 }
 
 function createComputation1000(ss, offset) {
-    effect(function () {
+    createMemo(function () {
         var sum = 0;
         for (var i = 0; i < 1000; i++) {
-            sum += ss[offset + i].value;
+            sum += ss[offset + i][0]();
         }
         return sum;
     });
@@ -194,18 +194,18 @@ function createComputation1000(ss, offset) {
 
 function updateComputations1to1(n, sources) {
     var s1 = sources[0];
-    effect(function () { return s1.value; });
+    createMemo(function () { return s1[0](); });
     for (var i = 0; i < n; i++) {
-        s1.value = i;
+        s1[1](i);
     }
 }
 
 function updateComputations2to1(n, sources) {
     var s1 = sources[0],
         s2 = sources[1];
-    effect(function () { return s1.value + s2.value; });
+    createMemo(function () { return s1[0]() + s2[0](); });
     for (var i = 0; i < n; i++) {
-        s1.value = i;
+        s1[1](i);
     }
 }
 
@@ -214,52 +214,52 @@ function updateComputations4to1(n, sources) {
         s2 = sources[1],
         s3 = sources[2],
         s4 = sources[3];
-    effect(function () { return s1.value + s2.value + s3.value + s4.value; });
+    createMemo(function () { return s1[0]() + s2[0]() + s3[0]() + s4[0](); });
     for (var i = 0; i < n; i++) {
-        s1.value = i;
+        s1[1](i);
     }
 }
 
 function updateComputations1000to1(n, sources) {
     var s1 = sources[0];
-    effect(function () {
+    createMemo(function () {
         var sum = 0;
         for (var i = 0; i < 1000; i++) {
-            sum += sources[i].value;
+            sum += sources[i][0]();
         }
         return sum;
     });
     for (var i = 0; i < n; i++) {
-        s1.value = i;
+        s1[1](i);
     }
 }
 
 function updateComputations1to2(n, sources) {
     var s1 = sources[0];
-    effect(function () { return s1.value; });
-    effect(function () { return s1.value; });
+    createMemo(function () { return s1[0](); });
+    createMemo(function () { return s1[0](); });
     for (var i = 0; i < n / 2; i++) {
-        s1.value = i;
+        s1[1](i);
     }
 }
 
 function updateComputations1to4(n, sources) {
     var s1 = sources[0];
-    effect(function () { return s1.value; });
-    effect(function () { return s1.value; });
-    effect(function () { return s1.value; });
-    effect(function () { return s1.value; });
+    createMemo(function () { return s1[0](); });
+    createMemo(function () { return s1[0](); });
+    createMemo(function () { return s1[0](); });
+    createMemo(function () { return s1[0](); });
     for (var i = 0; i < n / 4; i++) {
-        s1.value = i;
+        s1[1](i);
     }
 }
 
 function updateComputations1to1000(n, sources) {
     var s1 = sources[0];
     for (var i = 0; i < 1000; i++) {
-        effect(function () { return s1.value; });
+        createMemo(function () { return s1[0](); });
     }
     for (var i = 0; i < n / 1000; i++) {
-        s1.value = i;
+        s1[1](i);
     }
 }

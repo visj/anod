@@ -1,29 +1,8 @@
-function zero() {
-    return 0;
+import { root, value, compute } from "../../../src/core.js";
+
+function now() {
+    return performance.now();
 }
-
-/**
- * 
- * @param {string[]} def 
- * @param {function(): any} fallback 
- * @returns {function(): any}
- * @returns 
- */
-function tryDefine(def, fallback) {
-    try {
-        return new Function(...def);
-    } catch (_) {
-        return fallback;
-    }
-}
-
-var getHeapUsage = tryDefine(['%CollectHeapUsage()'], zero);
-var collectGarbage = tryDefine(['%CollectGarbage(null)'], zero);
-var optimizeFunctionOnNextCall = tryDefine(['fn', '%OptimizeFunctionOnNextCall(fn)'], zero);
-
-var zorn = Z;
-
-var now = typeof process === 'undefined' ? browserNow : nodeNow;
 
 var COUNT = 1e6;
 
@@ -45,7 +24,6 @@ function main() {
     createTotal += bench(createComputations2to1, COUNT / 2, COUNT);
     createTotal += bench(createComputations4to1, COUNT / 4, COUNT);
     createTotal += bench(createComputations1000to1, COUNT / 1000, COUNT);
-    //total += bench1(createComputations8, COUNT, 8 * COUNT);
     createTotal += bench(createComputations1to2, COUNT, COUNT / 2);
     createTotal += bench(createComputations1to4, COUNT, COUNT / 4);
     createTotal += bench(createComputations1to8, COUNT, COUNT / 8);
@@ -79,41 +57,36 @@ function run(fn, n, scount) {
     // prep n * arity sources
     var start,
         end;
-
-    // run 3 times to warm up 
-    var sources = createDataSignals(scount, []);
-    fn(n / 100, sources);
-    sources = createDataSignals(scount, []);
-    fn(n / 100, sources);
-    sources = createDataSignals(scount, []);
-    optimizeFunctionOnNextCall(fn);
-    fn(n / 100, sources);
-    sources = createDataSignals(scount, []);
-    for (var i = 0; i < scount; i++) {
-        sources[i].val;
-        sources[i].val;
-        sources[i].val;
-    }
-
-    // start GC clean
-    collectGarbage(null);
-
-    start = now();
-
-    fn(n, sources);
-
-    // end GC clean
-    sources = null;
-    collectGarbage(null);
-
-    end = now();
-
+    root(function (dispose) {
+        // run 3 times to warm up 
+        var sources = createDataSignals(scount, []);
+        fn(n / 100, sources);
+        sources = createDataSignals(scount, []);
+        fn(n / 100, sources);
+        sources = createDataSignals(scount, []);
+        fn(n / 100, sources);
+        sources = createDataSignals(scount, []);
+        for (var i = 0; i < scount; i++) {
+            sources[i].val();
+            sources[i].val();
+            sources[i].val();
+        }
+        dispose();
+    });
+    root(function(dispose) {
+        var sources = createDataSignals(scount, []);
+        start = now();
+        fn(n, sources);
+        end = now();
+        sources = null;
+        dispose();
+    });
     return end - start;
 }
 
 function createDataSignals(n, sources) {
     for (var i = 0; i < n; i++) {
-        sources[i] = zorn.data(i);
+        sources[i] = value(i);
     }
     return sources;
 }
@@ -129,7 +102,6 @@ function createComputations1to1000(n, sources) {
         for (var j = 0; j < 1000; j++) {
             createComputation1(sources[i]);
         }
-        //sources[i] = null;
     }
 }
 
@@ -143,7 +115,6 @@ function createComputations1to8(n, sources) {
         createComputation1(sources[i]);
         createComputation1(sources[i]);
         createComputation1(sources[i]);
-        //sources[i] = null;
     }
 }
 
@@ -153,7 +124,6 @@ function createComputations1to4(n, sources) {
         createComputation1(sources[i]);
         createComputation1(sources[i]);
         createComputation1(sources[i]);
-        //sources[i] = null;
     }
 }
 
@@ -161,14 +131,12 @@ function createComputations1to2(n, sources) {
     for (var i = 0; i < n / 2; i++) {
         createComputation1(sources[i]);
         createComputation1(sources[i]);
-        //sources[i] = null;
     }
 }
 
 function createComputations1to1(n, sources) {
     for (var i = 0; i < n; i++) {
         createComputation1(sources[i]);
-        //sources[i] = null;
     }
 }
 
@@ -178,8 +146,6 @@ function createComputations2to1(n, sources) {
             sources[i * 2],
             sources[i * 2 + 1]
         );
-        //sources[i * 2] = null;
-        //sources[i * 2 + 1] = null;
     }
 }
 
@@ -191,33 +157,6 @@ function createComputations4to1(n, sources) {
             sources[i * 4 + 2],
             sources[i * 4 + 3]
         );
-        //sources[i * 4] = null;
-        //sources[i * 4 + 1] = null;
-        //sources[i * 4 + 2] = null;
-        //sources[i * 4 + 3] = null;
-    }
-}
-
-function createComputations8(n, sources) {
-    for (var i = 0; i < n; i++) {
-        createComputation8(
-            sources[i * 8],
-            sources[i * 8 + 1],
-            sources[i * 8 + 2],
-            sources[i * 8 + 3],
-            sources[i * 8 + 4],
-            sources[i * 8 + 5],
-            sources[i * 8 + 6],
-            sources[i * 8 + 7]
-        );
-        sources[i * 8] = null;
-        sources[i * 8 + 1] = null;
-        sources[i * 8 + 2] = null;
-        sources[i * 8 + 3] = null;
-        sources[i * 8 + 4] = null;
-        sources[i * 8 + 5] = null;
-        sources[i * 8 + 6] = null;
-        sources[i * 8 + 7] = null;
     }
 }
 
@@ -229,51 +168,47 @@ function createComputations1000to1(n, sources) {
 }
 
 function createComputation0(i) {
-    zorn.effect(function () { return i; });
+    compute(function () { return i; });
 }
 
 function createComputation1(s1) {
-    zorn.effect(function () { 
-        return s1.val; 
+    compute(function () {
+        return s1.val();
     });
 }
 
 function createComputation2(s1, s2) {
-    zorn.effect(function () { return s1.val + s2.val; });
+    compute(function () { return s1.val() + s2.val(); });
 }
 
 function createComputation4(s1, s2, s3, s4) {
-    zorn.effect(function () { return s1.val + s2.val + s3.val + s4.val; });
-}
-
-function createComputation8(s1, s2, s3, s4, s5, s6, s7, s8) {
-    zorn.effect(function () { return s1.val + s2.val + s3.val + s4.val + s5.val + s6.val + s7.val + s8.val; });
+    compute(function () { return s1.val() + s2.val() + s3.val() + s4.val(); });
 }
 
 function createComputation1000(ss, offset) {
-    zorn.effect(function () {
+    compute(function () {
         var sum = 0;
         for (var i = 0; i < 1000; i++) {
-            sum += ss[offset + i].val;
+            sum += ss[offset + i].val();
         }
         return sum;
     });
 }
 
 function updateComputations1to1(n, sources) {
-    var s1 = sources[0],
-        c = zorn.effect(function () { return s1.val; });
+    var s1 = sources[0];
+    compute(function () { return s1.val(); });
     for (var i = 0; i < n; i++) {
-        s1.set(s1.peek + 1);
+        s1.update(i);
     }
 }
 
 function updateComputations2to1(n, sources) {
     var s1 = sources[0],
-        s2 = sources[1],
-        c = zorn.effect(function () { return s1.val + s2.val; });
+        s2 = sources[1];
+    compute(function () { return s1.val() + s2.val(); });
     for (var i = 0; i < n; i++) {
-        s1.set(s1.peek + 1);
+        s1.update(i);
     }
 }
 
@@ -281,79 +216,53 @@ function updateComputations4to1(n, sources) {
     var s1 = sources[0],
         s2 = sources[1],
         s3 = sources[2],
-        s4 = sources[3],
-        c = zorn.effect(function () { return s1.val + s2.val + s3.val + s4.val; });
+        s4 = sources[3];
+    compute(function () { return s1.val() + s2.val() + s3.val() + s4.val(); });
     for (var i = 0; i < n; i++) {
-        s1.set(s1.peek + 1);
+        s1.update(i);
     }
 }
 
 function updateComputations1000to1(n, sources) {
-    var s1 = sources[0],
-        c = zorn.effect(function () {
-            var sum = 0;
-            for (var i = 0; i < 1000; i++) {
-                sum += sources[i].val;
-            }
-            return sum;
-        });
+    var s1 = sources[0];
+    compute(function () {
+        var sum = 0;
+        for (var i = 0; i < 1000; i++) {
+            sum += sources[i].val();
+        }
+        return sum;
+    });
     for (var i = 0; i < n; i++) {
-        s1.set(s1.peek + 1);
+        s1.update(i);
     }
 }
 
 function updateComputations1to2(n, sources) {
-    var s1 = sources[0],
-        c1 = zorn.effect(function () { return s1.val; }),
-        c2 = zorn.effect(function () { return s1.val; });
+    var s1 = sources[0];
+    compute(function () { return s1.val(); });
+    compute(function () { return s1.val(); });
     for (var i = 0; i < n / 2; i++) {
-        s1.set(s1.peek + 1);
+        s1.update(i);
     }
 }
 
 function updateComputations1to4(n, sources) {
-    var s1 = sources[0],
-        c1 = zorn.effect(function () { return s1.val; }),
-        c2 = zorn.effect(function () { return s1.val; }),
-        c3 = zorn.effect(function () { return s1.val; }),
-        c4 = zorn.effect(function () { return s1.val; });
+    var s1 = sources[0];
+    compute(function () { return s1.val(); });
+    compute(function () { return s1.val(); });
+    compute(function () { return s1.val(); });
+    compute(function () { return s1.val(); });
     for (var i = 0; i < n / 4; i++) {
-        s1.set(s1.peek + 1);
+        s1.update(i);
     }
 }
 
 function updateComputations1to1000(n, sources) {
     var s1 = sources[0];
-    var calls = 0;
     for (var i = 0; i < 1000; i++) {
-        zorn.effect(function () {
-            calls++;
-            return s1.val; 
-        });
+        compute(function () { return s1.val(); });
     }
-    calls = 0;
-    var ln = n / 1000;
-    for (var i = 0; i < ln; i++) {
-        s1.set(s1.peek + 1);
+    for (var i = 0; i < n / 1000; i++) {
+        s1.update(i);
     }
-    if (calls !== ln * 1000) {
-        throw new Error('calls !== ln: ' + calls + ' !== ' + ln);
-    }
-}
-
-function browserNow() {
-    return performance.now();
-}
-
-function nodeNow() {
-    var hrt = process.hrtime();
-    return hrt[0] * 1000 + hrt[1] / 1e6;
-}
-
-function repeat(n, val) {
-    var arr = [];
-    for (var i = 0; i < n; i++) {
-        arr[i] = val;
-    }
-    return arr;
 }

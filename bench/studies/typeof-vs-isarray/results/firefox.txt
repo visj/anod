@@ -1,2 +1,0 @@
-isArray:  525
-typeof:   190

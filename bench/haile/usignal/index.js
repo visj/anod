@@ -1,4 +1,4 @@
-import { signal, effect } from "@preact/signals-core";
+import { signal, effect } from "usignal";
 
 function now() {
     return performance.now();
@@ -157,7 +157,6 @@ function createComputations4to1(n, sources) {
     }
 }
 
-// only create n / 100 computations, as otherwise takes too long
 function createComputations1000to1(n, sources) {
     for (var i = 0; i < n; i++) {
         createComputation1000(sources, i * 1000);

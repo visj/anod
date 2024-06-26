@@ -1,17 +1,17 @@
-import { test, root, dispose, cleanup, compute, value } from './helper/zorn.js';
+import { test, root, cleanup, compute, value } from './helper/zorn.js';
 
 describe("cleanup", function () {
     it("is called when a computation is disposed", function () {
         var d = value(1);
         var called = false;
         compute(function () {
-            d.val;
+            d.val();
             cleanup(function () {
                 called = true;
             });
         });
         test.equals(called , false);
-        d.set(d.peek + 1);
+        d.update(d.peek() + 1);
         test.equals(called , true);
     });
 
@@ -19,7 +19,7 @@ describe("cleanup", function () {
         var d = value(1);
         var called = false;
         compute(function () {
-            d.val;
+            d.val();
             compute(function () {
                 cleanup(function () {
                     called = true;
@@ -27,7 +27,7 @@ describe("cleanup", function () {
             });
         });
         test.equals(called , false);
-        d.set(d.peek + 1);
+        d.update(d.peek() + 1);
         test.equals(called , true);
     });
 
@@ -35,7 +35,7 @@ describe("cleanup", function () {
         var d = value(1);
         var called = 0;
         compute(function () {
-            d.val;
+            d.val();
             cleanup(function () {
                 called++;
             });
@@ -44,7 +44,7 @@ describe("cleanup", function () {
             });
         });
         test.equals(called , 0);
-        d.set(d.peek + 1);
+        d.update(d.peek() + 1);
         test.equals(called , 2);
     });
 
@@ -52,7 +52,7 @@ describe("cleanup", function () {
         var d = value(1);
         var called = '';
         compute(function () {
-            d.val;
+            d.val();
             cleanup(function () {
                 called += 'a';
             });
@@ -61,7 +61,7 @@ describe("cleanup", function () {
             });
         });
         test.equals(called , '');
-        d.set(d.peek + 1);
+        d.update(d.peek() + 1);
         test.equals(called , 'ab');
     });
 
@@ -83,17 +83,17 @@ describe("cleanup", function () {
         root(function (teardown) {
 
             compute(function () {
-                d.val;
+                d.val();
                 cleanup(function () {
                     called++;
                 });
             });
             test.equals(called , 0);
-            d.set(d.peek + 1);
+            d.update(d.peek() + 1);
             test.equals(called , 1);
             teardown();
             test.equals(called , 2);
-            d.set(d.peek + 1);
+            d.update(d.peek() + 1);
             test.equals(called , 2);
         });
     });

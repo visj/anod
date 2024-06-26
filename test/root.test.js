@@ -1,4 +1,4 @@
-import { test, root, effect, compute, cleanup, value } from './helper/zorn.js';
+import { test, root, compute, cleanup, value } from './helper/zorn.js';
 
 describe("root()", function () {
     it("allows subcomputations to escape their parents", function () {
@@ -7,14 +7,14 @@ describe("root()", function () {
             var innerTrigger = value(0);
             var innerRuns = 0;
 
-            effect(function () {
+            compute(function () {
                 // register dependency to outer trigger
-                outerTrigger.val;
+                outerTrigger.val();
                 // inner computation
                 root(function () {
-                    effect(function () {
+                    compute(function () {
                         // register dependency on inner trigger
-                        innerTrigger.val;
+                        innerTrigger.val();
                         // count total runs
                         innerRuns++;
                     });
@@ -25,14 +25,14 @@ describe("root()", function () {
             test.equals(innerRuns , 1);
 
             // trigger the outer computation, making more inners
-            outerTrigger.set(outerTrigger.peek + 1);
-            outerTrigger.set(outerTrigger.peek + 1);
+            outerTrigger.update(outerTrigger.peek() + 1);
+            outerTrigger.update(outerTrigger.peek() + 1);
 
             test.equals(innerRuns , 3);
 
             // now trigger inner value: three orphaned computations should equal three runs
             innerRuns = 0;
-            innerTrigger.set(innerTrigger.peek + 1);
+            innerTrigger.update(innerTrigger.peek() + 1);
 
             test.equals(innerRuns , 3);
         });
@@ -41,28 +41,28 @@ describe("root()", function () {
     it("does not batch updates when used at top level", function () {
         root(function() {
             var s = value(1);
-            var c = compute(function () { return s.val; });
+            var c = compute(function () { return s.val(); });
 
-            test.equals(c.val , 1);
+            test.equals(c.val() , 1);
 
-            s.set(2);
+            s.update(2);
 
-            test.equals(c.val , 2);
+            test.equals(c.val() , 2);
 
-            s.set(3);
+            s.update(3);
 
-            test.equals(c.val , 3);
+            test.equals(c.val() , 3);
         });
     });
 
     it("persists through entire scope when used at top level", function() {
         root(function() {
             var s = value(1);
-            effect(function() { s.val; });
-            s.set(2);
-            var c2 = compute(function(){ return s.val; });
-            s.set(3);
-            test.equals(c2.val , 3);
+            compute(function() { s.val(); });
+            s.update(2);
+            var c2 = compute(function(){ return s.val(); });
+            s.update(3);
+            test.equals(c2.val() , 3);
         });
     });
 
@@ -71,7 +71,7 @@ describe("root()", function () {
             var d1;
             var count = 0;
             var cleanups = 0;
-            effect(function() {
+            compute(function() {
                 root(function() {
                     cleanup(function(final) {
                         if (final) {
@@ -79,16 +79,16 @@ describe("root()", function () {
                         }
                     });
                     d1 = value(0);
-                    effect(function() { 
-                        d1.val;
+                    compute(function() { 
+                        d1.val();
                         count++;
                     });
                 });
             });
-            d1.set(d1.peek + 1);
+            d1.update(d1.peek() + 1);
             test.equals(count , 2);
             teardown();
-            d1.set(d1.peek + 1);
+            d1.update(d1.peek() + 1);
             test.equals(count , 2);
             test.equals(cleanups , 1);
         });

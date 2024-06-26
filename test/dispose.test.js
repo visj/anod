@@ -1,9 +1,9 @@
-import { test, root, batch, effect, $effect, compute, value, dispose } from './helper/zorn.js';
+import { test, root, $compute, compute, value } from './helper/zorn.js';
 
 describe("dispose", function () {
 
 	describe("root", function () {
-		it("disables updates and sets computation's value to undefined", function () {
+		it("disables updates and sets computation's value to null", function () {
 			var c, d, f;
 			root(function (teardown) {
 				c = 0;
@@ -11,22 +11,22 @@ describe("dispose", function () {
 
 				f = compute(function () {
 					c++;
-					return d.val;
+					return d.val();
 				});
 
 				test.equals(c , 1);
-				test.equals(f.val , 0);
+				test.equals(f.val() , 0);
 
-				d.set(1);
+				d.update(1);
 
 				test.equals(c , 2);
-				test.equals(f.val , 1);
+				test.equals(f.val() , 1);
 
 				teardown();
-				d.set(2);
+				d.update(2);
 
 				test.equals(c , 2);
-				test.equals(f.val , void 0);
+				test.equals(f.val() , null);
 			});
 		});
 
@@ -35,18 +35,18 @@ describe("dispose", function () {
 			root(function (teardown) {
 				c = 0;
 				d = value(0);
-				effect(function () {
+				compute(function () {
 					c++;
-					if (d.val) {
+					if (d.val()) {
 						teardown();
 					}
-					d.val;
+					d.val();
 				});
 
 				test.equals(c , 1);
-				d.set(1);
+				d.update(1);
 				test.equals(c , 2);
-				d.set(2);
+				d.update(2);
 				test.equals(c , 2);
 			});
 		});
@@ -56,11 +56,11 @@ describe("dispose", function () {
 			root(function (teardown) {
 				c = 0;
 				d = value(0);
-				effect(function () {
+				compute(function () {
 					c++;
-					d.val;
-					effect(function () {
-						if (d.val) {
+					d.val();
+					compute(function () {
+						if (d.val()) {
 							teardown();
 						}
 					});
@@ -68,9 +68,9 @@ describe("dispose", function () {
 
 				test.equals(c , 1);
 
-				d.set(1);
+				d.update(1);
 				test.equals(c , 2);
-				d.set(2);
+				d.update(2);
 				test.equals(c , 2);
 			});
 		});
@@ -82,27 +82,27 @@ describe("dispose", function () {
 				var d3;
 				var count = 0;
 
-				effect(function () {
-					d2.val;
+				compute(function () {
+					d2.val();
 					if (d3 === void 0) {
 						d3 = value(0);
 					}
 				});
-				effect(function () { d3.val; });
-				effect(function () { d3.val; });
-				effect(function () { d3.val; });
-				effect(function () {
-					d1.val;
-					effect(function () {
-						d3.val;
+				compute(function () { d3.val(); });
+				compute(function () { d3.val(); });
+				compute(function () { d3.val(); });
+				compute(function () {
+					d1.val();
+					compute(function () {
+						d3.val();
 						count++;
 					});
 				});
 				// update d2 to trigger d3 disposal
-				d2.set(d2.peek + 1);
+				d2.update(d2.peek() + 1);
 				test.equals(count , 1);
 				// d3 is now disposed so inner computation should not trigger
-				d3.set(d3.peek + 1);
+				d3.update(d3.peek() + 1);
 				test.equals(count , 1);
 			});
 		});
@@ -116,20 +116,20 @@ describe("dispose", function () {
 		it("persists through cycle when manually disposed", function () {
 			root(function (teardown) {
 				var d1 = value(0);
-				var c1 = compute(function () { return d1.val; });
+				var c1 = compute(function () { return d1.val(); });
 				var count = 0;
-				effect(function () {
-					effect(function () {
-						if (d1.val > 0) {
-							dispose(c1);
+				compute(function () {
+					compute(function () {
+						if (d1.val() > 0) {
+							c1.dispose();
 						}
 					});
-					effect(function () {
-						count += c1.val;
+					compute(function () {
+						count += c1.val();
 					});
 				});
-				d1.set(d1.peek + 1);
-				d1.set(d1.peek + 1);
+				d1.update(d1.peek() + 1);
+				d1.update(d1.peek() + 1);
 				test.equals(count , 1);
 			});
 		});
@@ -137,22 +137,22 @@ describe("dispose", function () {
 		it("ignores multiple calls to dispose", function () {
 			root(function (teardown) {
 				var d1 = value(0);
-				var c1 = compute(function () { return d1.val; });
+				var c1 = compute(function () { return d1.val(); });
 				var count = 0;
-				effect(function () {
-					effect(function () {
-						if (d1.val > 0) {
-							dispose(c1);
-							dispose(c1);
-							dispose(c1);
+				compute(function () {
+					compute(function () {
+						if (d1.val() > 0) {
+							c1.dispose();
+							c1.dispose();
+							c1.dispose();
 						}
 					});
-					effect(function () {
-						count += c1.val;
+					compute(function () {
+						count += c1.val();
 					});
 				});
-				d1.set(d1.peek + 1);
-				d1.set(d1.peek + 1);
+				d1.update(d1.peek() + 1);
+				d1.update(d1.peek() + 1);
 				test.equals(count , 1);
 			});
 		});
@@ -165,23 +165,23 @@ describe("dispose", function () {
 			var d2 = value(0);
 			var d3 = value(0);
 			var count = 0;
-			effect(function () {
-				if (!d1.val) {
-					dispose(d1);
-					dispose(d2);
-					d3.set(d3.peek + 1);
+			compute(function () {
+				if (!d1.val()) {
+					d1.dispose();
+					d2.dispose();
+					d3.update(d3.peek() + 1);
 				}
 			});
-			$effect(function () {
+			$compute(function () {
 				count++;
-				if (d1.val) {
-					d2.val;
+				if (d1.val()) {
+					d2.val();
 				} else {
-					d3.val;
+					d3.val();
 				}
 			});
 			count = 0;
-			d1.set(false);
+			d1.update(false);
 			test.equals(count , 2);
 		});
 	});

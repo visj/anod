@@ -5,26 +5,26 @@ describe("batch", function () {
 		var d = value(1);
 			
 		batch(function () {
-			d.set(2);
-			test.equals(d.val , 1);
+			d.update(2);
+			test.equals(d.val() , 1);
 		});
 		
-		test.equals(d.val , 2);
+		test.equals(d.val() , 2);
 	});
 	
 	it("halts propagation within its scope", function () {
         root(function () {
 			var d = value(1);
 			var f = compute(function() { 
-				return d.val;
+				return d.val();
 			});
 				
 			batch(function () {
-				d.set(2);
-				test.equals(f.val , 1);
+				d.update(2);
+				test.equals(f.val() , 1);
 			});
 			
-			test.equals(f.val , 2);
+			test.equals(f.val() , 2);
 		});
 	});
 });

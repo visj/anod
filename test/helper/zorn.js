@@ -1,5 +1,4 @@
-export * from '../../src/zorn.js';
-export { Mut  } from '../../src/zorn.js';
+export * from "../../src/core.js";
 
 export var test = {
     /**
@@ -34,6 +33,9 @@ export var test = {
                 }
             }
         } else if (typeof actual === 'object' && typeof expected === 'object') {
+            if (actual === null && expected === null) {
+                return;
+            }
             if (expected === null && actual !== null) {
                 throw new Error('Expected null, got ' + actual + '. ' + msg);
             } else if (expected !== null && actual === null) {

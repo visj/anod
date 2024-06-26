@@ -1,4 +1,4 @@
-import { test, root, effect, compute, value, dispose } from './helper/zorn.js';
+import { test, root, compute, value } from './helper/zorn.js';
 
 describe("compute() with subcomputations", function () {
 
@@ -13,17 +13,17 @@ describe("compute() with subcomputations", function () {
             function innerCounter() {
                 innerCount++;
             }
-            effect(function () {
+            compute(function () {
                 outerCounter();
-                effect(function () {
+                compute(function () {
                     innerCounter();
-                    return d.val;
+                    return d.val();
                 });
             })
 
             outerCount = innerCount = 0;
 
-            d.set(2);
+            d.update(2);
 
             test.equals(innerCount , 1);
             test.equals(outerCount , 0);
@@ -45,29 +45,29 @@ describe("compute() with subcomputations", function () {
             innerCounter = function () {
                 innerCount++;
             }
-            effect(function () {
+            compute(function () {
                 outerCounter();
-                d.val;
+                d.val();
                 g = compute(function () {
                     innerCounter();
-                    return e.val;
+                    return e.val();
                 });
             });
             h = g;
-            h.val;
+            h.val();
         }
 
         it("creates child on initialization", function () {
             root(function () {
                 init();
-                test.equals(h.val , 2);
+                test.equals(h.val() , 2);
             });
         });
 
         it("does not depend on child's dependencies", function () {
             root(function () {
                 init();
-                e.set(3);
+                e.update(3);
                 test.equals(outerCount , 1);
                 test.equals(innerCount , 2);
             });
@@ -77,8 +77,8 @@ describe("compute() with subcomputations", function () {
             root(function (teardown) {
                 init();
                 teardown();
-                e.set(3);
-                test.equals(g.val , void 0);
+                e.update(3);
+                test.equals(g.val() , null);
             });
         });
     });
@@ -89,20 +89,20 @@ describe("compute() with subcomputations", function () {
                 var a = value(1);
                 var b = compute(function () {
                     var c = compute(function () {
-                        return a.val;
+                        return a.val();
                     });
-                    a.val;
+                    a.val();
                     return { c: c };
                 });
                 var d = compute(function () {
-                    return b.val.c.val;
+                    return b.val().c.val();
                 });
 
-                test.equals(d.val , 1);
-                a.set(2);
-                test.equals(d.val , 2);
-                a.set(3);
-                test.equals(d.val , 3);
+                test.equals(d.val() , 1);
+                a.update(2);
+                test.equals(d.val() , 2);
+                a.update(3);
+                test.equals(d.val() , 3);
             });
         });
     });
@@ -112,26 +112,26 @@ describe("compute() with subcomputations", function () {
             root(function () {
                 var a = value(1);
                 var c;
-                effect(function () {
+                compute(function () {
                     c = compute(function () {
-                        return a.val;
+                        return a.val();
                     });
-                    a.val;
+                    a.val();
                     return { c: c };
                 });
                 var d = compute(function () {
-                    c.val;
+                    c.val();
                     var e = compute(function () {
-                        return a.val;
+                        return a.val();
                     });
                     return { e: e };
                 });
 
-                test.equals(d.val.e.val , 1);
-                a.set(2);
-                test.equals(d.val.e.val , 2);
-                a.set(3);
-                test.equals(d.val.e.val , 3);
+                test.equals(d.val().e.val() , 1);
+                a.update(2);
+                test.equals(d.val().e.val() , 2);
+                a.update(3);
+                test.equals(d.val().e.val() , 3);
             });
         });
     });
