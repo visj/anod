@@ -184,11 +184,6 @@ function Queue() {
      * @package
      * @type {number}
      */
-    this._index = 0;
-    /**
-     * @package
-     * @type {number}
-     */
     this._count = 0;
 }
 
