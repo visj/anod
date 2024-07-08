@@ -1,4 +1,4 @@
-import { test, root, $compute, compute, value } from './helper/zorn.js';
+import { test, root, $compute, compute, value } from './helper/anod.js';
 
 describe("dispose", function () {
 
@@ -74,42 +74,6 @@ describe("dispose", function () {
 				test.equals(c , 2);
 			});
 		});
-
-		it("disposes values created by computations", function () {
-			root(function () {
-				var d1 = value(0);
-				var d2 = value(0);
-				var d3;
-				var count = 0;
-
-				compute(function () {
-					d2.val();
-					if (d3 === void 0) {
-						d3 = value(0);
-					}
-				});
-				compute(function () { d3.val(); });
-				compute(function () { d3.val(); });
-				compute(function () { d3.val(); });
-				compute(function () {
-					d1.val();
-					compute(function () {
-						d3.val();
-						count++;
-					});
-				});
-				// update d2 to trigger d3 disposal
-				d2.update(d2.peek() + 1);
-				test.equals(count , 1);
-				// d3 is now disposed so inner computation should not trigger
-				d3.update(d3.peek() + 1);
-				test.equals(count , 1);
-			});
-		});
-	});
-
-	describe("data", function () {
-
 	});
 
 	describe("computations", function () {

@@ -1,4 +1,4 @@
-import { test, root, compute, $compute, value } from './helper/zorn.js';
+import { test, root, compute, $compute, value } from './helper/anod.js';
 
 describe("compute()", function () {
     describe("creation", function () {

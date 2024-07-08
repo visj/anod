@@ -1,4 +1,4 @@
-import { test, root, compute, value, batch } from './helper/zorn.js';
+import { test, root, compute, value, batch } from './helper/anod.js';
 
 describe("batch", function () {
 	it("batches changes until end", function () {

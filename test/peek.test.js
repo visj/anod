@@ -1,4 +1,4 @@
-import { test, root, compute, sample, value } from './helper/zorn.js';
+import { test, root, compute, sample, value } from './helper/anod.js';
 
 describe("peek(...)", function () {
 

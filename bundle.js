@@ -27,12 +27,12 @@ const replaceEnumPlugin = {
 
 async function esbuildBundleBench() {
     await esbuild.build({
-        entryPoints: ["./bench/haile/zorn/index.js"],
+        entryPoints: ["./bench/haile/anod/index.js"],
         bundle: true,
         minify: true,
         target: "ES5",
         mangleProps: /^_/,
-        outfile: "./bench/haile/zorn/zorn.esbuild.js",
+        outfile: "./bench/haile/anod/index.min.js",
         plugins: [replaceEnumPlugin],
     });
 }
@@ -82,36 +82,9 @@ async function esbuildBundleuSignal() {
     });
 }
 
-async function closureBundleBench() {
-    return new Promise((resolve, reject) => {
-        const cmd = [
-            "closure-compiler",
-            "-O ADVANCED",
-            "--language_out ECMASCRIPT_NEXT",
-            "--js src/api.js",
-            "--js src/core.js",
-            "--js src/types.js",
-            "--js bench/haile/zorn/index.js",
-            "--js_output_file bench/haile/zorn/zorn.closure.js"
-        ];
-        exec(cmd.join(" "), (err, stdout, stderr) => {
-            if (err) {
-                console.error(err);
-                reject(err);
-            } else {
-                if (stderr) {
-                    console.error(stderr);
-                }
-                resolve({ stdout, stderr });
-            }
-        });
-    });
-}
-
 async function bundleBench() {
     await Promise.all([
         esbuildBundleBench(),
-        closureBundleBench(),
         esbuildBundlePreact(),
         esbuildBundleSjs(),
         esbuildBundleSolid(),
@@ -125,8 +98,9 @@ async function closureBundleLibrary() {
         const cmd = [
             "closure-compiler",
             "-O ADVANCED",
-            "--language_out ECMASCRIPT5",
+            "--language_out ECMASCRIPT_NEXT",
             "--js src/core.js",
+            "--js src/array.js",
             "--js src/types.js",
             "--js src/entry.js",
             "--externs src/api.js",
@@ -141,24 +115,45 @@ async function closureBundleLibrary() {
                     console.error(stderr);
                 } else {
                     let code = await fs.promises.readFile("./temp/closure.build.js", "utf-8")
-                    const esmRegex = /window\.zorn\.([\$\w]*)\s*=\s*function\s*\(/g;
-                    const esm = code.replace(esmRegex, "export function $1(");
-                    const iifeRegex = /([\;\s]*)window\.zorn\.([\$\w]+)\s*=\s*function\s*\(/g;
-                    var i = 0;
-                    let iife = "var zorn=(function(){" + code.replace(iifeRegex, function (_, newLine, capture) {
-                        if (i++ === 0) {
-                            return ";return{" + capture + ":function(";
+                    const parts = code.split(/(window\.anod\.[\$\w]*)/g);
+                    let esm = parts[0];
+                    let iife = "var anod=(function(){" + parts[0] + "return{";
+                    for (let i = 1; i < parts.length - 1; i += 2) {
+                        let name = parts[i].slice(12);
+                        let content = parts[i + 1];
+                        if (i > 1) {
+                            iife += ",";
                         }
-                        if (newLine) {
-                            newLine = newLine.replace(";", "");
+                        if (content.startsWith("=function")) {
+                            esm += "export function " + name + content.slice(9);
+                            iife += name + ":" + content.slice(1, content.lastIndexOf(";"));
+                        } else {
+                            let min = content.slice(1, content.indexOf(";"));
+                            esm += "export { " + min + " as " + name + " };";
+                            iife += name + ":"+ content.slice(1, content.indexOf(";"));
                         }
-                        return newLine + "," + capture + ":function(";
-                    });
-                    iife = iife.replace(/[\s\;]*$/, "");
-                    iife = iife + "};" + "})();";
-                    await fs.promises.writeFile("./dist/zorn.js", iife);
-                    await fs.promises.writeFile("./dist/zorn.mjs", esm);
-                    await fs.promises.rm("./temp/closure.build.js");
+                    }
+                    iife += "}})();";
+                    await fs.promises.writeFile("./dist/anod.js", iife);
+                    await fs.promises.writeFile("./dist/anod.mjs", esm);
+                    // const esmRegex = /window\.anod\.([\$\w]*)\s*=\s*function\s*\(/g;
+                    // const esm = code.replace(esmRegex, "export function $1(");
+                    // const iifeRegex = /([\;\s]*)window\.anod\.([\$\w]+)\s*=\s*function\s*\(/g;
+                    // var i = 0;
+                    // let iife = "var anod=(function(){" + code.replace(iifeRegex, function (_, newLine, capture) {
+                    //     if (i++ === 0) {
+                    //         return ";return{" + capture + ":function(";
+                    //     }
+                    //     if (newLine) {
+                    //         newLine = newLine.replace(";", "");
+                    //     }
+                    //     return newLine + "," + capture + ":function(";
+                    // });
+                    // iife = iife.replace(/[\s\;]*$/, "");
+                    // iife = iife + "};" + "})();";
+                    // await fs.promises.writeFile("./dist/anod.js", iife);
+                    // await fs.promises.writeFile("./dist/anod.mjs", esm);
+                    // await fs.promises.rm("./temp/closure.build.js");
                     resolve({ stdout, stderr });
                 }
             }

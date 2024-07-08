@@ -1,131 +1,105 @@
 export interface Reactive<T = any> {
+    /**
+     * 
+     */
     val(): T;
+    /**
+     * 
+     */
     peek(): T;
+    /**
+     * 
+     */
     dispose(): void;
 }
 
 export interface Signal<T = any> extends Reactive<T> {
+    /**
+     * 
+     * @param val 
+     */
     update(val: T): void;
 }
-
-export type Cleanup = (final: boolean) => void;
-
-export type Equality<T> = (a: T, b: T) => boolean;
-
+/**
+ * 
+ * @param fn 
+ */
 export declare function root<T>(fn: (dispose: () => void) => T): T;
-
+/**
+ * 
+ * @param fn 
+ */
 export declare function batch(fn: () => void): void;
-
+/**
+ * 
+ * @param fn 
+ */
 export declare function sample<T>(fn: () => T): T;
-
-export declare function cleanup(fn: Cleanup): void;
-
+/**
+ * 
+ * @param fn 
+ */
+export declare function cleanup(fn: (final: boolean) => void): void;
+/**
+ * 
+ * @param val 
+ */
 export declare function data<T>(val: T): Signal<T>;
-
-export declare function value<T>(val: T, eq?: Equality<T> | null): Signal<T>;
-
+/**
+ * 
+ * @param val 
+ * @param eq 
+ */
+export declare function value<T>(val: T, eq?: ((a: T, b: T) => boolean) | null): Signal<T>;
+/**
+ * 
+ * @param val 
+ */
+export declare function array<T>(val?: T[]): SignalArray<T>;
+/**
+ * 
+ * @param fn 
+ */
 export declare function compute<T>(fn: () => T): Reactive<T>;
-export declare function compute<T>(fn: (seed: T) => T, seed: T): Reactive<T>;
-export declare function compute<T, U>(fn : (seed: T, args: U) => T, seed: T, args: U, eq: Equality<T> | null): Reactive<T>;
-export declare function compute<T, U>(fn: (seed: T, args: U) => T, seed?: T, args?: U, eq?: Equality<T> | null): Reactive<T>;
+/**
+ * 
+ * @param fn 
+ * @param initial 
+ */
+export declare function compute<T>(fn: (prev: T) => T, initial: T): Reactive<T>;
+/**
+ * 
+ * @param fn 
+ * @param initial 
+ * @param args 
+ * @param eq 
+ */
+export declare function compute<T, U>(fn : (prev: T, args: U) => T, initial: T, args: U, eq: ((a: T, b: T) => boolean) | null): Reactive<T>;
+/**
+ * 
+ * @param fn 
+ * @param initial 
+ * @param args 
+ * @param eq 
+ */
+export declare function compute<T, U>(fn: (prev: T, args: U) => T, initial?: T, args?: U, eq?: ((a: T, b: T) => boolean) | null): Reactive<T>;
 
 export declare function $compute<T>(fn: () => T): Reactive<T>;
 export declare function $compute<T>(fn: (seed: T) => T, seed: T): Reactive<T>;
-export declare function $compute<T, U>(fn : (seed: T, args: U) => T, seed: T, args: U, eq: Equality<T> | null): Reactive<T>;
-export declare function $compute<T, U>(fn: (seed: T, args: U) => T, seed?: T, args?: U, eq?: Equality<T> | null): Reactive<T>;
+export declare function $compute<T, U>(fn : (seed: T, args: U) => T, seed: T, args: U, eq: ((a: T, b: T) => boolean) | null): Reactive<T>;
+export declare function $compute<T, U>(fn: (seed: T, args: U) => T, seed?: T, args?: U, eq?: ((a: T, b: T) => boolean) | null): Reactive<T>;
 
-export const enum Mut {
-    Clear = 0,
-    RemoveOne = 1,
-    RemoveRange = 2,
-    Remove = 3,
-    InsertOne = 4,
-    InsertRange = 8,
-    Insert = 12,
-    ReplaceOne = 16,
-    ReplaceRange = 32,
-    Replace = 48,
-    Range = 42,
-    Head = 64,
-    Tail = 128,
-    Sides = 192,
-    Reverse = 256,
-    Sort = 512,
-    Assign = 1023,
-    Custom = 1024,
-}
-
-type MutTuple<M extends Mut, T> = readonly [mut: M, start: number, end: number, args: T];
-
-type MutSet<T> = MutTuple<Mut.Assign, T[]>;
-
-type MutReplace<T> = MutTuple<Mut.Replace, [number, T]>;
-
-type MutPop = MutTuple<Mut.RemoveOne | Mut.Tail, undefined>;
-
-type MutPopRange = MutTuple<Mut.RemoveRange | Mut.Tail, number>;
-
-type MutPush<T> = MutTuple<Mut.InsertOne | Mut.Tail, T>;
-
-type MutPushRange<T> = MutTuple<Mut.InsertRange | Mut.Tail, T[]>;
-
-type MutShift = MutTuple<Mut.RemoveOne | Mut.Head, undefined>;
-
-type MutShiftRange = MutTuple<Mut.RemoveRange | Mut.Head, number>;
-
-type MutUnshift<T> = MutTuple<Mut.InsertOne | Mut.Head, T>;
-
-type MutUnshiftRange<T> = MutTuple<Mut.InsertRange | Mut.Head, T[]>;
-
-type MutRemoveAt = MutTuple<Mut.Remove, number>;
-
-type MutRemoveRange = MutTuple<Mut.RemoveRange, [number, number]>;
-
-type MutInsertAt<T> = MutTuple<Mut.Insert, [number, 0, T]>;
-
-type MutInsertRange<T> = MutTuple<Mut.InsertRange, [number, 0, T[]]>;
-
-type MutReplaceRange<T> = MutTuple<Mut.Replace, [number, number, T[]]>;
-
-type MutReverse = MutTuple<Mut.Reverse, undefined>;
-
-type MutSort<T> = MutTuple<Mut.Sort, (a: T, b: T) => number>;
-
-type MutClear = MutTuple<Mut.Clear, undefined>;
-
-type Mutation<T> = MutSet<T>
-    | MutReplace<T>
-    | MutPop
-    | MutPopRange
-    | MutPush<T>
-    | MutPushRange<T>
-    | MutShift
-    | MutShiftRange
-    | MutUnshift<T>
-    | MutUnshiftRange<T>
-    | MutRemoveAt
-    | MutRemoveRange
-    | MutInsertAt<T>
-    | MutInsertRange<T>
-    | MutReplaceRange<T>
-    | MutReverse
-    | MutSort<T>
-    | MutTuple<Mut.Custom, unknown>
-    | MutClear;
-
-export interface Enumerable<T = any> extends Reactive<T[]> {
-
-    mut(): Mutation<T>;
+export interface SignalIterator<T = any> extends Reactive<T[]> {
     
-    length(): Reactive<number>;
+    length: () => number;
 
     at(index: number): Reactive<T>;
 
-    concat(...items: (T | T[])[]): Enumerable<T>;
+    concat(...items: (T | T[])[]): SignalIterator<T>;
 
     every(callbackFn: (element: T, index: number) => boolean): Reactive<boolean>;
 
-    filter(callbackFn: (element: T, index: number) => boolean): Enumerable<T>;
+    filter(callbackFn: (element: T, index: number) => boolean): SignalIterator<T>;
 
     find(callbackFn: (element: T, index: number) => boolean): Reactive<T | undefined>;
 
@@ -145,7 +119,7 @@ export interface Enumerable<T = any> extends Reactive<T[]> {
 
     lastIndexOf(searchElement: T, fromIndex?: number): Reactive<number>;
 
-    map<U>(callbackFn: (element: T, index: Reactive<number>) => U): Enumerable<U>;
+    map<U>(callbackFn: (element: T, index: Reactive<number>) => U): SignalIterator<U>;
 
     reduce(callbackFn: (previousValue: T, currentValue: T, currentIndex: number) => T): Reactive<T>;
 
@@ -159,12 +133,12 @@ export interface Enumerable<T = any> extends Reactive<T[]> {
 
     reduceRight<U>(callbackFn: (previousValue: U, currentValue: T, currentIndex: number) => U, initialValue: U): Reactive<U>;
 
-    slice(start?: number, end?: number): Enumerable<T>;
+    slice(start?: number, end?: number): SignalIterator<T>;
 
     some(callbackFn: (element: T, index: number) => boolean): Reactive<boolean>;
 }
 
-export interface ReactiveArray<T = any> extends Enumerable<T> {
+export interface SignalArray<T = any> extends SignalIterator<T> {
 
     pop(): void;
 

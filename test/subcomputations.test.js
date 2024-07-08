@@ -1,4 +1,4 @@
-import { test, root, compute, value } from './helper/zorn.js';
+import { test, root, compute, value } from './helper/anod.js';
 
 describe("compute() with subcomputations", function () {
 

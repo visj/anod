@@ -12,9 +12,9 @@ import * as preact from '@preact/signals-core';
 import * as maverick from '@maverick-js/signals';
 import * as usignal from "usignal";
 import Table from 'cli-table';
-import * as zorn from "../../dist/zorn.mjs";
+import * as anod from "../../dist/anod.mjs";
 
-const BATCHED = true;
+const BATCHED = false;
 const RUNS_PER_TIER = 10000;
 const LAYER_TIERS = [1, 2, 3, 4, 5, 10, 15, 20, 25, 50];
 
@@ -114,7 +114,7 @@ async function main() {
   report.maverick = { fn: runMaverick, runs: [], avg: [] };
   report['preact/signals'] = { fn: runPreact, runs: [] };
   report.usignal = { fn: runUsignal, runs: [] };
-  report.zorn = { fn: runZorn, runs: [] };
+  report.anod = { fn: runAnod, runs: [] };
   // Has no way to dispose so can't consider it feature comparable.
   report.reactively = { fn: runReactively, runs: [], avg: [] };
   // These libraries are not comparable in terms of features.
@@ -360,13 +360,13 @@ function runS(layers, done) {
   });
 }
 
-function runZorn(layers, done) {
-  zorn.root((dispose) => {
+function runAnod(layers, done) {
+  anod.root((dispose) => {
     const start = {
-      a: zorn.data(1),
-      b: zorn.data(2),
-      c: zorn.data(3),
-      d: zorn.data(4),
+      a: anod.data(1),
+      b: anod.data(2),
+      c: anod.data(3),
+      d: anod.data(4),
     };
 
     let layer = start;
@@ -374,10 +374,10 @@ function runZorn(layers, done) {
     for (let i = layers; i--;) {
       layer = ((m) => {
         return {
-          a: zorn.$compute(() => rand % 2 ? m.b.val() : m.c.val(), 0),
-          b: zorn.compute(() => m.a.val() - m.c.val(), 0),
-          c: zorn.compute(() => m.b.val() + m.d.val(), 0),
-          d: zorn.compute(() => m.c.val(), 0),
+          a: anod.$compute(() => rand % 2 ? m.b.val() : m.c.val(), 0),
+          b: anod.compute(() => m.a.val() - m.c.val(), 0),
+          c: anod.compute(() => m.b.val() + m.d.val(), 0),
+          d: anod.compute(() => m.c.val(), 0),
         };
       })(layer);
     }
@@ -386,7 +386,7 @@ function runZorn(layers, done) {
 
     const end = layer;
     if (BATCHED) {
-      zorn.batch(() => {
+      anod.batch(() => {
         start.a.update(4);
         start.b.update(3);
         start.c.update(2);

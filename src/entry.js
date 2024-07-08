@@ -8,12 +8,17 @@ import {
     compute,
     $compute
 } from "./core.js";
+import { 
+    array
+} from "./array.js";
 
-window["zorn"].root = root;
-window["zorn"].sample = sample;
-window["zorn"].batch = batch;
-window["zorn"].cleanup = cleanup;
-window["zorn"].data = data;
-window["zorn"].value = value;
-window["zorn"].compute = compute;
-window["zorn"].$compute = $compute;
+window["anod"].root = root;
+window["anod"].sample = sample;
+window["anod"].batch = batch;
+window["anod"].cleanup = cleanup;
+window["anod"].data = data;
+window["anod"].value = value;
+window["anod"].compute = compute;
+window["anod"].$compute = $compute;
+
+window["anod"].array = array;

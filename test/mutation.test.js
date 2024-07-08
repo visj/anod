@@ -1,4 +1,4 @@
-import { test, root, compute, value } from './helper/zorn.js';
+import { test, root, compute, value } from './helper/anod.js';
 
 describe("Computations which modify data", function () {
     it("batch data while executing computation", function () {

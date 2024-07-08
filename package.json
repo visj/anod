@@ -1,11 +1,11 @@
 {
-  "name": "zorn",
+  "name": "anod",
   "version": "0.4.0",
   "description": "",
   "type": "module",
-  "types": "dist/zorn.d.ts",
-  "main": "dist/zorn.min.cjs",
-  "module": "dist/zorn.min.mjs",
+  "types": "lib.d.ts",
+  "module": "dist/anod.mjs",
+  "browser": "dist/js",
   "scripts": {
     "test": "node --expose-gc ./node_modules/mocha/bin/_mocha"
   },
@@ -18,10 +18,10 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/visj/zorn.git"
+    "url": "https://github.com/visj/anod.git"
   },
   "bugs": {
-    "url": "https://github.com/visj/zorn/issues"
+    "url": "https://github.com/visj/anod/issues"
   },
   "author": "visj",
   "license": "MIT",
@@ -40,8 +40,11 @@
     "rollup-plugin-cleanup": "^3.2.1",
     "rollup-plugin-esbuild": "^6.1.1",
     "s-js": "^0.4.9",
+    "solid-js": "^1.8.17",
     "typescript": "^5.5.2",
-    "usignal": "^0.9.0",
-    "solid-js": "^1.8.17"
+    "usignal": "^0.9.0"
+  },
+  "dependencies": {
+    "s-array": "^0.4.10"
   }
 }

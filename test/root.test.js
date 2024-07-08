@@ -1,4 +1,4 @@
-import { test, root, compute, cleanup, value } from './helper/zorn.js';
+import { test, root, compute, cleanup, value } from './helper/anod.js';
 
 describe("root()", function () {
     it("allows subcomputations to escape their parents", function () {

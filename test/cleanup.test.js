@@ -1,4 +1,4 @@
-import { test, root, cleanup, compute, value } from './helper/zorn.js';
+import { test, root, cleanup, compute, value } from './helper/anod.js';
 
 describe("cleanup", function () {
     it("is called when a computation is disposed", function () {

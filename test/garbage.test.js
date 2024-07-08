@@ -1,4 +1,4 @@
-import { test, compute, value } from './helper/zorn.js';
+import { test, compute, value } from './helper/anod.js';
 
 if (global.gc) {
 

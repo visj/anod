@@ -1,4 +1,4 @@
-import { test, root, compute, value, batch } from './helper/zorn.js';
+import { test, root, compute, value, batch } from './helper/anod.js';
 
 describe("data", function () {
     it("takes and returns an initial value", function () {

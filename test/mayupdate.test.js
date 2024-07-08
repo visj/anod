@@ -1,4 +1,4 @@
-import { test, root, data, compute, cleanup, value } from './helper/zorn.js';
+import { test, root, data, compute, cleanup, value } from './helper/anod.js';
 
 describe("mayupdate", function () {
   it("does not trigger downstream computations unless changed", function () {

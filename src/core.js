@@ -33,9 +33,19 @@ var Stage = {
     Computes: 4,
     Updates: 5,
 };
-/* __ENUMS__ */
 /**
- * @public
+ * @enum {number}
+ */
+var Type = {
+    Reactive: 1,
+    Value: 2,
+    Array: 3,
+    Object: 4,
+    Function: 5
+};
+/* __ENUMS__ */
+export { State, Stage, Type };
+/**
  * @template T
  * @param {function(Dispose): T} fn 
  * @returns {T}
@@ -69,53 +79,6 @@ export function root(fn) {
 }
 
 /**
- * @public
- * @template T
- * @param {T} value 
- * @returns {Signal<T>}
- */
-export function data(value) {
-    return new Data(value, null);
-}
-
-/**
- * @public
- * @template T
- * @param {T} value 
- * @param {function(T,T): boolean=} eq
- * @returns {Signal<T>}
- */
-export function value(value, eq) {
-    return new Data(value, eq);
-}
-
-/**
- * @public
- * @template T,U
- * @param {function(T,U): T} fn 
- * @param {T=} seed 
- * @param {null | (function(T,T): boolean)=} eq
- * @param {U=} args
- * @returns {Reactive<T>}
- */
-export function compute(fn, seed, eq, args) {
-    return new Compute(fn, seed, State.Void, eq, args)._init();
-}
-
-/**
- * @public
- * @template T,U
- * @param {function(T,U): T} fn 
- * @param {T=} seed 
- * @param {null | (function(T,T): boolean)=} eq
- * @param {U=} args
- * @returns {Reactive<T>}
- */
-export function $compute(fn, seed, eq, args) {
-    return new Compute(fn, seed, State.Dynamic, eq, args)._init();
-}
-
-/**
  * @template T
  * @param {function(): T} fn 
  * @returns {T}
@@ -129,7 +92,6 @@ export function sample(fn) {
 }
 
 /**
- * @public
  * @param {function(): void} fn 
  * @returns {void}
  */
@@ -145,7 +107,6 @@ export function batch(fn) {
 }
 
 /**
- * @public
  * @param {Cleanup} fn
  * @returns {void} 
  */
@@ -153,6 +114,57 @@ export function cleanup(fn) {
     if (CONTEXT._owner !== null) {
         CONTEXT._owner._addCleanup(fn);
     }
+}
+
+export function stable() {
+    if (CONTEXT._listen !== null) {
+        CONTEXT._listen._state &= ~State.Dynamic;
+    }
+}
+
+/**
+ * @template T
+ * @param {T} value 
+ * @returns {SignalValue<T>}
+ */
+export function data(value) {
+    return new Data(value, null);
+}
+
+/**
+ * @template T
+ * @param {T} value 
+ * @param {function(T,T): boolean=} eq
+ * @returns {SignalValue<T>}
+ */
+export function value(value, eq) {
+    return new Data(value, eq);
+}
+
+/**
+ * @public
+ * @template T, U
+ * @param {function(T, U): T} fn 
+ * @param {T=} seed 
+ * @param {null | (function(T,T): boolean)=} eq
+ * @param {U=} args
+ * @returns {Signal<T>}
+ */
+export function compute(fn, seed, eq, args) {
+    return new Compute(fn, seed, State.Void, eq, args)._init();
+}
+
+/**
+ * @public
+ * @template T,U
+ * @param {function(T,U): T} fn 
+ * @param {T=} seed 
+ * @param {null | (function(T,T): boolean)=} eq
+ * @param {U=} args
+ * @returns {Signal<T>}
+ */
+export function $compute(fn, seed, eq, args) {
+    return new Compute(fn, seed, State.Dynamic, eq, args)._init();
 }
 
 /**
@@ -193,67 +205,47 @@ Queue.prototype._add = function (item) {
  * @package
  * @returns {void}
  */
-Queue.prototype._drain = function () {
-    for (; this._index < this._count; this._index++) {
-        this._items[this._index]._state &= ~(
-            State.Updating |
-            State.WillUpdate |
-            State.MayUpdate |
-            State.MayDispose |
-            State.MayCleared
-        );
-        this._items[this._index] = null;
-    }
-    this._count = this._index = 0;
-};
-
-/**
- * @package
- * @returns {void}
- */
 Queue.prototype._dispose = function () {
-    for (; this._index < this._count; this._index++) {
-        this._items[this._index]._dispose();
-        this._items[this._index] = null;
+    for (var i = 0; i < this._count; i++) {
+        this._items[i]._dispose();
+        this._items[i] = null;
     }
-    this._count = this._index = 0;
+    this._count = 0;
 };
 
 /**
  * @package
+ * @param {number} time
  * @returns {void}
  */
-Queue.prototype._update = function () {
-    for (; this._index < this._count; this._index++) {
-        var item = this._items[this._index];
+Queue.prototype._update = function (time) {
+    for (var i = 0; i < this._count; i++) {
+        var item = this._items[i];
         if (item._state & State.WillUpdate) {
-            item._update();
+            item._update(time);
         }
-        item._state &= ~(
-            State.Updating |
-            State.WillUpdate |
-            State.MayUpdate |
-            State.MayDispose |
-            State.MayCleared
-        );
-        this._items[this._index] = null;
+        this._items[i] = null;
     }
-    this._count = this._index = 0;
+    this._count = 0;
 };
-
+/**
+ * @const
+ * @type {undefined}
+ */
+export var _ = void 0;
 /**
  * @const
  * @type {Object}
  */
-var VOID = {};
+export var VOID = {};
 /**
  * @type {number}
  */
-var TIME = 1;
+export var TIME = 1;
 /**
  * @type {number}
  */
-var STAGE = Stage.Idle;
+export var STAGE = Stage.Idle;
 /**
  * @const
  * @type {Queue}
@@ -285,18 +277,57 @@ export var CONTEXT = {
 };
 
 /**
+ * 
+ * @param {*} val
+ * @returns {number}
+ */
+export function type(val) {
+    switch (typeof val) {
+        case "function":
+            return Type.Function;
+        case "object":
+            if (val !== null) {
+                if (val instanceof Reactive) {
+                    return Type.Reactive;
+                }
+                if (val instanceof Array) {
+                    return Type.Array;
+                }
+                if (!(
+                    val instanceof Date ||
+                    val instanceof RegExp ||
+                    val instanceof Error
+                )) {
+                    return Type.Object;
+                }
+            }
+        // fallthrough
+    }
+    return Type.Value;
+}
+
+/**
  * @throws {Error}
  * @param {string=} msg 
  * @returns {void}
  */
-function panic(msg) {
+export function panic(msg) {
     throw new Error(msg);
+}
+
+/**
+ * 
+ * @param {number} val
+ * @returns {void}
+ */
+export function stage(val) {
+    STAGE = val;
 }
 
 /**
  * @returns {void}
  */
-function reset() {
+export function reset() {
     DISPOSES._count =
         CHANGES._count =
         COMPUTES._count =
@@ -308,7 +339,7 @@ function reset() {
  * @param {Receive} to
  * @returns {void}
  */
-function addReceiver(from, to) {
+export function addReceiver(from, to) {
     var fromslot = -1;
     var toslot = to._source1 === null ? -1 : to._sources === null ? 0 : to._sources.length;
     if (from._node1 === null) {
@@ -344,7 +375,7 @@ function addReceiver(from, to) {
 /**
  * @returns {void}
  */
-function exec() {
+export function exec() {
     var owner = CONTEXT._owner;
     var listen = CONTEXT._listen;
     try {
@@ -359,7 +390,8 @@ function exec() {
 /**
  * @returns {void}
  */
-function start() {
+export function start() {
+    var time = 0;
     var cycle = 0;
     var disposes = DISPOSES;
     var changes = CHANGES;
@@ -371,22 +403,22 @@ function start() {
         computes._count !== 0 ||
         updates._count !== 0
     ) {
-        TIME++;
+        time = ++TIME;
         if (disposes._count !== 0) {
             STAGE = Stage.Disposes;
             disposes._dispose();
         }
         if (changes._count !== 0) {
             STAGE = Stage.Changes;
-            changes._update();
+            changes._update(time);
         }
         if (computes._count !== 0) {
             STAGE = Stage.Computes;
-            computes._update();
+            computes._update(time);
         }
         if (updates._count !== 0) {
             STAGE = Stage.Updates;
-            updates._update();
+            updates._update(time);
         }
         if (cycle++ > 1e5) {
             panic("cycle detected");
@@ -398,7 +430,7 @@ function start() {
  * @this {Module}
  * @returns {void}
  */
-function disposeModule() {
+export function disposeModule() {
     if ((this._state & (State.WillDispose | State.Disposed)) === 0) {
         if (STAGE === Stage.Idle) {
             this._dispose();
@@ -412,7 +444,7 @@ function disposeModule() {
  * @param {Scope} scope
  * @returns {void}
  */
-function disposeScope(scope) {
+export function disposeScope(scope) {
     var i = 0;
     var ln = 0;
     var state = scope._state;
@@ -437,7 +469,7 @@ function disposeScope(scope) {
  * @param {Module} child
  * @returns {void}
  */
-function addChild(child) {
+export function addChild(child) {
     this._state |= State.Scope;
     if (this._children === null) {
         this._children = [child];
@@ -451,7 +483,7 @@ function addChild(child) {
  * @param {Cleanup} fn
  * @returns {void}
  */
-function addCleanup(fn) {
+export function addCleanup(fn) {
     this._state |= State.Cleanup;
     if (this._cleanups === null) {
         this._cleanups = [fn];
@@ -462,11 +494,47 @@ function addCleanup(fn) {
 
 /**
  * @struct
+ * @template T
  * @constructor
- * @extends {ModuleProto}
- * @implements {RootProto}
+ * @extends {Module<T>}
  */
-function Root() {
+export function Reactive() { }
+
+/**
+ * @public
+ * @returns {T}
+ */
+Reactive.prototype.val = function () {
+    if (
+        CONTEXT._listen !== null &&
+        (this._state & (State.WillDispose | State.Disposed)) === 0
+    ) {
+        addReceiver(this, CONTEXT._listen);
+    }
+    return this._value;
+};
+
+/**
+ * @public
+ * @returns {T}
+ */
+Reactive.prototype.peek = function () {
+    return this._value;
+}
+
+/**
+ * @public
+ * @returns {void}
+ */
+Reactive.prototype.dispose = disposeModule;
+
+/**
+ * @struct
+ * @constructor
+ * @extends {Reactive}
+ * @implements {RootInterface}
+ */
+export function Root() {
     /**
      * @package
      * @type {number}
@@ -485,21 +553,10 @@ function Root() {
 }
 
 /**
- * @public
  * @override
  * @returns {void}
  */
 Root.prototype.dispose = disposeModule;
-
-/**
- * @package
- * @override
- * @returns {void}
- */
-Root.prototype._dispose = function () {
-    disposeScope(this);
-    this._state = State.Disposed;
-};
 
 /**
  * @package
@@ -516,6 +573,18 @@ Root.prototype._addChild = addChild;
  * @returns {void}
  */
 Root.prototype._addCleanup = addCleanup;
+
+/**
+ * @package
+ * @override
+ * @returns {void}
+ */
+Root.prototype._dispose = function () {
+    if (this._state !== State.Disposed) {
+        disposeScope(this);
+        this._state = State.Disposed;
+    }
+};
 
 /**
  * @param {Send} send
@@ -608,7 +677,7 @@ function removeSender(receive, slot) {
  * @param {number} time
  * @returns {void}
  */
-function sendWillUpdate(send, time) {
+export function sendWillUpdate(send, time) {
     var state = send._state;
     var node1 = send._node1;
     if (state & State.SendOne) {
@@ -623,7 +692,7 @@ function sendWillUpdate(send, time) {
             );
         }
         if ((node1._state & (State.WillUpdate | State.WillDispose)) === 0) {
-            node1._recordWillUpdate();
+            node1._recordWillUpdate(time);
         }
     }
     if (state & State.SendMany) {
@@ -642,7 +711,7 @@ function sendWillUpdate(send, time) {
                 );
             }
             if ((node1._state & (State.WillUpdate | State.WillDispose)) === 0) {
-                node1._recordWillUpdate();
+                node1._recordWillUpdate(time);
             }
         }
     }
@@ -668,7 +737,7 @@ function sendMayUpdate(send, time) {
             );
         }
         if ((node1._state & (State.MayUpdate | State.WillUpdate | State.WillDispose)) === 0) {
-            node1._recordMayUpdate();
+            node1._recordMayUpdate(time);
         }
     }
     if (state & State.SendMany) {
@@ -687,7 +756,7 @@ function sendMayUpdate(send, time) {
                 );
             }
             if ((node1._state & (State.MayUpdate | State.WillUpdate | State.WillDispose)) === 0) {
-                node1._recordMayUpdate();
+                node1._recordMayUpdate(time);
             }
         }
     }
@@ -713,12 +782,12 @@ function sendMayDispose(owner, time) {
             );
         }
         if (
-            (node._state & (State.SendOne | State.SendMany)) !== 0 &&
-            (node._state & (State.ReceiveOne | State.ReceiveMany)) !== 0 &&
+            (node._state & (State.SendOne | State.SendMany)) &&
+            (node._state & (State.ReceiveOne | State.ReceiveMany)) &&
             (node._state & (State.MayDispose | State.WillDispose | State.Disposed)) === 0
         ) {
             node._owner = owner;
-            node._recordMayDispose();
+            node._recordMayDispose(time);
         }
     }
 }
@@ -743,18 +812,17 @@ function sendWillDispose(nodes) {
  * @constructor
  * @param {T} val
  * @param {null | (function(T,T): boolean)=} eq
- * @extends {ModuleProto}
- * @implements {DataProto<T>}
+ * @extends {Reactive<T>}
+ * @implements {DataInterface<T>}
  */
-function Data(val, eq) {
+export function Data(val, eq) {
     /**
      * @package
      * @type {number}
      */
-    this._state = eq === null ?
-        State.Respond :
-        eq !== void 0 ?
-            State.Compare : State.Void;
+    this._state = eq === void 0 ? State.Void : (
+        eq === null ? State.Respond : State.Compare
+    );
     /**
      * @package
      * @type {T}
@@ -790,38 +858,10 @@ function Data(val, eq) {
      * @type {T | Object}
      */
     this._next = VOID;
-    if (CONTEXT._owner !== null) {
-        CONTEXT._owner._addChild(this);
-    }
 }
 
-/**
- * @public
- * @returns {void}
- */
-Data.prototype.dispose = disposeModule;
-
-/**
- * @public
- * @returns {T}
- */
-Data.prototype.peek = function () {
-    return this._value;
-}
-
-/**
- * @public
- * @returns {T}
- */
-Data.prototype.val = function () {
-    if (
-        CONTEXT._listen !== null &&
-        (this._state & (State.WillDispose | State.Disposed)) === 0
-    ) {
-        addReceiver(this, CONTEXT._listen);
-    }
-    return this._value;
-}
+Data.prototype = new Reactive();
+Data.constructor = Data;
 
 /**
  * @param {T} val
@@ -859,20 +899,24 @@ Data.prototype.update = function (val) {
  * @returns {void}
  */
 Data.prototype._dispose = function () {
-    disposeSender(this);
-    this._value =
-        this._next = null;
-    this._state = State.Disposed;
+    if (this._state !== State.Disposed) {
+        disposeSender(this);
+        this._value =
+            this._next = null;
+        this._state = State.Disposed;
+    }
 };
 
 /**
  * @package
+ * @param {number} time
  * @returns {void}
  */
-Data.prototype._update = function () {
+Data.prototype._update = function (time) {
     this._value = this._next;
     this._next = VOID;
-    sendWillUpdate(this, TIME);
+    this._state &= ~State.WillUpdate;
+    sendWillUpdate(this, time);
 };
 
 /**
@@ -904,7 +948,6 @@ function cleanupReceiver(node) {
 
 /**
  * @struct
- * @package
  * @template T,U
  * @constructor
  * @param {function(T,U): T} fn 
@@ -912,10 +955,10 @@ function cleanupReceiver(node) {
  * @param {number} state
  * @param {null | (function(T,T): boolean)=} eq
  * @param {U=} args
- * @extends {ModuleProto}
- * @implements {ComputeProto<T>}
+ * @extends {Reactive<T>}
+ * @implements {ComputeInterface<T>}
  */
-function Compute(fn, value, state, eq, args) {
+export function Compute(fn, value, state, eq, args) {
     /**
       * @package
       * @type {number}
@@ -1006,11 +1049,8 @@ function Compute(fn, value, state, eq, args) {
     this._args = args;
 };
 
-/**
- * @public
- * @returns {void}
- */
-Compute.prototype.dispose = disposeModule;
+Compute.prototype = new Reactive();
+Compute.constructor = Compute;
 
 /**
  * @package
@@ -1028,6 +1068,7 @@ Compute.prototype._addCleanup = addCleanup;
 
 /**
  * @public
+ * @override
  * @returns {T}
  */
 Compute.prototype.val = function () {
@@ -1040,7 +1081,7 @@ Compute.prototype.val = function () {
                 if (state & State.MayDispose) {
                     this._clearMayUpdate(time);
                 } else if (state & State.WillUpdate) {
-                    this._update();
+                    this._update(time);
                 }
             } else if (
                 stage === Stage.Computes &&
@@ -1061,14 +1102,15 @@ Compute.prototype.val = function () {
 
 /**
  * @public
+ * @override
  * @returns {T}
  */
 Compute.prototype.peek = function () {
     if (
-        STAGE !== Stage.Idle &&
-        this._time === TIME &&
         (this._state & (State.WillDispose | State.Disposed)) === 0 &&
-        (this._state & (State.WillUpdate | State.MayDispose | State.MayUpdate)) !== 0
+        (this._state & (State.WillUpdate | State.MayDispose | State.MayUpdate)) &&
+        STAGE !== Stage.Idle &&
+        this._time === TIME
     ) {
         this._clearMayUpdate(TIME);
     }
@@ -1077,25 +1119,30 @@ Compute.prototype.peek = function () {
 
 /**
  * @package
+ * @override
  * @returns {void}
  */
 Compute.prototype._dispose = function () {
-    disposeScope(this);
-    disposeSender(this);
-    cleanupReceiver(this);
-    this._value =
-        this._next =
-        this._args =
-        this._sources =
-        this._sourceslots = null;
-    this._state = State.Disposed;
+    if (this._state !== State.Disposed) {
+        disposeScope(this);
+        disposeSender(this);
+        cleanupReceiver(this);
+        this._value =
+            this._next =
+            this._args =
+            this._sources =
+            this._sourceslots = null;
+        this._state = State.Disposed;
+    }
 };
 
 /**
  * @package
+ * @override
+ * @param {number} time
  * @returns {void}
  */
-Compute.prototype._update = function () {
+Compute.prototype._update = function (time) {
     var i = 0;
     var ln = 0;
     var owner = CONTEXT._owner;
@@ -1126,16 +1173,24 @@ Compute.prototype._update = function () {
     var prev = this._value;
     this._state |= State.Updating;
     this._value = this._next(prev, this._args);
+    this._state &= ~(
+        State.Updating |
+        State.WillUpdate |
+        State.MayUpdate |
+        State.MayDispose |
+        State.MayCleared
+    );
     if (
-        (state & (State.SendOne | State.SendMany)) !== 0 &&
-        (state & State.Respond) === 0 &&
+        ((state & State.Respond) === 0) &&
+        (state & (State.SendOne | State.SendMany)) &&
         (
             (state & State.Compare) === 0 ?
                 prev !== this._value :
                 !this._equality(prev, this._value)
         )
+
     ) {
-        sendWillUpdate(this, TIME);
+        sendWillUpdate(this, time);
     }
     CONTEXT._owner = owner;
     CONTEXT._listen = listen;
@@ -1143,7 +1198,7 @@ Compute.prototype._update = function () {
 
 /**
  * @package
- * @returns {Reactive<T>} 
+ * @returns {Compute<T>} 
  */
 Compute.prototype._init = function () {
     var owner = CONTEXT._owner;
@@ -1166,78 +1221,84 @@ Compute.prototype._init = function () {
         }
     } else {
         this._value = this._next(this._value, this._args);
+        CONTEXT._owner = owner;
+        CONTEXT._listen = listen;
     }
-    CONTEXT._owner = owner;
-    CONTEXT._listen = listen;
     return this;
 };
 
 /**
  * @package
+ * @override
  * @returns {void}
  */
 Compute.prototype._recordWillDispose = function () {
-    var state = this._state;
-    this._state = (state | State.WillDispose) & ~State.WillUpdate;
-    if ((state & (State.WillUpdate | State.Scope)) === State.Scope) {
+    this._state = (this._state | State.WillDispose) & ~State.WillUpdate;
+    if ((this._state & (State.WillUpdate | State.Scope)) === State.Scope) {
         sendWillDispose(this._children);
     }
 };
 
 /**
  * @package
+ * @override
+ * @param {number} time
  * @returns {void}
  */
-Compute.prototype._recordMayDispose = function () {
+Compute.prototype._recordMayDispose = function (time) {
     this._state |= State.MayDispose;
     if ((this._state & (State.MayUpdate | State.Scope)) === State.Scope) {
-        sendMayDispose(this, TIME);
+        sendMayDispose(this, time);
     }
 };
 
 /**
  * @package
+ * @override
+ * @param {number} time
  * @returns {void}
  */
-Compute.prototype._recordMayUpdate = function () {
-    var state = this._state;
+Compute.prototype._recordMayUpdate = function (time) {
     this._state |= State.MayUpdate;
-    if ((state & (State.MayDispose | State.Scope)) === State.Scope) {
-        sendMayDispose(this, TIME);
+    if ((this._state & (State.MayDispose | State.Scope)) === State.Scope) {
+        sendMayDispose(this, time);
     }
-    if ((state & (State.SendOne | State.SendMany)) !== 0) {
-        sendMayUpdate(this, TIME);
+    if (this._state & (State.SendOne | State.SendMany)) {
+        sendMayUpdate(this, time);
     }
 };
 
 /**
  * @package
+ * @override
+ * @param {number} time
  * @returns {void}
  */
-Compute.prototype._recordWillUpdate = function () {
+Compute.prototype._recordWillUpdate = function (time) {
     var state = this._state;
     this._state |= State.WillUpdate;
     if (state & State.Scope) {
         sendWillDispose(this._children);
     }
     if (
-        (state & (State.SendOne | State.SendMany)) !== 0 &&
-        (state & State.Respond) === 0
+        (state & State.Respond) === 0 &&
+        (state & (State.SendOne | State.SendMany))
     ) {
         COMPUTES._add(this);
         if ((state & State.MayUpdate) === 0) {
-            sendMayUpdate(this, TIME);
+            sendMayUpdate(this, time);
         }
     } else {
         UPDATES._add(this);
-        if ((state & (State.SendOne | State.SendMany)) !== 0) {
-            sendWillUpdate(this, TIME);
+        if (state & (State.SendOne | State.SendMany)) {
+            sendWillUpdate(this, time);
         }
     }
 };
 
 /**
  * @package
+ * @override
  * @param {number} time
  * @returns {void} 
  */
@@ -1279,6 +1340,6 @@ Compute.prototype._clearMayUpdate = function (time) {
         if ((this._state & State.Updating) !== 0) {
             panic("cyclic dependency");
         }
-        this._update();
+        this._update(time);
     }
 };
