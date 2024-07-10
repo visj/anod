@@ -15,8 +15,8 @@ import Table from 'cli-table';
 import * as anod from "../../dist/anod.mjs";
 
 const BATCHED = false;
-const RUNS_PER_TIER = 10000;
-const LAYER_TIERS = [1, 2, 3, 4, 5, 10, 15, 20, 25, 50];
+const RUNS_PER_TIER = 500;
+const LAYER_TIERS = [1, 2, 3, 4, 5, 10, 15, 20, 25, 50, 100, 500, 1000, 2000, 2500];
 
 async function collectGarbage() {
   return new Promise(resolve => {
@@ -42,57 +42,22 @@ function shuffleArray(array) {
 }
 
 const SOLUTIONS = [
-  [3, 2, 4, 2]
-  , [2, -1, 4, 4]
-  , [-1, -2, 3, 4]
-  , [-2, -4, 2, 3]
-  , [-4, -4, -1, 2]
-  , [2, 4, -2, -3]
-  , [-1, -2, 3, 4]
-  , [-2, 1, -4, -4]
-  , [3, 2, 4, 2]
-  , [2, -1, 4, 4]
+  [3, 2, 4, 2],
+  [4, -2, 4, 4],
+  [-1, -2, 3, 4],
+  [2, 2, 4, 2],
+  [-4, -4, -1, 2],
+  [2, 2, 4, 2],
+  [-1, -2, 3, 4],
+  [4, -2, 4, 4],
+  [3, 2, 4, 2],
+  [4, -2, 4, 4],
+  [-2, -4, 2, 3],
+  [4, -2, 4, 4],
+  [-2, -4, 2, 3],
+  [4, -2, 4, 4],
+  [-2, -4, 2, 3]
 ];
-
-const COMPUTED_SOLUTIONS = [
-  [3, 2, 4, 2]
-  , [2, -1, 4, 4]
-  , [-1, -2, 3, 4]
-  , [3, -4, 2, 3]
-  , [-4, 1, -1, 2]
-  , [3, 4, -2, 3]
-  , [-1, -3, 3, 5]
-  , [-2, 7, 1, -4]
-  , [3, 2, 4, 3]
-  , [2, -1, 5, 4]
-  , [3, 2, 4, 2]
-  , [2, -1, 4, 4]
-  , [-1, -2, 3, 4]
-  , [3, -4, 2, 3]
-  , [-4, 1, -1, 2]
-  , [3, 4, -2, 3]
-  , [-1, -3, 3, 5]
-  , [-2, 7, 1, -4]
-  , [3, 2, 4, 3]
-  , [2, -1, 5, 4]
-]
-
-const COMPUTED_BATCH_SOLUTIONS = [
-  [3, 2, 4, 2]
-  , [2, -1, 4, 4]
-  , [-1, -2, 3, 4]
-  , [3, -4, 2, 3]
-  , [-4, 1, -1, 2]
-  , [3, -2, -2, 3]
-  , [1, -3, 3, 1]
-  , [-2, 5, 1, -2]
-  , [3, -2, -2, 3]
-  , [-2, 5, 1, -2]
-]
-
-
-
-var rand = 0;
 
 /**
  * @param {number} layers
@@ -100,11 +65,11 @@ var rand = 0;
  */
 const isSolution = (layers, answer) => {
   return answer.every((_, i) => (
-    SOLUTIONS[LAYER_TIERS.indexOf(layers)][i] === _) ||
-    COMPUTED_SOLUTIONS[LAYER_TIERS.indexOf(layers)][i] === _ ||
-    COMPUTED_BATCH_SOLUTIONS[LAYER_TIERS.indexOf(layers)][i] === _
+    SOLUTIONS[LAYER_TIERS.indexOf(layers)][i] === _)
   );
 };
+
+var rand = 0;
 
 async function main() {
   const report = {};
@@ -118,7 +83,7 @@ async function main() {
   // Has no way to dispose so can't consider it feature comparable.
   report.reactively = { fn: runReactively, runs: [], avg: [] };
   // These libraries are not comparable in terms of features.
-  report.cellx = { fn: runCellx, runs: [] };
+  // report.cellx = { fn: runCellx, runs: [] };
 
   // warm up first
   for (const lib of Object.keys(report)) {
@@ -128,24 +93,22 @@ async function main() {
       let layers = LAYER_TIERS[i];
       const runs = [];
       for (let j = 0; j < RUNS_PER_TIER; j += 1) {
-        rand = 0;
         runs.push(await start(current.fn, layers));
       }
       // Give cellx time to release its global pendingCells array
       await new Promise((resolve) => setTimeout(resolve, 0));
-      //current.runs[i] = med(runs) * 1000;
       await collectGarbage();
     }
   }
 
   for (const lib of shuffleArray(Object.keys(report))) {
+    rand = 0;
     const current = report[lib];
-
     for (let i = 0; i < LAYER_TIERS.length; i += 1) {
       let layers = LAYER_TIERS[i];
       const runs = [];
+      rand++;
       for (let j = 0; j < RUNS_PER_TIER; j += 1) {
-        rand = 0;
         runs.push(await start(current.fn, layers));
       }
       // Give cellx time to release its global pendingCells array
@@ -227,7 +190,6 @@ function runReactively(layers, done) {
       };
     })(layer);
   }
-  rand++;
   const startTime = performance.now();
 
   const end = layer;
@@ -276,7 +238,6 @@ function runMaverick(layers, done) {
         };
       })(layer);
     }
-    rand++;
     const startTime = performance.now();
 
     const end = layer;
@@ -333,7 +294,6 @@ function runS(layers, done) {
         };
       })(layer);
     }
-    rand++;
     const startTime = performance.now();
 
     const end = layer;
@@ -374,14 +334,13 @@ function runAnod(layers, done) {
     for (let i = layers; i--;) {
       layer = ((m) => {
         return {
-          a: anod.$compute(() => rand % 2 ? m.b.val() : m.c.val(), 0),
+          a: anod.compute(() => rand % 2 ? m.b.val() : m.c.val(), 0),
           b: anod.compute(() => m.a.val() - m.c.val(), 0),
           c: anod.compute(() => m.b.val() + m.d.val(), 0),
           d: anod.compute(() => m.c.val(), 0),
         };
       })(layer);
     }
-    rand++;
     const startTime = performance.now();
 
     const end = layer;
@@ -435,7 +394,6 @@ function runSolid(layers, done) {
         return props;
       })(layer);
     }
-    rand++;
     const startTime = performance.now();
 
     const end = layer;
@@ -482,7 +440,6 @@ function runPreact(layers, done) {
       return props;
     })(layer);
   }
-  rand++;
   const startTime = performance.now();
 
   const end = layer;
@@ -537,7 +494,6 @@ function runCellx(layers, done) {
       return props;
     })(layer);
   }
-  rand++;
   const startTime = performance.now();
 
   const end = layer;
@@ -586,7 +542,6 @@ function runUsignal(layers, done) {
       return props;
     })(layer);
   }
-  rand++;
   const startTime = performance.now();
 
   const end = layer;

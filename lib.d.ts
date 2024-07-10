@@ -64,30 +64,25 @@ export declare function compute<T>(fn: () => T): Reactive<T>;
 /**
  * 
  * @param fn 
- * @param initial 
+ * @param seed 
  */
-export declare function compute<T>(fn: (prev: T) => T, initial: T): Reactive<T>;
+export declare function compute<T>(fn: (prev: T) => T, seed: T): Reactive<T>;
 /**
  * 
  * @param fn 
- * @param initial 
+ * @param seed 
  * @param args 
  * @param eq 
  */
-export declare function compute<T, U>(fn : (prev: T, args: U) => T, initial: T, args: U, eq: ((a: T, b: T) => boolean) | null): Reactive<T>;
+export declare function compute<T, U>(fn : (prev: T, args: U) => T, seed: T, args: U, eq: ((a: T, b: T) => boolean) | null): Reactive<T>;
 /**
  * 
  * @param fn 
- * @param initial 
+ * @param seed 
  * @param args 
  * @param eq 
  */
-export declare function compute<T, U>(fn: (prev: T, args: U) => T, initial?: T, args?: U, eq?: ((a: T, b: T) => boolean) | null): Reactive<T>;
-
-export declare function $compute<T>(fn: () => T): Reactive<T>;
-export declare function $compute<T>(fn: (seed: T) => T, seed: T): Reactive<T>;
-export declare function $compute<T, U>(fn : (seed: T, args: U) => T, seed: T, args: U, eq: ((a: T, b: T) => boolean) | null): Reactive<T>;
-export declare function $compute<T, U>(fn: (seed: T, args: U) => T, seed?: T, args?: U, eq?: ((a: T, b: T) => boolean) | null): Reactive<T>;
+export declare function compute<T, U>(fn: (prev: T, args: U) => T, seed?: T, args?: U, eq?: ((a: T, b: T) => boolean) | null): Reactive<T>;
 
 export interface SignalIterator<T = any> extends Reactive<T[]> {
     

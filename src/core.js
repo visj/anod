@@ -146,25 +146,13 @@ export function value(value, eq) {
  * @template T, U
  * @param {function(T, U): T} fn 
  * @param {T=} seed 
+ * @param {boolean=} dynamic
  * @param {null | (function(T,T): boolean)=} eq
  * @param {U=} args
  * @returns {Signal<T>}
  */
-export function compute(fn, seed, eq, args) {
-    return new Compute(fn, seed, State.Void, eq, args)._init();
-}
-
-/**
- * @public
- * @template T,U
- * @param {function(T,U): T} fn 
- * @param {T=} seed 
- * @param {null | (function(T,T): boolean)=} eq
- * @param {U=} args
- * @returns {Signal<T>}
- */
-export function $compute(fn, seed, eq, args) {
-    return new Compute(fn, seed, State.Dynamic, eq, args)._init();
+export function compute(fn, seed, dynamic, eq, args) {
+    return new Compute(fn, seed, eq, args, dynamic)._init();
 }
 
 /**
@@ -299,6 +287,33 @@ export function type(val) {
         // fallthrough
     }
     return Type.Value;
+}
+
+/**
+ * 
+ * @param {Function} SubClass 
+ * @param {Function} SuperClass 
+ */
+export function extend(SubClass, SuperClass) {
+    /**
+     * @struct
+     * @constructor
+     */
+    function Construct() { }
+    Construct.prototype = SuperClass.prototype;
+    SubClass.prototype = new Construct();
+    SubClass.prototype.constructor = SubClass;
+}
+
+/**
+ * 
+ * @param {Function} SubClass 
+ * @param {Function} SuperClass 
+ */
+export function inherit(SubClass, SuperClass) {
+    for (var method in SuperClass.prototype) {
+        SubClass.prototype[method] = SuperClass.prototype[method];
+    }
 }
 
 /**
@@ -855,8 +870,7 @@ export function Data(val, eq) {
     this._next = VOID;
 }
 
-Data.prototype = new Reactive();
-Data.constructor = Data;
+extend(Data, Reactive);
 
 /**
  * @param {T} val
@@ -926,7 +940,7 @@ Data.prototype._recordWillDispose = function () {
  * @param {Receive} node 
  * @returns {void}
  */
-function cleanupReceiver(node) {
+export function cleanupReceiver(node) {
     var state = node._state;
     if (state & State.ReceiveOne) {
         removeReceiver(node._source1, node._source1slot);
@@ -947,21 +961,28 @@ function cleanupReceiver(node) {
  * @constructor
  * @param {function(T,U): T} fn 
  * @param {T} value 
- * @param {number} state
  * @param {null | (function(T,T): boolean)=} eq
  * @param {U=} args
+ * @param {boolean=} dynamic
  * @extends {Reactive<T>}
  * @implements {ComputeInterface<T>}
  */
-export function Compute(fn, value, state, eq, args) {
+export function Compute(fn, value, eq, args, dynamic) {
     /**
       * @package
       * @type {number}
       */
-    this._state = state | (eq === null ?
-        State.Respond :
-        eq !== void 0 ?
-            State.Compare : State.Void);
+    this._state = State.Void;
+    if (eq !== void 0) {
+        if (eq === null) {
+            this._state |= State.Respond;
+        } else {
+            this._state |= State.Compare;
+        }
+    }
+    if (dynamic) {
+        this._state |= State.Dynamic;
+    }
     /**
      * @package
      * @type {T}
@@ -1044,8 +1065,7 @@ export function Compute(fn, value, state, eq, args) {
     this._args = args;
 };
 
-Compute.prototype = new Reactive();
-Compute.constructor = Compute;
+extend(Compute, Reactive);
 
 /**
  * @package
@@ -1228,8 +1248,9 @@ Compute.prototype._init = function () {
  * @returns {void}
  */
 Compute.prototype._recordWillDispose = function () {
-    this._state = (this._state | State.WillDispose) & ~State.WillUpdate;
-    if ((this._state & (State.WillUpdate | State.Scope)) === State.Scope) {
+    var state = this._state;
+    this._state = (state | State.WillDispose) & ~(State.WillUpdate | State.MayDispose | State.MayUpdate);
+    if ((state & (State.WillUpdate | State.Scope)) === State.Scope) {
         sendWillDispose(this._children);
     }
 };

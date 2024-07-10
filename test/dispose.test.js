@@ -1,4 +1,4 @@
-import { test, root, $compute, compute, value } from './helper/anod.js';
+import { test, root, compute, value } from './helper/anod.js';
 
 describe("dispose", function () {
 
@@ -136,14 +136,14 @@ describe("dispose", function () {
 					d3.update(d3.peek() + 1);
 				}
 			});
-			$compute(function () {
+			compute(function () {
 				count++;
 				if (d1.val()) {
 					d2.val();
 				} else {
 					d3.val();
 				}
-			});
+			}, void 0, true);
 			count = 0;
 			d1.update(false);
 			test.equals(count , 2);

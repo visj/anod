@@ -5,6 +5,8 @@ import {
     Compute,
     State,
     Type,
+    extend,
+    inherit,
     type,
     VOID,
     start,
@@ -16,7 +18,8 @@ import {
     CHANGES,
     DISPOSES,
     addReceiver,
-    sendWillUpdate
+    sendWillUpdate,
+    cleanupReceiver
 } from "./core.js";
 
 /**
@@ -73,6 +76,16 @@ function Params(arg1, arg2) {
         this._type1 === Type.Function ||
         this._type2 === Type.Reactive ||
         this._type2 === Type.Function;
+    /**
+     * @package
+     * @type {boolean}
+     */
+    this._record = this._reactive;
+    /**
+     * @package
+     * @type {*}
+     */
+    this._state = void 0;
 }
 
 /**
@@ -80,100 +93,29 @@ function Params(arg1, arg2) {
  * @constructor
  * @template T, U, V
  * @param {function(T, Params<U, V>): T} fn
- * @param {ReactiveIterator<T>} source
- * @param {U=} arg1
- * @param {V=} arg2
- * @param {T=} value
+ * @param {T} value
+ * @param {Params<U, V>} args
+ * @param {boolean=} dynamic
  * @extends {Compute<T, U>}
  */
-function ComputeIterator(fn, source, arg1, arg2, value) {
-    /**
-     * @package
-     * @type {number}
-     */
-    this._state = State.Void;
-    /**
-     * @package
-     * @type {T}
-     */
-    this._value = value;
-    /**
-     * @package
-     * @type {Receive | null}
-     */
-    this._node1 = null;
-    /**
-     * @package
-     * @type {number}
-     */
-    this._node1slot = -1;
-    /**
-     * @package
-     * @type {Array<Receive> | null}
-     */
-    this._nodes = null;
-    /**
-     * @package
-     * @type {Array<number> | null}
-     */
-    this._nodeslots = null;
-    /**
-     * @package
-     * @type {null | (function(T,U): T)}
-     */
-    this._next = fn;
-    /**
-     * @package
-     * @type {Receive | null}
-     */
-    this._owner = null;
-    /**
-     * @package
-     * @type {number}
-     */
-    this._time = 0;
-    /**
-     * @package
-     * @type {Send | null}
-     */
-    this._source1 = null;
-    /**
-     * @package
-     * @type {number}
-     */
-    this._source1slot = 0;
-    /**
-     * @package
-     * @type {Array<Send> | null}
-     */
-    this._sources = null;
-    /**
-     * @package
-     * @type {Array<number> | null}
-     */
-    this._sourceslots = null;
-    /**
-     * @package
-     * @type {Params<U>}
-     */
-    this._args = new Params(arg1, arg2);
-    addReceiver(source, this);
+function ComputeIterator(fn, value, args, dynamic) {
+    Compute.call(this, fn, value, void 0, args, dynamic);
 }
 
-ComputeIterator.prototype = Object.create(Compute);
-ComputeIterator.constructor = ComputeIterator;
+extend(ComputeIterator, Compute);
 
 /**
  * @package
- * @override
+ * @param {Send} source
  * @returns {ComputeIterator<T>} 
  */
-ComputeIterator.prototype._init = function () {
+ComputeIterator.prototype._iterate = function (source) {
     var owner = CONTEXT._owner;
     var listen = CONTEXT._listen;
     if (owner !== null) {
         owner._addChild(this);
     }
+    addReceiver(source, this);
     var args = this._args;
     CONTEXT._owner = CONTEXT._listen = null;
     args._val = this._source1.val();
@@ -214,7 +156,13 @@ ComputeIterator.prototype._update = function (time) {
     CONTEXT._owner = CONTEXT._listen = null;
     args._val = this._source1.val();
     if (args._reactive) {
-        CONTEXT._listen = this;
+        if (this._state & State.Dynamic) {
+            cleanupReceiver(this);
+            args._record = true;
+        }
+        if (args._record) {
+            CONTEXT._listen = this;
+        }
     }
     this._state |= State.Updating;
     this._value = this._next(prev, args);
@@ -226,6 +174,12 @@ ComputeIterator.prototype._update = function (time) {
         State.MayCleared
     );
     if (
+        (this._state & (State.Dynamic | State.ReceiveMany)) === 0 && 
+        args._reactive && !args._record
+    ) {
+        args._reactive = false;
+    }
+    if (
         (this._state & (State.SendOne | State.SendMany)) &&
         prev !== this._value
     ) {
@@ -234,6 +188,20 @@ ComputeIterator.prototype._update = function (time) {
     CONTEXT._owner = owner;
     CONTEXT._listen = listen;
 };
+
+/**
+ * @template T, U, V
+ * @param {function(T, Params<T,U,V>): T} fn 
+ * @param {ReactiveIterator<T>} source
+ * @param {U=} arg1
+ * @param {boolean=} dynamic
+ * @param {V=} arg2
+ * @param {T=} seed
+ * @returns {Signal<T>}
+ */
+function computeIterator(fn, source, arg1, dynamic, arg2, seed) {
+    return new ComputeIterator(fn, seed, new Params(arg1, arg2), dynamic)._iterate(source);
+}
 
 /**
  * @const
@@ -257,21 +225,6 @@ function read(type, args) {
     return /** @type {T} */(args);
 }
 
-
-
-/**
- * @template T, U, V
- * @param {function(T, Params<T,U,V>): T} fn 
- * @param {ReactiveIterator<T>} source
- * @param {U=} arg1
- * @param {V=} arg2
- * @param {T=} seed
- * @returns {Signal<T>}
- */
-function computeIterator(fn, source, arg1, arg2, seed) {
-    return new ComputeIterator(fn, source, arg1, arg2, seed)._init();
-}
-
 /**
  * @struct
  * @template T
@@ -281,7 +234,7 @@ function computeIterator(fn, source, arg1, arg2, seed) {
  */
 function ReactiveIterator() { }
 
-ReactiveIterator.prototype = new Reactive();
+extend(ReactiveIterator, Reactive);
 
 /**
  * 
@@ -300,20 +253,21 @@ ReactiveIterator.prototype.length;
 /**
  * @template T, U
  * @param {T | undefined} prev 
- * @param {Params<T, U>} source 
+ * @param {Params<T, U>} params 
  * @returns {T | undefined}
  */
-function atIterator(prev, source) {
-    source._reactive = false;
-    return source._val[read(source._type1, source._arg1)];
+function atIterator(prev, params) {
+    params._record = false;
+    return params._val[read(params._type1, params._arg1)];
 }
 
 /**
  * @param {number | Signal<number> | (function(): number)} index 
+ * @param {boolean=} dynamic
  * @returns {Signal<T | undefined>}
  */
-ReactiveIterator.prototype.at = function (index) {
-    return computeIterator(atIterator, this, index, true);
+ReactiveIterator.prototype.at = function (index, dynamic) {
+    return computeIterator(atIterator, this, index, dynamic);
 };
 
 /**
@@ -325,34 +279,41 @@ ReactiveIterator.prototype.concat = function (items) { };
 /**
  * @template T
  * @param {boolean} prev 
- * @param {Params<T, (function(T,number): boolean)>} source 
+ * @param {Params<T, (function(T,number): boolean)>} params 
  * @returns {boolean}
  */
-function everyIterator(prev, source) {
-    var arr = source._val;
-    var len = arr.length;
+function everyIterator(prev, params) {
     var result = true;
+    var current = params._val;
+    var callback = params._arg1;
+    var len = current.length;
     if (len > 0) {
         var i = 0;
-        var callback = source._arg1;
-        if (source._reactive) {
-            source._reactive = false;
-            result = callback(arr[i], i++);
+        if (params._record) {
+            result = callback(current[i], i++);
+            params._record = false;
+            CONTEXT._listen = null;
         }
         while (result && i < len) {
-            result = callback(arr[i], i++);
+            result = callback(current[i], i++);
         }
     }
     return result;
 }
 
 /**
+ * @public
  * @param {function(T, number): boolean} callbackFn
+ * @param {boolean=} dynamic
  * @returns {Signal<boolean>}
  */
-ReactiveIterator.prototype.every = function (callbackFn) {
-    return computeIterator(everyIterator, this, callbackFn);
+ReactiveIterator.prototype.every = function (callbackFn, dynamic) {
+    return computeIterator(everyIterator, this, callbackFn, dynamic);
 };
+
+function filterIterator(prev, params) {
+
+}
 
 /**
  * @param {function(T,number): boolean} callbackFn
@@ -363,19 +324,35 @@ ReactiveIterator.prototype.filter = function (callbackFn) { };
 /**
  * @template T
  * @param {T | undefined} prev 
- * @param {Params<T, (function(T, number): boolean)>} source 
+ * @param {Params<T, (function(T, number): boolean)>} params 
  * @returns {T | undefined}
  */
-function findIterator(prev, source) {
-    return source._val.find(source._arg1);
+function findIterator(prev, params) {
+    var i = 0;
+    var found = false;
+    var current = params._val;
+    var callback = params._arg1;
+    var len = current.length;
+    if (len > 0) {
+        if (params._record) {
+            found = callback(current[i], i++);
+            params._record = false;
+            CONTEXT._listen = null;
+        }
+        while (!found && i < len) {
+            found = callback(current[i], i++);
+        }
+    }
+    return found ? current[i] : void 0;
 }
 
 /**
  * @param {function(T, number): boolean} callbackFn
+ * @param {boolean=} dynamic
  * @returns {Signal<T | undefined>}
  */
-ReactiveIterator.prototype.find = function (callbackFn) {
-    return computeIterator(findIterator, this, callbackFn);
+ReactiveIterator.prototype.find = function (callbackFn, dynamic) {
+    return computeIterator(findIterator, this, callbackFn, dynamic);
 };
 
 /**
@@ -485,10 +462,11 @@ function indexOfIterator(prev, source) {
 /**
  * @param {T | Signal<T> | (function(): T)} searchElement 
  * @param {number | Signal<number> | (function(): number)=} fromIndex
+ * @param {boolean=} dynamic
  * @returns {Signal<number>}
  */
-ReactiveIterator.prototype.indexOf = function (searchElement, fromIndex) {
-    return computeIterator(indexOfIterator, this, searchElement, fromIndex);
+ReactiveIterator.prototype.indexOf = function (searchElement, fromIndex, dynamic) {
+    return computeIterator(indexOfIterator, this, searchElement, dynamic, fromIndex);
 };
 
 /**
@@ -523,10 +501,11 @@ function lastIndexOfIterator(prev, source) {
 /**
  * @param {T | Signal<T> | (function(): T)} searchElement 
  * @param {number | Signal<number> | (function(): number)=} fromIndex
+ * @param {boolean=} dynamic
  * @returns {Signal<number>}
  */
-ReactiveIterator.prototype.lastIndexOf = function (searchElement, fromIndex) {
-    return computeIterator(lastIndexOfIterator, this, searchElement, fromIndex);
+ReactiveIterator.prototype.lastIndexOf = function (searchElement, fromIndex, dynamic) {
+    return computeIterator(lastIndexOfIterator, this, searchElement, dynamic, fromIndex);
 };
 
 /**
@@ -616,62 +595,8 @@ ReactiveIterator.prototype.some = function (callbackFn) {
  * @extends {ReactiveIterator<T>}
  * @implements {ComputeArrayInterface<T>}
  */
-export function ComputeArray(source) {
-    /**
-     * @package
-     * @type {number}
-     */
-    this._state = State.Void;
-    /**
-     * @package
-     * @type {T}
-     */
-    this._value = [];
-    /**
-     * @package
-     * @type {Receive | null}
-     */
-    this._node1 = null;
-    /**
-     * @package
-     * @type {number}
-     */
-    this._node1slot = -1;
-    /**
-     * @package
-     * @type {Array<Receive> | null}
-     */
-    this._nodes = null;
-    /**
-     * @package
-     * @type {Array<number> | null}
-     */
-    this._nodeslots = null;
-    /**
-     * @package
-     * @type {null}
-     */
-    this._next = null;
-    /**
-     * @package
-     * @type {Receive | null}
-     */
-    this._owner = null;
-    /**
-     * @package
-     * @type {number}
-     */
-    this._time = 0;
-    /**
-     * @package
-     * @type {Send | null}
-     */
-    this._source1 = null;
-    /**
-     * @package
-     * @type {number}
-     */
-    this._source1slot = 0;
+export function ComputeArray() {
+    Compute.call(/** @type {?} */(this));
     /**
      * @public
      * @type {function(): number}
@@ -679,8 +604,8 @@ export function ComputeArray(source) {
     this.length = getLength(this);
 }
 
-ComputeArray.prototype = new ReactiveIterator();
-ComputeArray.constructor = ComputeArray;
+extend(ComputeArray, ReactiveIterator);
+inherit(ComputeArray, Compute);
 
 /**
  * @struct
@@ -691,6 +616,7 @@ ComputeArray.constructor = ComputeArray;
  * @implements {DataArrayInterface<T>}
  */
 export function DataArray(val) {
+    Data.call(/** @type {?} */(this), val);
     /**
      * @public
      * @type {function(): number}
@@ -700,49 +626,11 @@ export function DataArray(val) {
      * @package
      * @type {number}
      */
-    this._state = State.Void;
-    /**
-     * @package
-     * @type {Array<T>}
-     */
-    this._value = val;
-    /**
-     * @package
-     * @type {Receive | null}
-     */
-    this._node1 = null;
-    /**
-     * @package
-     * @type {number}
-     */
-    this._node1slot = -1;
-    /**
-     * @package
-     * @type {Array<Receive> | null}
-     */
-    this._nodes = null;
-    /**
-     * @package
-     * @type {Array<number> | null}
-     */
-    this._nodeslots = null;
-    /**
-     * @package
-     * @type {Array<T> | Object}
-     */
-    this._next = VOID;
-    /**
-     * @package
-     * @type {number}
-     */
     this._mutation = -1;
-    if (CONTEXT._owner !== null) {
-        CONTEXT._owner._addChild(this);
-    }
 }
 
-DataArray.prototype = new ReactiveIterator();
-DataArray.constructor = DataArray;
+extend(DataArray, ReactiveIterator);
+inherit(DataArray, Data);
 
 /**
  * @public

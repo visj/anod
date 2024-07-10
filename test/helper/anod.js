@@ -1,4 +1,4 @@
-export * from "../../src/core.js";
+export * from "../../dist/anod.mjs";
 
 export var test = {
     /**

@@ -1,4 +1,4 @@
-import { test, root, compute, $compute, value } from './helper/anod.js';
+import { test, root, compute, value } from './helper/anod.js';
 
 describe("compute()", function () {
     describe("creation", function () {
@@ -89,10 +89,10 @@ describe("compute()", function () {
             t = value(1);
             e = value(2);
             fevals = 0;
-            f = $compute(function () {
+            f = compute(function () {
                 fevals++;
                 return i.val() ? t.val() : e.val();
-            });
+            }, 0, true);
             fevals = 0;
         }
 

@@ -3,6 +3,10 @@ import fs from "node:fs";
 import { exec } from "child_process";
 import * as esbuild from "esbuild";
 
+async function fileExists(path) {
+    return await fs.promises.stat(path).then(() => true, () => false);
+}
+
 async function loadEnums() {
     const code = await fs.promises.readFile("./src/core.js", "utf-8");
     await vm.runInThisContext(code.split("/* __ENUMS__ */")[0]);
@@ -25,15 +29,33 @@ const replaceEnumPlugin = {
     }
 }
 
-async function esbuildBundleBench() {
-    await esbuild.build({
-        entryPoints: ["./bench/haile/anod/index.js"],
-        bundle: true,
-        minify: true,
-        target: "ES5",
-        mangleProps: /^_/,
-        outfile: "./bench/haile/anod/index.min.js",
-        plugins: [replaceEnumPlugin],
+async function closureBundleBench() {
+    return new Promise((resolve, reject) => {
+        const cmd = [
+            "google-closure-compiler",
+            "-O ADVANCED",
+            "--language_out ECMASCRIPT_NEXT",
+            "--js src/core.js",
+            "--js src/array.js",
+            "--js src/types.js",
+            "--js src/api.js",
+            "--js bench/haile/anod/index.js",
+            "--js_output_file bench/haile/anod/index.min.js"
+        ];
+        exec(cmd.join(" "), async (err, stdout, stderr) => {
+            if (err) {
+                console.error(err);
+                return reject(err);
+            }
+            if (stderr) {
+                console.error(stderr);
+                return reject(stderr);
+            }
+            if (stdout.trim() !== "") {
+                console.log(stdout);
+            }
+            resolve();
+        });
     });
 }
 
@@ -84,7 +106,7 @@ async function esbuildBundleuSignal() {
 
 async function bundleBench() {
     await Promise.all([
-        esbuildBundleBench(),
+        closureBundleBench(),
         esbuildBundlePreact(),
         esbuildBundleSjs(),
         esbuildBundleSolid(),
@@ -93,82 +115,64 @@ async function bundleBench() {
     ]);
 }
 
-async function closureBundleLibrary() {
+async function bundleLibrary() {
     return new Promise((resolve, reject) => {
+        const outfile = "./temp/closure.build.js";
         const cmd = [
-            "closure-compiler",
+            "google-closure-compiler",
             "-O ADVANCED",
-            "--language_out ECMASCRIPT_NEXT",
+            "--language_out ES5",
             "--js src/core.js",
             "--js src/array.js",
             "--js src/types.js",
             "--js src/entry.js",
             "--externs src/api.js",
-            "--js_output_file temp/closure.build.js"
+            "--externs src/externs.js",
+            "--js_output_file " + outfile
         ];
         exec(cmd.join(" "), async (err, stdout, stderr) => {
             if (err) {
                 console.error(err);
-                reject(err);
-            } else {
-                if (stderr) {
-                    console.error(stderr);
+            }
+            if (stderr) {
+                console.error(stderr);
+            }
+            const exists = await fileExists(outfile);
+            if (!exists) {
+                return reject("Closure did not generate output file");
+            }
+            let code = await fs.promises.readFile(outfile, "utf-8")
+            const parts = code.split(/(window\.anod\.[\$\w]*)/g);
+            let esm = parts[0];
+            let iife = "var anod=(function(){" + parts[0] + "return{";
+            for (let i = 1; i < parts.length - 1; i += 2) {
+                let name = parts[i].slice(12);
+                let content = parts[i + 1];
+                if (i > 1) {
+                    iife += ",";
+                }
+                if (content.startsWith("=function")) {
+                    esm += "export function " + name + content.slice(9);
+                    iife += name + ":" + content.slice(1, content.lastIndexOf(";"));
                 } else {
-                    let code = await fs.promises.readFile("./temp/closure.build.js", "utf-8")
-                    const parts = code.split(/(window\.anod\.[\$\w]*)/g);
-                    let esm = parts[0];
-                    let iife = "var anod=(function(){" + parts[0] + "return{";
-                    for (let i = 1; i < parts.length - 1; i += 2) {
-                        let name = parts[i].slice(12);
-                        let content = parts[i + 1];
-                        if (i > 1) {
-                            iife += ",";
-                        }
-                        if (content.startsWith("=function")) {
-                            esm += "export function " + name + content.slice(9);
-                            iife += name + ":" + content.slice(1, content.lastIndexOf(";"));
-                        } else {
-                            let min = content.slice(1, content.indexOf(";"));
-                            esm += "export { " + min + " as " + name + " };";
-                            iife += name + ":"+ content.slice(1, content.indexOf(";"));
-                        }
-                    }
-                    iife += "}})();";
-                    await fs.promises.writeFile("./dist/anod.js", iife);
-                    await fs.promises.writeFile("./dist/anod.mjs", esm);
-                    // const esmRegex = /window\.anod\.([\$\w]*)\s*=\s*function\s*\(/g;
-                    // const esm = code.replace(esmRegex, "export function $1(");
-                    // const iifeRegex = /([\;\s]*)window\.anod\.([\$\w]+)\s*=\s*function\s*\(/g;
-                    // var i = 0;
-                    // let iife = "var anod=(function(){" + code.replace(iifeRegex, function (_, newLine, capture) {
-                    //     if (i++ === 0) {
-                    //         return ";return{" + capture + ":function(";
-                    //     }
-                    //     if (newLine) {
-                    //         newLine = newLine.replace(";", "");
-                    //     }
-                    //     return newLine + "," + capture + ":function(";
-                    // });
-                    // iife = iife.replace(/[\s\;]*$/, "");
-                    // iife = iife + "};" + "})();";
-                    // await fs.promises.writeFile("./dist/anod.js", iife);
-                    // await fs.promises.writeFile("./dist/anod.mjs", esm);
-                    // await fs.promises.rm("./temp/closure.build.js");
-                    resolve({ stdout, stderr });
+                    let min = content.slice(1, content.indexOf(";"));
+                    esm += "export { " + min + " as " + name + " };";
+                    iife += name + ":" + content.slice(1, content.indexOf(";"));
                 }
             }
+            iife += "}})();";
+            await fs.promises.writeFile("./dist/anod.js", iife);
+            await fs.promises.writeFile("./dist/anod.mjs", esm);
+            await fs.promises.rm("./temp/closure.build.js");
+            resolve({ stdout, stderr });
         });
     });
-}
-
-async function bundleLibrary() {
-    await closureBundleLibrary();
 }
 
 async function closureBundleTests() {
     return new Promise((resolve, reject) => {
         const cmd = [
-            "closure-compiler",
+            "google-closure-compiler",
             "-O ADVANCED",
             "--language_out ECMASCRIPT_NEXT",
             "--js src/api.js",
@@ -213,9 +217,10 @@ async function bundleTests() {
 }
 
 async function main() {
-    await loadEnums();
     try {
-        await Promise.all([
+        await loadEnums();
+        await fs.promises.mkdir("./dist", { recursive: true });
+        await Promise.allSettled([
             bundleBench(),
             // bundleTests(),
             bundleLibrary(),

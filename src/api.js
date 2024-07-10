@@ -1,27 +1,4 @@
 /**
- * NOTE: this is an ES2023 extern.
- * @param {function(this:S, T, number, !Array<T>): boolean} predicateFn
- * @param {S=} opt_this
- * @return {T|undefined}
- * @this {IArrayLike<T>|string}
- * @template T,S
- * @see https://tc39.es/ecma262/#sec-array.prototype.findlast
- */
-ReadonlyArray.prototype.findLast = function(predicateFn, opt_this) {};
-
-
-/**
- * NOTE: this is an ES2023 extern.
- * @param {function(this:S, T, number, !Array<T>): boolean} predicateFn
- * @param {S=} opt_this
- * @return {number}
- * @this {IArrayLike<T>|string}
- * @template T,S
- * @see https://tc39.es/ecma262/#sec-array.prototype.findlastindex
- */
-ReadonlyArray.prototype.findLastIndex = function(predicateFn, opt_this) {};
-
-/**
  * @interface
  * @template T
  */
@@ -273,75 +250,65 @@ var SignalType;
  */
 function SignalObject() { }
 
-/**
- * @const
- */
-var anod = {};
+// /**
+//  * @const
+//  */
+// var anod = {};
 
-/**
- * @template T
- * @param {function(function(): void): T} fn 
- * @returns {T}
- */
-anod.root = function (fn) { };
+// /**
+//  * @template T
+//  * @param {function(function(): void): T} fn 
+//  * @returns {T}
+//  */
+// anod.root = function (fn) { };
 
-/**
- * @param {function(): void} fn
- * @returns {void}
- */
-anod.batch = function (fn) { };
+// /**
+//  * @param {function(): void} fn
+//  * @returns {void}
+//  */
+// anod.batch = function (fn) { };
 
-/**
- * @param {function(boolean): void} fn
- * @returns {void}
- */
-anod.cleanup = function (fn) { };
+// /**
+//  * @param {function(boolean): void} fn
+//  * @returns {void}
+//  */
+// anod.cleanup = function (fn) { };
 
-/**
- * @template T
- * @param {function(): T} fn 
- * @returns {T}
- */
-anod.sample = function (fn) { };
+// /**
+//  * @template T
+//  * @param {function(): T} fn 
+//  * @returns {T}
+//  */
+// anod.sample = function (fn) { };
 
-/**
- * @template T
- * @param {T} val 
- * @returns {SignalValue<T>}
- */
-anod.data = function (val) { };
+// /**
+//  * @template T
+//  * @param {T} val 
+//  * @returns {SignalValue<T>}
+//  */
+// anod.data = function (val) { };
 
-/**
- * @template T
- * @param {T} val 
- * @param {null | (function(T,T): boolean)=} eq 
- * @returns {SignalValue<T>}
- */
-anod.value = function (val, eq) { };
+// /**
+//  * @template T
+//  * @param {T} val 
+//  * @param {null | (function(T,T): boolean)=} eq 
+//  * @returns {SignalValue<T>}
+//  */
+// anod.value = function (val, eq) { };
 
-/**
- * @template T
- * @param {Array<T>=} val 
- * @returns {SignalArray<T>}
- */
-anod.array = function (val) { };
+// /**
+//  * @template T
+//  * @param {Array<T>=} val 
+//  * @returns {SignalArray<T>}
+//  */
+// anod.array = function (val) { };
 
-/**
- * @template T,U
- * @param {function(T,U): T} fn 
- * @param {T=} seed 
- * @param {null | (function(T,T): boolean)=} eq 
- * @param {U=} args 
- * @returns {Signal<T>}
- */
-anod.compute = function (fn, seed, args, eq) { };
-
-/**
- * @template T,U
- * @param {function(T,U): T} fn 
- * @param {T=} seed 
- * @param {null | (function(T,T): boolean)=} eq 
- * @param {U=} args 
- * @returns {Signal<T>}
- */
-anod.$compute = function (fn, seed, args, eq) { };
+// /**
+//  * @template T,U
+//  * @param {function(T,U): T} fn 
+//  * @param {T=} seed 
+//  * @param {null | (function(T,T): boolean)=} eq 
+//  * @param {U=} args 
+//  * @returns {Signal<T>}
+//  */
+// anod.compute = function (fn, seed, args, eq) { };

@@ -5,7 +5,6 @@
   "type": "module",
   "types": "lib.d.ts",
   "module": "dist/anod.mjs",
-  "browser": "dist/js",
   "scripts": {
     "test": "node --expose-gc ./node_modules/mocha/bin/_mocha"
   },
@@ -43,8 +42,5 @@
     "solid-js": "^1.8.17",
     "typescript": "^5.5.2",
     "usignal": "^0.9.0"
-  },
-  "dependencies": {
-    "s-array": "^0.4.10"
   }
 }
