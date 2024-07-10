@@ -47,9 +47,10 @@ SignalValue.prototype.update = function (val) { };
 function SignalIterator() { }
 
 /**
- * @returns {number}
+ * @const
+ * @type {function(): number}
  */
-SignalIterator.prototype.length = function() { };
+SignalIterator.prototype.length;
 
 /**
  * @this {SignalIterator<T>}
@@ -139,7 +140,7 @@ SignalIterator.prototype.join = function (separator) { };
 /**
  * @this {SignalIterator<T>}
  * @param {T | Signal<T> | (function(): T)} searchElement 
- * @param {number | Signal<number> | (function(): T)=} fromIndex
+ * @param {number | Signal<number> | (function(): number)=} fromIndex
  * @returns {Signal<number>}
  */
 SignalIterator.prototype.lastIndexOf = function (searchElement, fromIndex) { };
@@ -147,7 +148,7 @@ SignalIterator.prototype.lastIndexOf = function (searchElement, fromIndex) { };
 /**
  * @template U
  * @this {SignalIterator<T>}
- * @param {function(T,Signal<number>): U} callbackFn
+ * @param {function(T, Signal<number>): U} callbackFn
  * @returns {SignalIterator<U>}
  */
 SignalIterator.prototype.map = function (callbackFn) { };
@@ -249,66 +250,3 @@ var SignalType;
  * @extends {IObject<string, SignalType>}
  */
 function SignalObject() { }
-
-// /**
-//  * @const
-//  */
-// var anod = {};
-
-// /**
-//  * @template T
-//  * @param {function(function(): void): T} fn 
-//  * @returns {T}
-//  */
-// anod.root = function (fn) { };
-
-// /**
-//  * @param {function(): void} fn
-//  * @returns {void}
-//  */
-// anod.batch = function (fn) { };
-
-// /**
-//  * @param {function(boolean): void} fn
-//  * @returns {void}
-//  */
-// anod.cleanup = function (fn) { };
-
-// /**
-//  * @template T
-//  * @param {function(): T} fn 
-//  * @returns {T}
-//  */
-// anod.sample = function (fn) { };
-
-// /**
-//  * @template T
-//  * @param {T} val 
-//  * @returns {SignalValue<T>}
-//  */
-// anod.data = function (val) { };
-
-// /**
-//  * @template T
-//  * @param {T} val 
-//  * @param {null | (function(T,T): boolean)=} eq 
-//  * @returns {SignalValue<T>}
-//  */
-// anod.value = function (val, eq) { };
-
-// /**
-//  * @template T
-//  * @param {Array<T>=} val 
-//  * @returns {SignalArray<T>}
-//  */
-// anod.array = function (val) { };
-
-// /**
-//  * @template T,U
-//  * @param {function(T,U): T} fn 
-//  * @param {T=} seed 
-//  * @param {null | (function(T,T): boolean)=} eq 
-//  * @param {U=} args 
-//  * @returns {Signal<T>}
-//  */
-// anod.compute = function (fn, seed, args, eq) { };

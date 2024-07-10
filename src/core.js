@@ -146,12 +146,12 @@ export function value(value, eq) {
  * @template T, U
  * @param {function(T, U): T} fn 
  * @param {T=} seed 
+ * @param {U=} args
  * @param {boolean=} dynamic
  * @param {null | (function(T,T): boolean)=} eq
- * @param {U=} args
  * @returns {Signal<T>}
  */
-export function compute(fn, seed, dynamic, eq, args) {
+export function compute(fn, seed, args, dynamic, eq) {
     return new Compute(fn, seed, eq, args, dynamic)._init();
 }
 

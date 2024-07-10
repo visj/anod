@@ -16,7 +16,7 @@ export interface Reactive<T = any> {
 export interface Signal<T = any> extends Reactive<T> {
     /**
      * 
-     * @param val 
+     * @param val
      */
     update(val: T): void;
 }
@@ -48,9 +48,9 @@ export declare function data<T>(val: T): Signal<T>;
 /**
  * 
  * @param val 
- * @param eq 
+ * @param equality 
  */
-export declare function value<T>(val: T, eq?: ((a: T, b: T) => boolean) | null): Signal<T>;
+export declare function value<T>(val: T, equality?: ((a: T, b: T) => boolean) | null): Signal<T>;
 /**
  * 
  * @param val 
@@ -58,35 +58,35 @@ export declare function value<T>(val: T, eq?: ((a: T, b: T) => boolean) | null):
 export declare function array<T>(val?: T[]): SignalArray<T>;
 /**
  * 
- * @param fn 
+ * @param callback 
  */
-export declare function compute<T>(fn: () => T): Reactive<T>;
+export declare function compute<T>(callback: () => T): Reactive<T>;
 /**
  * 
- * @param fn 
+ * @param callback 
  * @param seed 
  */
-export declare function compute<T>(fn: (prev: T) => T, seed: T): Reactive<T>;
+export declare function compute<T>(callback: (prev: T) => T, seed: T): Reactive<T>;
 /**
  * 
- * @param fn 
- * @param seed 
- * @param args 
- * @param eq 
- */
-export declare function compute<T, U>(fn : (prev: T, args: U) => T, seed: T, args: U, eq: ((a: T, b: T) => boolean) | null): Reactive<T>;
-/**
- * 
- * @param fn 
+ * @param callback 
  * @param seed 
  * @param args 
  * @param eq 
  */
-export declare function compute<T, U>(fn: (prev: T, args: U) => T, seed?: T, args?: U, eq?: ((a: T, b: T) => boolean) | null): Reactive<T>;
+export declare function compute<T, U>(callback: (prev: T, args: U) => T, seed: T, args: U): Reactive<T>;
+/**
+ * 
+ * @param callback 
+ * @param seed 
+ * @param args 
+ * @param equality 
+ */
+export declare function compute<T, U>(callback: (prev: T, args: U) => T, seed?: T, args?: U, dynamic?: boolean, equality?: ((a: T, b: T) => boolean) | null): Reactive<T>;
 
 export interface SignalIterator<T = any> extends Reactive<T[]> {
     
-    length: () => number;
+    readonly length: () => number;
 
     at(index: number): Reactive<T>;
 

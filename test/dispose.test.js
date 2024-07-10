@@ -143,7 +143,7 @@ describe("dispose", function () {
 				} else {
 					d3.val();
 				}
-			}, void 0, true);
+			}, void 0, void 0, true);
 			count = 0;
 			d1.update(false);
 			test.equals(count , 2);

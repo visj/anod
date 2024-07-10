@@ -596,7 +596,7 @@ ReactiveIterator.prototype.some = function (callbackFn) {
  * @implements {ComputeArrayInterface<T>}
  */
 export function ComputeArray() {
-    Compute.call(/** @type {?} */(this));
+    // Compute.call(/** @type {?} */(this));
     /**
      * @public
      * @type {function(): number}
