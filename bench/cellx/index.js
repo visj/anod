@@ -14,7 +14,7 @@ import * as usignal from "usignal";
 import Table from 'cli-table';
 import * as anod from "../../dist/anod.mjs";
 
-const BATCHED = false;
+const BATCHED = true;
 const RUNS_PER_TIER = 500;
 const LAYER_TIERS = [1, 2, 3, 4, 5, 10, 15, 20, 25, 50, 100, 500, 1000, 2000, 2500];
 

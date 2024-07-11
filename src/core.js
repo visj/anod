@@ -868,6 +868,9 @@ export function Data(val, eq) {
      * @type {T | Object}
      */
     this._next = VOID;
+    if (CONTEXT._owner !== null) {
+        CONTEXT._owner._addChild(this);
+    }
 }
 
 extend(Data, Reactive);
@@ -1218,9 +1221,6 @@ Compute.prototype._update = function (time) {
 Compute.prototype._init = function () {
     var owner = CONTEXT._owner;
     var listen = CONTEXT._listen;
-    if (owner !== null) {
-        owner._addChild(this);
-    }
     CONTEXT._owner = CONTEXT._listen = this;
     if (STAGE === Stage.Idle) {
         reset();
@@ -1236,9 +1236,12 @@ Compute.prototype._init = function () {
         }
     } else {
         this._value = this._next(this._value, this._args);
-        CONTEXT._owner = owner;
-        CONTEXT._listen = listen;
     }
+    if (owner !== null) {
+        owner._addChild(this);
+    }
+    CONTEXT._owner = owner;
+    CONTEXT._listen = listen;
     return this;
 };
 
