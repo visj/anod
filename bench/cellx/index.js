@@ -14,8 +14,9 @@ import * as usignal from "usignal";
 import Table from 'cli-table';
 import * as anod from "../../dist/anod.mjs";
 
-const BATCHED = true;
-const RUNS_PER_TIER = 500;
+let rand = 0;
+const BATCHED = false;
+const RUNS_PER_TIER = 300;
 const LAYER_TIERS = [1, 2, 3, 4, 5, 10, 15, 20, 25, 50, 100, 500, 1000, 2000, 2500];
 
 async function collectGarbage() {
@@ -69,8 +70,6 @@ const isSolution = (layers, answer) => {
   );
 };
 
-var rand = 0;
-
 async function main() {
   const report = {};
 
@@ -102,13 +101,12 @@ async function main() {
   }
 
   for (const lib of shuffleArray(Object.keys(report))) {
-    rand = 0;
+    rand = 1;
     const current = report[lib];
-    for (let i = 0; i < LAYER_TIERS.length; i += 1) {
+    for (let i = 0; i < LAYER_TIERS.length; i++, rand++) {
       let layers = LAYER_TIERS[i];
       const runs = [];
-      rand++;
-      for (let j = 0; j < RUNS_PER_TIER; j += 1) {
+      for (let j = 0; j < RUNS_PER_TIER; j++) {
         runs.push(await start(current.fn, layers));
       }
       // Give cellx time to release its global pendingCells array
@@ -124,27 +122,28 @@ async function main() {
   });
 
   for (let i = 0; i < LAYER_TIERS.length; i += 1) {
-    let min = Infinity,
-      max = -1,
-      fastestLib,
-      slowestLib;
+    let min = Infinity;
 
     for (const lib of Object.keys(report)) {
       const time = report[lib].runs[i];
 
       if (time < min) {
         min = time;
-        fastestLib = lib;
-      }
-
-      if (time > max) {
-        max = time;
-        slowestLib = lib;
       }
     }
     if (Object.keys(report).length > 1) {
-      report[fastestLib].runs[i] = kleur.green(report[fastestLib].runs[i].toFixed(2));
-      report[slowestLib].runs[i] = kleur.red(report[slowestLib].runs[i].toFixed(2));
+      for (const lib of Object.keys(report)) {
+        const time = report[lib].runs[i];
+        let color;
+        if (time <= min * 1.25) {
+          color = "green";
+        } else if (time <= min * 1.5) {
+          color = "reset";
+        } else {
+          color = "red";
+        }
+        report[lib].runs[i] = kleur[color](report[lib].runs[i].toFixed(2));
+      }
     }
   }
 

@@ -1,3 +1,4 @@
+import { _ } from '../src/core.js';
 import { test, root, compute, value } from './helper/anod.js';
 
 describe("dispose", function () {
@@ -143,7 +144,7 @@ describe("dispose", function () {
 				} else {
 					d3.val();
 				}
-			}, void 0, void 0, true);
+			}, _, { unstable: true });
 			count = 0;
 			d1.update(false);
 			test.equals(count , 2);

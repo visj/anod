@@ -94,12 +94,11 @@ function Params(arg1, arg2) {
  * @template T, U, V
  * @param {function(T, Params<U, V>): T} fn
  * @param {T} value
- * @param {Params<U, V>} args
- * @param {boolean=} dynamic
+ * @param {SignalOptions<T, U>=} opts
  * @extends {Compute<T, U>}
  */
-function ComputeIterator(fn, value, args, dynamic) {
-    Compute.call(this, fn, value, void 0, args, dynamic);
+function ComputeIterator(fn, value, opts) {
+    Compute.call(this, fn, value, opts);
 }
 
 extend(ComputeIterator, Compute);
@@ -200,7 +199,7 @@ ComputeIterator.prototype._update = function (time) {
  * @returns {Signal<T>}
  */
 function computeIterator(fn, source, arg1, dynamic, arg2, seed) {
-    return new ComputeIterator(fn, seed, new Params(arg1, arg2), dynamic)._iterate(source);
+    return new ComputeIterator(fn, seed, { args: new Params(arg1, arg2), dyn: dynamic })._iterate(source);
 }
 
 /**

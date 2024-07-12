@@ -250,3 +250,27 @@ var SignalType;
  * @extends {IObject<string, SignalType>}
  */
 function SignalObject() { }
+
+/**
+ * @record
+ * @template T, U
+ */
+function SignalOptions() { }
+
+/**
+ * @const
+ * @type {U | undefined}
+ */
+SignalOptions.prototype.args;
+
+/**
+ * @const
+ * @type {boolean | undefined}
+ */
+SignalOptions.prototype.unstable;
+
+/**
+ * @const
+ * @type {(function(T, T): boolean) | null | undefined}
+ */
+SignalOptions.prototype.compare;

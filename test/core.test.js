@@ -92,7 +92,7 @@ describe("compute()", function () {
             f = compute(function () {
                 fevals++;
                 return i.val() ? t.val() : e.val();
-            }, 0, void 0, true);
+            }, 0, { unstable: true });
             fevals = 0;
         }
 

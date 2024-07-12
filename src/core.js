@@ -145,14 +145,12 @@ export function value(value, eq) {
  * @public
  * @template T, U
  * @param {function(T, U): T} fn 
- * @param {T=} seed 
- * @param {U=} args
- * @param {boolean=} dynamic
- * @param {null | (function(T,T): boolean)=} eq
+ * @param {T=} seed
+ * @param {SignalOptions<T, U>=} opts
  * @returns {Signal<T>}
  */
-export function compute(fn, seed, args, dynamic, eq) {
-    return new Compute(fn, seed, eq, args, dynamic)._init();
+export function compute(fn, seed, opts) {
+    return new Compute(fn, seed, opts)._init();
 }
 
 /**
@@ -962,30 +960,31 @@ export function cleanupReceiver(node) {
  * @struct
  * @template T,U
  * @constructor
- * @param {function(T,U): T} fn 
+ * @param {function(T, U): T} fn 
  * @param {T} value 
- * @param {null | (function(T,T): boolean)=} eq
- * @param {U=} args
- * @param {boolean=} dynamic
+ * @param {SignalOptions<T, U>=} opts
  * @extends {Reactive<T>}
  * @implements {ComputeInterface<T>}
  */
-export function Compute(fn, value, eq, args, dynamic) {
+export function Compute(fn, value, opts) {
     /**
-      * @package
-      * @type {number}
-      */
-    this._state = State.Void;
-    if (eq !== void 0) {
-        if (eq === null) {
-            this._state |= State.Respond;
-        } else {
-            this._state |= State.Compare;
-        }
-    }
-    if (dynamic) {
-        this._state |= State.Dynamic;
-    }
+     * @package
+     * @type {number}
+     */
+    this._state = (
+        opts === void 0
+    ) ? State.Void : (
+        (
+            (
+                opts.compare === void 0
+            ) ? State.Void : (
+                opts.compare === null
+            ) ? State.Respond : State.Compare
+        ) |
+        (
+            opts.unstable ? State.Dynamic : State.Void
+        )
+    );
     /**
      * @package
      * @type {T}
@@ -995,7 +994,7 @@ export function Compute(fn, value, eq, args, dynamic) {
      * @package
      * @type {null | (function(T,T): boolean) | undefined}
      */
-    this._equality = eq;
+    this._equality = opts ? opts.compare : void 0;
     /**
      * @package
      * @type {Receive | null}
@@ -1065,7 +1064,7 @@ export function Compute(fn, value, eq, args, dynamic) {
      * @package
      * @type {U}
      */
-    this._args = args;
+    this._args = opts ? opts.args : void 0;
 };
 
 extend(Compute, Reactive);
