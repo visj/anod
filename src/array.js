@@ -155,7 +155,7 @@ ComputeIterator.prototype._update = function (time) {
     CONTEXT._owner = CONTEXT._listen = null;
     args._val = this._source1.val();
     if (args._reactive) {
-        if (this._state & State.Dynamic) {
+        if (this._state & State.Unstable) {
             cleanupReceiver(this);
             args._record = true;
         }
@@ -173,7 +173,7 @@ ComputeIterator.prototype._update = function (time) {
         State.MayCleared
     );
     if (
-        (this._state & (State.Dynamic | State.ReceiveMany)) === 0 && 
+        (this._state & (State.Unstable | State.ReceiveMany)) === 0 && 
         args._reactive && !args._record
     ) {
         args._reactive = false;

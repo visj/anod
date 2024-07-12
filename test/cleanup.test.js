@@ -1,4 +1,4 @@
-import { test, root, cleanup, compute, value } from './helper/anod.js';
+import { test, root, cleanup, compute, value } from "./helper/anod.js";
 
 describe("cleanup", function () {
     it("is called when a computation is disposed", function () {
@@ -48,21 +48,21 @@ describe("cleanup", function () {
         test.equals(called , 2);
     });
 
-    it("runs cleanups in order", function () {
+    it("runs cleanups in reverse order", function () {
         var d = value(1);
-        var called = '';
+        var called = "";
         compute(function () {
             d.val();
             cleanup(function () {
-                called += 'a';
+                called += "a";
             });
             cleanup(function () {
-                called += 'b';
+                called += "b";
             });
         });
-        test.equals(called , '');
+        test.equals(called , "");
         d.update(d.peek() + 1);
-        test.equals(called , 'ab');
+        test.equals(called , "ba");
     });
 
     it("can be run within root scope", function () {

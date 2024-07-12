@@ -291,7 +291,7 @@ Module.prototype._dispose = function() { };
  * @package
  * @returns {void}
  */
-Module.prototype._recordWillDispose = function () { };
+Module.prototype._recordDispose = function () { };
 
 /**
  * @package
