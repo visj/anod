@@ -1,10 +1,11 @@
-export * from "../../dist/anod.mjs";
+export * from "../../dist/index.mjs";
+export * from "../../dist/array.mjs";
 
 export var test = {
     /**
-     * 
-     * @param {*} ok 
-     * @param {string=} msg 
+     *
+     * @param {*} ok
+     * @param {string=} msg
      */
     ok: function (ok, msg) {
         if (!ok) {
@@ -13,9 +14,9 @@ export var test = {
     },
     /**
      * @template T
-     * @param {T} actual 
-     * @param {T} expected 
-     * @param {string=} msg 
+     * @param {T} actual
+     * @param {T} expected
+     * @param {string=} msg
      */
     equals: function (actual, expected, msg) {
         if (msg == null) {
@@ -56,9 +57,9 @@ export var test = {
         }
     },
     /**
-     * 
-     * @param {Function} fn 
-     * @param {string=} msg 
+     *
+     * @param {Function} fn
+     * @param {string=} msg
      */
     throws: function (fn, msg) {
         var thrown = false;

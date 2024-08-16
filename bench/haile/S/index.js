@@ -1,4 +1,4 @@
-import S from "s-js";
+import S from "./S";
 
 function now() {
     return performance.now();

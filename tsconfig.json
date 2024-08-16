@@ -1,0 +1,16 @@
+{
+  "compilerOptions": {
+    "target": "es2016",
+    "module": "commonjs",
+    "allowJs": true,
+    "declaration": true,
+    "outDir": "./dist",
+    "baseUrl": ".",
+    "strict": true,
+    "paths": {
+      "anod": ["."],
+      "anod/array": ["."]
+    }
+  },
+  "include": ["src/**/*", "*.ts", "*.json"]
+}

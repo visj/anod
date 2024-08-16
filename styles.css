@@ -1,0 +1,83 @@
+/* General reset */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    font-family: Arial, sans-serif;
+}
+
+/* Container for the grid */
+.grid {
+    width: 100%;
+    min-height: 100vh;
+    max-width: 1200px;
+    margin: 0 auto;
+    background-color: grey;
+}
+
+.row {
+    width: 100%;
+    position: relative;
+}
+
+.col {
+    width: 100%;
+    position: relative;
+    display: inline-block;
+    vertical-align: top;
+    box-sizing: border-box;
+    margin-right: 1%;
+    margin-bottom: 10px;
+}
+
+.h2 {
+    height: 100%;
+}
+
+.w12 {
+    width: 100%;
+}
+
+.w8 {
+    width: 66.3333333333333333%;
+}
+
+.w6 {
+    width: 49.5%;
+}
+
+.w4 {
+    width: 32.6666666666666667%;
+}
+
+.w3 {
+    width: 24.25%;
+}
+
+.w2 {
+    width: 15.8333333333333333%;
+}
+
+.col:last-child {
+    margin-right: 0%;
+}
+
+.row:last-child > * {
+    margin-bottom: 0%;
+}
+
+.text {
+    background-color: bisque;
+    height: 100px;
+    padding: 10px;
+}
+
+.tall {
+    height: 210px;
+}
+
+footer {
+    vertical-align: bottom;
+    display: inline-block;
+    position: relative;
+}

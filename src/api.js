@@ -2,34 +2,28 @@
  * @interface
  * @template T
  */
-function Signal() { }
+function Signal() {}
 
 /**
  * @template T
  * @this {Signal<T>}
  * @returns {T}
  */
-Signal.prototype.val = function () { };
+Signal.prototype.val = function () {};
 
 /**
  * @template T
  * @this {Signal<T>}
  * @returns {T}
  */
-Signal.prototype.peek = function () { };
-
-/**
- * @this {Signal}
- * @returns {void}
- */
-Signal.prototype.dispose = function () { };
+Signal.prototype.peek = function () {};
 
 /**
  * @interface
  * @template T
  * @extends {Signal<T>}
  */
-function SignalValue() { }
+function SignalValue() {}
 
 /**
  * @template T
@@ -37,14 +31,14 @@ function SignalValue() { }
  * @this {Signal<T>}
  * @returns {void}
  */
-SignalValue.prototype.update = function (val) { };
+SignalValue.prototype.update = function (val) {};
 
 /**
  * @interface
  * @template T
  * @extends {Signal<Array<T>>}
  */
-function SignalIterator() { }
+function SignalIterator() {}
 
 /**
  * @const
@@ -54,96 +48,96 @@ SignalIterator.prototype.length;
 
 /**
  * @this {SignalIterator<T>}
- * @param {number | Signal<number> | function(): number} index 
+ * @param {number | Signal<number> | function(): number} index
  * @returns {Signal<T | undefined>}
  */
-SignalIterator.prototype.at = function (index) { };
+SignalIterator.prototype.at = function (index) {};
 
 /**
  * @this {SignalIterator<T>}
  * @param {...(T | Array<T> | SignalIterator<T>)} items
- * @returns {SignalIterator<T>} 
+ * @returns {SignalIterator<T>}
  */
-SignalIterator.prototype.concat = function (items) { };
+SignalIterator.prototype.concat = function (items) {};
 
 /**
  * @this {SignalIterator<T>}
  * @param {function(T, number): boolean} callbackFn
  * @returns {Signal<boolean>}
  */
-SignalIterator.prototype.every = function (callbackFn) { };
+SignalIterator.prototype.every = function (callbackFn) {};
 
 /**
  * @this {SignalIterator<T>}
  * @param {function(T, number): boolean} callbackFn
  * @returns {SignalIterator<T>}
  */
-SignalIterator.prototype.filter = function (callbackFn) { };
+SignalIterator.prototype.filter = function (callbackFn) {};
 
 /**
  * @this {SignalIterator<T>}
  * @param {function(T, number): boolean} callbackFn
  * @returns {Signal<T | undefined>}
  */
-SignalIterator.prototype.find = function (callbackFn) { };
+SignalIterator.prototype.find = function (callbackFn) {};
 
 /**
  * @this {SignalIterator<T>}
  * @param {function(T, number): boolean} callbackFn
  * @returns {Signal<number>}
  */
-SignalIterator.prototype.findIndex = function (callbackFn) { };
+SignalIterator.prototype.findIndex = function (callbackFn) {};
 
 /**
  * @this {SignalIterator<T>}
  * @param {function(T, number): boolean} callbackFn
  * @returns {Signal<T | undefined>}
  */
-SignalIterator.prototype.findLast = function (callbackFn) { };
+SignalIterator.prototype.findLast = function (callbackFn) {};
 
 /**
  * @this {SignalIterator<T>}
  * @param {function(T,number): boolean} callbackFn
  * @returns {Signal<number>}
  */
-SignalIterator.prototype.findLastIndex = function (callbackFn) { };
+SignalIterator.prototype.findLastIndex = function (callbackFn) {};
 
 /**
  * @this {SignalIterator<T>}
  * @param {function(T,number): void} callbackFn
- * @returns {void} 
+ * @returns {void}
  */
-SignalIterator.prototype.forEach = function (callbackFn) { };
+SignalIterator.prototype.forEach = function (callbackFn) {};
 
 /**
  * @this {SignalIterator<T>}
  * @param {T | Signal<T>} searchElement
  * @returns {Signal<boolean>}
  */
-SignalIterator.prototype.includes = function (searchElement) { };
+SignalIterator.prototype.includes = function (searchElement) {};
 
 /**
  * @this {SignalIterator<T>}
- * @param {T | Signal<T> | (function(): T)} searchElement 
+ * @param {T | Signal<T> | (function(): T)} searchElement
  * @param {number | Signal<number> | (function(): number)=} fromIndex
  * @returns {Signal<number>}
  */
-SignalIterator.prototype.indexOf = function (searchElement, fromIndex) { };
+SignalIterator.prototype.indexOf = function (searchElement, fromIndex) {};
 
 /**
  * @this {SignalIterator<T>}
  * @param {string | Signal<string> | (function(): string)=} separator
  * @returns {Signal<string>}
  */
-SignalIterator.prototype.join = function (separator) { };
+SignalIterator.prototype.join = function (separator) {};
 
 /**
  * @this {SignalIterator<T>}
- * @param {T | Signal<T> | (function(): T)} searchElement 
+ * @param {T | Signal<T> | (function(): T)} searchElement
  * @param {number | Signal<number> | (function(): number)=} fromIndex
  * @returns {Signal<number>}
  */
-SignalIterator.prototype.lastIndexOf = function (searchElement, fromIndex) { };
+SignalIterator.prototype.lastIndexOf = function (searchElement, fromIndex) {};
 
 /**
  * @template U
@@ -151,25 +145,25 @@ SignalIterator.prototype.lastIndexOf = function (searchElement, fromIndex) { };
  * @param {function(T, Signal<number>): U} callbackFn
  * @returns {SignalIterator<U>}
  */
-SignalIterator.prototype.map = function (callbackFn) { };
+SignalIterator.prototype.map = function (callbackFn) {};
 
 /**
  * @template U, V
  * @this {SignalIterator<T>}
- * @param {function((T | U), T, number): V} callbackFn 
- * @param {U | Signal<U> | (function(): U)=} initialValue 
+ * @param {function((T | U), T, number): V} callbackFn
+ * @param {U | Signal<U> | (function(): U)=} initialValue
  * @returns {Signal<V>}
  */
-SignalIterator.prototype.reduce = function (callbackFn, initialValue) { };
+SignalIterator.prototype.reduce = function (callbackFn, initialValue) {};
 
 /**
  * @template U
  * @this {SignalIterator<T>}
  * @param {function((T | U), T, number): U} callbackFn
- * @param {U | Signal<U>=} initialValue 
+ * @param {U | Signal<U>=} initialValue
  * @returns {Signal<U>}
  */
-SignalIterator.prototype.reduceRight = function (callbackFn, initialValue) { };
+SignalIterator.prototype.reduceRight = function (callbackFn, initialValue) {};
 
 /**
  * @this {SignalIterator<T>}
@@ -177,14 +171,14 @@ SignalIterator.prototype.reduceRight = function (callbackFn, initialValue) { };
  * @param {number | Signal<number> | (function(): number)=} end
  * @returns {SignalIterator<T>}
  */
-SignalIterator.prototype.slice = function (start, end) { };
+SignalIterator.prototype.slice = function (start, end) {};
 
 /**
  * @this {SignalIterator<T>}
  * @param {function(T, number): boolean} callbackFn
- * @returns {Signal<boolean>} 
+ * @returns {Signal<boolean>}
  */
-SignalIterator.prototype.some = function (callbackFn) { };
+SignalIterator.prototype.some = function (callbackFn) {};
 
 /**
  * @interface
@@ -192,85 +186,97 @@ SignalIterator.prototype.some = function (callbackFn) { };
  * @extends {SignalIterator<T>}
  * @extends {SignalValue<Array<T>>}
  */
-function SignalArray() { }
+function SignalArray() {}
 
 /**
  * @this {SignalArray<T>}
  * @returns {void}
  */
-SignalArray.prototype.pop = function () { };
+SignalArray.prototype.pop = function () {};
 
 /**
  * @this {SignalArray<T>}
  * @param {...T} elementN
  * @returns {void}
  */
-SignalArray.prototype.push = function (elementN) { };
+SignalArray.prototype.push = function (elementN) {};
 
 /**
  * @this {SignalArray<T>}
  * @returns {void}
  */
-SignalArray.prototype.shift = function () { };
+SignalArray.prototype.shift = function () {};
 
 /**
  * @this {SignalArray<T>}
  * @returns {void}
  */
-SignalArray.prototype.reverse = function () { };
+SignalArray.prototype.reverse = function () {};
 
 /**
  * @this {SignalArray<T>}
  * @param {function(T,T): number=} compareFn
  * @returns {void}
  */
-SignalArray.prototype.sort = function (compareFn) { };
+SignalArray.prototype.sort = function (compareFn) {};
 
 /**
  * @this {SignalArray<T>}
- * @param {number} start 
- * @param {number=} deleteCount 
+ * @param {number} start
+ * @param {number=} deleteCount
  * @param {...T} items
  * @returns {void}
  */
-SignalArray.prototype.splice = function (start, deleteCount, items) { };
+SignalArray.prototype.splice = function (start, deleteCount, items) {};
 
 /**
  * @this {SignalArray<T>}
  * @param {...T} elementN
  * @returns {void}
  */
-SignalArray.prototype.unshift = function (elementN) { };
-
-/** @typedef {Signal | SignalValue | SignalArray | SignalObject} */
-var SignalType;
+SignalArray.prototype.unshift = function (elementN) {};
 
 /**
  * @interface
  * @extends {IObject<string, SignalType>}
  */
-function SignalObject() { }
+function SignalObject() {}
+
+/** @typedef {Signal | SignalValue | SignalIterator | SignalObject} */
+var SignalType;
 
 /**
  * @record
  * @template T, U
  */
-function SignalOptions() { }
+function SignalOptions() {}
 
 /**
- * @const
  * @type {U | undefined}
  */
 SignalOptions.prototype.args;
 
 /**
- * @const
+ * @type {Signal | Array<Signal> | (function(): void) | undefined}
+ */
+SignalOptions.prototype.source;
+
+/**
+ * @type {boolean | undefined}
+ */
+SignalOptions.prototype.defer;
+
+/**
+ * @type {boolean | undefined}
+ */
+SignalOptions.prototype.sample;
+
+/**
  * @type {boolean | undefined}
  */
 SignalOptions.prototype.unstable;
 
 /**
- * @const
  * @type {(function(T, T): boolean) | null | undefined}
  */
 SignalOptions.prototype.compare;

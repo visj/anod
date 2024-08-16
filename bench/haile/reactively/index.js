@@ -1,4 +1,4 @@
-import { root, compute, value } from "anod";
+import { reactive, stabilize } from "@reactively/core";
 
 function now() {
   return performance.now();
@@ -58,7 +58,7 @@ function printRes(name, res) {
 function run(fn, n, scount) {
   // prep n * arity sources
   var start, end;
-  root(function (dispose) {
+  function warmup() {
     // run 3 times to warm up
     var sources = createDataSignals(scount, []);
     fn(n / 100, sources);
@@ -68,22 +68,23 @@ function run(fn, n, scount) {
     fn(n / 100, sources);
     sources = createDataSignals(scount, []);
     for (var i = 0; i < scount; i++) {
-      sources[i].val();
-      sources[i].val();
-      sources[i].val();
+      sources[i].get();
+      sources[i].get();
+      sources[i].get();
     }
-    dispose();
-  });
+  }
+  warmup();
   var sources = createDataSignals(scount, []);
   start = now();
   fn(n, sources);
   end = now();
+  sources = null;
   return end - start;
 }
 
 function createDataSignals(n, sources) {
   for (var i = 0; i < n; i++) {
-    sources[i] = value(i);
+    sources[i] = reactive(i);
   }
   return sources;
 }
@@ -154,7 +155,6 @@ function createComputations4to1(n, sources) {
   }
 }
 
-// only create n / 100 computations, as otherwise takes too long
 function createComputations1000to1(n, sources) {
   for (var i = 0; i < n; i++) {
     createComputation1000(sources, i * 1000);
@@ -162,57 +162,74 @@ function createComputations1000to1(n, sources) {
 }
 
 function createComputation0(i) {
-  compute(function () {
+  reactive(function () {
     return i;
-  });
+  }, { effect: true });
 }
 
 function createComputation1(s1) {
-  compute(function () {
-    return s1.val();
-  });
+  reactive(
+    function () {
+      return s1.value;
+    },
+    { effect: true },
+  );
 }
 
 function createComputation2(s1, s2) {
-  compute(function () {
-    return s1.val() + s2.val();
-  });
+  reactive(
+    function () {
+      return s1.value + s2.value;
+    },
+    { effect: true },
+  );
 }
 
 function createComputation4(s1, s2, s3, s4) {
-  compute(function () {
-    return s1.val() + s2.val() + s3.val() + s4.val();
-  });
+  reactive(
+    function () {
+      return s1.value + s2.value + s3.value + s4.value;
+    },
+    { effect: true },
+  );
 }
 
 function createComputation1000(ss, offset) {
-  compute(function () {
-    var sum = 0;
-    for (var i = 0; i < 1000; i++) {
-      sum += ss[offset + i].val();
-    }
-    return sum;
-  });
+  reactive(
+    function () {
+      var sum = 0;
+      for (var i = 0; i < 1000; i++) {
+        sum += ss[offset + i].value;
+      }
+      return sum;
+    },
+    { effect: true },
+  );
 }
 
 function updateComputations1to1(n, sources) {
   var s1 = sources[0];
-  compute(function () {
-    return s1.val();
+  var c1 = reactive(function () {
+    return s1.value;
   });
   for (var i = 0; i < n; i++) {
-    s1.update(i);
+    s1.set(i);
+    c1.get();
   }
 }
 
 function updateComputations2to1(n, sources) {
   var s1 = sources[0],
     s2 = sources[1];
-  compute(function () {
-    return s1.val() + s2.val();
-  });
+  var c1 = reactive(
+    function () {
+      return s1.value + s2.value;
+    },
+    { effect: true },
+  );
   for (var i = 0; i < n; i++) {
-    s1.update(i);
+    s1.set(i);
+    c1.get();
   }
 }
 
@@ -221,68 +238,104 @@ function updateComputations4to1(n, sources) {
     s2 = sources[1],
     s3 = sources[2],
     s4 = sources[3];
-  compute(function () {
-    return s1.val() + s2.val() + s3.val() + s4.val();
-  });
+  var c1 = reactive(
+    function () {
+      return s1.value + s2.value + s3.value + s4.value;
+    },
+    { effect: true },
+  );
   for (var i = 0; i < n; i++) {
-    s1.update(i);
+    s1.set(i);
+    c1.get();
   }
 }
 
 function updateComputations1000to1(n, sources) {
   var s1 = sources[0];
-  compute(function () {
-    var sum = 0;
-    for (var i = 0; i < 1000; i++) {
-      sum += sources[i].val();
-    }
-    return sum;
-  });
+  var c1 = reactive(
+    function () {
+      var sum = 0;
+      for (var i = 0; i < 1000; i++) {
+        sum += sources[i].value;
+      }
+      return sum;
+    },
+    { effect: true },
+  );
   for (var i = 0; i < n; i++) {
-    s1.update(i);
+    s1.set(i);
+    c1.get();
   }
 }
 
 function updateComputations1to2(n, sources) {
   var s1 = sources[0];
-  compute(function () {
-    return s1.val();
-  });
-  compute(function () {
-    return s1.val();
-  });
+  var c1 = reactive(
+    function () {
+      return s1.value;
+    },
+    { effect: true },
+  );
+  var c2 = reactive(
+    function () {
+      return s1.value;
+    },
+    { effect: true },
+  );
   for (var i = 0; i < n / 2; i++) {
-    s1.update(i);
+    s1.set(i);
+    c1.get();
+    c2.get();
   }
 }
 
 function updateComputations1to4(n, sources) {
   var s1 = sources[0];
-  compute(function () {
-    return s1.val();
-  });
-  compute(function () {
-    return s1.val();
-  });
-  compute(function () {
-    return s1.val();
-  });
-  compute(function () {
-    return s1.val();
-  });
+  var c1 = reactive(
+    function () {
+      return s1.value;
+    },
+    { effect: true },
+  );
+  var c2 = reactive(
+    function () {
+      return s1.value;
+    },
+    { effect: true },
+  );
+  var c3 = reactive(
+    function () {
+      return s1.value;
+    },
+    { effect: true },
+  );
+  var c4 = reactive(
+    function () {
+      return s1.value;
+    },
+    { effect: true },
+  );
   for (var i = 0; i < n / 4; i++) {
-    s1.update(i);
+    s1.set(i);
+    c1.get();
+    c2.get();
+    c3.get();
+    c4.get();
   }
 }
 
 function updateComputations1to1000(n, sources) {
   var s1 = sources[0];
   for (var i = 0; i < 1000; i++) {
-    compute(function () {
-      return s1.val();
-    });
+    reactive(
+      function () {
+        return s1.value;
+      },
+      { effect: true },
+    );
   }
   for (var i = 0; i < n / 1000; i++) {
-    s1.update(i);
+    s1.set(i);
+    stabilize();
   }
 }

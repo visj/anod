@@ -73,11 +73,13 @@ function run(fn, n, scount) {
         }
     }
     warmup();
-    var sources = createDataSignals(scount, []);
-    start = now();
-    fn(n, sources);
-    end = now();
-    sources = null;
+    function root() {
+        var sources = createDataSignals(scount, []);
+        start = now();
+        fn(n, sources);
+        end = now();
+    }
+    root();
     return end - start;
 }
 

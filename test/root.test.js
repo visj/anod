@@ -65,32 +65,4 @@ describe("root()", function () {
             test.equals(c2.val() , 3);
         });
     });
-
-    it("disposes owned root nodes", function() {
-        root(function(teardown) {
-            var d1;
-            var count = 0;
-            var cleanups = 0;
-            compute(function() {
-                root(function() {
-                    cleanup(function(final) {
-                        if (final) {
-                            cleanups++;
-                        }
-                    });
-                    d1 = value(0);
-                    compute(function() { 
-                        d1.val();
-                        count++;
-                    });
-                });
-            });
-            d1.update(d1.peek() + 1);
-            test.equals(count , 2);
-            teardown();
-            d1.update(d1.peek() + 1);
-            test.equals(count , 2);
-            test.equals(cleanups , 1);
-        });
-    });
 });

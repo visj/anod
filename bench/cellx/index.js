@@ -2,37 +2,39 @@
  * Extracted from: https://github.com/Riim/cellx#benchmark
  */
 
-import kleur from 'kleur';
+import kleur from "kleur";
 
-import { reactive } from '@reactively/core';
-import * as cellx from 'cellx';
-import * as Sjs from 's-js';
+import { reactive } from "@reactively/core";
+import * as cellx from "cellx";
+import * as Sjs from "s-js";
 import * as solid from "solid-js/dist/solid.js";
-import * as preact from '@preact/signals-core';
-import * as maverick from '@maverick-js/signals';
+import * as preact from "@preact/signals-core";
+import * as maverick from "@maverick-js/signals";
 import * as usignal from "usignal";
-import Table from 'cli-table';
-import * as anod from "../../dist/anod.mjs";
+import Table from "cli-table";
+import * as anod from "../../dist/index.mjs";
 
 let rand = 0;
 const BATCHED = false;
-const RUNS_PER_TIER = 300;
-const LAYER_TIERS = [1, 2, 3, 4, 5, 10, 15, 20, 25, 50, 100, 500, 1000, 2000, 2500];
+const RUNS_PER_TIER = 500;
+const LAYER_TIERS = [
+  1, 2, 3, 4, 5, 10, 15, 20, 25, 50, 100, 500, 1000, 2000, 2500,
+];
 
 async function collectGarbage() {
-  return new Promise(resolve => {
+  return new Promise((resolve) => {
     setTimeout(() => {
       if (global.gc) {
         global.gc();
       }
       resolve();
     });
-  })
+  });
 }
 
 const med = (array) => {
   return array.reduce((a, b) => a + b, 0) / array.length;
-}
+};
 
 function shuffleArray(array) {
   for (let i = array.length - 1; i > 0; i--) {
@@ -57,7 +59,7 @@ const SOLUTIONS = [
   [4, -2, 4, 4],
   [-2, -4, 2, 3],
   [4, -2, 4, 4],
-  [-2, -4, 2, 3]
+  [-2, -4, 2, 3],
 ];
 
 /**
@@ -65,8 +67,8 @@ const SOLUTIONS = [
  * @param {number[]} answer
  */
 const isSolution = (layers, answer) => {
-  return answer.every((_, i) => (
-    SOLUTIONS[LAYER_TIERS.indexOf(layers)][i] === _)
+  return answer.every(
+    (_, i) => SOLUTIONS[LAYER_TIERS.indexOf(layers)][i] === _,
   );
 };
 
@@ -76,7 +78,7 @@ async function main() {
   report.solid = { fn: runSolid, runs: [] };
   report.S = { fn: runS, runs: [] };
   report.maverick = { fn: runMaverick, runs: [], avg: [] };
-  report['preact/signals'] = { fn: runPreact, runs: [] };
+  report["preact/signals"] = { fn: runPreact, runs: [] };
   report.usignal = { fn: runUsignal, runs: [] };
   report.anod = { fn: runAnod, runs: [] };
   // Has no way to dispose so can't consider it feature comparable.
@@ -118,7 +120,7 @@ async function main() {
   }
 
   const table = new Table({
-    head: ['', ...LAYER_TIERS.map((n) => kleur.bold(kleur.cyan(n)))],
+    head: ["", ...LAYER_TIERS.map((n) => kleur.bold(kleur.cyan(n)))],
   });
 
   for (let i = 0; i < LAYER_TIERS.length; i += 1) {
@@ -150,7 +152,9 @@ async function main() {
   for (const lib of Object.keys(report)) {
     table.push([
       kleur.magenta(lib),
-      ...report[lib].runs.map((n) => (typeof n === 'number' ? n.toFixed(2) : n)),
+      ...report[lib].runs.map((n) =>
+        typeof n === "number" ? n.toFixed(2) : n,
+      ),
     ]);
   }
 
@@ -179,10 +183,10 @@ function runReactively(layers, done) {
 
   let layer = start;
 
-  for (let i = layers; i--;) {
+  for (let i = layers; i--; ) {
     layer = ((m) => {
       return {
-        a: reactive(() => rand % 2 ? m.b.value : m.c.value),
+        a: reactive(() => (rand % 2 ? m.b.value : m.c.value)),
         b: reactive(() => m.a.value - m.c.value),
         c: reactive(() => m.b.value + m.d.value),
         d: reactive(() => m.c.value),
@@ -227,10 +231,10 @@ function runMaverick(layers, done) {
 
     let layer = start;
 
-    for (let i = layers; i--;) {
+    for (let i = layers; i--; ) {
       layer = ((m) => {
         return {
-          a: maverick.computed(() => rand % 2 ? m.b() : m.c()),
+          a: maverick.computed(() => (rand % 2 ? m.b() : m.c())),
           b: maverick.computed(() => m.a() - m.c()),
           c: maverick.computed(() => m.b() + m.d()),
           d: maverick.computed(() => m.c()),
@@ -283,10 +287,10 @@ function runS(layers, done) {
 
     let layer = start;
 
-    for (let i = layers; i--;) {
+    for (let i = layers; i--; ) {
       layer = ((m) => {
         return {
-          a: S(() => rand % 2 ? m.b() : m.c()),
+          a: S(() => (rand % 2 ? m.b() : m.c())),
           b: S(() => m.a() - m.c()),
           c: S(() => m.b() + m.d()),
           d: S(() => m.c()),
@@ -330,10 +334,10 @@ function runAnod(layers, done) {
 
     let layer = start;
 
-    for (let i = layers; i--;) {
+    for (let i = layers; i--; ) {
       layer = ((m) => {
         return {
-          a: anod.compute(() => rand % 2 ? m.b.val() : m.c.val(), 0),
+          a: anod.compute(() => (rand % 2 ? m.b.val() : m.c.val()), 0),
           b: anod.compute(() => m.a.val() - m.c.val(), 0),
           c: anod.compute(() => m.b.val() + m.d.val(), 0),
           d: anod.compute(() => m.c.val(), 0),
@@ -381,10 +385,10 @@ function runSolid(layers, done) {
 
     let layer = start;
 
-    for (let i = layers; i--;) {
+    for (let i = layers; i--; ) {
       layer = ((m) => {
         const props = {
-          a: solid.createMemo(() => rand % 2 ? m.b() : m.c()),
+          a: solid.createMemo(() => (rand % 2 ? m.b() : m.c())),
           b: solid.createMemo(() => m.a() - m.c()),
           c: solid.createMemo(() => m.b() + m.d()),
           d: solid.createMemo(() => m.c()),
@@ -428,10 +432,10 @@ function runPreact(layers, done) {
 
   let layer = start;
 
-  for (let i = layers; i--;) {
+  for (let i = layers; i--; ) {
     layer = ((m) => {
       const props = {
-        a: preact.computed(() => rand % 2 ? m.b.value : m.c.value),
+        a: preact.computed(() => (rand % 2 ? m.b.value : m.c.value)),
         b: preact.computed(() => m.a.value - m.c.value),
         c: preact.computed(() => m.b.value + m.d.value),
         d: preact.computed(() => m.c.value),
@@ -476,19 +480,19 @@ function runCellx(layers, done) {
 
   let layer = start;
 
-  for (let i = layers; i--;) {
+  for (let i = layers; i--; ) {
     layer = ((m) => {
       const props = {
-        a: new cellx.Cell(() => rand % 2 ? m.b.get() : m.c.get()),
+        a: new cellx.Cell(() => (rand % 2 ? m.b.get() : m.c.get())),
         b: new cellx.Cell(() => m.a.get() - m.c.get()),
         c: new cellx.Cell(() => m.b.get() + m.d.get()),
         d: new cellx.Cell(() => m.c.get()),
       };
 
-      props.a.on('change', function () { });
-      props.b.on('change', function () { });
-      props.c.on('change', function () { });
-      props.d.on('change', function () { });
+      props.a.on("change", function () {});
+      props.b.on("change", function () {});
+      props.c.on("change", function () {});
+      props.d.on("change", function () {});
 
       return props;
     })(layer);
@@ -529,10 +533,10 @@ function runUsignal(layers, done) {
 
   let layer = start;
 
-  for (let i = layers; i--;) {
+  for (let i = layers; i--; ) {
     layer = ((m) => {
       const props = {
-        a: usignal.computed(() => rand % 2 ? m.b.value : m.c.value),
+        a: usignal.computed(() => (rand % 2 ? m.b.value : m.c.value)),
         b: usignal.computed(() => m.a.value - m.c.value),
         c: usignal.computed(() => m.b.value + m.d.value),
         d: usignal.computed(() => m.c.value),
@@ -546,15 +550,15 @@ function runUsignal(layers, done) {
   const end = layer;
   if (BATCHED) {
     usignal.batch(() => {
-      a.value = 4, b.value = 3, c.value = 2, d.value = 1;
+      (a.value = 4), (b.value = 3), (c.value = 2), (d.value = 1);
       const solution = [end.a.value, end.b.value, end.c.value, end.d.value];
       const endTime = performance.now() - startTime;
       done(isSolution(layers, solution) ? endTime : -1);
     });
   } else {
-    a.value = 4, end.a.value, end.b.value, end.c.value, end.d.value;
-    b.value = 3, end.a.value, end.b.value, end.c.value, end.d.value;
-    c.value = 2, end.a.value, end.b.value, end.c.value, end.d.value;
+    (a.value = 4), end.a.value, end.b.value, end.c.value, end.d.value;
+    (b.value = 3), end.a.value, end.b.value, end.c.value, end.d.value;
+    (c.value = 2), end.a.value, end.b.value, end.c.value, end.d.value;
     d.value = 1;
     const solution = [end.a.value, end.b.value, end.c.value, end.d.value];
     const endTime = performance.now() - startTime;
