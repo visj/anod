@@ -21,11 +21,20 @@ export interface SignalValue<T = any> extends Signal<T> {
   update(val: T): void;
 }
 
-export interface SignalOptions<T, U> {
+export interface OptionsBase<T, U> {
   args?: U;
   unstable?: boolean;
   compare?: ((a: T, b: T) => boolean) | null;
 }
+
+export interface OptionsWithSource<T, U> extends OptionsBase<T, U> {
+  defer?: boolean;
+  sample?: boolean;
+  source: Signal | Array<Signal> | (() => void);
+}
+
+export type Options<T, U> = OptionsBase<T, U> | OptionsWithSource<T, U>;
+
 /**
  *
  * @param fn
@@ -83,5 +92,5 @@ export declare function compute<T>(
 export declare function compute<T, U>(
   callback: (prev: T, args: U) => T,
   seed: T,
-  opts: SignalOptions<T, U>,
+  opts: Options<T, U>,
 ): Signal<T>;

@@ -8,7 +8,7 @@ async function esbuildBundleAnod() {
     bundle: true,
     minify: true,
     target: "ES5",
-    outfile: "./bench/haile/anod/index.min.js",
+    outfile: "./bench/haile/anod/index.min.js"
   });
 }
 
@@ -17,7 +17,7 @@ async function esbuildBundlePreact() {
     entryPoints: ["./bench/haile/preact/index.js"],
     bundle: true,
     minify: true,
-    outfile: "./bench/haile/preact/index.min.js",
+    outfile: "./bench/haile/preact/index.min.js"
   });
 }
 
@@ -26,7 +26,7 @@ async function esbuildBundleReactively() {
     entryPoints: ["./bench/haile/reactively/index.js"],
     bundle: true,
     minify: true,
-    outfile: "./bench/haile/reactively/index.min.js",
+    outfile: "./bench/haile/reactively/index.min.js"
   });
 }
 
@@ -35,7 +35,7 @@ async function esbuildBundleSjs() {
     entryPoints: ["./bench/haile/S/index.js"],
     bundle: true,
     minify: true,
-    outfile: "./bench/haile/S/index.min.js",
+    outfile: "./bench/haile/S/index.min.js"
   });
 }
 
@@ -44,7 +44,7 @@ async function esbuildBundleSolid() {
     entryPoints: ["./bench/haile/solid/index.js"],
     bundle: true,
     minify: true,
-    outfile: "./bench/haile/solid/index.min.js",
+    outfile: "./bench/haile/solid/index.min.js"
   });
 }
 
@@ -53,7 +53,7 @@ async function esbuildBundleMaverick() {
     entryPoints: ["./bench/haile/maverick/index.js"],
     bundle: true,
     minify: true,
-    outfile: "./bench/haile/maverick/index.min.js",
+    outfile: "./bench/haile/maverick/index.min.js"
   });
 }
 
@@ -62,7 +62,7 @@ async function esbuildBundleuSignal() {
     entryPoints: ["./bench/haile/usignal/index.js"],
     bundle: true,
     minify: true,
-    outfile: "./bench/haile/usignal/index.min.js",
+    outfile: "./bench/haile/usignal/index.min.js"
   });
 }
 
@@ -74,7 +74,7 @@ async function bundleBench() {
     esbuildBundleSjs(),
     esbuildBundleSolid(),
     esbuildBundleMaverick(),
-    esbuildBundleuSignal(),
+    esbuildBundleuSignal()
   ]);
 }
 
@@ -109,14 +109,17 @@ async function bundleCore() {
     iife += "," + symbol + ":" + symbol;
   }
   iife += "}})();";
-  await fs.promises.writeFile("./build/core.min.js", iife);
-  await fs.promises.writeFile("./dist/index.mjs", esm);
+  await Promise.all([
+    fs.promises.copyFile("./index.d.ts", "./dist/index.d.ts"),
+    fs.promises.writeFile("./build/core.min.js", iife),
+    fs.promises.writeFile("./dist/index.mjs", esm)
+  ]);
 }
 
 async function bundleArray() {
   const code = (await fs.promises.readFile("./temp/array.js", "utf-8")).replace(
     /\n/g,
-    "",
+    ""
   );
   let param = "__anod__";
   const array = code.split('"./core.js";');
@@ -160,14 +163,14 @@ async function bundleArray() {
       stdin: { contents: iife },
       minify: true,
       write: false,
-      target: "ES5",
+      target: "ES5"
     }),
     esbuild.build({
       stdin: { contents: esm },
       minify: true,
       write: false,
-      target: "ES5",
-    }),
+      target: "ES5"
+    })
   ]);
   if (iifeCode.errors.length || esmCode.errors.length) {
     console.error(iifeCode.errors);
@@ -175,14 +178,12 @@ async function bundleArray() {
     return;
   }
   await Promise.all([
-    fs.promises.writeFile(
-      "./dist/array.mjs",
-      esmCode.outputFiles[0].contents,
-    ),
+    fs.promises.copyFile("./array.d.ts", "./dist/array.d.ts"),
+    fs.promises.writeFile("./dist/array.mjs", esmCode.outputFiles[0].contents),
     fs.promises.writeFile(
       "./build/array.min.js",
-      iifeCode.outputFiles[0].contents,
-    ),
+      iifeCode.outputFiles[0].contents
+    )
   ]);
 }
 
@@ -200,7 +201,7 @@ async function closureBundleLibrary() {
       "--js src/core.js",
       "--chunk core:1",
       "--js src/array.js",
-      "--chunk array:1:core",
+      "--chunk array:1:core"
     ];
     exec(cmd.join(" "), async (err, stdout, stderr) => {
       if (err) {
@@ -219,7 +220,7 @@ async function concatBundleLibrary() {
   let [api, core, array] = await Promise.all([
     fs.promises.readFile("./src/api.js", "utf-8"),
     fs.promises.readFile("./src/core.js", "utf-8"),
-    fs.promises.readFile("./src/array.js", "utf-8"),
+    fs.promises.readFile("./src/array.js", "utf-8")
   ]);
   api =
     api +
@@ -244,6 +245,7 @@ async function bundleLibrary() {
 async function main() {
   try {
     await fs.promises.mkdir("./dist", { recursive: true });
+    await fs.promises.mkdir("./build", { recursive: true });
     await bundleLibrary();
     await bundleBench();
   } catch (err) {

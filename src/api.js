@@ -280,3 +280,18 @@ SignalOptions.prototype.unstable;
  * @type {(function(T, T): boolean) | null | undefined}
  */
 SignalOptions.prototype.compare;
+
+/**
+ * @record
+ */
+function IteratorOptions() {}
+
+/**
+ * @type {Signal | Array<Signal> | (function(): void) | undefined}
+ */
+IteratorOptions.prototype.source;
+
+/**
+ * @type {boolean | undefined}
+ */
+IteratorOptions.prototype.unstable;

@@ -28,6 +28,7 @@ var State = {
   Unstable: 65536,
   Sample: 131072,
   Defer: 262144,
+  Source: 524288
 };
 /**
  * @enum {number}
@@ -38,7 +39,7 @@ var Stage = {
   Disposes: 2,
   Changes: 3,
   Computes: 4,
-  Updates: 5,
+  Updates: 5
 };
 
 /**
@@ -46,11 +47,12 @@ var Stage = {
  * @enum {number}
  */
 var Type = {
+  None: 0,
   Reactive: 1,
   Value: 2,
   Array: 3,
   Object: 4,
-  Function: 5,
+  Function: 5
 };
 
 /**
@@ -58,7 +60,7 @@ var Type = {
  */
 var ErrorCode = {
   Circular: 1,
-  Conflict: 2,
+  Conflict: 2
 };
 
 /**
@@ -477,7 +479,7 @@ var UPDATES = new Queue();
 var CONTEXT = {
   _stage: Stage.Idle,
   _owner: null,
-  _listen: null,
+  _listen: null
 };
 
 /**
@@ -1050,6 +1052,27 @@ function cleanupReceiver(node) {
 }
 
 /**
+ * @param {Send | Array<Send> | (function(): void) | undefined} source
+ * @param {Receive} owner
+ * @returns {void}
+ */
+function readSource(source, owner) {
+  switch (type(source)) {
+    case Type.Reactive:
+      addReceiver(/** @type {Send} */ (source), owner);
+      break;
+    case Type.Array:
+      var len = /** @type {Array<Send>} */ (source).length;
+      for (var i = 0; i < len; i++) {
+        addReceiver(/** @type {Array<Send>} */ (source)[i], owner);
+      }
+      break;
+    case Type.Function:
+      /** @type {function(): void} */ (source)();
+  }
+}
+
+/**
  * @struct
  * @template T,U
  * @constructor
@@ -1065,10 +1088,8 @@ function Compute(fn, seed, opts) {
   var args;
   /** @type {(function(T, T): boolean) | null | undefined} */
   var compare;
-  /** @type {Send | Array<Send> | undefined} */
-  var stable;
-  /** @type {(function(): void) | undefined} */
-  var dynamic;
+  /** @type {Signal | Array<Signal> | (function(): void) | undefined} */
+  var source;
   if (opts != null) {
     if (opts.compare != null) {
       compare = opts.compare;
@@ -1089,12 +1110,8 @@ function Compute(fn, seed, opts) {
     }
     args = opts.args;
     if (opts.source != null) {
-      if (typeof opts.source === "function") {
-        dynamic = opts.source;
-        state |= State.Unstable;
-      } else {
-        stable = /** @type {Send | Array<Send>} */ (opts.source);
-      }
+      state |= State.Source;
+      source = opts.source;
     }
   }
   /**
@@ -1184,18 +1201,11 @@ function Compute(fn, seed, opts) {
   this._args = args;
   /**
    * @package
-   * @type {(function(): void) | null | undefined}
+   * @type {Send | Array<Send> | (function(): void) | undefined}
    */
-  this._source = dynamic;
-  if (stable !== void 0) {
-    if (stable instanceof Array) {
-      for (var i = 0; i < stable.length; i++) {
-        addReceiver(stable[i], this);
-      }
-    } else {
-      addReceiver(stable, this);
-    }
-  }
+  this._source = /** @type {Send | Array<Send> | (function(): void) | undefined} */ (
+    source
+  );
 }
 
 Compute.prototype = new Reactive();
@@ -1206,24 +1216,9 @@ Compute.prototype = new Reactive();
  */
 Compute.prototype._init = function () {
   var context = CONTEXT;
+  var state = this._state;
   var owner = context._owner;
   var listen = context._listen;
-  context._owner = context._listen = this;
-  if (context._stage === Stage.Idle) {
-    reset();
-    context._stage = Stage.Started;
-    try {
-      this._value = this._next(this._value, this._args);
-      if (CHANGES._count !== 0 || DISPOSES._count !== 0) {
-        start();
-      }
-    } finally {
-      context._stage = Stage.Idle;
-      context._owner = context._listen = null;
-    }
-  } else {
-    this._value = this._next(this._value, this._args);
-  }
   if (owner !== null) {
     owner._state |= State.Scope;
     var children = owner._children;
@@ -1233,8 +1228,40 @@ Compute.prototype._init = function () {
       children[children.length] = this;
     }
   }
-  context._owner = owner;
-  context._listen = listen;
+  if (state & State.Source) {
+    context._owner = null;
+    context._listen = this;
+    readSource(this._source, this);
+    if (!(state & State.Unstable)) {
+      this._source = null;
+      this._state &= ~State.Source;
+    }
+  }
+  if (!(state & State.Defer)) {
+    context._owner = this;
+    if (state & State.Sample) {
+      context._listen = null;
+    } else if (!(state & State.Source)) {
+      context._listen = this;
+    }
+    if (context._stage === Stage.Idle) {
+      reset();
+      context._stage = Stage.Started;
+      try {
+        this._value = this._next(this._value, this._args);
+        if (CHANGES._count !== 0 || DISPOSES._count !== 0) {
+          start();
+        }
+      } finally {
+        context._stage = Stage.Idle;
+        context._owner = context._listen = null;
+      }
+    } else {
+      this._value = this._next(this._value, this._args);
+    }
+    context._owner = owner;
+    context._listen = listen;
+  }
   return this;
 };
 
@@ -1289,8 +1316,7 @@ Compute.prototype.peek = function () {
     if (
       (state & (State.WillUpdate | State.MayDispose)) ===
         (State.WillUpdate | State.MayDispose) ||
-      (stage === Stage.Computes &&
-        state & (State.MayDispose | State.MayUpdate))
+      (stage === Stage.Computes && state & (State.MayDispose | State.MayUpdate))
     ) {
       this._clearMayUpdate(time);
     } else if (state & State.WillUpdate) {
@@ -1349,11 +1375,17 @@ Compute.prototype._update = function (time) {
     }
     this._state &= ~State.Cleanup;
   }
-  context._owner = this;
   if (state & State.Unstable) {
     cleanupReceiver(this);
     context._listen = this;
+    if (state & State.Source) {
+      readSource(this._source, this);
+    }
+    if (state & State.Sample) {
+      context._listen = null;
+    }
   }
+  context._owner = this;
   var prev = this._value;
   this._state |= State.Updating;
   this._value = this._next(prev, this._args);
@@ -1516,8 +1548,8 @@ function root(fn) {
       dispose(node);
     };
   }
-  context._listen = null;
   context._owner = node;
+  context._listen = null;
   try {
     return fn(disposer);
   } finally {
@@ -1527,16 +1559,16 @@ function root(fn) {
 }
 
 /**
- * @param {Reactive} node
+ * @param {Signal} node
  * @returns {void}
  */
 function dispose(node) {
-  if (!(node._state & (State.WillDispose | State.Disposing | State.Disposed))) {
+  if (!(/** @type {Reactive} */(node)._state & (State.WillDispose | State.Disposing | State.Disposed))) {
     if (CONTEXT._stage === Stage.Idle) {
-      node._dispose();
+      /** @type {Reactive} */(node)._dispose();
     } else {
-      node._state |= State.WillDispose;
-      DISPOSES._add(node);
+      /** @type {Reactive} */(node)._state |= State.WillDispose;
+      DISPOSES._add(/** @type {Reactive} */(node));
     }
   }
 }
@@ -1567,6 +1599,17 @@ function batch(fn) {
     exec();
   } else {
     fn();
+  }
+}
+
+/**
+ * @param {Signal} node
+ * @returns {void}
+ */
+function record(node) {
+  var listen = CONTEXT._listen;
+  if (listen !== null) {
+    addReceiver(/** @type {Send} */(node), listen);
   }
 }
 
@@ -1628,6 +1671,7 @@ window["anod"]["root"] = root;
 window["anod"]["dispose"] = dispose;
 window["anod"]["sample"] = sample;
 window["anod"]["batch"] = batch;
+window["anod"]["record"] = record;
 window["anod"]["cleanup"] = cleanup;
 window["anod"]["stable"] = stable;
 window["anod"]["data"] = data;
@@ -1674,13 +1718,15 @@ export {
   sendDispose,
   Data,
   cleanupReceiver,
+  readSource,
   Compute,
   root,
   sample,
   batch,
+  record,
   cleanup,
   stable,
   data,
   value,
-  compute,
+  compute
 };

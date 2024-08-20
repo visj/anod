@@ -1,4 +1,4 @@
-import { Signal, SignalValue, SignalOptions } from "./lib.core";
+import { Signal, SignalValue, Options } from "./index";
 
 export interface SignalIterator<T = any> extends Signal<T[]> {
   readonly length: () => number;
