@@ -4,18 +4,18 @@
   "description": "",
   "type": "module",
   "types": "core.d.ts",
-  "main": "./dist/index.mjs",
-  "module": "./dist/index.mjs",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
   "exports": {
     ".": {
       "types": "./lib.core.d.ts",
-      "import": "./dist/index.mjs",
-      "module": "./dist/index.mjs"
+      "import": "./dist/index.js",
+      "module": "./dist/index.js"
     },
     "./array": {
       "types": "./lib.array.d.ts",
-      "import": "./dist/array.mjs",
-      "module": "./dist/array.mjs"
+      "import": "./dist/array.js",
+      "module": "./dist/array.js"
     }
   },
   "scripts": {

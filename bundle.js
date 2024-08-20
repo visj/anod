@@ -112,7 +112,7 @@ async function bundleCore() {
   await Promise.all([
     fs.promises.copyFile("./index.d.ts", "./dist/index.d.ts"),
     fs.promises.writeFile("./build/core.min.js", iife),
-    fs.promises.writeFile("./dist/index.mjs", esm)
+    fs.promises.writeFile("./dist/index.js", esm)
   ]);
 }
 
@@ -124,7 +124,7 @@ async function bundleArray() {
   let param = "__anod__";
   const array = code.split('"./core.js";');
   const parts = array[1].split(/(window\.anod\.[\$\w]*)/g);
-  let esm = array[0] + '"./index.mjs";' + parts[0];
+  let esm = array[0] + '"./index.js";' + parts[0];
   let iife = "(function(" + param + "){";
   const internals = array[0];
   const symbols = internals
@@ -179,7 +179,7 @@ async function bundleArray() {
   }
   await Promise.all([
     fs.promises.copyFile("./array.d.ts", "./dist/array.d.ts"),
-    fs.promises.writeFile("./dist/array.mjs", esmCode.outputFiles[0].contents),
+    fs.promises.writeFile("./dist/array.js", esmCode.outputFiles[0].contents),
     fs.promises.writeFile(
       "./build/array.min.js",
       iifeCode.outputFiles[0].contents

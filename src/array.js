@@ -76,6 +76,26 @@ var Mutation = {
 };
 
 /**
+ * @record
+ */
+function Change() {}
+
+/**
+ * @type {number}
+ */
+Change.prototype.mut;
+
+/**
+ * @type {number}
+ */
+Change.prototype.head;
+
+/**
+ * @type {number}
+ */
+Change.prototype.tail;
+
+/**
  * @template T, U, V
  * @param {ReactiveIterator<T>} source
  * @param {function(T, BaseParams<U, V>): T} fn
@@ -597,10 +617,8 @@ function ComputeArray(fn, value, opts) {
   this.length = getLength(this);
 }
 
-ComputeArray.prototype = new ReactiveIterator();
-for (var method in Compute.prototype) {
-  ComputeArray.prototype[method] = Compute.prototype[method];
-}
+ComputeArray.prototype = Object.create( new ReactiveIterator(), Compute.prototype);
+ComputeArray.constructor = ComputeArray;
 
 /**
  * @struct
@@ -619,10 +637,8 @@ function DataArray(val) {
   this.length = getLength(this);
 }
 
-DataArray.prototype = new ReactiveIterator();
-for (var method in Data.prototype) {
-  DataArray.prototype[method] = Data.prototype[method];
-}
+DataArray.prototype = Object.create(new ReactiveIterator(), Data.prototype);
+DataArray.constructor = DataArray;
 
 // /**
 //  * @public

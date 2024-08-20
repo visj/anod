@@ -1,6 +1,3 @@
-/** @typedef {function(): void} */
-var Dispose;
-
 /** @typedef {function(boolean): void} */
 var Cleanup;
 
@@ -1531,13 +1528,13 @@ Compute.prototype._clearMayUpdate = function (time) {
 
 /**
  * @template T
- * @param {function(Dispose): T} fn
+ * @param {function(function(): void): T} fn
  * @returns {T}
  */
 function root(fn) {
   /** @type {Root} */
   var node = null;
-  /** @type {Dispose} */
+  /** @type {function(): void} */
   var disposer;
   var context = CONTEXT;
   var owner = context._owner;
@@ -1679,7 +1676,6 @@ window["anod"]["value"] = value;
 window["anod"]["compute"] = compute;
 
 export {
-  Dispose,
   Cleanup,
   State,
   Stage,

@@ -1,5 +1,5 @@
-export * from "../../dist/index.mjs";
-export * from "../../dist/array.mjs";
+export * from "../../dist/index.js";
+export * from "../../dist/array.js";
 
 export var test = {
     /**
