@@ -66,6 +66,15 @@ async function esbuildBundleuSignal() {
   });
 }
 
+async function esbuildBundleTC39Proposal() {
+  await esbuild.build({
+    entryPoints: ["./bench/haile/tc39/index.js"],
+    bundle: true,
+    minify: true,
+    outfile: "./bench/haile/tc39/index.min.js"
+  });
+}
+
 async function bundleBench() {
   await Promise.all([
     esbuildBundleAnod(),
@@ -74,7 +83,8 @@ async function bundleBench() {
     esbuildBundleSjs(),
     esbuildBundleSolid(),
     esbuildBundleMaverick(),
-    esbuildBundleuSignal()
+    esbuildBundleuSignal(),
+    esbuildBundleTC39Proposal()
   ]);
 }
 

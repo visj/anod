@@ -12,13 +12,14 @@ import * as preact from "@preact/signals-core";
 import * as maverick from "@maverick-js/signals";
 import * as usignal from "usignal";
 import Table from "cli-table";
-import * as anod from "../../dist/index.mjs";
+import { Signal } from "signal-polyfill";
+import * as anod from "../../dist/index.js";
 
 let rand = 0;
-const BATCHED = true;
+const BATCHED = false;
 const RUNS_PER_TIER = 500;
 const LAYER_TIERS = [
-  1, 2, 3, 4, 5, 10, 15, 20, 25, 50, 100, 500, 1000, 2000, 2500,
+  1, 2, 3, 4, 5, 10, 15, 20, 25, 50, 100, 500, 1000
 ];
 
 async function collectGarbage() {
@@ -57,9 +58,7 @@ const SOLUTIONS = [
   [4, -2, 4, 4],
   [-2, -4, 2, 3],
   [4, -2, 4, 4],
-  [-2, -4, 2, 3],
-  [4, -2, 4, 4],
-  [-2, -4, 2, 3],
+  [-2, -4, 2, 3]
 ];
 
 /**
@@ -83,6 +82,7 @@ async function main() {
   report.anod = { fn: runAnod, runs: [] };
   // Has no way to dispose so can't consider it feature comparable.
   report.reactively = { fn: runReactively, runs: [], avg: [] };
+  report.signal = { fn: runSignal, runs: [], avg: [] };
   // These libraries are not comparable in terms of features.
   // report.cellx = { fn: runCellx, runs: [] };
 
@@ -183,7 +183,7 @@ function runReactively(layers, done) {
 
   let layer = start;
 
-  for (let i = layers; i--; ) {
+  for (let i = layers; i--;) {
     layer = ((m) => {
       return {
         a: reactive(() => (rand % 2 ? m.b.value : m.c.value)),
@@ -231,7 +231,7 @@ function runMaverick(layers, done) {
 
     let layer = start;
 
-    for (let i = layers; i--; ) {
+    for (let i = layers; i--;) {
       layer = ((m) => {
         return {
           a: maverick.computed(() => (rand % 2 ? m.b() : m.c())),
@@ -287,7 +287,7 @@ function runS(layers, done) {
 
     let layer = start;
 
-    for (let i = layers; i--; ) {
+    for (let i = layers; i--;) {
       layer = ((m) => {
         return {
           a: S(() => (rand % 2 ? m.b() : m.c())),
@@ -334,7 +334,7 @@ function runAnod(layers, done) {
 
     let layer = start;
 
-    for (let i = layers; i--; ) {
+    for (let i = layers; i--;) {
       layer = ((m) => {
         return {
           a: anod.compute(() => (rand % 2 ? m.b.val() : m.c.val()), 0),
@@ -371,6 +371,49 @@ function runAnod(layers, done) {
   });
 }
 
+function runSignal(layers, done) {
+  const start = {
+    a: new Signal.State(1),
+    b: new Signal.State(2),
+    c: new Signal.State(3),
+    d: new Signal.State(4),
+  };
+
+  let layer = start;
+
+  for (let i = layers; i--;) {
+    layer = ((m) => {
+      return {
+        a: new Signal.Computed(() => (rand % 2 ? m.b.get() : m.c.get())),
+        b: new Signal.Computed(() => m.a.get() - m.c.get()),
+        c: new Signal.Computed(() => m.b.get() + m.d.get()),
+        d: new Signal.Computed(() => m.c.get()),
+      };
+    })(layer);
+  }
+  const startTime = performance.now();
+
+  const end = layer;
+  if (BATCHED) {
+    start.a.set(4);
+    start.b.set(3);
+    start.c.set(2);
+    start.d.set(1);
+  } else {
+    start.a.set(4);
+    end.a.get(), end.b.get(), end.c.get(), end.d.get();
+    start.b.set(3);
+    end.a.get(), end.b.get(), end.c.get(), end.d.get();
+    start.c.set(2);
+    end.a.get(), end.b.get(), end.c.get(), end.d.get();
+    start.d.set(1);
+  }
+
+  const solution = [end.a.get(), end.b.get(), end.c.get(), end.d.get()];
+  const endTime = performance.now() - startTime;
+  done(isSolution(layers, solution) ? endTime : -1);
+}
+
 /**
  * @see {@link https://github.com/solidjs/solid}
  */
@@ -385,7 +428,7 @@ function runSolid(layers, done) {
 
     let layer = start;
 
-    for (let i = layers; i--; ) {
+    for (let i = layers; i--;) {
       layer = ((m) => {
         const props = {
           a: solid.createMemo(() => (rand % 2 ? m.b() : m.c())),
@@ -432,7 +475,7 @@ function runPreact(layers, done) {
 
   let layer = start;
 
-  for (let i = layers; i--; ) {
+  for (let i = layers; i--;) {
     layer = ((m) => {
       const props = {
         a: preact.computed(() => (rand % 2 ? m.b.value : m.c.value)),
@@ -480,7 +523,7 @@ function runCellx(layers, done) {
 
   let layer = start;
 
-  for (let i = layers; i--; ) {
+  for (let i = layers; i--;) {
     layer = ((m) => {
       const props = {
         a: new cellx.Cell(() => (rand % 2 ? m.b.get() : m.c.get())),
@@ -489,10 +532,10 @@ function runCellx(layers, done) {
         d: new cellx.Cell(() => m.c.get()),
       };
 
-      props.a.on("change", function () {});
-      props.b.on("change", function () {});
-      props.c.on("change", function () {});
-      props.d.on("change", function () {});
+      props.a.on("change", function () { });
+      props.b.on("change", function () { });
+      props.c.on("change", function () { });
+      props.d.on("change", function () { });
 
       return props;
     })(layer);
@@ -533,7 +576,7 @@ function runUsignal(layers, done) {
 
   let layer = start;
 
-  for (let i = layers; i--; ) {
+  for (let i = layers; i--;) {
     layer = ((m) => {
       const props = {
         a: usignal.computed(() => (rand % 2 ? m.b.value : m.c.value)),
