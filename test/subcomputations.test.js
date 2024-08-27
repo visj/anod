@@ -30,6 +30,23 @@ describe("compute() with subcomputations", function () {
         });
     });
 
+    it("disallows children in lazy computations", function () {
+      root(function () {
+        var v1 = value(1);
+        var called = false;
+        test.throws(function () {
+          compute(function () {
+            v1.val();
+            compute(function () {
+              called = true;
+              v1.val();
+            });
+          }, void 0, { lazy: true });
+        });
+        test.equals(called, false);
+      });
+    });
+
     describe("with child", function () {
         var d, e, g, h,
             outerCount, outerCounter,

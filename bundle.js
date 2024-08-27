@@ -233,13 +233,17 @@ async function concatBundleLibrary() {
     fs.promises.readFile("./src/array.js", "utf-8")
   ]);
   api =
-    api +
-    `
-    export {
-      Signal,
-      SignalValue
-    };
-  `;
+    api + "\n" +
+    "export {" + "\n"
+    + "  Signal,\n"
+    + "  SignalData,\n"
+    + "  SignalIterator,\n"
+    + "  SignalArray,\n"
+    + "  SignalObject,\n"
+    + "  SignalValue,\n"
+    + "  SignalOptions,\n"
+    + "  IteratorOptions\n"
+    + "};";
   let windowRegex = /window\["anod"\]\["\w+"\] = \w+;\s*/g;
   let importsRegex = /import\s*{[^}]*}\s*from\s*['"]\.\/core\.js['"]\;\s*/g;
   core = core.replace(windowRegex, "");

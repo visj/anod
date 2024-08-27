@@ -13,7 +13,7 @@ export interface Signal<T = any> {
   dispose(): void;
 }
 
-export interface SignalValue<T = any> extends Signal<T> {
+export interface SignalData<T = any> extends Signal<T> {
   /**
    *
    * @param val
@@ -23,6 +23,7 @@ export interface SignalValue<T = any> extends Signal<T> {
 
 export interface OptionsBase<T, U> {
   args?: U;
+  lazy?: boolean;
   unstable?: boolean;
   compare?: ((a: T, b: T) => boolean) | null;
 }
@@ -33,7 +34,7 @@ export interface OptionsWithSource<T, U> extends OptionsBase<T, U> {
   source: Signal | Array<Signal> | (() => void);
 }
 
-export type Options<T, U> = OptionsBase<T, U> | OptionsWithSource<T, U>;
+export type SignalOptions<T, U> = OptionsBase<T, U> | OptionsWithSource<T, U>;
 
 /**
  *
@@ -59,7 +60,7 @@ export declare function cleanup(fn: (final: boolean) => void): void;
  *
  * @param val
  */
-export declare function data<T>(val: T): SignalValue<T>;
+export declare function data<T>(val: T): SignalData<T>;
 /**
  *
  * @param val
@@ -68,7 +69,7 @@ export declare function data<T>(val: T): SignalValue<T>;
 export declare function value<T>(
   val: T,
   equality?: ((a: T, b: T) => boolean) | null,
-): SignalValue<T>;
+): SignalData<T>;
 /**
  *
  * @param callback
@@ -92,5 +93,5 @@ export declare function compute<T>(
 export declare function compute<T, U>(
   callback: (prev: T, args: U) => T,
   seed: T,
-  opts: Options<T, U>,
+  opts: SignalOptions<T, U>,
 ): Signal<T>;

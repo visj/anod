@@ -22,7 +22,7 @@ describe("exceptions within computations", function () {
       });
 
       test.equals(b.val(), 2);
-      test.equals(d.val(), 1);
+      test.equals(d.val(), 2);
     });
   });
 
@@ -47,7 +47,7 @@ describe("exceptions within computations", function () {
       });
 
       test.equals(b.val(), 2);
-      test.equals(d.val(), 1);
+      test.equals(d.val(), 2);
 
       b.update(3);
 

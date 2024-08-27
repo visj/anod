@@ -13,6 +13,8 @@ import {
   Compute,
   reset,
   type,
+  extend,
+  ModuleInterface,
   start,
   addReceiver,
   readSource,
@@ -72,44 +74,26 @@ function Params() {}
  * @enum {number}
  */
 var Mutation = {
-  None: 0
+  None: 0,
+  Insert: 1,
+  Remove: 2,
+  Replace: 4
 };
-
-/**
- * @record
- */
-function Change() {}
-
-/**
- * @type {number}
- */
-Change.prototype.mut;
-
-/**
- * @type {number}
- */
-Change.prototype.head;
-
-/**
- * @type {number}
- */
-Change.prototype.tail;
 
 /**
  * @template T, U, V
  * @param {ReactiveIterator<T>} source
- * @param {function(T, BaseParams<U, V>): T} fn
  * @param {U=} param1
  * @param {number=} type1
  * @param {IteratorOptions=} opts
  * @param {V=} param2
  * @param {number=} type2
- * @returns {Signal<T>}
+ * @returns {SignalOptions<T, BaseParams<U, V>>}
  */
-function iterate(source, fn, param1, type1, opts, param2, type2) {
+function mergeParams(source, param1, type1, opts, param2, type2) {
   /** @type {BaseParams<U, V>} */
   var args = { _param1: param1, _param2: param2 };
-  /** @type {Reactive | Array<Reactive> | (function(): void)} */
+  /** @type {Signal | Array<Signal> | (function(): void)} */
   var sources;
   /** @type {Signal | Array<Signal> | (function(): void) | null} */
   var param3 = null;
@@ -124,37 +108,79 @@ function iterate(source, fn, param1, type1, opts, param2, type2) {
       type3 = type(param3);
     }
   }
-  if (type1 === Type.Function || type2 === Type.Function || type3 === Type.Function) {
+  var types = type1 | type2 | type3;
+  if (types & Type.Function) {
     sources = function () {
       addReceiver(source, this);
-      readSource(param1, this);
-      readSource(param2, this);
-      readSource(/** @type {function(): void} */(param3), this);
+      if (type1 & (Type.Reactive | Type.Function)) {
+        readSource(param1, this);
+      }
+      if (type2 & (Type.Reactive | Type.Function)) {
+        readSource(param2, this);
+      }
+      if (type3 & (Type.Reactive | Type.Function)) {
+        readSource(/** @type {function(): void} */ (param3), this);
+      }
     };
-  } else if (type1 === Type.Reactive || type2 === Type.Reactive || type3 === Type.Reactive || type3 === Type.Array) {
+  } else if (types & Type.Reactive || type3 & Type.Array) {
     sources = [source];
-    if (type1 === Type.Reactive) {
+    if (type1 & Type.Reactive) {
       sources.push(param1);
     }
-    if (type2 === Type.Reactive) {
+    if (type2 & Type.Reactive) {
       sources.push(param2);
     }
-    if (type3 === Type.Reactive) {
-      sources.push(/** @type {Reactive} */(param3));
-    } else if (type3 === Type.Array) {
-      for (var i = 0, j = sources.length, len = /** @type {Array<Send>} */(param3).length; i < len;) {
-        sources[j++] = /** @type {Array<Send>} */(param3)[i++];
+    if (type3 & Type.Reactive) {
+      sources.push(/** @type {Signal} */ (param3));
+    } else if (type3 & Type.Array) {
+      var i = 0,
+        j = /** @type {Array<Signal>} */ (sources).length,
+        len = /** @type {Array<Signal>} */ (param3).length;
+      while (i < len) {
+        sources[j++] = /** @type {Array<Signal>} */ (param3)[i++];
       }
     }
   } else {
     sources = source;
   }
-  return compute(fn, void 0, {
+  return {
     args: args,
     sample: true,
     source: sources,
     unstable: unstable
-  });
+  };
+}
+
+/**
+ * @template T, U, V
+ * @param {ReactiveIterator<T>} source
+ * @param {function(T, BaseParams<U, V>): T} fn
+ * @param {U=} param1
+ * @param {number=} type1
+ * @param {IteratorOptions=} opts
+ * @param {V=} param2
+ * @param {number=} type2
+ * @returns {Signal<T>}
+ */
+function iterateSignal(source, fn, param1, type1, opts, param2, type2) {
+  var args = mergeParams(source, param1, type1, opts, param2, type2);
+  return compute(fn, void 0, args);
+}
+
+/**
+ * @template T, U, V
+ * @param {ReactiveIterator<T>} source
+ * @param {function(T, BaseParams<U, V>): T} fn
+ * @param {U=} param1
+ * @param {number=} type1
+ * @param {IteratorOptions=} opts
+ * @param {V=} param2
+ * @param {number=} type2
+ * @returns {SignalIterator<T>}
+ */
+function iterateArray(source, fn, param1, type1, opts, param2, type2) {
+  var args = mergeParams(source, param1, type1, opts, param2, type2);
+  return new ComputeArray(fn, null, args)._init();
 }
 
 /**
@@ -179,9 +205,30 @@ function read(args) {
 
 /**
  * @struct
+ * @abstract
  * @template T
  * @constructor
- * @extends {Reactive<Array<T>>}
+ * @extends {Module<ReadonlyArray<T>>}
+ * @implements {ModuleInterface<ReadonlyArray<T>>}
+ */
+function ModuleIterator() {}
+
+/**
+ * @type {function(): number}
+ */
+ModuleIterator.prototype.length;
+
+/**
+ * @package
+ * @returns {ReactiveIterator<T>}
+ */
+ModuleIterator.prototype._init = function () {};
+
+/**
+ * @struct
+ * @template T
+ * @constructor
+ * @extends {ModuleIterator<ReadonlyArray<T>>}
  * @implements {SignalIterator<T>}
  */
 function ReactiveIterator() {}
@@ -200,11 +247,6 @@ function getLength(source) {
 }
 
 /**
- * @type {function(): number}
- */
-ReactiveIterator.prototype.length;
-
-/**
  * @template T
  * @this {ReactiveIterator<T>}
  * @param {T | undefined} prev
@@ -212,9 +254,10 @@ ReactiveIterator.prototype.length;
  * @returns {T | undefined}
  */
 function atIterator(prev, params) {
+  /** @type {Array<T>} */
   var source = this._source1.peek();
   var length = source.length;
-  var index = /** @type {number} */(read(params._param1));
+  var index = /** @type {number} */ (read(params._param1));
   if (index >= 0 && index < length) {
     return source[index];
   }
@@ -226,15 +269,28 @@ function atIterator(prev, params) {
  * @returns {Signal<T | undefined>}
  */
 ReactiveIterator.prototype.at = function (index, opts) {
-  return iterate(this, atIterator, index, type(index), opts);
+  return iterateSignal(this, atIterator, index, type(index), opts);
 };
 
 /**
- * @param {T | Array<T> | SignalIterator<T>} items
+ * @template T
+ * @this {ComputeArray<T>}
+ * @param {Array<T>} prev
+ * @param {Params<T | Array<T> | Signal<T> | Signal<Array<T>>, undefined>} params
+ * @returns {Array<T>}
+ */
+function concatIterator(prev, params) {
+  return this._source1.peek().concat(read(params._param1));
+}
+
+/**
+ * @param {T | Array<T> | Signal<T> | Signal<Array<T>>} items
  * @param {IteratorOptions=} opts
  * @returns {SignalIterator<T>}
  */
-ReactiveIterator.prototype.concat = function (items, opts) {};
+ReactiveIterator.prototype.concat = function (items, opts) {
+  return iterateArray(this, concatIterator, items, type(items), opts);
+};
 
 /**
  * @template T
@@ -245,12 +301,13 @@ ReactiveIterator.prototype.concat = function (items, opts) {};
  */
 function everyIterator(prev, params) {
   var result = true;
+  /** @type {Array<T>} */
   var source = this._source1.peek();
   var length = source.length;
   if (length > 0) {
     var callback = params._param1;
-    for (var i = 0; result && i < length; ) {
-      result = callback(source[i], i++);
+    for (var i = 0; result && i < length; i++) {
+      result = callback(source[i], i);
     }
   }
   return result;
@@ -263,7 +320,7 @@ function everyIterator(prev, params) {
  * @returns {Signal<boolean>}
  */
 ReactiveIterator.prototype.every = function (callbackFn, opts) {
-  return iterate(this, everyIterator, callbackFn, Type.None, opts);
+  return iterateSignal(this, everyIterator, callbackFn, Type.None, opts);
 };
 
 function filterIterator(prev, params) {}
@@ -282,6 +339,7 @@ ReactiveIterator.prototype.filter = function (callbackFn) {};
  * @returns {T | undefined}
  */
 function findIterator(prev, params) {
+  /** @type {Array<T>} */
   var source = this._source1.peek();
   var length = source.length;
   if (length > 0) {
@@ -301,7 +359,7 @@ function findIterator(prev, params) {
  * @returns {Signal<T | undefined>}
  */
 ReactiveIterator.prototype.find = function (callbackFn, opts) {
-  return iterate(this, findIterator, callbackFn, Type.None, opts);
+  return iterateSignal(this, findIterator, callbackFn, Type.None, opts);
 };
 
 /**
@@ -312,13 +370,13 @@ ReactiveIterator.prototype.find = function (callbackFn, opts) {
  * @returns {number}
  */
 function findIndexIterator(prev, params) {
+  /** @type {Array<T>} */
   var source = this._source1.peek();
   var length = source.length;
   if (length > 0) {
     var callback = params._param1;
     for (var i = 0; i < length; i++) {
-      var item = source[i];
-      if (callback(item, i)) {
+      if (callback(source[i], i)) {
         return i;
       }
     }
@@ -332,7 +390,7 @@ function findIndexIterator(prev, params) {
  * @returns {Signal<number>}
  */
 ReactiveIterator.prototype.findIndex = function (callbackFn, opts) {
-  return iterate(this, findIndexIterator, callbackFn, Type.None, opts);
+  return iterateSignal(this, findIndexIterator, callbackFn, Type.None, opts);
 };
 
 /**
@@ -343,6 +401,7 @@ ReactiveIterator.prototype.findIndex = function (callbackFn, opts) {
  * @returns {T | undefined}
  */
 function findLastIterator(prev, params) {
+  /** @type {Array<T>} */
   var source = this._source1.peek();
   var length = source.length;
   if (length > 0) {
@@ -362,7 +421,7 @@ function findLastIterator(prev, params) {
  * @returns {Signal<T | undefined>}
  */
 ReactiveIterator.prototype.findLast = function (callbackFn, opts) {
-  return iterate(this, findLastIterator, callbackFn, Type.None, opts);
+  return iterateSignal(this, findLastIterator, callbackFn, Type.None, opts);
 };
 
 /**
@@ -373,13 +432,13 @@ ReactiveIterator.prototype.findLast = function (callbackFn, opts) {
  * @returns {T | undefined}
  */
 function findLastIndexIterator(prev, params) {
+  /** @type {Array<T>} */
   var source = this._source1.peek();
   var length = source.length;
   if (length > 0) {
     var callback = params._param1;
     for (var i = length - 1; i >= 0; i--) {
-      var item = source[i];
-      if (callback(item, i)) {
+      if (callback(source[i], i)) {
         return i;
       }
     }
@@ -393,7 +452,13 @@ function findLastIndexIterator(prev, params) {
  * @returns {Signal<number>}
  */
 ReactiveIterator.prototype.findLastIndex = function (callbackFn, opts) {
-  return iterate(this, findLastIndexIterator, callbackFn, Type.None, opts);
+  return iterateSignal(
+    this,
+    findLastIndexIterator,
+    callbackFn,
+    Type.None,
+    opts
+  );
 };
 
 /**
@@ -404,6 +469,7 @@ ReactiveIterator.prototype.findLastIndex = function (callbackFn, opts) {
  * @returns {void}
  */
 function forEachIterator(prev, params) {
+  /** @type {Array<T>} */
   var source = this._source1.peek();
   var length = source.length;
   var callback = params._param1;
@@ -418,7 +484,7 @@ function forEachIterator(prev, params) {
  * @returns {void}
  */
 ReactiveIterator.prototype.forEach = function (callbackFn, opts) {
-  iterate(this, forEachIterator, callbackFn, Type.None, opts);
+  iterateSignal(this, forEachIterator, callbackFn, Type.None, opts);
 };
 
 /**
@@ -438,7 +504,13 @@ function includesIterator(prev, params) {
  * @returns {Signal<boolean>}
  */
 ReactiveIterator.prototype.includes = function (searchElement, opts) {
-  return iterate(this, includesIterator, searchElement, type(searchElement), opts);
+  return iterateSignal(
+    this,
+    includesIterator,
+    searchElement,
+    type(searchElement),
+    opts
+  );
 };
 
 /**
@@ -461,7 +533,15 @@ function indexOfIterator(prev, params) {
  * @returns {Signal<number>}
  */
 ReactiveIterator.prototype.indexOf = function (searchElement, fromIndex, opts) {
-  return iterate(this, indexOfIterator, searchElement, type(searchElement), opts, fromIndex, type(fromIndex));
+  return iterateSignal(
+    this,
+    indexOfIterator,
+    searchElement,
+    type(searchElement),
+    opts,
+    fromIndex,
+    type(fromIndex)
+  );
 };
 
 /**
@@ -481,7 +561,7 @@ function joinIterator(prev, params) {
  * @returns {Signal<string>}
  */
 ReactiveIterator.prototype.join = function (separator, opts) {
-  return iterate(this, joinIterator, separator, type(separator), opts);
+  return iterateSignal(this, joinIterator, separator, type(separator), opts);
 };
 
 /**
@@ -503,8 +583,20 @@ function lastIndexOfIterator(prev, params) {
  * @param {IteratorOptions=} opts
  * @returns {Signal<number>}
  */
-ReactiveIterator.prototype.lastIndexOf = function (searchElement, fromIndex, opts) {
-  return iterate(this, lastIndexOfIterator, searchElement, type(searchElement), opts, fromIndex, type(fromIndex));
+ReactiveIterator.prototype.lastIndexOf = function (
+  searchElement,
+  fromIndex,
+  opts
+) {
+  return iterateSignal(
+    this,
+    lastIndexOfIterator,
+    searchElement,
+    type(searchElement),
+    opts,
+    fromIndex,
+    type(fromIndex)
+  );
 };
 
 /**
@@ -535,7 +627,15 @@ function reduceIterator(prev, params) {
  * @returns {Signal<V>}
  */
 ReactiveIterator.prototype.reduce = function (callbackFn, initialValue, opts) {
-  return iterate(this, reduceIterator, callbackFn, Type.None, opts, initialValue, type(initialValue));
+  return iterateSignal(
+    this,
+    reduceIterator,
+    callbackFn,
+    Type.None,
+    opts,
+    initialValue,
+    type(initialValue)
+  );
 };
 
 /**
@@ -558,25 +658,62 @@ function reduceRightIterator(prev, params) {
  * @param {IteratorOptions=} opts
  * @returns {Signal<U>}
  */
-ReactiveIterator.prototype.reduceRight = function (callbackFn, initialValue, opts) {
-  return iterate(this, reduceRightIterator, callbackFn, Type.None, opts, initialValue, type(initialValue));
+ReactiveIterator.prototype.reduceRight = function (
+  callbackFn,
+  initialValue,
+  opts
+) {
+  return iterateSignal(
+    this,
+    reduceRightIterator,
+    callbackFn,
+    Type.None,
+    opts,
+    initialValue,
+    type(initialValue)
+  );
 };
 
 /**
  * @template T
+ * @this {ComputeArray<T>}
  * @param {Array<T>} prev
- * @param {*} params
+ * @param {Params<number | undefined, number | undefined>} params
+ * @returns {Array<T>}
  */
 function sliceIterator(prev, params) {
-
+  /** @type {Array<T>} */
+  var source = this._source1.peek();
+  if (this._state & State.Initial) {
+    return source.slice(
+      /** @type {number | undefined} */ (read(params._param1)),
+      /** @type {number | undefined} */ (read(params._param2))
+    );
+  }
+  // todo
+  return source.slice(
+    /** @type {number | undefined} */ (read(params._param1)),
+    /** @type {number | undefined} */ (read(params._param2))
+  );
 }
 
 /**
  * @param {number | Signal<number> | (function(): number)=} start
  * @param {number | Signal<number> | (function(): number)=} end
+ * @param {IteratorOptions=} opts
  * @returns {SignalIterator<T>}
  */
-ReactiveIterator.prototype.slice = function (start, end) {};
+ReactiveIterator.prototype.slice = function (start, end, opts) {
+  return iterateArray(
+    this,
+    sliceIterator,
+    start,
+    type(start),
+    opts,
+    end,
+    type(end)
+  );
+};
 
 /**
  * @template T, U
@@ -595,7 +732,7 @@ function someIterator(prev, params) {
  * @returns {Signal<boolean>}
  */
 ReactiveIterator.prototype.some = function (callbackFn, opts) {
-  return iterate(this, someIterator, callbackFn, Type.None, opts);
+  return iterateSignal(this, someIterator, callbackFn, Type.None, opts);
 };
 
 /**
@@ -603,13 +740,13 @@ ReactiveIterator.prototype.some = function (callbackFn, opts) {
  * @template T, U
  * @constructor
  * @param {function(T, U): T} fn
- * @param {T} value
- * @param {SignalOptions<T, U>=} opts
+ * @param {T} seed
+ * @param {IteratorOptions=} opts
  * @extends {ReactiveIterator<T>}
  * @implements {ComputeArrayInterface<T>}
  */
-function ComputeArray(fn, value, opts) {
-  Compute.call(/** @type {?} */ (this), fn, value, opts);
+function ComputeArray(fn, seed, opts) {
+  Compute.call(/** @type {?} */ (this), fn, seed, opts);
   /**
    * @public
    * @type {function(): number}
@@ -617,8 +754,39 @@ function ComputeArray(fn, value, opts) {
   this.length = getLength(this);
 }
 
-ComputeArray.prototype = Object.create( new ReactiveIterator(), Compute.prototype);
-ComputeArray.constructor = ComputeArray;
+extend(ComputeArray, ReactiveIterator, Compute);
+
+/**
+ * @struct
+ * @constructor
+ */
+function Change() {
+  /**
+   * @package
+   * @type {number}
+   */
+  this._mut = Mutation.None;
+  /**
+   * @package
+   * @type {number}
+   */
+  this._head = -1;
+  /**
+   * @package
+   * @type {number}
+   */
+  this._tail = -1;
+  /**
+   * @package
+   * @type {number}
+   */
+  this._count = 0;
+  /**
+   * @package
+   * @type {Array}
+   */
+  this._args = [];
+}
 
 /**
  * @struct
@@ -635,10 +803,19 @@ function DataArray(val) {
    * @type {function(): number}
    */
   this.length = getLength(this);
+  /**
+   * @package
+   * @type {Change}
+   */
+  this._next = new Change();
+  /**
+   * @package
+   * @type {Change}
+   */
+  this._change = new Change();
 }
 
-DataArray.prototype = Object.create(new ReactiveIterator(), Data.prototype);
-DataArray.constructor = DataArray;
+extend(DataArray, ReactiveIterator, Data);
 
 // /**
 //  * @public
@@ -659,6 +836,8 @@ DataArray.constructor = DataArray;
 DataArray.prototype._mutate = function (mutation, param) {
   // this._next = param !== void 0 ? param : REF;
 };
+
+DataArray.prototype.modify = function (callbackFn) {};
 
 /**
  * @public
@@ -726,7 +905,7 @@ export {
   Type,
   Mutation,
   type,
-  iterate,
+  iterateSignal as iterate,
   REF,
   read,
   ReactiveIterator,

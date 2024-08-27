@@ -1,6 +1,3 @@
-/** @typedef {function(boolean): void} */
-var Cleanup;
-
 /**
  * @enum {number}
  */
@@ -25,7 +22,9 @@ var State = {
   Unstable: 65536,
   Sample: 131072,
   Defer: 262144,
-  Source: 524288
+  Source: 524288,
+  Initial: 1048576,
+  Lazy: 2097152
 };
 /**
  * @enum {number}
@@ -40,16 +39,15 @@ var Stage = {
 };
 
 /**
- * @const
  * @enum {number}
  */
 var Type = {
   None: 0,
   Reactive: 1,
   Value: 2,
-  Array: 3,
-  Object: 4,
-  Function: 5
+  Array: 4,
+  Object: 8,
+  Function: 16
 };
 
 /**
@@ -73,7 +71,7 @@ Scope.prototype._children;
 
 /**
  * @package
- * @type {Array<Cleanup> | null}
+ * @type {Array<function(boolean): void> | null}
  */
 Scope.prototype._cleanups;
 
@@ -229,7 +227,7 @@ Module.prototype._children;
 
 /**
  * @package
- * @type {Array<Cleanup> | null}
+ * @type {Array<function(boolean): void> | null}
  */
 Module.prototype._cleanups;
 
@@ -288,7 +286,7 @@ Module.prototype._sourceslots;
 
 /**
  * @package
- * @type {?}
+ * @type {*}
  */
 Module.prototype._next;
 
@@ -306,6 +304,11 @@ Module.prototype.peek = function () {};
  * @returns {void}
  */
 Module.prototype.dispose = function () {};
+
+/**
+ * @returns {Module<T>}
+ */
+Module.prototype._init = function () {};
 
 /**
  * @param {T} val
@@ -370,7 +373,7 @@ function RootInterface() {}
  * @interface
  * @template T
  * @extends {Send}
- * @extends {SignalValue<T>}
+ * @extends {SignalData<T>}
  */
 function DataInterface() {}
 
@@ -498,6 +501,19 @@ function type(val) {
       }
   }
   return Type.Value;
+}
+
+/**
+ * @param {Function} ctor
+ * @param {Function} parent
+ * @param {Function} mixin
+ */
+function extend(ctor, parent, mixin) {
+  ctor.prototype = new parent();
+  for (var key in mixin.prototype) {
+    ctor.prototype[key] = mixin.prototype[key];
+  }
+  ctor.constructor = ctor;
 }
 
 /**
@@ -653,7 +669,7 @@ function Root() {
   this._children = [];
   /**
    * @package
-   * @type {Array<Cleanup> | null}
+   * @type {Array<function(boolean): void> | null}
    */
   this._cleanups = null;
 }
@@ -762,16 +778,6 @@ function sendWillUpdate(send, time) {
   var state = send._state;
   var node1 = send._node1;
   if (state & State.SendOne) {
-    if (node1._time < time) {
-      node1._time = time;
-      node1._state &= ~(
-        State.Updating |
-        State.WillUpdate |
-        State.MayUpdate |
-        State.MayDispose |
-        State.MayCleared
-      );
-    }
     if (!(node1._state & (State.WillUpdate | State.Disposing))) {
       node1._recordWillUpdate(time);
     }
@@ -781,16 +787,6 @@ function sendWillUpdate(send, time) {
     var ln = nodes.length;
     for (var i = 0; i < ln; i++) {
       node1 = nodes[i];
-      if (node1._time < time) {
-        node1._time = time;
-        node1._state &= ~(
-          State.Updating |
-          State.WillUpdate |
-          State.MayUpdate |
-          State.MayDispose |
-          State.MayCleared
-        );
-      }
       if (!(node1._state & (State.WillUpdate | State.Disposing))) {
         node1._recordWillUpdate(time);
       }
@@ -807,16 +803,6 @@ function sendMayUpdate(send, time) {
   var state = send._state;
   var node1 = send._node1;
   if (state & State.SendOne) {
-    if (node1._time < time) {
-      node1._time = time;
-      node1._state &= ~(
-        State.Updating |
-        State.WillUpdate |
-        State.MayUpdate |
-        State.MayDispose |
-        State.MayCleared
-      );
-    }
     if (
       !(node1._state & (State.MayUpdate | State.WillUpdate | State.Disposing))
     ) {
@@ -828,16 +814,6 @@ function sendMayUpdate(send, time) {
     var len = nodes.length;
     for (var i = 0; i < len; i++) {
       node1 = nodes[i];
-      if (node1._time < time) {
-        node1._time = time;
-        node1._state &= ~(
-          State.Updating |
-          State.WillUpdate |
-          State.MayUpdate |
-          State.MayDispose |
-          State.MayCleared
-        );
-      }
       if (
         !(node1._state & (State.MayUpdate | State.WillUpdate | State.Disposing))
       ) {
@@ -856,16 +832,6 @@ function sendMayDispose(owner, time) {
   var children = owner._children;
   for (var i = 0, ln = children.length; i < ln; i++) {
     var node = children[i];
-    if (node._time < time) {
-      node._time = time;
-      node._state &= ~(
-        State.Updating |
-        State.WillUpdate |
-        State.MayUpdate |
-        State.MayDispose |
-        State.MayCleared
-      );
-    }
     if (
       node._state & (State.SendOne | State.SendMany) &&
       node._state & (State.ReceiveOne | State.ReceiveMany) &&
@@ -1049,7 +1015,7 @@ function cleanupReceiver(node) {
 }
 
 /**
- * @param {Send | Array<Send> | (function(): void) | undefined} source
+ * @param {Signal | Array<Signal> | (function(): void) | undefined} source
  * @param {Receive} owner
  * @returns {void}
  */
@@ -1105,6 +1071,9 @@ function Compute(fn, seed, opts) {
     if (opts.sample) {
       state |= State.Sample;
     }
+    if (opts.lazy) {
+      state |= State.Lazy;
+    }
     args = opts.args;
     if (opts.source != null) {
       state |= State.Source;
@@ -1158,7 +1127,7 @@ function Compute(fn, seed, opts) {
   this._children = null;
   /**
    * @package
-   * @type {Array<Cleanup> | null}
+   * @type {Array<function(boolean): void> | null}
    */
   this._cleanups = null;
   /**
@@ -1198,11 +1167,9 @@ function Compute(fn, seed, opts) {
   this._args = args;
   /**
    * @package
-   * @type {Send | Array<Send> | (function(): void) | undefined}
+   * @type {Signal | Array<Signal> | (function(): void) | undefined}
    */
-  this._source = /** @type {Send | Array<Send> | (function(): void) | undefined} */ (
-    source
-  );
+  this._source = source;
 }
 
 Compute.prototype = new Reactive();
@@ -1217,6 +1184,9 @@ Compute.prototype._init = function () {
   var owner = context._owner;
   var listen = context._listen;
   if (owner !== null) {
+    if (owner._state & State.Lazy) {
+      throw new Error("Lazy computations cannot own child computations");
+    }
     owner._state |= State.Scope;
     var children = owner._children;
     if (children === null) {
@@ -1241,6 +1211,7 @@ Compute.prototype._init = function () {
     } else if (!(state & State.Source)) {
       context._listen = this;
     }
+    this._state |= State.Initial;
     if (context._stage === Stage.Idle) {
       reset();
       context._stage = Stage.Started;
@@ -1274,19 +1245,17 @@ Compute.prototype.val = function () {
     var context = CONTEXT;
     var stage = context._stage;
     var listen = context._listen;
-    if (stage !== Stage.Idle && this._time === time) {
-      if (
-        (state & (State.WillUpdate | State.MayDispose)) ===
-          (State.WillUpdate | State.MayDispose) ||
-        (stage === Stage.Computes &&
-          state & (State.MayDispose | State.MayUpdate))
-      ) {
-        this._clearMayUpdate(time);
-      } else if (state & State.WillUpdate) {
-        this._update(time);
-      }
+    if (
+      (state & (State.WillUpdate | State.MayDispose)) ===
+        (State.WillUpdate | State.MayDispose) ||
+      (stage === Stage.Computes && state & (State.MayDispose | State.MayUpdate))
+    ) {
+      this._clearMayUpdate(time);
+    } else if (state & State.WillUpdate) {
+      this._update(time);
     }
     if (
+      stage !== Stage.Idle &&
       listen !== null &&
       !(this._state & (State.WillDispose | State.Disposing | State.Disposed))
     ) {
@@ -1303,21 +1272,16 @@ Compute.prototype.val = function () {
  */
 Compute.prototype.peek = function () {
   var state = this._state;
-  var time = TIME;
   var stage = CONTEXT._stage;
-  if (
-    !(state & (State.Disposing | State.Disposed)) &&
-    stage !== Stage.Idle &&
-    this._time === time
-  ) {
+  if (!(state & (State.Disposing | State.Disposed))) {
     if (
       (state & (State.WillUpdate | State.MayDispose)) ===
         (State.WillUpdate | State.MayDispose) ||
       (stage === Stage.Computes && state & (State.MayDispose | State.MayUpdate))
     ) {
-      this._clearMayUpdate(time);
+      this._clearMayUpdate(TIME);
     } else if (state & State.WillUpdate) {
-      this._update(time);
+      this._update(TIME);
     }
   }
   return this._value;
@@ -1384,7 +1348,7 @@ Compute.prototype._update = function (time) {
   }
   context._owner = this;
   var prev = this._value;
-  this._state |= State.Updating;
+  this._state = (this._state | State.Updating) & ~State.Initial;
   this._value = this._next(prev, this._args);
   this._state &= ~(
     State.Updating |
@@ -1459,18 +1423,20 @@ Compute.prototype._recordMayUpdate = function (time) {
 Compute.prototype._recordWillUpdate = function (time) {
   var state = this._state;
   this._state |= State.WillUpdate;
-  if (state & State.Scope) {
-    sendDispose(this._children);
-  }
-  if (!(state & State.Respond) && state & (State.SendOne | State.SendMany)) {
-    COMPUTES._add(this);
-    if (!(state & State.MayUpdate)) {
-      sendMayUpdate(this, time);
+  if (!(state & State.Lazy)) {
+    if (state & State.Scope) {
+      sendDispose(this._children);
     }
-  } else {
-    UPDATES._add(this);
-    if (state & (State.SendOne | State.SendMany)) {
-      sendWillUpdate(this, time);
+    if (!(state & State.Respond) && state & (State.SendOne | State.SendMany)) {
+      COMPUTES._add(this);
+      if (!(state & State.MayUpdate)) {
+        sendMayUpdate(this, time);
+      }
+    } else {
+      UPDATES._add(this);
+      if (state & (State.SendOne | State.SendMany)) {
+        sendWillUpdate(this, time);
+      }
     }
   }
 };
@@ -1560,12 +1526,15 @@ function root(fn) {
  * @returns {void}
  */
 function dispose(node) {
-  if (!(/** @type {Reactive} */(node)._state & (State.WillDispose | State.Disposing | State.Disposed))) {
+  var react = /** @type {Reactive} */ (node);
+  if (
+    !(react._state & (State.WillDispose | State.Disposing | State.Disposed))
+  ) {
     if (CONTEXT._stage === Stage.Idle) {
-      /** @type {Reactive} */(node)._dispose();
+      react._dispose();
     } else {
-      /** @type {Reactive} */(node)._state |= State.WillDispose;
-      DISPOSES._add(/** @type {Reactive} */(node));
+      react._state |= State.WillDispose;
+      DISPOSES._add(react);
     }
   }
 }
@@ -1606,12 +1575,12 @@ function batch(fn) {
 function record(node) {
   var listen = CONTEXT._listen;
   if (listen !== null) {
-    addReceiver(/** @type {Send} */(node), listen);
+    addReceiver(/** @type {Send} */ (node), listen);
   }
 }
 
 /**
- * @param {Cleanup} fn
+ * @param {function(boolean): void} fn
  * @returns {void}
  */
 function cleanup(fn) {
@@ -1636,7 +1605,7 @@ function stable() {
 /**
  * @template T
  * @param {T} value
- * @returns {SignalValue<T>}
+ * @returns {SignalData<T>}
  */
 function data(value) {
   return new Data(value, null);
@@ -1646,7 +1615,7 @@ function data(value) {
  * @template T
  * @param {T} value
  * @param {function(T,T): boolean=} eq
- * @returns {SignalValue<T>}
+ * @returns {SignalData<T>}
  */
 function value(value, eq) {
   return new Data(value, eq);
@@ -1676,7 +1645,6 @@ window["anod"]["value"] = value;
 window["anod"]["compute"] = compute;
 
 export {
-  Cleanup,
   State,
   Stage,
   Type,
@@ -1697,6 +1665,7 @@ export {
   COMPUTES,
   UPDATES,
   CONTEXT,
+  extend,
   type,
   reset,
   addReceiver,
