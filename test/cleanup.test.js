@@ -2,99 +2,97 @@ import { test, root, cleanup, compute, value } from "./helper/anod.js";
 
 describe("cleanup", function () {
     it("is called when a computation is disposed", function () {
-        var d = value(1);
-        var called = false;
+        var s1 = value(1);
+        var calls = 0;
         compute(function () {
-            d.val();
+            s1.val();
             cleanup(function () {
-                called = true;
+                calls++;
             });
         });
-        test.equals(called , false);
-        d.update(d.peek() + 1);
-        test.equals(called , true);
+        test.equals(calls, 0);
+        s1.update(s1.peek() + 1);
+        test.equals(calls, 1);
     });
 
     it("can be called from within a subcomputation", function () {
-        var d = value(1);
-        var called = false;
+        var s1 = value(1);
+        var calls = 0;
         compute(function () {
-            d.val();
+            s1.val();
             compute(function () {
                 cleanup(function () {
-                    called = true;
+                    calls++;
                 });
             });
         });
-        test.equals(called , false);
-        d.update(d.peek() + 1);
-        test.equals(called , true);
+        test.equals(calls, 0);
+        s1.update(s1.peek() + 1);
+        test.equals(calls, 1);
     });
 
     it("accepts multiple cleanup functions", function () {
-        var d = value(1);
-        var called = 0;
+        var s1 = value(1);
+        var calls = 0;
         compute(function () {
-            d.val();
+            s1.val();
             cleanup(function () {
-                called++;
+                calls++;
             });
             cleanup(function () {
-                called++;
+                calls++;
             });
         });
-        test.equals(called , 0);
-        d.update(d.peek() + 1);
-        test.equals(called , 2);
+        test.equals(calls, 0);
+        s1.update(s1.peek() + 1);
+        test.equals(calls, 2);
     });
 
     it("runs cleanups in reverse order", function () {
-        var d = value(1);
-        var called = "";
+        var s1 = value(1);
+        var calls = "";
         compute(function () {
-            d.val();
+            s1.val();
             cleanup(function () {
-                called += "a";
+                calls += "a";
             });
             cleanup(function () {
-                called += "b";
+                calls += "b";
             });
         });
-        test.equals(called , "");
-        d.update(d.peek() + 1);
-        test.equals(called , "ba");
+        test.equals(calls, "");
+        s1.update(s1.peek() + 1);
+        test.equals(calls, "ba");
     });
 
     it("can be run within root scope", function () {
-        var called = false;
+        var calls = 0;
         root(function (teardown) {
             cleanup(function () {
-                called = true;
+                calls++;
             });
-
             teardown();
-            test.equals(called , true);
+            test.equals(calls, 1);
         });
     });
 
     it("is run only once when a computation is disposed", function () {
-        var d = value(1);
-        var called = 0;
+        var s1 = value(1);
+        var calls = 0;
         root(function (teardown) {
-
             compute(function () {
-                d.val();
+                s1.val();
                 cleanup(function () {
-                    called++;
+                    calls++;
                 });
             });
-            test.equals(called , 0);
-            d.update(d.peek() + 1);
-            test.equals(called , 1);
+            test.equals(calls, 0);
+            s1.update(s1.peek() + 1);
+            test.equals(calls, 1);
             teardown();
-            test.equals(called , 2);
-            d.update(d.peek() + 1);
-            test.equals(called , 2);
+            test.equals(calls, 2);
+            s1.update(s1.peek() + 1);
+            test.equals(calls, 2);
         });
     });
 });

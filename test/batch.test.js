@@ -2,29 +2,29 @@ import { test, root, compute, value, batch } from './helper/anod.js';
 
 describe("batch", function () {
 	it("batches changes until end", function () {
-		var d = value(1);
+		var s1 = value(1);
 			
 		batch(function () {
-			d.update(2);
-			test.equals(d.val() , 1);
+			s1.update(2);
+			test.equals(s1.val() , 1);
 		});
 		
-		test.equals(d.val() , 2);
+		test.equals(s1.val() , 2);
 	});
 	
 	it("halts propagation within its scope", function () {
         root(function () {
-			var d = value(1);
-			var f = compute(function() { 
-				return d.val();
+			var s1 = value(1);
+			var c1 = compute(function() { 
+				return s1.val();
 			});
 				
 			batch(function () {
-				d.update(2);
-				test.equals(f.val() , 1);
+				s1.update(2);
+				test.equals(c1.val() , 1);
 			});
 			
-			test.equals(f.val() , 2);
+			test.equals(c1.val() , 2);
 		});
 	});
 });

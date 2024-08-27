@@ -17,7 +17,7 @@ import * as anod from "../../dist/index.js";
 
 let rand = 0;
 const BATCHED = true;
-const RUNS_PER_TIER = 500;
+const RUNS_PER_TIER = 2500;
 const LAYER_TIERS = [
   1, 2, 3, 4, 5, 10, 15, 20, 25, 50, 100, 500, 1000
 ];
@@ -85,7 +85,6 @@ async function main() {
   report.signal = { fn: runSignal, runs: [], avg: [] };
   // These libraries are not comparable in terms of features.
   // report.cellx = { fn: runCellx, runs: [] };
-
   // warm up first
   for (const lib of Object.keys(report)) {
     const current = report[lib];
@@ -324,51 +323,47 @@ function runS(layers, done) {
 }
 
 function runAnod(layers, done) {
-  anod.root((dispose) => {
-    const start = {
-      a: anod.data(1),
-      b: anod.data(2),
-      c: anod.data(3),
-      d: anod.data(4),
-    };
+  const start = {
+    a: anod.data(1),
+    b: anod.data(2),
+    c: anod.data(3),
+    d: anod.data(4),
+  };
 
-    let layer = start;
+  let layer = start;
 
-    for (let i = layers; i--;) {
-      layer = ((m) => {
-        return {
-          a: anod.compute(() => (rand % 2 ? m.b.val() : m.c.val()), 0),
-          b: anod.compute(() => m.a.val() - m.c.val(), 0),
-          c: anod.compute(() => m.b.val() + m.d.val(), 0),
-          d: anod.compute(() => m.c.val(), 0),
-        };
-      })(layer);
-    }
-    const startTime = performance.now();
+  for (let i = layers; i--;) {
+    layer = ((m) => {
+      return {
+        a: anod.compute(() => (rand % 2 ? m.b.val() : m.c.val()), 0),
+        b: anod.compute(() => m.a.val() - m.c.val(), 0),
+        c: anod.compute(() => m.b.val() + m.d.val(), 0),
+        d: anod.compute(() => m.c.val(), 0),
+      };
+    })(layer);
+  }
+  const startTime = performance.now();
 
-    const end = layer;
-    if (BATCHED) {
-      anod.batch(() => {
-        start.a.update(4);
-        start.b.update(3);
-        start.c.update(2);
-        start.d.update(1);
-      });
-    } else {
+  const end = layer;
+  if (BATCHED) {
+    anod.batch(() => {
       start.a.update(4);
-      end.a.val(), end.b.val(), end.c.val(), end.d.val();
       start.b.update(3);
-      end.a.val(), end.b.val(), end.c.val(), end.d.val();
       start.c.update(2);
-      end.a.val(), end.b.val(), end.c.val(), end.d.val();
       start.d.update(1);
-    }
-
-    const solution = [end.a.val(), end.b.val(), end.c.val(), end.d.val()];
-    const endTime = performance.now() - startTime;
-    dispose();
-    done(isSolution(layers, solution) ? endTime : -1);
-  });
+    });
+  } else {
+    start.a.update(4);
+    end.a.val(), end.b.val(), end.c.val(), end.d.val();
+    start.b.update(3);
+    end.a.val(), end.b.val(), end.c.val(), end.d.val();
+    start.c.update(2);
+    end.a.val(), end.b.val(), end.c.val(), end.d.val();
+    start.d.update(1);
+  }
+  const solution = [end.a.val(), end.b.val(), end.c.val(), end.d.val()];
+  const endTime = performance.now() - startTime;
+  done(isSolution(layers, solution) ? endTime : -1);
 }
 
 function runSignal(layers, done) {

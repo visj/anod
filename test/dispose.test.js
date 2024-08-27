@@ -3,89 +3,89 @@ import { test, root, dispose, compute, value } from "./helper/anod.js";
 describe("dispose", function () {
   describe("root", function () {
     it("disables updates and sets computation's value to null", function () {
-      var c, d, f;
+      var calls, s1, c1;
       root(function (teardown) {
-        c = 0;
-        d = value(0);
+        calls = 0;
+        s1 = value(0);
 
-        f = compute(function () {
-          c++;
-          return d.val();
+        c1 = compute(function () {
+          calls++;
+          return s1.val();
         });
 
-        test.equals(c, 1);
-        test.equals(f.val(), 0);
+        test.equals(calls, 1);
+        test.equals(c1.val(), 0);
 
-        d.update(1);
+        s1.update(1);
 
-        test.equals(c, 2);
-        test.equals(f.val(), 1);
+        test.equals(calls, 2);
+        test.equals(c1.val(), 1);
 
         teardown();
-        d.update(2);
+        s1.update(2);
 
-        test.equals(c, 2);
-        test.equals(f.val(), null);
+        test.equals(calls, 2);
+        test.equals(c1.val(), null);
       });
     });
 
     it("works from the body of its own computation", function () {
-      var c, d;
+      var calls, s1;
       root(function (teardown) {
-        c = 0;
-        d = value(0);
+        calls = 0;
+        s1 = value(0);
         compute(function () {
-          c++;
-          if (d.val()) {
+          calls++;
+          if (s1.val()) {
             teardown();
           }
-          d.val();
+          s1.val();
         });
 
-        test.equals(c, 1);
-        d.update(1);
-        test.equals(c, 2);
-        d.update(2);
-        test.equals(c, 2);
+        test.equals(calls, 1);
+        s1.update(1);
+        test.equals(calls, 2);
+        s1.update(2);
+        test.equals(calls, 2);
       });
     });
 
     it("works from the body of a subcomputation", function () {
-      var c, d;
+      var calls, s1;
       root(function (teardown) {
-        c = 0;
-        d = value(0);
+        calls = 0;
+        s1 = value(0);
         compute(function () {
-          c++;
-          d.val();
+          calls++;
+          s1.val();
           compute(function () {
-            if (d.val()) {
+            if (s1.val()) {
               teardown();
             }
           });
         });
 
-        test.equals(c, 1);
+        test.equals(calls, 1);
 
-        d.update(1);
-        test.equals(c, 2);
-        d.update(2);
-        test.equals(c, 2);
+        s1.update(1);
+        test.equals(calls, 2);
+        s1.update(2);
+        test.equals(calls, 2);
       });
     });
   });
 
   describe("computations", function () {
     it("persists through cycle when manually disposed", function () {
-      root(function (teardown) {
-        var d1 = value(0);
+      root(function () {
+        var s1 = value(0);
         var c1 = compute(function () {
-          return d1.val();
+          return s1.val();
         });
         var count = 0;
         compute(function () {
           compute(function () {
-            if (d1.val() > 0) {
+            if (s1.val() > 0) {
               dispose(c1);
             }
           });
@@ -93,22 +93,22 @@ describe("dispose", function () {
             count += c1.val();
           });
         });
-        d1.update(d1.peek() + 1);
-        d1.update(d1.peek() + 1);
+        s1.update(s1.peek() + 1);
+        s1.update(s1.peek() + 1);
         test.equals(count, 1);
       });
     });
 
     it("ignores multiple calls to dispose", function () {
-      root(function (teardown) {
-        var d1 = value(0);
+      root(function () {
+        var s1 = value(0);
         var c1 = compute(function () {
-          return d1.val();
+          return s1.val();
         });
         var count = 0;
         compute(function () {
           compute(function () {
-            if (d1.val() > 0) {
+            if (s1.val() > 0) {
               dispose(c1);
               dispose(c1);
               dispose(c1);
@@ -118,8 +118,8 @@ describe("dispose", function () {
             count += c1.val();
           });
         });
-        d1.update(d1.peek() + 1);
-        d1.update(d1.peek() + 1);
+        s1.update(s1.peek() + 1);
+        s1.update(s1.peek() + 1);
         test.equals(count, 1);
       });
     });
@@ -127,32 +127,32 @@ describe("dispose", function () {
 
   describe("unmount", function () {
     it("does not unmount pending computations with changing dependencies", function () {
-      var d1 = value(true);
-      var d2 = value(0);
-      var d3 = value(0);
-      var count = 0;
+      var s1 = value(true);
+      var s2 = value(0);
+      var s3 = value(0);
+      var calls = 0;
       compute(function () {
-        if (!d1.val()) {
-          dispose(d1);
-          dispose(d2);
-          d3.update(d3.peek() + 1);
+        if (!s1.val()) {
+          dispose(s1);
+          dispose(s2);
+          s3.update(s3.peek() + 1);
         }
       });
       compute(
         function () {
-          count++;
-          if (d1.val()) {
-            d2.val();
+          calls++;
+          if (s1.val()) {
+            s2.val();
           } else {
-            d3.val();
+            s3.val();
           }
         },
         void 0,
         { unstable: true },
       );
-      count = 0;
-      d1.update(false);
-      test.equals(count, 2);
+      calls = 0;
+      s1.update(false);
+      test.equals(calls, 2);
     });
   });
 });

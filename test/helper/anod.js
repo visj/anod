@@ -1,5 +1,6 @@
 export * from "../../dist/index.js";
 export * from "../../dist/array.js";
+// export * from "../../build/index.js";
 
 export var test = {
     /**

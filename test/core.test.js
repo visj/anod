@@ -4,10 +4,10 @@ describe("compute()", function () {
   describe("creation", function () {
     it("returns initial value of wrapped function", function () {
       root(function () {
-        var f = compute(function () {
+        var c1 = compute(function () {
           return 1;
         });
-        test.equals(f.val(), 1);
+        test.equals(c1.val(), 1);
       });
     });
   });
@@ -26,13 +26,13 @@ describe("compute()", function () {
     it("does not re-occur when read", function () {
       root(function () {
         var calls = 0;
-        var f = compute(function () {
+        var c1 = compute(function () {
           calls++;
         });
 
-        f.val();
-        f.val();
-        f.val();
+        c1.val();
+        c1.val();
+        c1.val();
 
         test.equals(calls, 1);
       });
@@ -42,103 +42,106 @@ describe("compute()", function () {
   describe("with a dependency on an data", function () {
     it("updates when data is set", function () {
       root(function () {
-        var d = value(1);
+        var s1 = value(1);
         var fevals = 0;
         compute(function () {
           fevals++;
-          d.val();
+          s1.val();
         });
 
         fevals = 0;
 
-        d.update(d.peek() + 1);
+        s1.update(s1.peek() + 1);
         test.equals(fevals, 1);
       });
     });
 
     it("does not update when data is read", function () {
       root(function () {
-        var d = value(1);
-        var fevals = 0;
+        var s1 = value(1);
+        var evals = 0;
         compute(function () {
-          fevals++;
-          d.val();
+          evals++;
+          s1.val();
         });
 
-        fevals = 0;
+        evals = 0;
 
-        d.val();
-        test.equals(fevals, 0);
+        s1.val();
+        test.equals(evals, 0);
       });
     });
 
     it("updates return value", function () {
       root(function () {
-        var d = value(1);
-        var f = compute(function () {
-          return d.val();
+        var s1 = value(1);
+        var c1 = compute(function () {
+          return s1.val();
         });
 
-        d.update(2);
-        test.equals(f.val(), 2);
+        s1.update(2);
+        test.equals(c1.val(), 2);
       });
     });
   });
 
   describe("with changing dependencies", function () {
-    var i, t, e, fevals, f;
+    var s1;
+    var s2;
+    var s3;
+    var evals;
+    var c1;
 
     function init() {
-      i = value(true);
-      t = value(1);
-      e = value(2);
-      fevals = 0;
-      f = compute(
+      s1 = value(true);
+      s2 = value(1);
+      s3 = value(2);
+      c1 = compute(
         function () {
-          fevals++;
-          return i.val() ? t.val() : e.val();
+          evals++;
+          return s1.val() ? s2.val() : s3.val();
         },
         0,
         { unstable: true }
       );
-      fevals = 0;
+      evals = 0;
     }
 
     it("updates on active dependencies", function () {
       root(function () {
         init();
-        t.update(5);
-        test.equals(fevals, 1);
-        test.equals(f.val(), 5);
+        s2.update(5);
+        test.equals(evals, 1);
+        test.equals(c1.val(), 5);
       });
     });
 
     it("does not update on inactive dependencies", function () {
       root(function () {
         init();
-        e.update(5);
-        test.equals(fevals, 0);
-        test.equals(f.val(), 1);
+        s3.update(5);
+        test.equals(evals, 0);
+        test.equals(c1.val(), 1);
       });
     });
 
     it("deactivates obsolete dependencies", function () {
       root(function () {
         init();
-        i.update(false);
-        fevals = 0;
-        t.update(5);
-        test.equals(fevals, 0);
+        s1.update(false);
+        evals = 0;
+        s2.update(5);
+        test.equals(evals, 0);
       });
     });
 
     it("activates new dependencies", function () {
       root(function () {
         init();
-        i.update(false);
-        fevals = 0;
-        e.update(5);
-        test.equals(fevals, 1);
+        s1.update(false);
+        evals = 0;
+        s3.update(5);
+        test.equals(evals, 1);
       });
     });
   });
@@ -146,15 +149,15 @@ describe("compute()", function () {
   describe("that creates an data", function () {
     it("does not register a dependency", function () {
       root(function () {
-        var fevals = 0,
-          d;
+        var calls = 0,
+          s1;
         compute(function () {
-          fevals++;
-          d = value(1);
+          calls++;
+          s1 = value(1);
         });
-        fevals = 0;
-        d.update(2);
-        test.equals(fevals, 0);
+        calls = 0;
+        s1.update(2);
+        test.equals(calls, 0);
       });
     });
   });
@@ -162,18 +165,18 @@ describe("compute()", function () {
   describe("lazy", function () {
     it("does not eagerly update lazy computations", function () {
       root(function () {
-        var v1 = value(1);
+        var s1 = value(1);
         var calls = 0;
         var c1 = compute(function () {
           calls++;
-          return v1.val();
+          return s1.val();
         }, 0, { lazy: true });
         test.equals(c1.val(), 1);
-        v1.update(2);
+        s1.update(2);
         test.equals(calls, 1);
-        v1.update(3);
+        s1.update(3);
         test.equals(calls, 1);
-        v1.update(4);
+        s1.update(4);
         test.equals(c1.val(), 4);
         test.equals(c1.val(), 4);
         test.equals(c1.val(), 4);
@@ -183,21 +186,56 @@ describe("compute()", function () {
 
     it("works inside the body of a computation", function () {
       root(function() {
-        var v1 = value(1);
+        var s1 = value(1);
         var calls = 0;
-        var c1 = compute(function () {
+        compute(function () {
           calls++;
-          return v1.val();
+          return s1.val();
         }, 0, { lazy: true });
       })
+    });
+
+    it("works for derived mayupdate computations", function () {
+      var s1 = value(1);
+      var calls1 = 0;
+      var calls2 = 0;
+      var calls3 = 0;
+      var c1 = compute(function () {
+        calls1++;
+        return s1.val();
+      }, 0, { lazy: true });
+      var c2 = compute(function () {
+        calls2++;
+        return c1.val();
+      }, 0, { lazy: true });
+      var c3 = compute(function () {
+        calls3++;
+        return c2.val();
+      }, 0, { lazy: true });
+      s1.update(2);
+      test.equals(calls1, 1);
+      test.equals(calls2, 1);
+      test.equals(calls3, 1);
+      s1.update(3);
+      test.equals(calls1, 1);
+      test.equals(calls2, 1);
+      test.equals(calls3, 1);
+      test.equals(c3.val(), 3);
+      test.equals(calls1, 2);
+      test.equals(calls2, 2);
+      test.equals(calls3, 2);
+      test.equals(c3.val(), 3);
+      test.equals(calls1, 2);
+      test.equals(calls2, 2);
+      test.equals(calls3, 2);
     });
   });
 
   describe("from a function with no return value", function () {
     it("reads as undefined", function () {
       root(function () {
-        var f = compute(function () {});
-        test.ok(f.val() == null);
+        var c1 = compute(function () {});
+        test.equals(c1.val(), void 0);
       });
     });
   });
@@ -205,64 +243,64 @@ describe("compute()", function () {
   describe("with a seed", function () {
     it("reduces seed value", function () {
       root(function () {
-        var a = value(5);
-        var f = compute(function (v) {
-          return v + a.val();
+        var s1 = value(5);
+        var c1 = compute(function (seed) {
+          return seed + s1.val();
         }, 5);
-        test.equals(f.val(), 10);
-        a.update(6);
-        test.equals(f.val(), 16);
+        test.equals(c1.val(), 10);
+        s1.update(6);
+        test.equals(c1.val(), 16);
       });
     });
   });
 
   describe("with a dependency on a computation", function () {
-    var d, fcount, f, gcount, g;
+    var s1, callsOne, c1, callsTwo, c2;
 
     function init() {
-      d = value(1);
-      fcount = 0;
-      f = compute(function () {
-        fcount++;
-        return d.val();
+      s1 = value(1);
+      callsOne = 0;
+      c1 = compute(function () {
+        callsOne++;
+        return s1.val();
       });
-      gcount = 0;
-      g = compute(function () {
-        gcount++;
-        return f.val();
+      callsTwo = 0;
+      c2 = compute(function () {
+        callsTwo++;
+        return c1.val();
       });
     }
 
     it("does not cause re-evaluation", function () {
       root(function () {
         init();
-        test.equals(fcount, 1);
+        test.equals(callsOne, 1);
       });
     });
 
     it("does not occur from a read", function () {
       root(function () {
         init();
-        f.val();
-        test.equals(gcount, 1);
+        c1.val();
+        test.equals(callsTwo, 1);
       });
     });
 
     it("does not occur from a read of the watcher", function () {
       root(function () {
         init();
-        g.val();
-        test.equals(gcount, 1);
+        c2.val();
+        test.equals(callsTwo, 1);
       });
     });
 
     it("occurs when computation updates", function () {
       root(function () {
         init();
-        d.update(2);
-        test.equals(fcount, 2);
-        test.equals(gcount, 2);
-        test.equals(g.val(), 2);
+        s1.update(2);
+        test.equals(callsOne, 2);
+        test.equals(callsTwo, 2);
+        test.equals(c2.val(), 2);
       });
     });
   });
@@ -282,21 +320,21 @@ describe("compute()", function () {
 
     it("throws when continually setting an indirect dependency", function () {
       root(function () {
-        var d = value(1);
-        var f1 = compute(function () {
-          return d.val();
+        var s1 = value(1);
+        var c1 = compute(function () {
+          return s1.val();
         });
-        var f2 = compute(function () {
-          return f1.val();
+        var c2 = compute(function () {
+          return c1.val();
         });
-        var f3 = compute(function () {
-          return f2.val();
+        var c3 = compute(function () {
+          return c2.val();
         });
 
         test.throws(function () {
           compute(function () {
-            f3.val();
-            d.update(d.peek() + 1);
+            c3.val();
+            s1.update(s1.peek() + 1);
           });
         });
       });
@@ -306,12 +344,12 @@ describe("compute()", function () {
   describe("with circular dependencies", function () {
     it("throws when cycle created by modifying a branch", function () {
       root(function () {
-        var d = value(1);
-        var f = compute(function () {
-          return f ? f.val() : d.val();
-        });
+        var s1 = value(1);
+        var c1 = compute(function () {
+          return c1 ? c1.val() : s1.val();
+        }, 0);
         test.throws(function () {
-          d.update(0);
+          s1.update(0);
         });
       });
     });
@@ -329,25 +367,23 @@ describe("compute()", function () {
         //    \  /
         //     a1
         //
-        var seq = "";
-        var a1 = value(0);
-        var b1 = compute(function () {
-          seq += "b1";
-          return a1.val();
+        var calls = "";
+        var s1 = value(0);
+        var c1 = compute(function () {
+          calls += "c1";
+          return s1.val();
         });
-        var b2 = compute(function () {
-          seq += "b2";
-          return a1.val();
+        var c2 = compute(function () {
+          calls += "c2";
+          return s1.val();
         });
         compute(function () {
-          b1.val(), b2.val();
-          seq += "c1";
+          c1.val(), c2.val();
+          calls += "c3";
         });
-
-        seq = "";
-        a1.update(a1.peek() + 1);
-
-        test.equals(seq, "b1b2c1");
+        calls = "";
+        s1.update(s1.peek() + 1);
+        test.equals(calls, "c1c2c3");
       });
     });
 
@@ -362,31 +398,30 @@ describe("compute()", function () {
         // +---+---+---+---+
         //         v
         //         g
-        var d = value(0);
-        var f1 = compute(function () {
-          return d.val();
+        var s1 = value(0);
+        var c1 = compute(function () {
+          return s1.val();
         });
-        var f2 = compute(function () {
-          return d.val();
+        var c2 = compute(function () {
+          return s1.val();
         });
-        var f3 = compute(function () {
-          return d.val();
+        var c3 = compute(function () {
+          return s1.val();
         });
-        var f4 = compute(function () {
-          return d.val();
+        var c4 = compute(function () {
+          return s1.val();
         });
-        var f5 = compute(function () {
-          return d.val();
+        var c5 = compute(function () {
+          return s1.val();
         });
-        var gcount = 0;
+        var calls = 0;
         compute(function () {
-          gcount++;
-          return f1.val() + f2.val() + f3.val() + f4.val() + f5.val();
+          calls++;
+          return c1.val() + c2.val() + c3.val() + c4.val() + c5.val();
         });
-
-        gcount = 0;
-        d.update(d.peek() + 1);
-        test.equals(gcount, 1);
+        calls = 0;
+        s1.update(s1.peek() + 1);
+        test.equals(calls, 1);
       });
     });
 
@@ -396,44 +431,44 @@ describe("compute()", function () {
         //     |
         // +---+---+
         // v   v   v
-        // f1  f2 f3
+        // c1  c2 c3
         //   \ | /
         //     O
         //   / | \
         // v   v   v
-        // g1  g2  g3
+        // c4  c5  c6
         // +---+---+
         //     v
         //     h
-        var d = value(0);
-        var f1 = compute(function () {
-          return d.val();
+        var s1 = value(0);
+        var c1 = compute(function () {
+          return s1.val();
         });
-        var f2 = compute(function () {
-          return d.val();
+        var c2 = compute(function () {
+          return s1.val();
         });
-        var f3 = compute(function () {
-          return d.val();
+        var c3 = compute(function () {
+          return s1.val();
         });
-        var g1 = compute(function () {
-          return f1.val() + f2.val() + f3.val();
+        var c4 = compute(function () {
+          return c1.val() + c2.val() + c3.val();
         });
-        var g2 = compute(function () {
-          return f1.val() + f2.val() + f3.val();
+        var c5 = compute(function () {
+          return c1.val() + c2.val() + c3.val();
         });
-        var g3 = compute(function () {
-          return f1.val() + f2.val() + f3.val();
+        var c6 = compute(function () {
+          return c1.val() + c2.val() + c3.val();
         });
 
-        var hcount = 0;
+        var calls = 0;
         compute(function () {
-          hcount++;
-          g1.val() + g2.val() + g3.val();
+          calls++;
+          c4.val() + c5.val() + c6.val();
         });
 
-        hcount = 0;
-        d.update(d.peek() + 1);
-        test.equals(hcount, 1);
+        calls = 0;
+        s1.update(s1.peek() + 1);
+        test.equals(calls, 1);
       });
     });
   });
