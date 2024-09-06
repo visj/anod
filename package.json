@@ -19,7 +19,7 @@
     }
   },
   "scripts": {
-    "test": "node --expose-gc ./node_modules/mocha/bin/_mocha"
+    "test": "node --expose-gc test/index.js"
   },
   "keywords": [
     "reactive",
@@ -47,9 +47,7 @@
     "cellx": "^2.0.0",
     "cli-table": "^0.3.11",
     "esbuild": "^0.21.5",
-    "jasmine": "^5.1.0",
     "kleur": "^4.1.5",
-    "mocha": "^10.4.0",
     "rollup": "^4.18.0",
     "rollup-plugin-cleanup": "^3.2.1",
     "rollup-plugin-esbuild": "^6.1.1",

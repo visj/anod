@@ -164,7 +164,7 @@ async function bundleArray() {
     } else {
       let min = content.slice(1, content.indexOf(";"));
       esm += "export { " + min + " as " + name + " };";
-      iife += name + ":" + content.slice(1, content.indexOf(";"));
+      iife += param + "." + name + "=" + content.slice(1, content.lastIndexOf(";"));
     }
   }
   iife += "})(anod);";

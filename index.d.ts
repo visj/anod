@@ -13,6 +13,15 @@ export interface Signal<T = any> {
   dispose(): void;
 }
 
+export declare var Compute: {
+  new <T = any, U = any>(
+    callback: (prev: T, args: U) => T,
+    seed: T,
+    opts: SignalOptions<T, U>
+  ): Signal<T>;
+  readonly prototype: Signal;
+};
+
 export interface SignalData<T = any> extends Signal<T> {
   /**
    *
@@ -21,6 +30,14 @@ export interface SignalData<T = any> extends Signal<T> {
   update(val: T): void;
 }
 
+export declare var Data: {
+  new<T = any>(
+    val: T,
+    equality?: ((a: T, b: T) => boolean) | null
+  ): SignalData<T>;
+  readonly prototype: SignalData;
+};
+
 export interface OptionsBase<T, U> {
   args?: U;
   lazy?: boolean;
@@ -28,13 +45,13 @@ export interface OptionsBase<T, U> {
   compare?: ((a: T, b: T) => boolean) | null;
 }
 
-export interface OptionsWithSource<T, U> extends OptionsBase<T, U> {
+export interface Options<T, U> extends OptionsBase<T, U> {
   defer?: boolean;
   sample?: boolean;
   source: Signal | Array<Signal> | (() => void);
 }
 
-export type SignalOptions<T, U> = OptionsBase<T, U> | OptionsWithSource<T, U>;
+export type SignalOptions<T, U> = OptionsBase<T, U> | Options<T, U>;
 
 /**
  *

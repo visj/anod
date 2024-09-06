@@ -1,6 +1,9 @@
 import {
   Send,
   Receive,
+  VOID,
+  CONTEXT,
+  CHANGES,
   State,
   Type,
   Reactive,
@@ -10,7 +13,10 @@ import {
   extend,
   addReceiver,
   readSource,
-  compute
+  sendWillUpdate,
+  compute,
+  exec,
+  reset
 } from "./core.js";
 
 /**
@@ -20,7 +26,7 @@ import {
  * @extends {Receive}
  * @extends {SignalIterator<T>}
  */
-function ComputeArrayInterface() {}
+function ComputeArrayInterface() { }
 
 /**
  * @interface
@@ -28,32 +34,19 @@ function ComputeArrayInterface() {}
  * @extends {Send}
  * @extends {SignalArray<T>}
  */
-function DataArrayInterface() {}
-
-/**
- * @struct
- * @abstract
- * @template T
- * @constructor
- * @extends {Reactive<ReadonlyArray<T>>}
- * @implements {SignalIterator<T>}
- */
-function ReactiveIterator() {}
-
-extend(ReactiveIterator, Reactive);
+function DataArrayInterface() { }
 
 /**
  * @record
  * @template T, U, V
  */
-function BaseParams() {}
+function BaseParams() { }
 
 /**
- * @const
  * @package
- * @type {ReactiveIterator<T>}
+ * @type {?}
  */
-BaseParams.prototype._source;
+BaseParams.prototype._state;
 
 /**
  * @const
@@ -75,17 +68,60 @@ BaseParams.prototype._param2;
  * @template T, U, V
  * @extends {BaseParams<T, U | Signal<U> | (function(): U), V | Signal<V> | (function(): V)>}
  */
-function Params() {}
+function Params() { }
+
+/**
+ * @struct
+ * @constructor
+ * @template T
+ * @param {number} type
+ */
+function Change(type) {
+  /**
+   * @package
+   * @type {number}
+   */
+  this._type = type;
+  /**
+   * @package
+   * @type {number}
+   */
+  this._index = -1;
+  /**
+   * @package
+   * @type {number}
+   */
+  this._remove = 0;
+  /**
+   * @package
+   * @type {number}
+   */
+  this._insert = 0;
+  /**
+   * @package
+   * @type {T | Array<T>}
+   */
+  this._params = null;
+}
 
 /**
  * @const
  * @enum {number}
  */
 var Mutation = {
-  None: 0,
-  Insert: 1,
-  Remove: 2,
-  Replace: 4
+  None: -1,
+  Custom: 0,
+  Pop: 1,
+  Push: 2,
+  Shift: 3,
+  Reverse: 4,
+  Sort: 5,
+  Splice: 6,
+  Unshift: 7,
+  TypeMask: 7,
+  Insert: 8,
+  Remove: 16,
+  Reorder: 32
 };
 
 /**
@@ -100,7 +136,7 @@ var Mutation = {
  */
 function mergeParams(source, param1, type1, opts, param2, type2) {
   /** @type {BaseParams<T, U, V>} */
-  var args = { _source: source, _param1: param1, _param2: param2 };
+  var args = { _state: void 0, _param1: param1, _param2: param2 };
   /** @type {Signal | Array<Signal> | (function(): void)} */
   var sources;
   /** @type {Signal | Array<Signal> | (function(): void) | null} */
@@ -134,7 +170,7 @@ function mergeParams(source, param1, type1, opts, param2, type2) {
         readSource(param2, this);
       }
       if (type3 & (Type.Reactive | Type.Function)) {
-        readSource(/** @type {function(): void} */ (param3), this);
+        readSource(/** @type {function(): void} */(param3), this);
       }
     };
   } else if (types & Type.Reactive || type3 & Type.Array) {
@@ -146,7 +182,7 @@ function mergeParams(source, param1, type1, opts, param2, type2) {
       sources.push(param2);
     }
     if (type3 & Type.Reactive) {
-      sources.push(/** @type {Signal} */ (param3));
+      sources.push(/** @type {Signal} */(param3));
     } else if (type3 & Type.Array) {
       var i = 0,
         j = /** @type {Array<Signal>} */ (sources).length,
@@ -225,6 +261,25 @@ function getLength(source) {
 }
 
 /**
+ * @struct
+ * @abstract
+ * @template T
+ * @constructor
+ * @extends {Reactive<ReadonlyArray<T>>}
+ * @implements {SignalIterator<T>}
+ */
+function ReactiveIterator() { }
+
+extend(ReactiveIterator, Reactive);
+
+/**
+ * @package
+ * @abstract
+ * @returns {Change<T>}
+ */
+ReactiveIterator.prototype.mut = function () { };
+
+/**
  * @template T
  * @this {ReactiveIterator<T>}
  * @param {T | undefined} prev
@@ -233,7 +288,7 @@ function getLength(source) {
  */
 function atIterator(prev, params) {
   /** @type {ReadonlyArray<T>} */
-  var source = params._source.peek();
+  var source = this._source1.peek();
   var length = source.length;
   var index = /** @type {number} */ (read(params._param1));
   if (index >= 0 && index < length) {
@@ -259,7 +314,7 @@ ReactiveIterator.prototype.at = function (index, opts) {
  * @returns {Array<T>}
  */
 function concatIterator(prev, params) {
-  return params._source.peek().concat(read(params._param1));
+  return this._source1.peek().concat(read(params._param1));
 }
 
 /**
@@ -281,14 +336,46 @@ ReactiveIterator.prototype.concat = function (items, opts) {
  */
 function everyIterator(prev, params) {
   /** @type {ReadonlyArray<T>} */
-  var source = params._source.peek();
+  var source = this._source1.peek();
   var length = source.length;
   var result = true;
   if (length > 0) {
-    var callback = params._param1;
-    for (var i = 0; result && i < length; i++) {
-      result = callback(source[i], i);
+    var i = 0;
+    if (!(this._state & State.Initial)) {
+      var mut = this._source1.mut();
+      var typ = mut._type;
+      if (typ !== Mutation.None && !(typ & Mutation.Reorder)) {
+        if (prev) {
+          if (mut._insert === 0) {
+            return prev;
+          }
+          i = mut._index;
+        } else {
+          if (mut._remove === 0) {
+            if (mut._index < params._state) {
+              params._state = mut._index;
+            }
+            return prev;
+          }
+          if (length <= params._state) {
+            params._state = length;
+            return true;
+          }
+          i = params._state;
+        }
+      }
     }
+    params._state = 0;
+    var callback = params._param1;
+    for (; i < length; i++) {
+      result = callback(source[i], i);
+      if (!result) {
+        params._state = i;
+        break;
+      }
+    }
+  } else {
+    params._state = 0;
   }
   return result;
 }
@@ -303,14 +390,40 @@ ReactiveIterator.prototype.every = function (callbackFn, opts) {
   return iterateCompute(this, everyIterator, callbackFn, Type.None, opts);
 };
 
-function filterIterator(prev, params) {}
+/**
+ * @template T
+ * @this {ReactiveIterator<T>}
+ * @param {Array<T>} prev
+ * @param {BaseParams<T, (function(T, number): boolean), undefined>} params
+ * @returns {Array<T>}
+ */
+function filterIterator(prev, params) {
+  /** @type {ReadonlyArray<T>} */
+  var source = this._source1.peek();
+  var length = source.length;
+  /** @type {Array<T>} */
+  var result = [];
+  if (length > 0) {
+    var callback = params._param1;
+    for (var i = 0; i < length; i++) {
+      var item = source[i];
+      if (callback(item, i)) {
+        result.push(item);
+      }
+    }
+  }
+  return result;
+}
 
 /**
  * @public
  * @param {function(T, number): boolean} callbackFn
+ * @param {IteratorOptions=} opts
  * @returns {SignalIterator<T>}
  */
-ReactiveIterator.prototype.filter = function (callbackFn) {};
+ReactiveIterator.prototype.filter = function (callbackFn, opts) {
+  return iterateArray(this, filterIterator, callbackFn, Type.None, opts);
+};
 
 /**
  * @template T
@@ -321,17 +434,43 @@ ReactiveIterator.prototype.filter = function (callbackFn) {};
  */
 function findIterator(prev, params) {
   /** @type {ReadonlyArray<T>} */
-  var source = params._source.peek();
+  var source = this._source1.peek();
   var length = source.length;
   if (length > 0) {
+    var i = 0;
+    if (!(this._state & State.Initial)) {
+      var mut = this._source1.mut();
+      var typ = mut._type;
+      if (typ !== Mutation.None && !(typ & Mutation.Reorder)) {
+        i = params._state;
+        var index = mut._index;
+        if (
+          (mut._insert === 0 && (
+            i < 0 || i < index || i > (index + mut._remove)
+          )) ||
+          (i > 0 && i < index)
+        ) {
+          if (index < i) {
+            params._state = i - mut._remove + mut._insert;
+          }
+          console.log("fast track: ", params._state);
+          return prev;
+        }
+        if (i > index) {
+          i = index;
+        }
+      }
+    }
     var callback = params._param1;
-    for (var i = 0; i < length; i++) {
+    for (; i < length; i++) {
       var item = source[i];
       if (callback(item, i)) {
+        params._state = i;
         return item;
       }
     }
   }
+  params._state = -1;
 }
 
 /**
@@ -353,7 +492,7 @@ ReactiveIterator.prototype.find = function (callbackFn, opts) {
  */
 function findIndexIterator(prev, params) {
   /** @type {ReadonlyArray<T>} */
-  var source = params._source.peek();
+  var source = this._source1.peek();
   var length = source.length;
   if (length > 0) {
     var callback = params._param1;
@@ -385,7 +524,7 @@ ReactiveIterator.prototype.findIndex = function (callbackFn, opts) {
  */
 function findLastIterator(prev, params) {
   /** @type {ReadonlyArray<T>} */
-  var source = params._source.peek();
+  var source = this._source1.peek();
   var length = source.length;
   if (length > 0) {
     var callback = params._param1;
@@ -417,7 +556,7 @@ ReactiveIterator.prototype.findLast = function (callbackFn, opts) {
  */
 function findLastIndexIterator(prev, params) {
   /** @type {ReadonlyArray<T>} */
-  var source = params._source.peek();
+  var source = this._source1.peek();
   var length = source.length;
   if (length > 0) {
     var callback = params._param1;
@@ -454,7 +593,7 @@ ReactiveIterator.prototype.findLastIndex = function (callbackFn, opts) {
  */
 function forEachIterator(prev, params) {
   /** @type {ReadonlyArray<T>} */
-  var source = params._source.peek();
+  var source = this._source1.peek();
   var length = source.length;
   var callback = params._param1;
   for (var i = 0; i < length; i++) {
@@ -465,10 +604,10 @@ function forEachIterator(prev, params) {
 /**
  * @param {function(T,number): void} callbackFn
  * @param {IteratorOptions=} opts
- * @returns {void}
+ * @returns {Signal<void>}
  */
 ReactiveIterator.prototype.forEach = function (callbackFn, opts) {
-  iterateCompute(this, forEachIterator, callbackFn, Type.None, opts);
+  return iterateCompute(this, forEachIterator, callbackFn, Type.None, opts);
 };
 
 /**
@@ -479,7 +618,7 @@ ReactiveIterator.prototype.forEach = function (callbackFn, opts) {
  * @returns {boolean}
  */
 function includesIterator(prev, params) {
-  return params._source.peek().includes(read(params._param1));
+  return this._source1.peek().includes(read(params._param1));
 }
 
 /**
@@ -505,7 +644,7 @@ ReactiveIterator.prototype.includes = function (searchElement, opts) {
  * @returns {number}
  */
 function indexOfIterator(prev, params) {
-  return params._source
+  return this._source1
     .peek()
     .indexOf(read(params._param1), read(params._param2));
 }
@@ -536,7 +675,7 @@ ReactiveIterator.prototype.indexOf = function (searchElement, fromIndex, opts) {
  * @returns {string}
  */
 function joinIterator(prev, params) {
-  return params._source.peek().join(read(params._param1));
+  return this._source1.peek().join(read(params._param1));
 }
 
 /**
@@ -556,7 +695,7 @@ ReactiveIterator.prototype.join = function (separator, opts) {
  * @returns {number}
  */
 function lastIndexOfIterator(prev, params) {
-  return params._source
+  return this._source1
     .peek()
     .lastIndexOf(read(params._param1), read(params._param2));
 }
@@ -588,7 +727,7 @@ ReactiveIterator.prototype.lastIndexOf = function (
  * @param {function(T, Signal<number>): U} callbackFn
  * @returns {SignalIterator<U>}
  */
-ReactiveIterator.prototype.map = function (callbackFn) {};
+ReactiveIterator.prototype.map = function (callbackFn) { };
 
 /**
  * @template T
@@ -598,7 +737,7 @@ ReactiveIterator.prototype.map = function (callbackFn) {};
  * @returns {T}
  */
 function reduceIterator(prev, params) {
-  return params._source
+  return this._source1
     .peek()
     .reduce(read(params._param1), read(params._param2));
 }
@@ -630,7 +769,7 @@ ReactiveIterator.prototype.reduce = function (callbackFn, initialValue, opts) {
  * @returns {U}
  */
 function reduceRightIterator(prev, params) {
-  return params._source
+  return this._source1
     .peek()
     .reduceRight(read(params._param1), read(params._param2));
 }
@@ -667,17 +806,17 @@ ReactiveIterator.prototype.reduceRight = function (
  */
 function sliceIterator(prev, params) {
   /** @type {ReadonlyArray<T>} */
-  var source = params._source.peek();
+  var source = this._source1.peek();
   if (this._state & State.Initial) {
     return source.slice(
-      /** @type {number | undefined} */ (read(params._param1)),
-      /** @type {number | undefined} */ (read(params._param2))
+      /** @type {number | undefined} */(read(params._param1)),
+      /** @type {number | undefined} */(read(params._param2))
     );
   }
   // todo
   return source.slice(
-    /** @type {number | undefined} */ (read(params._param1)),
-    /** @type {number | undefined} */ (read(params._param2))
+    /** @type {number | undefined} */(read(params._param1)),
+    /** @type {number | undefined} */(read(params._param2))
   );
 }
 
@@ -707,7 +846,7 @@ ReactiveIterator.prototype.slice = function (start, end, opts) {
  * @returns {boolean}
  */
 function someIterator(prev, params) {
-  return params._source.peek().some(read(params._param1));
+  return this._source1.peek().some(read(params._param1));
 }
 
 /**
@@ -730,46 +869,44 @@ ReactiveIterator.prototype.some = function (callbackFn, opts) {
  * @implements {ComputeArrayInterface<T>}
  */
 function ComputeArray(fn, seed, opts) {
-  Compute.call(/** @type {?} */ (this), fn, seed, opts);
+  Compute.call(/** @type {?} */(this), fn, seed, opts);
   /**
    * @public
    * @type {function(): number}
    */
   this.length = getLength(this);
+  /**
+   * @type {Change<T>}
+   */
+  this._mut = new Change(Mutation.None);
 }
 
 extend(ComputeArray, ReactiveIterator, Compute);
 
 /**
- * @struct
- * @constructor
+ * @package
+ * @override
+ * @returns {Change<T>}
  */
-function Change() {
-  /**
-   * @package
-   * @type {number}
-   */
-  this._mut = Mutation.None;
-  /**
-   * @package
-   * @type {number}
-   */
-  this._head = -1;
-  /**
-   * @package
-   * @type {number}
-   */
-  this._tail = -1;
-  /**
-   * @package
-   * @type {number}
-   */
-  this._count = 0;
-  /**
-   * @package
-   * @type {Array}
-   */
-  this._args = [];
+ComputeArray.prototype.mut = function () {
+  return this._mut;
+};
+
+/**
+ * 
+ * @param {Change} change 
+ * @param {number} type 
+ * @param {number} index 
+ * @param {number} remove
+ * @param {number} insert 
+ * @param {?=} params 
+ */
+function mutate(change, type, index, remove, insert, params) {
+  change._type = type;
+  change._index = index;
+  change._remove = remove;
+  change._insert = insert;
+  change._params = params;
 }
 
 /**
@@ -781,79 +918,210 @@ function Change() {
  * @implements {DataArrayInterface<T>}
  */
 function DataArray(val) {
-  Data.call(/** @type {?} */ (this), val || []);
+  Data.call(/** @type {?} */(this), val || []);
   /**
    * @public
    * @type {function(): number}
    */
   this.length = getLength(this);
   /**
-   * @package
-   * @type {Change}
+   * @type {Change<T>}
    */
-  this._next = new Change();
+  this._mut = new Change(Mutation.None);
   /**
-   * @package
-   * @type {Change}
+   * @type {Change<T>}
    */
-  this._change = new Change();
+  this._next = new Change(Mutation.None);
 }
 
 extend(DataArray, ReactiveIterator, Data);
 
-// /**
-//  * @public
-//  * @override
-//  * @param {Array<T>} val
-//  * @returns {void}
-//  */
-// DataArray.prototype.update = function (val) {
-//   this._mutate(1, val);
-// };
+/**
+ * @package
+ * @override
+ * @returns {Change<T>}
+ */
+DataArray.prototype.mut = function () {
+  return this._mut;
+};
 
 /**
  * @package
- * @param {number} mutation
- * @param {*=} param
+ * @param {number} type
+ * @param {number} index
+ * @param {number} remove
+ * @param {number} insert
+ * @param {?=} params
  * @returns {void}
  */
-DataArray.prototype._mutate = function (mutation, param) {
-  // this._next = param !== void 0 ? param : REF;
+DataArray.prototype._mutate = function (type, index, remove, insert, params) {
+  var state = this._state;
+  if (
+    !(state & (State.ScheduledDispose | State.WillDispose | State.Disposed))
+  ) {
+    var next = this._next;
+    if (CONTEXT._idle) {
+      mutate(next, type, index, remove, insert, params);
+      this._apply();
+      if (state & (State.SendOne | State.SendMany)) {
+        reset();
+        sendWillUpdate(this);
+        exec();
+      }
+    } else {
+      if (next._type !== Mutation.None) {
+        throw new Error("Conflict");
+      }
+      mutate(next, type, index, remove, insert, params);
+      this._state |= State.WillUpdate;
+      CHANGES._add(this);
+    }
+  }
 };
 
-DataArray.prototype.modify = function (callbackFn) {};
+/**
+ * @package
+ * @returns {void}
+ */
+DataArray.prototype._apply = function () {
+  /** @type {number} */
+  var i;
+  /** @type {number} */
+  var len;
+  /** @type {Array<T>} */
+  var items;
+  /** @type {Change} */
+  var mut = this._mut;
+  /** @type {Change} */
+  var next = this._next;
+  var value = /** @type {Array<T>} */(this._value);
+  switch (next._type & Mutation.TypeMask) {
+    case Mutation.Pop:
+      value.pop();
+      break;
+    case Mutation.Push:
+      if (next._insert === 1) {
+        value.push(next._params);
+      } else {
+        Array.prototype.push.apply(value, next._params);
+      }
+      break;
+    case Mutation.Reverse:
+      value.reverse();
+      break;
+    case Mutation.Shift:
+      value.shift();
+      break;
+    case Mutation.Sort:
+      value.sort(next._params);
+      break;
+    case Mutation.Splice:
+      len = next._insert;
+      if (len === 0) {
+        value.splice(next._index, next._remove);
+      } else if (len === 1) {
+        value.splice(next._index, next._remove, next._params);
+      } else {
+        var args = [next._index, next._remove];
+        items = /** @type {Array<T>} */(next._params);
+        for (i = 0; i < len; i++) {
+          args[i + 2] = items[i];
+        }
+        Array.prototype.splice.apply(value, args);
+      }
+      break;
+    case Mutation.Unshift:
+      if (next._insert === 1) {
+        value.unshift(next._params);
+      } else {
+        Array.prototype.unshift.apply(value, next._params);
+      }
+      break;
+    case Mutation.Custom:
+      this._value = /** @type {function(Array<T>, Change): Array<T>} */(next._params)(value, next);
+      break;
+  }
+  mut._type = Mutation.None;
+  mut._params = null;
+  this._mut = next;
+  this._next = mut;
+};
+
+/**
+ * @package
+ * @override
+ * @returns {void}
+ */
+DataArray.prototype._update = function () {
+  this._apply();
+  this._state &= ~State.WillUpdate;
+  sendWillUpdate(this);
+};
+
+/**
+ * @public
+ * @param {function(Array<T>, Change): Array<T>} callbackFn 
+ * @returns {void}
+ */
+DataArray.prototype.modify = function (callbackFn) {
+  this._mutate(Mutation.Custom, -1, 0, 0, callbackFn);
+};
 
 /**
  * @public
  * @returns {void}
  */
-DataArray.prototype.pop = function () {};
+DataArray.prototype.pop = function () {
+  this._mutate(Mutation.Pop | Mutation.Remove, this._value.length - 1, 1, 0);
+};
 
 /**
  * @public
  * @param {...T} elementN
  * @returns {void}
  */
-DataArray.prototype.push = function (elementN) {};
+DataArray.prototype.push = function (elementN) {
+  /** @type {T | Array<T>} */
+  var params;
+  /** @type {number} */
+  var len = arguments.length;
+  if (len > 0) {
+    if (len === 1) {
+      params = elementN;
+    } else {
+      params = new Array(len);
+      for (var i = 0; i < len; i++) {
+        params[i] = arguments[i];
+      }
+    }
+    this._mutate(Mutation.Push | Mutation.Insert, this._value.length - 1, 0, len, params);
+  }
+};
 
 /**
  * @public
  * @returns {void}
  */
-DataArray.prototype.shift = function () {};
+DataArray.prototype.reverse = function () {
+  this._mutate(Mutation.Reverse | Mutation.Reorder, -1, 0, 0);
+};
 
 /**
  * @public
  * @returns {void}
  */
-DataArray.prototype.reverse = function () {};
+DataArray.prototype.shift = function () {
+  this._mutate(Mutation.Shift | Mutation.Remove, 0, 1, 0);
+};
 
 /**
  * @public
  * @param {function(T,T): number=} compareFn
  * @returns {void}
  */
-DataArray.prototype.sort = function (compareFn) {};
+DataArray.prototype.sort = function (compareFn) {
+  this._mutate(Mutation.Sort | Mutation.Reorder, -1, 0, 0, compareFn);
+};
 
 /**
  * @public
@@ -862,14 +1130,56 @@ DataArray.prototype.sort = function (compareFn) {};
  * @param {...T} items
  * @returns {void}
  */
-DataArray.prototype.splice = function (start, deleteCount, items) {};
+DataArray.prototype.splice = function (start, deleteCount, items) {
+  /** @type {T | Array<T>} */
+  var params;
+  var len = arguments.length;
+  if (len > 1) {
+    var mutation = Mutation.Splice;
+    if (deleteCount == null) {
+      deleteCount = 0;
+    }
+    if (deleteCount > 0) {
+      mutation |= Mutation.Remove;
+    }
+    if (len > 2) {
+      mutation |= Mutation.Insert;
+      if (len === 3) {
+        params = items;
+      } else {
+        params = new Array(len - 2);
+        for (var j = 0, i = 2; i < len; i++, j++) {
+          params[j] = arguments[i];
+        }
+      }
+    }
+    console.log(params);
+    this._mutate(mutation, start, deleteCount, len - 2, params);
+  }
+};
 
 /**
  * @public
  * @param {...T} elementN
  * @returns {void}
  */
-DataArray.prototype.unshift = function (elementN) {};
+DataArray.prototype.unshift = function (elementN) {
+  /** @type {T | Array<T>} */
+  var args;
+  /** @type {number} */
+  var len = arguments.length;
+  if (len > 0) {
+    if (len === 1) {
+      args = elementN;
+    } else {
+      args = new Array(len);
+      for (var i = 0; i < len; i++) {
+        args[i] = arguments[i];
+      }
+    }
+    this._mutate(Mutation.Unshift | Mutation.Insert, 0, 0, len, args);
+  }
+};
 
 /**
  * @template T
@@ -881,6 +1191,8 @@ function array(val) {
 }
 
 window["anod"]["array"] = array;
+window["anod"]["DataArray"] = DataArray;
+window["anod"]["ComputeArray"] = ComputeArray;
 
 export {
   ComputeArrayInterface,

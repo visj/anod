@@ -61,7 +61,7 @@ var ErrorCode = {
 /**
  * @interface
  */
-function Unit() {}
+function Unit() { }
 
 /**
  * @package
@@ -73,13 +73,13 @@ Unit.prototype._state;
  * @package
  * @returns {void}
  */
-Receive.prototype._clearMayUpdate = function () {};
+Receive.prototype._clearMayUpdate = function () { };
 
 /**
  * @interface
  * @extends {Unit}
  */
-function Scope() {}
+function Scope() { }
 
 /**
  * @package
@@ -98,7 +98,7 @@ Scope.prototype._cleanups;
  * @template T
  * @extends {Unit}
  */
-function Send() {}
+function Send() { }
 
 /**
  * @package
@@ -128,7 +128,7 @@ Send.prototype._nodeslots;
  * @interface
  * @extends {Unit}
  */
-function Receive() {}
+function Receive() { }
 
 /**
  * @package
@@ -158,24 +158,24 @@ Receive.prototype._sourceslots;
  * @package
  * @returns {void}
  */
-Receive.prototype._recordMayUpdate = function () {};
+Receive.prototype._recordMayUpdate = function () { };
 
 /**
  * @package
  * @returns {void}
  */
-Receive.prototype._recordWillUpdate = function () {};
+Receive.prototype._recordWillUpdate = function () { };
 
 /**
  * @package
  * @returns {void}
  */
-Receive.prototype._recordMayDispose = function () {};
+Receive.prototype._recordMayDispose = function () { };
 
 /**
  * @record
  */
-function Context() {}
+function Context() { }
 
 /**
  * @type {boolean}
@@ -200,7 +200,7 @@ Context.prototype._listen;
  * @extends {Receive}
  * @extends {Signal<T>}
  */
-function ModuleInterface() {}
+function ModuleInterface() { }
 
 /**
  * @struct
@@ -209,7 +209,7 @@ function ModuleInterface() {}
  * @constructor
  * @implements {ModuleInterface<T>}
  */
-function Module() {}
+function Module() { }
 
 /**
  * @package
@@ -297,65 +297,65 @@ Module.prototype._next;
 /**
  * @returns {T}
  */
-Module.prototype.val = function () {};
+Module.prototype.val = function () { };
 
 /**
  * @returns {T}
  */
-Module.prototype.peek = function () {};
+Module.prototype.peek = function () { };
 
 /**
  * @returns {void}
  */
-Module.prototype.dispose = function () {};
+Module.prototype.dispose = function () { };
 
 /**
  * @param {T} val
  * @returns {void}
  */
-Module.prototype.update = function (val) {};
+Module.prototype.update = function (val) { };
 
 /**
  * @package
  * @returns {void}
  */
-Module.prototype._update = function () {};
+Module.prototype._update = function () { };
 
 /**
  * @package
  * @returns {void}
  */
-Module.prototype._dispose = function () {};
+Module.prototype._dispose = function () { };
 
 /**
  * @package
  * @returns {void}
  */
-Module.prototype._recordDispose = function () {};
+Module.prototype._recordDispose = function () { };
 
 /**
  * @package
  * @returns {void}
  */
-Module.prototype._recordMayUpdate = function () {};
+Module.prototype._recordMayUpdate = function () { };
 
 /**
  * @package
  * @returns {void}
  */
-Module.prototype._recordWillUpdate = function () {};
+Module.prototype._recordWillUpdate = function () { };
 
 /**
  * @package
  * @returns {void}
  */
-Module.prototype._clearMayUpdate = function () {};
+Module.prototype._clearMayUpdate = function () { };
 
 /**
  * @package
  * @returns {void}
  */
-Module.prototype._recordMayDispose = function () {};
+Module.prototype._recordMayDispose = function () { };
 
 /**
  * @struct
@@ -364,13 +364,13 @@ Module.prototype._recordMayDispose = function () {};
  * @constructor
  * @extends {Module<T>}
  */
-function Reactive() {}
+function Reactive() { }
 
 /**
  * @interface
  * @extends {Scope}
  */
-function RootInterface() {}
+function RootInterface() { }
 
 /**
  * @interface
@@ -378,7 +378,7 @@ function RootInterface() {}
  * @extends {Send}
  * @extends {SignalData<T>}
  */
-function DataInterface() {}
+function DataInterface() { }
 
 /**
  * @interface
@@ -388,7 +388,7 @@ function DataInterface() {}
  * @extends {Receive}
  * @extends {Signal<T>}
  */
-function ComputeInterface() {}
+function ComputeInterface() { }
 
 /**
  * @final
@@ -623,14 +623,14 @@ function disposeScope(scope) {
   var state = scope._state;
   if (state & State.Scope) {
     var children = scope._children;
-    for (ln = children.length; ln--; ) {
+    for (ln = children.length; ln--;) {
       children.pop()._dispose();
     }
     scope._state &= ~State.Scope;
   }
   if (state & State.Cleanup) {
     var cleanups = scope._cleanups;
-    for (ln = cleanups.length; ln--; ) {
+    for (ln = cleanups.length; ln--;) {
       cleanups.pop()(true);
     }
     scope._state &= ~State.Cleanup;
@@ -669,7 +669,8 @@ function Root() {
 Root.prototype._dispose = function () {
   if (this._state !== State.Disposed) {
     disposeScope(this);
-    this._children = this._cleanups = null;
+    this._children = 
+      this._cleanups = null;
     this._state = State.Disposed;
   }
 };
@@ -685,7 +686,7 @@ function disposeSender(send) {
     send._node1 = null;
   }
   if (state & State.SendMany) {
-    for (var ln = send._nodes.length; ln--; ) {
+    for (var ln = send._nodes.length; ln--;) {
       removeSender(send._nodes[ln], send._nodeslots[ln]);
     }
   }
@@ -1001,7 +1002,7 @@ function disposeReceiver(node) {
     node._source1 = null;
   }
   if (state & State.ReceiveMany) {
-    for (var ln = node._sources.length; ln--; ) {
+    for (var ln = node._sources.length; ln--;) {
       removeReceiver(node._sources.pop(), node._sourceslots.pop());
     }
   }
@@ -1016,12 +1017,12 @@ function disposeReceiver(node) {
 function readSource(source, owner) {
   switch (type(source)) {
     case Type.Reactive:
-      addReceiver(/** @type {Send} */ (source), owner);
+      addReceiver(/** @type {Send} */(source), owner);
       break;
     case Type.Array:
       var len = /** @type {Array<Send>} */ (source).length;
       for (var i = 0; i < len; i++) {
-        addReceiver(/** @type {Array<Send>} */ (source)[i], owner);
+        addReceiver(/** @type {Array<Send>} */(source)[i], owner);
       }
       break;
     case Type.Function:
@@ -1278,7 +1279,7 @@ Compute.prototype._dispose = function () {
       this._source =
       this._sources =
       this._sourceslots =
-        null;
+      null;
     this._state = State.Disposed;
   }
 };
@@ -1541,7 +1542,7 @@ function batch(fn) {
 function record(node) {
   var listen = CONTEXT._listen;
   if (listen !== null) {
-    addReceiver(/** @type {Send} */ (node), listen);
+    addReceiver(/** @type {Send} */(node), listen);
   }
 }
 
@@ -1609,6 +1610,8 @@ window["anod"]["stable"] = stable;
 window["anod"]["data"] = data;
 window["anod"]["value"] = value;
 window["anod"]["compute"] = compute;
+window["anod"]["Data"] = Data;
+window["anod"]["Compute"] = Compute;
 
 export {
   State,

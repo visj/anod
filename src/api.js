@@ -144,7 +144,7 @@ SignalIterator.prototype.findLastIndex = function (callbackFn, opts) {};
 /**
  * @param {function(T,number): void} callbackFn
  * @param {IteratorOptions=} opts
- * @returns {void}
+ * @returns {Signal<void>}
  */
 SignalIterator.prototype.forEach = function (callbackFn, opts) {};
 
