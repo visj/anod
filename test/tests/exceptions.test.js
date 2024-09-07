@@ -1,7 +1,11 @@
-import { test, assert, throws } from "../helper/index.js";
+import { test, assert, Anod } from "../helper/index.js";
 
+/**
+ * 
+ * @param {Anod} anod 
+ */
 export function run(anod) {
-  test("exceptions wtesthin computations", function () {
+  test("exceptions within computations", function () {
     test("halt updating", function () {
       anod.root(function () {
         var a = anod.value(false);
@@ -15,12 +19,12 @@ export function run(anod) {
           return b.val();
         });
   
-        throws(function () {
+        assert(function () {
           anod.batch(function () {
             a.update(true);
             b.update(2);
           });
-        });
+        }, "throws");
   
         assert(b.val(), 2);
         assert(d.val(), 2);
@@ -40,12 +44,12 @@ export function run(anod) {
           return b.val();
         });
   
-        throws(function () {
+        assert(function () {
           anod.batch(function () {
             a.update(true);
             b.update(2);
           });
-        });
+        }, "throws");
   
         assert(b.val(), 2);
         assert(d.val(), 2);

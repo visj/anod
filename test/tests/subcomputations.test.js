@@ -1,5 +1,9 @@
-import { test, assert, throws } from "../helper/index.js";
+import { test, assert, Anod } from "../helper/index.js";
 
+/**
+ * 
+ * @param {Anod} anod 
+ */
 export function run(anod) {
     test("compute with subcomputations", function () {
         test("does not register a dependency on the subcomputation", function () {
@@ -34,7 +38,7 @@ export function run(anod) {
           anod.root(function () {
             var v1 = anod.value(1);
             var called = false;
-            throws(function () {
+            assert(function () {
               anod.compute(function () {
                 v1.val();
                 anod.compute(function () {
@@ -42,7 +46,7 @@ export function run(anod) {
                   v1.val();
                 });
               }, void 0, { lazy: true });
-            });
+            }, "throws");
             assert(called, false);
           });
         });

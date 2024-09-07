@@ -1,5 +1,9 @@
-import { test, assert, throws } from "../helper/index.js";
+import { test, assert, Anod } from "../helper/index.js";
 
+/**
+ * 
+ * @param {Anod} anod 
+ */
 export function run(anod) {
     test("value", function () {
         test("takes and returns an intestial value", function () {

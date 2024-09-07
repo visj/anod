@@ -1,7 +1,11 @@
-import { test, assert, throws } from "../helper/index.js";
+import { test, assert, Anod } from "../helper/index.js";
 
+/**
+ * 
+ * @param {Anod} anod 
+ */
 export function run(anod) {
-    test("anod.cleanup", function () {
+    test("cleanup", function () {
         test("is called when a computation is disposed", function () {
             var s1 = anod.value(1);
             var calls = 0;

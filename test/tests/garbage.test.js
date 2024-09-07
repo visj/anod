@@ -1,6 +1,10 @@
-import { test, assert, throws } from "../helper/index.js";
+import { test, assert, Anod } from "../helper/index.js";
 
-export function run(anod) {
+/**
+ * 
+ * @param {Anod} anod 
+ */
+export async function run(anod) {
   if (global.gc) {
     /**
      *
@@ -13,21 +17,23 @@ export function run(anod) {
       });
     }
   
-    test("garbage collection", function () {
-      test("should not be collected when referenced", function (done) {
+    await test("garbage collection", async function () {
+      await test("should not be collected when referenced", function () {
         var d1 = anod.value(1);
         var ref = new WeakRef(
           anod.compute(function () {
             d1.val();
           }),
         );
-        collect(function () {
-          assert(ref.deref() !== void 0, true);
-          done();
-        });
+        return new Promise(function(resolve) {
+          collect(function () {
+            assert(ref.deref() !== void 0, true);
+            resolve();
+          });
+        })
       });
   
-      test("should be collected when disposed", function (done) {
+      await test("should be collected when disposed", async function () {
         var s1 = anod.value(1);
         var c1 = new WeakRef(
           anod.compute(function () {
@@ -35,13 +41,15 @@ export function run(anod) {
           }),
         );
         anod.dispose(s1);
-        collect(function () {
-          assert(c1.deref(), void 0);
-          done();
+        return new Promise(function(resolve) {
+          collect(function () {
+            assert(c1.deref(), void 0);
+            resolve();
+          });
         });
       });
   
-      test("should be collected when only referenced locally", function (done) {
+      await test("should be collected when only referenced locally", function () {
         function local() {
           var s1 = new WeakRef(anod.value(1));
           var c1 = new WeakRef(
@@ -53,10 +61,12 @@ export function run(anod) {
         }
         var { s1, c1 } = local();
         assert(c1.deref().val(), 1);
-        collect(function () {
-          assert(s1.deref(), void 0);
-          assert(c1.deref(), void 0);
-          done();
+        return new Promise(function(resolve) {
+          collect(function () {
+            assert(s1.deref(), void 0);
+            assert(c1.deref(), void 0);
+            resolve();
+          });
         });
       });
     });

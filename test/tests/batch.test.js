@@ -1,5 +1,9 @@
-import { test, assert, throws } from "../helper/index.js";
+import { test, assert, Anod } from "../helper/index.js";
 
+/**
+ * 
+ * @param {Anod} anod 
+ */
 export function run(anod) {
 	test("batch", function () {
 		test("batches changes until end", function () {

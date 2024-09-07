@@ -927,6 +927,7 @@ Data.prototype.peek = function () {
 };
 
 /**
+ * @public
  * @param {T} val
  * @returns {void}
  */

@@ -118,10 +118,11 @@ var Mutation = {
   Sort: 5,
   Splice: 6,
   Unshift: 7,
-  TypeMask: 7,
-  Insert: 8,
-  Remove: 16,
-  Reorder: 32
+  Assign: 8,
+  TypeMask: 1023,
+  Insert: 1024,
+  Remove: 2048,
+  Reorder: 4096
 };
 
 /**
@@ -946,6 +947,15 @@ DataArray.prototype.mut = function () {
 };
 
 /**
+ * @public
+ * @param {ReadonlyArray<T>} val
+ * @returns {void}
+ */
+DataArray.prototype.update = function (val) {
+  this._mutate(Mutation.Assign | Mutation.Reorder, 0, 0, 0, val)
+};
+
+/**
  * @package
  * @param {number} type
  * @param {number} index
@@ -1036,6 +1046,9 @@ DataArray.prototype._apply = function () {
       } else {
         Array.prototype.unshift.apply(value, next._params);
       }
+      break;
+    case Mutation.Assign:
+      this._value = next._params;
       break;
     case Mutation.Custom:
       this._value = /** @type {function(Array<T>, Change): Array<T>} */(next._params)(value, next);
@@ -1153,7 +1166,6 @@ DataArray.prototype.splice = function (start, deleteCount, items) {
         }
       }
     }
-    console.log(params);
     this._mutate(mutation, start, deleteCount, len - 2, params);
   }
 };

@@ -1,7 +1,11 @@
-import { test, assert, throws } from "../helper/index.js";
+import { test, assert, Anod } from "../helper/index.js";
 
+/**
+ * 
+ * @param {Anod} anod 
+ */
 export function run(anod) {
-    test("anod.root()", function () {
+    test("root", function () {
         test("allows subcomputations to escape their parents", function () {
             anod.root(function () {
                 var outerTrigger = anod.value(0);
