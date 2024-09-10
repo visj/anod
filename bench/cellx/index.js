@@ -72,7 +72,7 @@ const isSolution = (layers, answer) => {
 };
 
 async function main() {
-  const report = {};
+  var report = {};
 
   report.solid = { fn: runSolid, runs: [] };
   report.S = { fn: runS, runs: [] };

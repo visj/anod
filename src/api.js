@@ -228,6 +228,11 @@ SignalIterator.prototype.some = function (callbackFn, opts) {};
 function SignalArray() {}
 
 /**
+ * @param {function(Array<T>): Array<T>} callbackFn
+ */
+SignalArray.prototype.modify = function (callbackFn) {};
+
+/**
  * @returns {void}
  */
 SignalArray.prototype.pop = function () {};
