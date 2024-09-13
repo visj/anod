@@ -1,15 +1,15 @@
-import { Signal, SignalData, Options } from "./index";
+import { ReadonlySignal, ReadonlySignal, Options } from "./index";
 
-type Value<T> = T | Signal<T> | (() => T);
+type Value<T> = T | ReadonlySignal<T> | (() => T);
 
 type IteratorOptions<T> = Partial<
   Pick<Options<T, never>, "source" | "unstable" | "compare" | "lazy">
 >;
 
-export interface SignalIterator<T = any> extends Signal<ReadonlyArray<T>> {
+export interface SignalIterator<T = any> extends ReadonlySignal<ReadonlyArray<T>> {
   readonly length: () => number;
 
-  at(index: Value<number>, opts?: IteratorOptions<T>): Signal<T>;
+  at(index: Value<number>, opts?: IteratorOptions<T>): ReadonlySignal<T>;
 
   concat(
     items: T | T[] | Value<T> | Value<T[]>,
@@ -19,7 +19,7 @@ export interface SignalIterator<T = any> extends Signal<ReadonlyArray<T>> {
   every(
     callbackFn: (element: T, index: number) => boolean,
     opts?: IteratorOptions<T>
-  ): Signal<boolean>;
+  ): ReadonlySignal<boolean>;
 
   filter(
     callbackFn: (element: T, index: number) => boolean,
@@ -29,22 +29,22 @@ export interface SignalIterator<T = any> extends Signal<ReadonlyArray<T>> {
   find(
     callbackFn: (element: T, index: number) => boolean,
     opts?: IteratorOptions<T>
-  ): Signal<T | undefined>;
+  ): ReadonlySignal<T | undefined>;
 
   findIndex(
     callbackFn: (element: T, index: number) => boolean,
     opts?: IteratorOptions<T>
-  ): Signal<number>;
+  ): ReadonlySignal<number>;
 
   findLast(
     callbackFn: (element: T, index: number) => boolean,
     opts?: IteratorOptions<T>
-  ): Signal<T | undefined>;
+  ): ReadonlySignal<T | undefined>;
 
   findLastIndex(
     callbackFn: (element: T, index: number) => boolean,
     opts?: IteratorOptions<T>
-  ): Signal<number>;
+  ): ReadonlySignal<number>;
 
   forEach(
     callbackFn: (element: T, index: number) => void,
@@ -55,58 +55,58 @@ export interface SignalIterator<T = any> extends Signal<ReadonlyArray<T>> {
     searchElement: Value<T>,
     fromIndex?: Value<number>,
     opts?: IteratorOptions<T>
-  ): Signal<boolean>;
+  ): ReadonlySignal<boolean>;
 
   indexOf(
     searchElement: Value<T>,
     fromIndex?: Value<number>,
     opts?: IteratorOptions<T>
-  ): Signal<number>;
+  ): ReadonlySignal<number>;
 
-  join(separator?: Value<string>, opts?: IteratorOptions<T>): Signal<string>;
+  join(separator?: Value<string>, opts?: IteratorOptions<T>): ReadonlySignal<string>;
 
   lastIndexOf(
     searchElement: Value<T>,
     fromIndex?: Value<number>,
     opts?: IteratorOptions<T>
-  ): Signal<number>;
+  ): ReadonlySignal<number>;
 
   map<U>(
-    callbackFn: (element: T, index: Signal<number>) => U,
+    callbackFn: (element: T, index: ReadonlySignal<number>) => U,
     opts?: IteratorOptions<T>
   ): SignalIterator<U>;
 
   reduce(
     callbackFn: (previousValue: T, currentValue: T, currentIndex: number) => T
-  ): Signal<T>;
+  ): ReadonlySignal<T>;
 
   reduce(
     callbackFn: (previousValue: T, currentValue: T, currentIndex: number) => T,
     initialValue: Value<T>,
     opts?: IteratorOptions<T>
-  ): Signal<T>;
+  ): ReadonlySignal<T>;
 
   reduce<U>(
     callbackFn: (previousValue: U, currentValue: T, currentIndex: number) => U,
     initialValue: Value<U>,
     opts?: IteratorOptions<T>
-  ): Signal<U>;
+  ): ReadonlySignal<U>;
 
   reduceRight(
     callbackFn: (previousValue: T, currentValue: T, currentIndex: number) => T
-  ): Signal<T>;
+  ): ReadonlySignal<T>;
 
   reduceRight(
     callbackFn: (previousValue: T, currentValue: T, currentIndex: number) => T,
     initialValue: Value<T>,
     opts?: IteratorOptions<T>
-  ): Signal<T>;
+  ): ReadonlySignal<T>;
 
   reduceRight<U>(
     callbackFn: (previousValue: U, currentValue: T, currentIndex: number) => U,
     initialValue: Value<U>,
     opts?: IteratorOptions<T>
-  ): Signal<U>;
+  ): ReadonlySignal<U>;
 
   slice(
     start?: Value<number>,
@@ -117,7 +117,7 @@ export interface SignalIterator<T = any> extends Signal<ReadonlyArray<T>> {
   some(
     callbackFn: (element: T, index: number) => boolean,
     opts?: IteratorOptions<T>
-  ): Signal<boolean>;
+  ): ReadonlySignal<boolean>;
 }
 
 export const enum Mutation {
@@ -134,7 +134,7 @@ export const enum Mutation {
     TypeMask = 15,
     Insert = 16,
     Remove = 32,
-    Reorder = 64  
+    Reorder = 64
 }
 
 export type Change<T> = {
@@ -147,7 +147,7 @@ export type Change<T> = {
 
 export interface SignalArray<T = any>
   extends SignalIterator<T>,
-    SignalData<ReadonlyArray<T>> {
+    ReadonlySignal<ReadonlyArray<T>> {
   /**
    *
    * @param callbackFn

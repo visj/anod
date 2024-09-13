@@ -25,7 +25,8 @@ var State = {
   Source: 524288,
   Initial: 1048576,
   Lazy: 2097152,
-  Changed: 4194304
+  Changed: 4194304,
+  ManualScope: 8388608
 };
 /**
  * @enum {number}
@@ -206,7 +207,7 @@ function ModuleInterface() {}
 /**
  * @struct
  * @abstract
- * @template T
+ * @template T,U,N
  * @constructor
  * @implements {ModuleInterface<T>}
  */
@@ -291,9 +292,15 @@ Module.prototype._sourceslots;
 
 /**
  * @package
- * @type {*}
+ * @type {N}
  */
 Module.prototype._next;
+
+/**
+ * @package
+ * @type {U}
+ */
+Module.prototype._args;
 
 /**
  * @returns {T}
@@ -361,15 +368,45 @@ Module.prototype._recordMayDispose = function () {};
 /**
  * @struct
  * @abstract
- * @template T
+ * @template T, U, N
  * @constructor
- * @extends {Module<T>}
+ * @extends {Module<T, U, N>}
  */
 function Reactive() {}
 
 /**
+ * @public
+ * @returns {T}
+ */
+Reactive.prototype.peek = function () {
+  return this._value;
+};
+
+/**
+ * @public
+ * @returns {void}
+ */
+Reactive.prototype.dispose = function () {
+  if (
+    !(
+      this._state &
+      (State.ScheduledDispose | State.WillDispose | State.Disposed)
+    )
+  ) {
+    if (CONTEXT._idle) {
+      this._dispose();
+    } else {
+      this._state |= State.ScheduledDispose;
+      DISPOSES._add(this);
+    }
+  }
+};
+
+/**
  * @interface
+ * @template T
  * @extends {Scope}
+ * @extends {RootSignal<T>}
  */
 function RootInterface() {}
 
@@ -377,19 +414,19 @@ function RootInterface() {}
  * @interface
  * @template T
  * @extends {Send}
- * @extends {SignalData<T>}
+ * @extends {Scope}
+ * @extends {Receive}
+ * @extends {ReadonlySignal<T>}
  */
-function DataInterface() {}
+function ComputeInterface() {}
 
 /**
  * @interface
  * @template T
  * @extends {Send}
- * @extends {Scope}
- * @extends {Receive}
  * @extends {Signal<T>}
  */
-function ComputeInterface() {}
+function DataInterface() {}
 
 /**
  * @final
@@ -641,15 +678,22 @@ function disposeScope(scope) {
 /**
  * @struct
  * @constructor
- * @extends {Reactive}
+ * @template T
+ * @extends {Reactive<T,void,void>}
+ * @param {function(): T} fn
  * @implements {RootInterface}
  */
-function Root() {
+function Root(fn) {
   /**
    * @package
    * @type {number}
    */
   this._state = 0;
+  /**
+   * @package
+   * @type {T}
+   */
+  this._value = void 0;
   /**
    * @package
    * @type {Array<Module> | null}
@@ -660,7 +704,20 @@ function Root() {
    * @type {Array<function(boolean): void> | null}
    */
   this._cleanups = null;
+  var context = CONTEXT;
+  var owner = context._owner;
+  var listen = context._listen;
+  context._owner = this;
+  context._listen = null;
+  try {
+    this._value = fn();
+  } finally {
+    context._owner = owner;
+    context._listen = listen;
+  }
 }
+
+extend(Root, Reactive);
 
 /**
  * @package
@@ -851,7 +908,7 @@ function sendDispose(nodes) {
  * @constructor
  * @param {T} val
  * @param {(function(T,T): boolean) | null=} eq
- * @extends {Reactive<T>}
+ * @extends {Reactive<T,void,T | Object>}
  * @implements {DataInterface<T>}
  */
 function Data(val, eq) {
@@ -902,6 +959,7 @@ extend(Data, Reactive);
 
 /**
  * @public
+ * @override
  * @returns {T}
  */
 Data.prototype.val = function () {
@@ -916,14 +974,6 @@ Data.prototype.val = function () {
   ) {
     addReceiver(this, listen);
   }
-  return this._value;
-};
-
-/**
- * @public
- * @returns {T}
- */
-Data.prototype.peek = function () {
   return this._value;
 };
 
@@ -1011,8 +1061,11 @@ function disposeReceiver(node) {
   node._state &= ~(State.ReceiveOne | State.ReceiveMany);
 }
 
+/** @typedef {Signal | (function(): ?)} */
+var Source;
+
 /**
- * @param {Signal | Array<Signal> | (function(): void) | undefined} source
+ * @param {Source | Array<Source> | undefined} source
  * @param {Receive} owner
  * @returns {void}
  */
@@ -1024,22 +1077,22 @@ function readSource(source, owner) {
     case Type.Array:
       var len = /** @type {Array<Send>} */ (source).length;
       for (var i = 0; i < len; i++) {
-        addReceiver(/** @type {Array<Send>} */ (source)[i], owner);
+        readSource(/** @type {Array<Source>} */ (source)[i], owner);
       }
       break;
     case Type.Function:
-      /** @type {function(): void} */ (source)();
+      /** @type {function(): ?} */ (source)();
   }
 }
 
 /**
  * @struct
- * @template T, U
+ * @template T,U
  * @constructor
  * @param {function(T, U): T} fn
  * @param {T} seed
  * @param {SignalOptions<T, U> | undefined} opts
- * @extends {Reactive<T>}
+ * @extends {Reactive<T, U, function(T, U): T>}
  * @implements {ComputeInterface<T>}
  */
 function Compute(fn, seed, opts) {
@@ -1048,12 +1101,13 @@ function Compute(fn, seed, opts) {
   var args;
   /** @type {(function(T, T): boolean) | null | undefined} */
   var compare;
-  /** @type {Signal | Array<Signal> | (function(): void) | undefined} */
+  /** @type {Source | Array<Source> | undefined} */
   var source;
   if (opts != null) {
+    args = opts.args;
     if (opts.compare != null) {
       compare = opts.compare;
-      if (opts.compare === null) {
+      if (compare === null) {
         state |= State.Respond;
       } else {
         state |= State.Compare;
@@ -1071,7 +1125,6 @@ function Compute(fn, seed, opts) {
     if (opts.lazy) {
       state |= State.Lazy;
     }
-    args = opts.args;
     if (opts.source != null) {
       state |= State.Source;
       source = opts.source;
@@ -1114,7 +1167,7 @@ function Compute(fn, seed, opts) {
   this._nodeslots = null;
   /**
    * @package
-   * @type {null | (function(T,U): T)}
+   * @type {(function(T,U): T) | null}
    */
   this._next = fn;
   /**
@@ -1159,9 +1212,9 @@ function Compute(fn, seed, opts) {
   this._args = args;
   /**
    * @package
-   * @type {Signal | Array<Signal> | (function(): void) | undefined}
+   * @type {Source | Array<Source> | undefined}
    */
-  this._source = source;
+  this._source = void 0;
   var context = CONTEXT;
   var owner = context._owner;
   var listen = context._listen;
@@ -1181,20 +1234,21 @@ function Compute(fn, seed, opts) {
     context._owner = null;
     context._listen = this;
     readSource(source, this);
-    if (!(state & State.Unstable)) {
-      this._source = null;
+    if (state & State.Unstable) {
+      this._source = source;
+    } else {
       this._state &= ~State.Source;
     }
   }
   if (!(state & State.Defer)) {
     context._owner = this;
-    context._listen = state & State.Sample ? null : this;
+    context._listen = (state & State.Sample) ? null : this;
     this._state |= State.Initial;
     if (context._idle) {
       reset();
       context._idle = false;
       try {
-        this._value = this._next(this._value, this._args);
+        this._value = this._next(seed, args);
         if (CHANGES._count !== 0 || DISPOSES._count !== 0) {
           start();
         }
@@ -1204,7 +1258,7 @@ function Compute(fn, seed, opts) {
         context._listen = listen;
       }
     } else {
-      this._value = this._next(this._value, this._args);
+      this._value = this._next(seed, args);
       context._owner = owner;
       context._listen = listen;
     }
@@ -1304,7 +1358,7 @@ Compute.prototype._update = function () {
   var listen = context._listen;
   context._owner = context._listen = null;
   var state = this._state;
-  if (state & (State.Scope | State.Cleanup)) {
+  if (state & (State.Scope | State.Cleanup) && !(state & State.ManualScope)) {
     disposeScope(this);
   }
   if (state & State.Unstable) {
@@ -1323,6 +1377,7 @@ Compute.prototype._update = function () {
     (this._state | State.Updating) & ~(State.Initial | State.MayCleared);
   this._value = this._next(prev, this._args);
   this._state &= ~(
+    State.Changed |
     State.Updating |
     State.WillUpdate |
     State.MayUpdate |
@@ -1450,8 +1505,8 @@ Compute.prototype._clearMayUpdate = function () {
     }
     if (this._state & State.ReceiveMany) {
       var sources = this._sources;
-      var ln = sources.length;
-      for (var i = 0; i < ln; i++) {
+      var len = sources.length;
+      for (var i = 0; i < len; i++) {
         source1 = sources[i];
         if (source1._state & (State.MayUpdate | State.WillUpdate)) {
           source1._clearMayUpdate();
@@ -1473,51 +1528,42 @@ Compute.prototype._clearMayUpdate = function () {
 
 /**
  * @template T
- * @param {function(function(): void): T} fn
- * @returns {T}
+ * @param {function(): T} fn
+ * @returns {RootSignal<T>}
  */
 function root(fn) {
-  /** @type {Root} */
-  var node = null;
-  /** @type {function(): void} */
-  var disposer;
-  var context = CONTEXT;
-  var owner = context._owner;
-  var listen = context._listen;
-  if (fn.length !== 0) {
-    node = new Root();
-    disposer = function () {
-      dispose(node);
-    };
-  }
-  context._owner = node;
-  context._listen = null;
-  try {
-    return fn(disposer);
-  } finally {
-    context._owner = owner;
-    context._listen = listen;
-  }
+  return new Root(fn);
 }
 
 /**
- * @param {Reactive} node
- * @returns {void}
+ * @template T
+ * @param {T} value
+ * @returns {Signal<T>}
  */
-function dispose(node) {
-  if (
-    !(
-      node._state &
-      (State.ScheduledDispose | State.WillDispose | State.Disposed)
-    )
-  ) {
-    if (CONTEXT._idle) {
-      node._dispose();
-    } else {
-      node._state |= State.ScheduledDispose;
-      DISPOSES._add(node);
-    }
-  }
+function data(value) {
+  return new Data(value, null);
+}
+
+/**
+ * @template T
+ * @param {T} value
+ * @param {function(T,T): boolean=} eq
+ * @returns {Signal<T>}
+ */
+function value(value, eq) {
+  return new Data(value, eq);
+}
+
+/**
+ * @public
+ * @template T, U
+ * @param {function(T, U): T} fn
+ * @param {T=} seed
+ * @param {SignalOptions<T, U>=} opts
+ * @returns {ReadonlySignal<T>}
+ */
+function compute(fn, seed, opts) {
+  return new Compute(fn, seed, opts);
 }
 
 /**
@@ -1550,17 +1596,6 @@ function batch(fn) {
 }
 
 /**
- * @param {Signal} node
- * @returns {void}
- */
-function record(node) {
-  var listen = CONTEXT._listen;
-  if (listen !== null) {
-    addReceiver(/** @type {Send} */ (node), listen);
-  }
-}
-
-/**
  * @param {function(boolean): void} fn
  * @returns {void}
  */
@@ -1577,53 +1612,34 @@ function cleanup(fn) {
   }
 }
 
-function stable() {
-  if (CONTEXT._owner !== null) {
-    CONTEXT._owner._state &= ~State.Unstable;
+/**
+ * @param {Signal} node
+ * @returns {void}
+ */
+function record(node) {
+  var listen = CONTEXT._listen;
+  if (listen !== null) {
+    addReceiver(/** @type {Send} */ (node), listen);
   }
 }
 
-/**
- * @template T
- * @param {T} value
- * @returns {SignalData<T>}
- */
-function data(value) {
-  return new Data(value, null);
-}
-
-/**
- * @template T
- * @param {T} value
- * @param {function(T,T): boolean=} eq
- * @returns {SignalData<T>}
- */
-function value(value, eq) {
-  return new Data(value, eq);
-}
-
-/**
- * @public
- * @template T, U
- * @param {function(T, U): T} fn
- * @param {T=} seed
- * @param {SignalOptions<T, U>=} opts
- * @returns {Signal<T>}
- */
-function compute(fn, seed, opts) {
-  return new Compute(fn, seed, opts);
+function stable() {
+  var owner = CONTEXT._owner;
+  if (owner !== null) {
+    owner._state &= ~State.Unstable;
+    owner._source = null;
+  }
 }
 
 window["anod"]["root"] = root;
-window["anod"]["dispose"] = dispose;
-window["anod"]["sample"] = sample;
-window["anod"]["batch"] = batch;
-window["anod"]["record"] = record;
-window["anod"]["cleanup"] = cleanup;
-window["anod"]["stable"] = stable;
 window["anod"]["data"] = data;
 window["anod"]["value"] = value;
 window["anod"]["compute"] = compute;
+window["anod"]["batch"] = batch;
+window["anod"]["sample"] = sample;
+window["anod"]["cleanup"] = cleanup;
+window["anod"]["record"] = record;
+window["anod"]["stable"] = stable;
 window["anod"]["Data"] = Data;
 window["anod"]["Compute"] = Compute;
 
@@ -1633,6 +1649,7 @@ export {
   Type,
   Scope,
   Send,
+  Source,
   Receive,
   Context,
   ModuleInterface,
@@ -1670,7 +1687,6 @@ export {
   root,
   sample,
   batch,
-  dispose,
   record,
   cleanup,
   stable,

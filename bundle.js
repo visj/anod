@@ -235,14 +235,14 @@ async function concatBundleLibrary() {
   api =
     api + "\n" +
     "export {" + "\n"
+    + "  RootSignal,\n"
+    + "  ReadonlySignal,\n"
     + "  Signal,\n"
-    + "  SignalData,\n"
     + "  SignalIterator,\n"
     + "  SignalArray,\n"
     + "  SignalObject,\n"
     + "  SignalValue,\n"
-    + "  SignalOptions,\n"
-    + "  IteratorOptions\n"
+    + "  SignalOptions\n"
     + "};";
   let windowRegex = /window\["anod"\]\["\w+"\] = \w+;\s*/g;
   let importsRegex = /import\s*{[^}]*}\s*from\s*['"]\.\/core\.js['"]\;\s*/g;

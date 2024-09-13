@@ -1,8 +1,8 @@
-import { test, assert, Anod } from "../helper/index.js";
+import { test, assert, Anod } from "../../helper/index.js";
 
 /**
- * 
- * @param {Anod} anod 
+ *
+ * @param {Anod} anod
  */
 export function run(anod) {
   test("may dispose", function () {
@@ -32,7 +32,7 @@ export function run(anod) {
           assert(order , 't1c1');
         });
       });
-  
+
       test("does not update if called while being in mayDispose state", function () {
         anod.root(function () {
           var d1 = anod.value(1);

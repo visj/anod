@@ -1,8 +1,8 @@
-import { test, assert, Anod } from "../helper/index.js";
+import { test, assert, Anod } from "../../helper/index.js";
 
 /**
- * 
- * @param {Anod} anod 
+ *
+ * @param {Anod} anod
  */
 export function run(anod) {
   test("mayupdate", function () {
@@ -27,7 +27,7 @@ export function run(anod) {
         assert(order , 't1c1');
       });
     });
-  
+
     test("updates downstream pending nodes", function () {
       anod.root(function () {
         var d1 = anod.value(0);
@@ -57,7 +57,7 @@ export function run(anod) {
         assert(order , 't1c1e[c]2_1e1e2_1');
       });
     });
-  
+
     test("updates once if dependent on both tracing and non-tracing node", function() {
       anod.root(function() {
         var d1 = anod.value(0);
@@ -78,7 +78,7 @@ export function run(anod) {
         assert(c2.val() , 2);
       });
     });
-  
+
     test("does not update if pending source disposes", function() {
       anod.root(function() {
         var d1 = anod.value(0);

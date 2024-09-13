@@ -1,8 +1,4 @@
-export interface Signal<T = any> {
-  /**
-   *
-   */
-  val(): T;
+export interface RootSignal<T = any> {
   /**
    *
    */
@@ -13,16 +9,28 @@ export interface Signal<T = any> {
   dispose(): void;
 }
 
+export interface ReadonlySignal<T = any> extends RootSignal<T> {
+  /**
+   *
+   */
+  val(): T;
+}
+
+export declare var Root: {
+  new <T = any>(callback: () => T): RootSignal<T>;
+  readonly prototype: RootSignal;
+};
+
 export declare var Compute: {
   new <T = any, U = any>(
     callback: (prev: T, args: U) => T,
     seed: T,
     opts: SignalOptions<T, U>
-  ): Signal<T>;
-  readonly prototype: Signal;
+  ): ReadonlySignal<T>;
+  readonly prototype: ReadonlySignal;
 };
 
-export interface SignalData<T = any> extends Signal<T> {
+export interface Signal<T = any> extends ReadonlySignal<T> {
   /**
    *
    * @param val
@@ -34,8 +42,8 @@ export declare var Data: {
   new<T = any>(
     val: T,
     equality?: ((a: T, b: T) => boolean) | null
-  ): SignalData<T>;
-  readonly prototype: SignalData;
+  ): Signal<T>;
+  readonly prototype: Signal;
 };
 
 export interface OptionsBase<T, U> {
@@ -48,7 +56,7 @@ export interface OptionsBase<T, U> {
 export interface Options<T, U> extends OptionsBase<T, U> {
   defer?: boolean;
   sample?: boolean;
-  source: Signal | Array<Signal> | (() => void);
+  source: ReadonlySignal | Array<ReadonlySignal> | (() => void);
 }
 
 export type SignalOptions<T, U> = OptionsBase<T, U> | Options<T, U>;
@@ -57,7 +65,47 @@ export type SignalOptions<T, U> = OptionsBase<T, U> | Options<T, U>;
  *
  * @param fn
  */
-export declare function root<T>(fn: (dispose: () => void) => T): T;
+export declare function root<T>(fn: () => T): ReadonlySignal<T>;
+/**
+ *
+ * @param val
+ */
+export declare function data<T>(val: T): Signal<T>;
+/**
+ *
+ * @param val
+ * @param equality
+ */
+export declare function value<T>(
+  val: T,
+  equality?: ((a: T, b: T) => boolean) | null,
+): Signal<T>;
+/**
+ *
+ * @param callback
+ */
+export declare function compute<T>(callback: () => T): ReadonlySignal<T>;
+/**
+ *
+ * @param callback
+ * @param seed
+ */
+export declare function compute<T>(
+  callback: (prev: T) => T,
+  seed: T,
+): ReadonlySignal<T>;
+/**
+ *
+ * @param callback
+ * @param seed
+ * @param opts
+ */
+export declare function compute<T, U>(
+  callback: (prev: T, args: U) => T,
+  seed: T,
+  opts: SignalOptions<T, U>,
+): ReadonlySignal<T>;
+
 /**
  *
  * @param fn
@@ -73,42 +121,3 @@ export declare function sample<T>(fn: () => T): T;
  * @param fn
  */
 export declare function cleanup(fn: (final: boolean) => void): void;
-/**
- *
- * @param val
- */
-export declare function data<T>(val: T): SignalData<T>;
-/**
- *
- * @param val
- * @param equality
- */
-export declare function value<T>(
-  val: T,
-  equality?: ((a: T, b: T) => boolean) | null,
-): SignalData<T>;
-/**
- *
- * @param callback
- */
-export declare function compute<T>(callback: () => T): Signal<T>;
-/**
- *
- * @param callback
- * @param seed
- */
-export declare function compute<T>(
-  callback: (prev: T) => T,
-  seed: T,
-): Signal<T>;
-/**
- *
- * @param callback
- * @param seed
- * @param opts
- */
-export declare function compute<T, U>(
-  callback: (prev: T, args: U) => T,
-  seed: T,
-  opts: SignalOptions<T, U>,
-): Signal<T>;

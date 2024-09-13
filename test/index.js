@@ -10,41 +10,56 @@ const TEST_FOLDER = path.join(__dirname, "tests");
 
 var anodmin = Object.assign({}, core, array);
 
-/**
- * 
- * @param {string} test 
- */
-async function asserts(tests) {
-    let count = 0;
-    for (const test of tests) {
-        const file = (await fs.readFile(path.join(TEST_FOLDER, test))).toString();
-        let index = 0;
-        while ((index = file.indexOf("assert(", index)) !== -1) {
-            count++;
-            index += "assert(".length;
-        }
-    }
-    return count;
+async function countAsserts(test) {
+  let index = 0;
+  let count = 0;
+  const file = (await fs.readFile(path.join(TEST_FOLDER, test))).toString();
+  while ((index = file.indexOf("assert", index)) !== -1) {
+    count++;
+    index += "assert".length;
+  }
+  return count - 1;
 }
 
 /**
- * 
- * @param {Anod} anod 
+ *
+ * @param {string} test
+ * @returns {Promise<number>}
+ */
+async function assertCount(tests) {
+  return (await Promise.all(tests.map(countAsserts))).reduce(
+    (sum, val) => sum + val,
+    0
+  );
+}
+
+/**
+ *
+ * @param {Anod} anod
  */
 async function run(files, tests, anod) {
-    console.log("Expected " + await asserts(files) + " asserts.");
-    for (let i = 0; i < tests.length; i++) {
-        const test = tests[i];
-        await test.run(anod);
-    }
-    report();
+  console.log("Expected " + (await assertCount(files)) + " asserts.");
+  for (let i = 0; i < tests.length; i++) {
+    const test = tests[i];
+    await test.run(anod);
+  }
+  report();
 }
 
-(async function() {
-    const files = await fs.readdir(TEST_FOLDER);
-    const tests = await Promise.all(files.map(file => import(path.join(TEST_FOLDER, file))));
-    console.log("-- Testing bundled version --");
-    await run(files, tests, anod);
-    console.log("-- Testing minified version --");
-    await run(files, tests, anodmin);
+async function loadTests(folder) {
+  const files = await fs.readdir(path.join(TEST_FOLDER, folder));
+  return files.map((file) => path.join(folder, file));
+}
+
+(async function () {
+  const files = (
+    await Promise.all([loadTests("core"), loadTests("array")])
+  ).flat();
+  const tests = await Promise.all(
+    files.map((file) => import(path.join(TEST_FOLDER, file)))
+  );
+  console.log("-- Testing bundled version --");
+  await run(files, tests, anod);
+  console.log("-- Testing minified version --");
+  await run(files, tests, anodmin);
 })();

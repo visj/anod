@@ -1,8 +1,8 @@
-import { test, assert, Anod } from "../helper/index.js";
+import { test, assert, Anod } from "../../helper/index.js";
 
 /**
- * 
- * @param {Anod} anod 
+ *
+ * @param {Anod} anod
  */
 export function run(anod) {
 	test("batch", function () {
@@ -14,11 +14,11 @@ export function run(anod) {
 			});
 			assert(s1.val(), 2);
 		});
-		
-		test("halts propagation wtesthin tests scope", function () {
+
+		test("halts propagation within tests scope", function () {
 			anod.root(function () {
 				var s1 = anod.value(1);
-				var c1 = anod.compute(function() { 
+				var c1 = anod.compute(function() {
 					return s1.val();
 				});
 				anod.batch(function () {

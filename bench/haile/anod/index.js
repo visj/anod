@@ -58,7 +58,7 @@ function printRes(name, res) {
 function run(fn, n, scount) {
   // prep n * arity sources
   var start, end;
-  root(function (dispose) {
+  var r1 = root(function () {
     // run 3 times to warm up
     var sources = createDataSignals(scount, []);
     fn(n / 100, sources);
@@ -72,8 +72,8 @@ function run(fn, n, scount) {
       sources[i].val();
       sources[i].val();
     }
-    dispose();
   });
+  r1.dispose();
   var sources = createDataSignals(scount, []);
   start = now();
   fn(n, sources);

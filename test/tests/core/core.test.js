@@ -1,8 +1,8 @@
-import { test, assert, Anod } from "../helper/index.js";
+import { test, assert, Anod } from "../../helper/index.js";
 
 /**
- * 
- * @param {Anod} anod 
+ *
+ * @param {Anod} anod
  */
 export function run(anod) {
   test("compute", function () {
@@ -314,12 +314,12 @@ export function run(anod) {
       test("throws when continually setting a direct dependency", function () {
         anod.root(function () {
           var d = anod.value(1);
-          assert(function () {
+          assert.throws(function () {
             anod.compute(function () {
               d.val();
               d.update(d.peek() + 1);
             });
-          }, "throws");
+          });
         });
       });
 
@@ -336,12 +336,12 @@ export function run(anod) {
             return c2.val();
           });
 
-          assert(function () {
+          assert.throws(function () {
             anod.compute(function () {
               c3.val();
               s1.update(s1.peek() + 1);
             });
-          }, "throws");
+          });
         });
       });
     });
@@ -353,9 +353,9 @@ export function run(anod) {
           var c1 = anod.compute(function () {
             return c1 ? c1.val() : s1.val();
           }, 0);
-          assert(function () {
+          assert.throws(function () {
             s1.update(0);
-          }, "throws");
+          });
         });
       });
     });

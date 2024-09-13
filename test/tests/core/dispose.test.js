@@ -1,85 +1,39 @@
-import { test, assert, Anod } from "../helper/index.js";
+import { test, assert, Anod } from "../../helper/index.js";
 
 /**
- * 
- * @param {Anod} anod 
+ *
+ * @param {Anod} anod
  */
 export function run(anod) {
   test("dispose", function () {
     test("root", function () {
       test("disables updates and sets computation's value to null", function () {
         var calls, s1, c1;
-        anod.root(function (teardown) {
+        var r1 = anod.root(function () {
           calls = 0;
           s1 = anod.value(0);
-  
+
           c1 = anod.compute(function () {
             calls++;
             return s1.val();
           });
-  
+
           assert(calls, 1);
           assert(c1.val(), 0);
-  
+
           s1.update(1);
-  
+
           assert(calls, 2);
           assert(c1.val(), 1);
-  
-          teardown();
-          s1.update(2);
-  
-          assert(calls, 2);
-          assert(c1.val(), null);
         });
-      });
-  
-      test("works from the body of tests own computation", function () {
-        var calls, s1;
-        anod.root(function (teardown) {
-          calls = 0;
-          s1 = anod.value(0);
-          anod.compute(function () {
-            calls++;
-            if (s1.val()) {
-              teardown();
-            }
-            s1.val();
-          });
-  
-          assert(calls, 1);
-          s1.update(1);
-          assert(calls, 2);
-          s1.update(2);
-          assert(calls, 2);
-        });
-      });
-  
-      test("works from the body of a subcomputation", function () {
-        var calls, s1;
-        anod.root(function (teardown) {
-          calls = 0;
-          s1 = anod.value(0);
-          anod.compute(function () {
-            calls++;
-            s1.val();
-            anod.compute(function () {
-              if (s1.val()) {
-                teardown();
-              }
-            });
-          });
-  
-          assert(calls, 1);
-  
-          s1.update(1);
-          assert(calls, 2);
-          s1.update(2);
-          assert(calls, 2);
-        });
+        r1.dispose();
+        s1.update(2);
+
+        assert(calls, 2);
+        assert(c1.val(), null);
       });
     });
-  
+
     test("computations", function () {
       test("persists through cycle when manually disposed", function () {
         anod.root(function () {
@@ -91,7 +45,7 @@ export function run(anod) {
           anod.compute(function () {
             anod.compute(function () {
               if (s1.val() > 0) {
-                anod.dispose(c1);
+                c1.dispose();
               }
             });
             anod.compute(function () {
@@ -103,7 +57,7 @@ export function run(anod) {
           assert(count, 1);
         });
       });
-  
+
       test("ignores multiple calls to dispose", function () {
         anod.root(function () {
           var s1 = anod.value(0);
@@ -114,9 +68,9 @@ export function run(anod) {
           anod.compute(function () {
             anod.compute(function () {
               if (s1.val() > 0) {
-                anod.dispose(c1);
-                anod.dispose(c1);
-                anod.dispose(c1);
+                c1.dispose();
+                c1.dispose();
+                c1.dispose();
               }
             });
             anod.compute(function () {
@@ -129,7 +83,7 @@ export function run(anod) {
         });
       });
     });
-  
+
     test("unmount", function () {
       test("does not unmount pending computations wtesth changing dependencies", function () {
         var s1 = anod.value(true);
@@ -138,8 +92,8 @@ export function run(anod) {
         var calls = 0;
         anod.compute(function () {
           if (!s1.val()) {
-            anod.dispose(s1);
-            anod.dispose(s2);
+            s1.dispose();
+            s2.dispose();
             s3.update(s3.peek() + 1);
           }
         });
@@ -162,4 +116,3 @@ export function run(anod) {
     });
   });
 }
-

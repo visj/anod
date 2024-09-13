@@ -7,9 +7,9 @@ var FAIL = 0;
 export var Anod;
 
 /**
- * 
- * @param {string} msg 
- * @param {function(): Promise} callback 
+ *
+ * @param {string} msg
+ * @param {function(): Promise} callback
  */
 export async function test(msg, callback) {
     try {
@@ -24,33 +24,32 @@ export async function test(msg, callback) {
 
 /**
  * @template T
- * @param {T} v1 
- * @param {T | string} v2 
+ * @param {T} v1
+ * @param {T | string} v2
  */
 export function assert(v1, v2) {
-    if (typeof v1 === "function") {
-        if (v2 === "throws") {
-            var thrown = false;
-            try {
-                v1();
-            } catch (err) {
-                thrown = true;
-            }
-            if (!thrown) {
-                FAIL++;
-                throw new Error("Expected function to throw");
-            }
-            PASS++;
-        } else {
-            throw new Error("Not supported operation " + v2);
-        }
-    } else {
-        if (v1 !== v2) {
-            FAIL++;
-            throw new Error("Expected " + v2 + ", got " + v1);
-        }
-        PASS++;
-    }
+  if (v1 !== v2) {
+      FAIL++;
+      throw new Error("Expected " + v2 + ", got " + v1);
+  }
+  PASS++;
+}
+
+/**
+ * @param {function(): void} callback
+ */
+assert.throws = function(callback) {
+  var thrown = false;
+  try {
+      callback();
+  } catch (err) {
+      thrown = true;
+  }
+  if (!thrown) {
+      FAIL++;
+      throw new Error("Expected function to throw");
+  }
+  PASS++;
 }
 
 export function report() {

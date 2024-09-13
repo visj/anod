@@ -1,8 +1,8 @@
-import { test, assert, Anod } from "../helper/index.js";
+import { test, assert, Anod } from "../../helper/index.js";
 
 /**
- * 
- * @param {Anod} anod 
+ *
+ * @param {Anod} anod
  */
 export function run(anod) {
   test("exceptions within computations", function () {
@@ -18,19 +18,19 @@ export function run(anod) {
         var d = anod.compute(function () {
           return b.val();
         });
-  
-        assert(function () {
+
+        assert.throws(function () {
           anod.batch(function () {
             a.update(true);
             b.update(2);
           });
-        }, "throws");
-  
+        });
+
         assert(b.val(), 2);
         assert(d.val(), 2);
       });
     });
-  
+
     test("leave non-excepted parts of dependency tree intact", function () {
       anod.root(function () {
         var a = anod.value(false);
@@ -43,24 +43,24 @@ export function run(anod) {
         var d = anod.compute(function () {
           return b.val();
         });
-  
-        assert(function () {
+
+        assert.throws(function () {
           anod.batch(function () {
             a.update(true);
             b.update(2);
           });
-        }, "throws");
-  
+        });
+
         assert(b.val(), 2);
         assert(d.val(), 2);
-  
+
         b.update(3);
-  
+
         assert(b.val(), 3);
         assert(d.val(), 3);
       });
     });
-  
+
     test("disposes registered computations after exception", function () {
       anod.root(function () {
         var v1 = anod.value(0);

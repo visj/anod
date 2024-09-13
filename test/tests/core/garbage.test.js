@@ -1,8 +1,8 @@
-import { test, assert, Anod } from "../helper/index.js";
+import { test, assert, Anod } from "../../helper/index.js";
 
 /**
- * 
- * @param {Anod} anod 
+ *
+ * @param {Anod} anod
  */
 export async function run(anod) {
   if (global.gc) {
@@ -16,7 +16,7 @@ export async function run(anod) {
         callback();
       });
     }
-  
+
     await test("garbage collection", async function () {
       await test("should not be collected when referenced", function () {
         var d1 = anod.value(1);
@@ -32,7 +32,7 @@ export async function run(anod) {
           });
         })
       });
-  
+
       await test("should be collected when disposed", async function () {
         var s1 = anod.value(1);
         var c1 = new WeakRef(
@@ -40,7 +40,7 @@ export async function run(anod) {
             s1.val();
           }),
         );
-        anod.dispose(s1);
+        s1.dispose();
         return new Promise(function(resolve) {
           collect(function () {
             assert(c1.deref(), void 0);
@@ -48,7 +48,7 @@ export async function run(anod) {
           });
         });
       });
-  
+
       await test("should be collected when only referenced locally", function () {
         function local() {
           var s1 = new WeakRef(anod.value(1));
@@ -70,5 +70,5 @@ export async function run(anod) {
         });
       });
     });
-  }  
+  }
 }
