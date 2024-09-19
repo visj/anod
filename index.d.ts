@@ -1,15 +1,16 @@
-export interface RootSignal<T = any> {
-  /**
-   *
-   */
-  peek(): T;
+export interface RootSignal {
+
   /**
    *
    */
   dispose(): void;
 }
 
-export interface ReadonlySignal<T = any> extends RootSignal<T> {
+export interface ReadonlySignal<T = any> extends RootSignal {
+  /**
+   *
+   */
+    peek(): T;
   /**
    *
    */
@@ -17,15 +18,14 @@ export interface ReadonlySignal<T = any> extends RootSignal<T> {
 }
 
 export declare var Root: {
-  new <T = any>(callback: () => T): RootSignal<T>;
+  new <T = any>(callback: () => T): RootSignal;
   readonly prototype: RootSignal;
 };
 
 export declare var Compute: {
   new <T = any, U = any>(
-    callback: (prev: T, args: U) => T,
-    seed: T,
-    opts: SignalOptions<T, U>
+    fn: (prev: T, args: U) => T,
+    opts: SignalOptions<T>
   ): ReadonlySignal<T>;
   readonly prototype: ReadonlySignal;
 };
@@ -46,20 +46,10 @@ export declare var Data: {
   readonly prototype: Signal;
 };
 
-export interface OptionsBase<T, U> {
-  args?: U;
-  lazy?: boolean;
+export interface SignalOptions<T> {
+  eager?: boolean;
   unstable?: boolean;
-  compare?: ((a: T, b: T) => boolean) | null;
 }
-
-export interface Options<T, U> extends OptionsBase<T, U> {
-  defer?: boolean;
-  sample?: boolean;
-  source: ReadonlySignal | Array<ReadonlySignal> | (() => void);
-}
-
-export type SignalOptions<T, U> = OptionsBase<T, U> | Options<T, U>;
 
 /**
  *
@@ -87,24 +77,47 @@ export declare function value<T>(
 export declare function compute<T>(callback: () => T): ReadonlySignal<T>;
 /**
  *
- * @param callback
+ * @param fn
  * @param seed
  */
 export declare function compute<T>(
-  callback: (prev: T) => T,
+  fn: (prev: T) => T,
   seed: T,
 ): ReadonlySignal<T>;
 /**
  *
- * @param callback
+ * @param fn
  * @param seed
  * @param opts
  */
 export declare function compute<T, U>(
-  callback: (prev: T, args: U) => T,
-  seed: T,
-  opts: SignalOptions<T, U>,
+  fn: () => T,
+  opts: SignalOptions<T>,
 ): ReadonlySignal<T>;
+
+/**
+ *
+ * @param callback
+ */
+export declare function effect<T>(callback: () => T): RootSignal;
+/**
+ *
+ * @param fn
+ * @param seed
+ */
+export declare function effect<T>(
+  fn: (prev: T) => T
+): RootSignal;
+/**
+ *
+ * @param fn
+ * @param seed
+ * @param opts
+ */
+export declare function effect(
+  fn: () => void,
+  opts: SignalOptions<void>,
+): RootSignal;
 
 /**
  *

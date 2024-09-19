@@ -73,7 +73,7 @@ const isSolution = (layers, answer) => {
 
 async function main() {
   var report = {};
-
+  var collect = !!global.gc;
   report.solid = { fn: runSolid, runs: [] };
   report.S = { fn: runS, runs: [] };
   report.maverick = { fn: runMaverick, runs: [], avg: [] };
@@ -93,11 +93,12 @@ async function main() {
       let layers = LAYER_TIERS[i];
       const runs = [];
       for (let j = 0; j < RUNS_PER_TIER; j += 1) {
-        runs.push(await start(current.fn, layers));
+        runs.push(start(current.fn, layers));
       }
       // Give cellx time to release its global pendingCells array
-      await new Promise((resolve) => setTimeout(resolve, 0));
-      await collectGarbage();
+      if (collect) {
+        await collectGarbage();
+      }
     }
   }
 
@@ -108,13 +109,12 @@ async function main() {
       let layers = LAYER_TIERS[i];
       const runs = [];
       for (let j = 0; j < RUNS_PER_TIER; j++) {
-        runs.push(await start(current.fn, layers));
+        runs.push(start(current.fn, layers));
       }
-      // Give cellx time to release its global pendingCells array
-      await new Promise((resolve) => setTimeout(resolve, 0));
-
       current.runs[i] = med(runs) * 1000;
-      await collectGarbage();
+      if (collect) {
+        await collectGarbage();
+      }
     }
   }
 
@@ -160,19 +160,14 @@ async function main() {
   console.log(table.toString());
 }
 
-async function start(runner, layers) {
-  return new Promise((done) => {
-    runner(layers, done);
-  }).catch((err) => {
-    console.error(err);
-    return -1;
-  });
+function start(runner, layers) {
+  return runner(layers);
 }
 
 /**
  * @see {@link https://github.com/modderme123/reactively}
  */
-function runReactively(layers, done) {
+function runReactively(layers) {
   const start = {
     a: reactive(1),
     b: reactive(2),
@@ -213,13 +208,14 @@ function runReactively(layers, done) {
   const solution = [end.a.get(), end.b.get(), end.c.get(), end.d.get()];
   const endTime = performance.now() - startTime;
 
-  done(isSolution(layers, solution) ? endTime : -1);
+  return isSolution(layers, solution) ? endTime : -1;
 }
 
 /**
  * @see {@link https://github.com/maverick-js/signals}
  */
-function runMaverick(layers, done) {
+function runMaverick(layers) {
+  var result;
   maverick.root((dispose) => {
     const start = {
       a: maverick.signal(1),
@@ -266,17 +262,18 @@ function runMaverick(layers, done) {
     const solution = [end.a(), end.b(), end.c(), end.d()];
     const endTime = performance.now() - startTime;
     dispose();
-    done(isSolution(layers, solution) ? endTime : -1);
+    result = isSolution(layers, solution) ? endTime : -1;
   });
+  return result;
 }
 
 /**
  * @see {@link https://github.com/adamhaile/S}
  */
-function runS(layers, done) {
+function runS(layers) {
   const S = Sjs.default;
 
-  S.root((dispose) => {
+  return S.root((dispose) => {
     const start = {
       a: S.data(1),
       b: S.data(2),
@@ -318,11 +315,11 @@ function runS(layers, done) {
     const solution = [end.a(), end.b(), end.c(), end.d()];
     const endTime = performance.now() - startTime;
     dispose();
-    done(isSolution(layers, solution) ? endTime : -1);
+    return isSolution(layers, solution) ? endTime : -1;
   });
 }
 
-function runAnod(layers, done) {
+function runAnod(layers) {
   const start = {
     a: anod.data(1),
     b: anod.data(2),
@@ -335,10 +332,10 @@ function runAnod(layers, done) {
   for (let i = layers; i--;) {
     layer = ((m) => {
       return {
-        a: anod.compute(() => (rand % 2 ? m.b.val() : m.c.val()), 0),
-        b: anod.compute(() => m.a.val() - m.c.val(), 0),
-        c: anod.compute(() => m.b.val() + m.d.val(), 0),
-        d: anod.compute(() => m.c.val(), 0),
+        a: anod.compute(() => (rand % 2 ? m.b.val() : m.c.val())),
+        b: anod.compute(() => m.a.val() - m.c.val()),
+        c: anod.compute(() => m.b.val() + m.d.val()),
+        d: anod.compute(() => m.c.val()),
       };
     })(layer);
   }
@@ -363,7 +360,7 @@ function runAnod(layers, done) {
   }
   const solution = [end.a.val(), end.b.val(), end.c.val(), end.d.val()];
   const endTime = performance.now() - startTime;
-  done(isSolution(layers, solution) ? endTime : -1);
+  return isSolution(layers, solution) ? endTime : -1;
 }
 
 function runSignal(layers, done) {
@@ -406,14 +403,14 @@ function runSignal(layers, done) {
 
   const solution = [end.a.get(), end.b.get(), end.c.get(), end.d.get()];
   const endTime = performance.now() - startTime;
-  done(isSolution(layers, solution) ? endTime : -1);
+  return isSolution(layers, solution) ? endTime : -1;
 }
 
 /**
  * @see {@link https://github.com/solidjs/solid}
  */
-function runSolid(layers, done) {
-  solid.createRoot((dispose) => {
+function runSolid(layers) {
+  return solid.createRoot((dispose) => {
     const [a, setA] = solid.createSignal(1),
       [b, setB] = solid.createSignal(2),
       [c, setC] = solid.createSignal(3),
@@ -453,14 +450,14 @@ function runSolid(layers, done) {
     const solution = [end.a(), end.b(), end.c(), end.d()];
     const endTime = performance.now() - startTime;
     dispose();
-    done(isSolution(layers, solution) ? endTime : -1);
+    return isSolution(layers, solution) ? endTime : -1;
   });
 }
 
 /**
  * @see {@link https://github.com/preactjs/signals}
  */
-function runPreact(layers, done) {
+function runPreact(layers) {
   const a = preact.signal(1),
     b = preact.signal(2),
     c = preact.signal(3),
@@ -502,7 +499,7 @@ function runPreact(layers, done) {
   }
   const solution = [end.a.value, end.b.value, end.c.value, end.d.value];
   const endTime = performance.now() - startTime;
-  done(isSolution(layers, solution) ? endTime : -1);
+  return isSolution(layers, solution) ? endTime : -1;
 }
 
 /**
@@ -561,7 +558,7 @@ function runCellx(layers, done) {
   done(isSolution(layers, solution) ? endTime : -1);
 }
 
-function runUsignal(layers, done) {
+function runUsignal(layers) {
   const a = usignal.signal(1),
     b = usignal.signal(2),
     c = usignal.signal(3),
@@ -589,19 +586,16 @@ function runUsignal(layers, done) {
   if (BATCHED) {
     usignal.batch(() => {
       (a.value = 4), (b.value = 3), (c.value = 2), (d.value = 1);
-      const solution = [end.a.value, end.b.value, end.c.value, end.d.value];
-      const endTime = performance.now() - startTime;
-      done(isSolution(layers, solution) ? endTime : -1);
     });
   } else {
     (a.value = 4), end.a.value, end.b.value, end.c.value, end.d.value;
     (b.value = 3), end.a.value, end.b.value, end.c.value, end.d.value;
     (c.value = 2), end.a.value, end.b.value, end.c.value, end.d.value;
     d.value = 1;
-    const solution = [end.a.value, end.b.value, end.c.value, end.d.value];
-    const endTime = performance.now() - startTime;
-    done(isSolution(layers, solution) ? endTime : -1);
   }
+  const solution = [end.a.value, end.b.value, end.c.value, end.d.value];
+  const endTime = performance.now() - startTime;
+  return isSolution(layers, solution) ? endTime : -1;
 }
 
 main();

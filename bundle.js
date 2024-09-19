@@ -90,19 +90,19 @@ async function bundleBench() {
 
 async function bundleCore() {
   const core = (await fs.promises.readFile("./temp/core.js", "utf-8"))
-    .replace(/\n/g, "")
+    .replace(/\n/g, " ")
     .split("export");
   const parts = core[0].split(/(window\.anod\.[\$\w]*)/g);
   let esm = parts[0];
   let iife = "var anod=(function(){" + parts[0] + "return{";
   for (let i = 1; i < parts.length - 1; i += 2) {
     let name = parts[i].slice(12);
-    let content = parts[i + 1];
+    let content = parts[i + 1].trim();
     if (i > 1) {
       iife += ",";
     }
-    if (content.startsWith("=function")) {
-      esm += "export function " + name + content.slice(9);
+    if (content.match(/\=\s*function/)) {
+      esm += "export function " + name + content.slice(content.indexOf("function") + "function".length);
       iife += name + ":" + content.slice(1, content.lastIndexOf(";"));
     } else {
       let min = content.slice(1, content.indexOf(";"));
@@ -127,10 +127,8 @@ async function bundleCore() {
 }
 
 async function bundleArray() {
-  const code = (await fs.promises.readFile("./temp/array.js", "utf-8")).replace(
-    /\n/g,
-    ""
-  );
+  const code = (await fs.promises.readFile("./temp/array.js", "utf-8"))
+    .replace(/\n/g, " ");
   let param = "__anod__";
   const array = code.split('"./core.js";');
   const parts = array[1].split(/(window\.anod\.[\$\w]*)/g);
@@ -153,7 +151,7 @@ async function bundleArray() {
   iife += parts[0];
   for (let i = 1; i < parts.length - 1; i += 2) {
     let name = parts[i].slice(12);
-    let content = parts[i + 1];
+    let content = parts[i + 1].trim();
     if (i > 1) {
       iife += ";";
     }
@@ -219,9 +217,9 @@ async function closureBundleLibrary() {
       } else if (stderr) {
         reject(stderr);
       } else {
-        await Promise.all[(bundleCore(), bundleArray())];
         resolve({ stdout, stderr });
       }
+      await Promise.all[(bundleCore(), bundleArray())];
     });
   });
 }

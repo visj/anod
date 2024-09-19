@@ -1,17 +1,9 @@
 /**
  * @interface
- * @template T
  */
 function RootSignal() {}
 
 /**
- * @public
- * @returns {T}
- */
-RootSignal.prototype.peek = function () {};
-
-/**
- * @public
  * @returns {void}
  */
 RootSignal.prototype.dispose = function () {};
@@ -19,15 +11,19 @@ RootSignal.prototype.dispose = function () {};
 /**
  * @interface
  * @template T
- * @extends {RootSignal<T>}
+ * @extends {RootSignal}
  */
 function ReadonlySignal() {}
 
 /**
- * @public
  * @returns {T}
  */
 ReadonlySignal.prototype.val = function () {};
+
+/**
+ * @returns {T}
+ */
+ReadonlySignal.prototype.peek = function () {};
 
 /**
  * @interface
@@ -45,34 +41,14 @@ Signal.prototype.update = function (val) {};
 
 /**
  * @record
- * @template T, U
+ * @template T
  */
 function SignalOptions() {}
 
 /**
- * @type {U | undefined}
- */
-SignalOptions.prototype.args;
-
-/**
  * @type {boolean | undefined}
  */
-SignalOptions.prototype.lazy;
-
-/**
- * @type {Signal | Array<Signal> | (function(): void) | undefined}
- */
-SignalOptions.prototype.source;
-
-/**
- * @type {boolean | undefined}
- */
-SignalOptions.prototype.defer;
-
-/**
- * @type {boolean | undefined}
- */
-SignalOptions.prototype.sample;
+SignalOptions.prototype.eager;
 
 /**
  * @type {boolean | undefined}
@@ -92,11 +68,9 @@ SignalOptions.prototype.compare;
 function SignalIterator() {}
 
 /**
- * @const
- * @public
- * @type {function(): number}
+ * @returns {number}
  */
-SignalIterator.prototype.length;
+SignalIterator.prototype.length = function() {};
 
 /**
  * @param {number | Signal<number> | (function(): number)} index
@@ -267,7 +241,7 @@ SignalArray.prototype.shift = function () {};
 SignalArray.prototype.reverse = function () {};
 
 /**
- * @param {function(T,T): number=} compareFn
+ * @param {function(T, T): number=} compareFn
  * @returns {void}
  */
 SignalArray.prototype.sort = function (compareFn) {};

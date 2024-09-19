@@ -1,6 +1,7 @@
 import { signal, computed, effect } from "@preact/signals-core";
 import { array } from "./dist/array.js";
-import { compute } from "./dist/index.js";
+import { value, compute, batch } from "./dist/index.js";
+import S from "s-js";
 
 function createArray() {
   return [...new Array(50).keys()].slice(1);
@@ -79,10 +80,47 @@ function benchAnod() {
   console.log("Anod. Runs: " + runs + ", Time: " + (performance.now() - start));
 }
 
+// var v1 = signal(1);
+// var c1 = computed(function () {
+//   console.log("v1", v1.value);
+//   if (v1.value === 3) {
+//     throw new Error("oh no");
+//   }
+//   return v1.peek();
+// });
+// batch(function() {
+//   console.log("c1", c1.value);
+//   v1.value = 3;
+//   v1.value = 2;
+//   v1.value = 4;
+// });
+// console.log("here")
+// console.log("c1", c1.value);
+
+var v1 = value(1);
+var c1 = compute(function () {
+  console.log("v1", v1.peek());
+  if (v1.val() === 3) {
+    throw new Error("oh no");
+  }
+  return v1.peek();
+});
+try {
+  v1.update(3);
+} catch(err) {
+}
+batch(function() {
+  // console.log("c1", c1.val());
+  v1.update(2);
+});
+console.log("here")
+console.log("c1", c1.val());
+
+
 for (var i = 0; i < 10; i++) {
-  benchPreact();
+  // benchPreact();
 }
 
 for (var i = 0; i < 10; i++) {
-  benchAnod();
+  // benchAnod();
 }

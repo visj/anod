@@ -1,4 +1,4 @@
-import { root, compute, value } from "anod";
+import { root, effect, value } from "anod";
 
 function now() {
   return performance.now();
@@ -162,31 +162,31 @@ function createComputations1000to1(n, sources) {
 }
 
 function createComputation0(i) {
-  compute(function () {
+  effect(function () {
     return i;
   });
 }
 
 function createComputation1(s1) {
-  compute(function () {
+  effect(function () {
     return s1.val();
   });
 }
 
 function createComputation2(s1, s2) {
-  compute(function () {
+  effect(function () {
     return s1.val() + s2.val();
   });
 }
 
 function createComputation4(s1, s2, s3, s4) {
-  compute(function () {
+  effect(function () {
     return s1.val() + s2.val() + s3.val() + s4.val();
   });
 }
 
 function createComputation1000(ss, offset) {
-  compute(function () {
+  effect(function () {
     var sum = 0;
     for (var i = 0; i < 1000; i++) {
       sum += ss[offset + i].val();
@@ -197,7 +197,7 @@ function createComputation1000(ss, offset) {
 
 function updateComputations1to1(n, sources) {
   var s1 = sources[0];
-  compute(function () {
+  effect(function () {
     return s1.val();
   });
   for (var i = 0; i < n; i++) {
@@ -208,7 +208,7 @@ function updateComputations1to1(n, sources) {
 function updateComputations2to1(n, sources) {
   var s1 = sources[0],
     s2 = sources[1];
-  compute(function () {
+  effect(function () {
     return s1.val() + s2.val();
   });
   for (var i = 0; i < n; i++) {
@@ -221,7 +221,7 @@ function updateComputations4to1(n, sources) {
     s2 = sources[1],
     s3 = sources[2],
     s4 = sources[3];
-  compute(function () {
+  effect(function () {
     return s1.val() + s2.val() + s3.val() + s4.val();
   });
   for (var i = 0; i < n; i++) {
@@ -231,7 +231,7 @@ function updateComputations4to1(n, sources) {
 
 function updateComputations1000to1(n, sources) {
   var s1 = sources[0];
-  compute(function () {
+  effect(function () {
     var sum = 0;
     for (var i = 0; i < 1000; i++) {
       sum += sources[i].val();
@@ -245,10 +245,10 @@ function updateComputations1000to1(n, sources) {
 
 function updateComputations1to2(n, sources) {
   var s1 = sources[0];
-  compute(function () {
+  effect(function () {
     return s1.val();
   });
-  compute(function () {
+  effect(function () {
     return s1.val();
   });
   for (var i = 0; i < n / 2; i++) {
@@ -258,16 +258,16 @@ function updateComputations1to2(n, sources) {
 
 function updateComputations1to4(n, sources) {
   var s1 = sources[0];
-  compute(function () {
+  effect(function () {
     return s1.val();
   });
-  compute(function () {
+  effect(function () {
     return s1.val();
   });
-  compute(function () {
+  effect(function () {
     return s1.val();
   });
-  compute(function () {
+  effect(function () {
     return s1.val();
   });
   for (var i = 0; i < n / 4; i++) {
@@ -278,7 +278,7 @@ function updateComputations1to4(n, sources) {
 function updateComputations1to1000(n, sources) {
   var s1 = sources[0];
   for (var i = 0; i < 1000; i++) {
-    compute(function () {
+    effect(function () {
       return s1.val();
     });
   }

@@ -38,10 +38,11 @@ export function run(anod) {
         test("does not throw if set to the same value twice in a computation", function () {
             anod.root(function () {
                 var s1 = anod.value(1);
-                anod.compute(function () {
+                var c1 = anod.compute(function () {
                     s1.update(2);
                     s1.update(2);
                 });
+                c1.val();
                 assert(s1.val(), 2);
             });
         });

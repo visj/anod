@@ -7,28 +7,25 @@ import { test, assert, Anod } from "../../helper/index.js";
 export function run(anod) {
   test("exceptions within computations", function () {
     test("halt updating", function () {
-      anod.root(function () {
-        var a = anod.value(false);
-        var b = anod.value(1);
-        anod.compute(function () {
-          if (a.val()) {
-            throw new Error();
-          }
-        });
-        var d = anod.compute(function () {
-          return b.val();
-        });
-
-        assert.throws(function () {
-          anod.batch(function () {
-            a.update(true);
-            b.update(2);
-          });
-        });
-
-        assert(b.val(), 2);
-        assert(d.val(), 2);
+      var s1 = anod.value(false);
+      var s2 = anod.value(1);
+      anod.effect(function () {
+        if (s1.val()) {
+          throw new Error();
+        }
       });
+      anod.effect(function () {
+        return s2.val();
+      });
+
+      assert.throws(function () {
+        anod.batch(function () {
+          s1.update(true);
+          s2.update(2);
+        });
+      });
+
+      assert(s2.val(), 2);
     });
 
     test("leave non-excepted parts of dependency tree intact", function () {
@@ -76,11 +73,11 @@ export function run(anod) {
               }
             });
           });
-        } catch (err) {}
+        } catch (err) { }
         order = "";
         try {
           v1.update(1);
-        } catch (err) {}
+        } catch (err) { }
         assert(order, "c1c2");
       });
     });

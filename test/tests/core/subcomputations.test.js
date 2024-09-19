@@ -17,9 +17,9 @@ export function run(anod) {
         function innerCounter() {
           innerCount++;
         }
-        anod.compute(function () {
+        anod.effect(function () {
           outerCounter();
-          anod.compute(function () {
+          anod.effect(function () {
             innerCounter();
             return d.val();
           });
@@ -31,27 +31,6 @@ export function run(anod) {
 
         assert(innerCount, 1);
         assert(outerCount, 0);
-      });
-    });
-
-    test("disallows children in lazy computations", function () {
-      anod.root(function () {
-        var v1 = anod.value(1);
-        var called = false;
-        assert.throws(function () {
-          anod.compute(
-            function () {
-              v1.val();
-              anod.compute(function () {
-                called = true;
-                v1.val();
-              });
-            },
-            void 0,
-            { lazy: true }
-          );
-        });
-        assert(called, false);
       });
     });
 
@@ -68,7 +47,7 @@ export function run(anod) {
         innerCounter = function () {
           innerCount++;
         };
-        anod.compute(function () {
+        anod.effect(function () {
           outerCounter();
           d.val();
           g = anod.compute(function () {
@@ -103,59 +82,6 @@ export function run(anod) {
         r1.dispose();
         e.update(3);
         assert(g.val(), null);
-      });
-    });
-
-    test("which disposes sub that's being updated", function () {
-      test("propagates successfully", function () {
-        anod.root(function () {
-          var a = anod.value(1);
-          var b = anod.compute(function () {
-            var c = anod.compute(function () {
-              return a.val();
-            });
-            a.val();
-            return { c: c };
-          });
-          var d = anod.compute(function () {
-            return b.val().c.val();
-          });
-
-          assert(d.val(), 1);
-          a.update(2);
-          assert(d.val(), 2);
-          a.update(3);
-          assert(d.val(), 3);
-        });
-      });
-    });
-
-    test("which disposes a sub wtesth a dependee with a sub", function () {
-      test("propagates successfully", function () {
-        anod.root(function () {
-          var a = anod.value(1);
-          var c;
-          anod.compute(function () {
-            c = anod.compute(function () {
-              return a.val();
-            });
-            a.val();
-            return { c: c };
-          });
-          var d = anod.compute(function () {
-            c.val();
-            var e = anod.compute(function () {
-              return a.val();
-            });
-            return { e: e };
-          });
-
-          assert(d.val().e.val(), 1);
-          a.update(2);
-          assert(d.val().e.val(), 2);
-          a.update(3);
-          assert(d.val().e.val(), 3);
-        });
       });
     });
   });

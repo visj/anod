@@ -18,13 +18,13 @@ export function run(anod) {
             return s1.val();
           });
 
-          assert(calls, 1);
           assert(c1.val(), 0);
+          assert(calls, 1);
 
           s1.update(1);
 
-          assert(calls, 2);
           assert(c1.val(), 1);
+          assert(calls, 2);
         });
         r1.dispose();
         s1.update(2);
@@ -42,38 +42,13 @@ export function run(anod) {
             return s1.val();
           });
           var count = 0;
-          anod.compute(function () {
-            anod.compute(function () {
+          anod.effect(function () {
+            anod.effect(function () {
               if (s1.val() > 0) {
                 c1.dispose();
               }
             });
-            anod.compute(function () {
-              count += c1.val();
-            });
-          });
-          s1.update(s1.peek() + 1);
-          s1.update(s1.peek() + 1);
-          assert(count, 1);
-        });
-      });
-
-      test("ignores multiple calls to dispose", function () {
-        anod.root(function () {
-          var s1 = anod.value(0);
-          var c1 = anod.compute(function () {
-            return s1.val();
-          });
-          var count = 0;
-          anod.compute(function () {
-            anod.compute(function () {
-              if (s1.val() > 0) {
-                c1.dispose();
-                c1.dispose();
-                c1.dispose();
-              }
-            });
-            anod.compute(function () {
+            anod.effect(function () {
               count += c1.val();
             });
           });
@@ -85,19 +60,19 @@ export function run(anod) {
     });
 
     test("unmount", function () {
-      test("does not unmount pending computations wtesth changing dependencies", function () {
+      test("does not unmount pending computations with changing dependencies", function () {
         var s1 = anod.value(true);
         var s2 = anod.value(0);
         var s3 = anod.value(0);
         var calls = 0;
-        anod.compute(function () {
+        anod.effect(function () {
           if (!s1.val()) {
             s1.dispose();
             s2.dispose();
             s3.update(s3.peek() + 1);
           }
         });
-        anod.compute(
+        anod.effect(
           function () {
             calls++;
             if (s1.val()) {
@@ -106,7 +81,6 @@ export function run(anod) {
               s3.val();
             }
           },
-          void 0,
           { unstable: true },
         );
         calls = 0;

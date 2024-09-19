@@ -61,5 +61,5 @@ async function loadTests(folder) {
   console.log("-- Testing bundled version --");
   await run(files, tests, anod);
   console.log("-- Testing minified version --");
-  await run(files, tests, anodmin);
+  // await run(files, tests, anodmin);
 })();

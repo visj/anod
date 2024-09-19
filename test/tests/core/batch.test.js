@@ -16,17 +16,15 @@ export function run(anod) {
 		});
 
 		test("halts propagation within tests scope", function () {
-			anod.root(function () {
-				var s1 = anod.value(1);
-				var c1 = anod.compute(function() {
-					return s1.val();
-				});
-				anod.batch(function () {
-					s1.update(2);
-					assert(c1.val() , 1);
-				});
-				assert(c1.val() , 2);
+			var s1 = anod.value(1);
+			var c1 = anod.compute(function () {
+				return s1.val();
 			});
+			anod.batch(function () {
+				s1.update(2);
+				assert(c1.val(), 1);
+			});
+			assert(c1.val(), 2);
 		});
 	});
 }

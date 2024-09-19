@@ -9,12 +9,12 @@ export var Anod;
 /**
  *
  * @param {string} msg
- * @param {function(): Promise} callback
+ * @param {function(): void} callback
  */
-export async function test(msg, callback) {
+export function test(msg, callback) {
     try {
         MESSAGES.push(msg);
-        await callback();
+        callback();
     } catch (err) {
         console.error(MESSAGES.join(" -> ") + ": " + err.message);
     } finally {

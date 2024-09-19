@@ -12,12 +12,12 @@ export function run(anod) {
                 var innerTrigger = anod.value(0);
                 var innerRuns = 0;
 
-                anod.compute(function () {
+                anod.effect(function () {
                     // register dependency to outer trigger
                     outerTrigger.val();
                     // inner computation
                     anod.root(function () {
-                        anod.compute(function () {
+                        anod.effect(function () {
                             // register dependency on inner trigger
                             innerTrigger.val();
                             // count total runs
