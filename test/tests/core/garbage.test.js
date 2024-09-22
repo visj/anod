@@ -1,59 +1,55 @@
-import { test, assert, Anod } from "../../helper/index.js";
+import { test, assert, context, Anod } from "../../helper/index.js";
 
 /**
  *
  * @param {Anod} anod
  */
-export async function run(anod) {
+export function run(anod) {
   if (global.gc) {
-    /**
-     *
-     * @param {function(): void} callback
-     */
+    var { value, compute } = anod;
+
     function collect(callback) {
-      setTimeout(function () {
+      setTimeout(function() {
         global.gc();
         callback();
       });
     }
 
-    await test("garbage collection", async function () {
-      await test("should not be collected when referenced", function () {
-        var d1 = anod.value(1);
+    test("garbage collection", function () {
+
+      test("should not be collected when referenced", function () {
+        var s1 = value(1);
         var ref = new WeakRef(
-          anod.compute(function () {
-            d1.val();
+          compute(function () {
+            s1.val();
           }),
         );
-        return new Promise(function(resolve) {
-          collect(function () {
-            assert(ref.deref() !== void 0, true);
-            resolve();
-          });
-        })
+        global.gc();
+        assert(ref.deref() !== void 0, true);
       });
 
-      await test("should be collected when disposed", async function () {
+      test("should be collected when disposed", function () {
         var s1 = anod.value(1);
         var c1 = new WeakRef(
           anod.compute(function () {
             s1.val();
           }),
         );
+        c1.deref().val();
         s1.dispose();
-        return new Promise(function(resolve) {
-          collect(function () {
+        var restore = context();
+        collect(function() {
+          restore(function() {
             assert(c1.deref(), void 0);
-            resolve();
           });
-        });
+        })
       });
 
-      await test("should be collected when only referenced locally", function () {
+      test("should be collected when only referenced locally", function () {
         function local() {
-          var s1 = new WeakRef(anod.value(1));
+          var s1 = new WeakRef(value(1));
           var c1 = new WeakRef(
-            anod.compute(function () {
+            compute(function () {
               return s1.deref().val();
             }),
           );
@@ -61,11 +57,12 @@ export async function run(anod) {
         }
         var { s1, c1 } = local();
         assert(c1.deref().val(), 1);
-        return new Promise(function(resolve) {
-          collect(function () {
+        s1.deref().dispose();
+        var restore = context();
+        collect(function() {
+          restore(function() {
             assert(s1.deref(), void 0);
             assert(c1.deref(), void 0);
-            resolve();
           });
         });
       });

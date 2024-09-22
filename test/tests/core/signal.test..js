@@ -12,7 +12,7 @@ export function run(anod) {
 
         test("can be set by passing in a new value", function () {
             var d = anod.value(1);
-            d.update(2);
+            d.set(2);
             assert(d.val() , 2);
         });
 
@@ -26,7 +26,7 @@ export function run(anod) {
                 });
 
                 assert(f.val() , 1);
-                d.update(1);
+                d.set(1);
                 assert(f.val() , 1);
             });
         });
@@ -41,9 +41,9 @@ export function run(anod) {
                 });
 
                 assert(f.val() , 1);
-                d.update(1);
+                d.set(1);
                 assert(f.val() , 1);
-                d.update(2);
+                d.set(2);
                 assert(f.val() , 2);
             });
         });
@@ -60,9 +60,9 @@ export function run(anod) {
                 });
 
                 assert(f.val() , 1);
-                d.update([1]);
+                d.set([1]);
                 assert(f.val() , 1);
-                d.update([2]);
+                d.set([2]);
                 assert(f.val() , 2);
             });
         });

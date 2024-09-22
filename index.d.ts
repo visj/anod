@@ -1,3 +1,11 @@
+export interface Context {
+  _idle: boolean,
+  _owner: RootSignal | null,
+  _listen: ReadonlySignal | null
+}
+
+export declare var CONTEXT: Context;
+
 export interface RootSignal {
 
   /**
@@ -22,10 +30,18 @@ export declare var Root: {
   readonly prototype: RootSignal;
 };
 
+export declare var Effect: {
+  new <T = any>(
+    fn: () => void,
+    opts?: SignalOptions<T>
+  ): RootSignal;
+  readonly prototype: RootSignal;
+};
+
 export declare var Compute: {
   new <T = any, U = any>(
     fn: (prev: T, args: U) => T,
-    opts: SignalOptions<T>
+    opts?: SignalOptions<T>
   ): ReadonlySignal<T>;
   readonly prototype: ReadonlySignal;
 };
@@ -35,7 +51,7 @@ export interface Signal<T = any> extends ReadonlySignal<T> {
    *
    * @param val
    */
-  update(val: T): void;
+  set(val: T): void;
 }
 
 export declare var Data: {
@@ -47,7 +63,6 @@ export declare var Data: {
 };
 
 export interface SignalOptions<T> {
-  eager?: boolean;
   unstable?: boolean;
 }
 

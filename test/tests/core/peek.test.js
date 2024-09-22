@@ -5,59 +5,60 @@ import { test, assert, Anod } from "../../helper/index.js";
  * @param {Anod} anod
  */
 export function run(anod) {
+    var { value, compute, effect, sample } = anod;
+    
     test("peek", function () {
-
         test("returns the value of a data", function () {
-            anod.root(function() {
-                var d = anod.value(1);
-                assert(d.peek() , 1);
-            });
+            var s1 = value(1);
+            assert(s1.peek(), 1);
         });
 
         test("avoids a dedendency", function () {
-            anod.root(function () {
-                var a = anod.value(1);
-                var b = anod.value(2);
-                var c = anod.value(3);
-                var d = 0;
+            var s1 = anod.value(1);
+            var s2 = anod.value(2);
+            var s3 = anod.value(3);
+            var count = 0;
 
-                anod.compute(function () {
-                    d++;
-                    a.val();
-                    b.peek();
-                    c.val();
-                });
-
-                assert(d , 1);
-                b.update(4);
-                assert(d , 1);
-                a.update(5);
-                c.update(6);
-                assert(d , 3);
+            var c1 = compute(function () {
+                count++;
+                s1.val();
+                s2.peek();
+                s3.val();
             });
+            effect(function () {
+                c1.val();
+            });
+            assert(count, 1);
+            s1.set(5);
+            assert(count, 2);
+            s2.set(4);
+            assert(count, 2);
+            s3.set(6);
+            assert(count, 3);
         });
 
-        test("can take computed values", function() {
-            anod.root(function () {
-                var a = anod.value(1);
-                var b = anod.value(2);
-                var c = anod.value(3);
-                var d = 0;
+        test("can take computed values", function () {
+            var s1 = anod.value(1);
+            var s2 = anod.value(2);
+            var s3 = anod.value(3);
+            var count = 0;
 
-                anod.compute(function () {
-                    d++;
-                    a.val();
-                    anod.sample(function() {
-                        a.val(); b.val();
-                    });
-                    c.val();
+            var c1 = compute(function () {
+                count++;
+                s1.val();
+                sample(function () {
+                    s1.val(); s2.val();
                 });
-                assert(d , 1);
-                b.update(4);
-                assert(d , 1);
-                a.update(5);
-                assert(d , 2);
+                s3.val();
             });
+            effect(function() {
+                c1.val();
+            });
+            assert(count, 1);
+            s2.set(4);
+            assert(count, 1);
+            s1.set(5);
+            assert(count, 2);
         });
     });
 }

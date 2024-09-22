@@ -21,13 +21,13 @@ export function run(anod) {
           assert(c1.val(), 0);
           assert(calls, 1);
 
-          s1.update(1);
+          s1.set(1);
 
           assert(c1.val(), 1);
           assert(calls, 2);
         });
         r1.dispose();
-        s1.update(2);
+        s1.set(2);
 
         assert(calls, 2);
         assert(c1.val(), null);
@@ -52,8 +52,8 @@ export function run(anod) {
               count += c1.val();
             });
           });
-          s1.update(s1.peek() + 1);
-          s1.update(s1.peek() + 1);
+          s1.set(s1.peek() + 1);
+          s1.set(s1.peek() + 1);
           assert(count, 1);
         });
       });
@@ -69,7 +69,7 @@ export function run(anod) {
           if (!s1.val()) {
             s1.dispose();
             s2.dispose();
-            s3.update(s3.peek() + 1);
+            s3.set(s3.peek() + 1);
           }
         });
         anod.effect(
@@ -84,7 +84,7 @@ export function run(anod) {
           { unstable: true },
         );
         calls = 0;
-        s1.update(false);
+        s1.set(false);
         assert(calls, 2);
       });
     });

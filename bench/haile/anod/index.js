@@ -201,7 +201,7 @@ function updateComputations1to1(n, sources) {
     return s1.val();
   });
   for (var i = 0; i < n; i++) {
-    s1.update(i);
+    s1.set(i);
   }
 }
 
@@ -212,7 +212,7 @@ function updateComputations2to1(n, sources) {
     return s1.val() + s2.val();
   });
   for (var i = 0; i < n; i++) {
-    s1.update(i);
+    s1.set(i);
   }
 }
 
@@ -225,7 +225,7 @@ function updateComputations4to1(n, sources) {
     return s1.val() + s2.val() + s3.val() + s4.val();
   });
   for (var i = 0; i < n; i++) {
-    s1.update(i);
+    s1.set(i);
   }
 }
 
@@ -239,7 +239,7 @@ function updateComputations1000to1(n, sources) {
     return sum;
   });
   for (var i = 0; i < n; i++) {
-    s1.update(i);
+    s1.set(i);
   }
 }
 
@@ -252,7 +252,7 @@ function updateComputations1to2(n, sources) {
     return s1.val();
   });
   for (var i = 0; i < n / 2; i++) {
-    s1.update(i);
+    s1.set(i);
   }
 }
 
@@ -271,7 +271,7 @@ function updateComputations1to4(n, sources) {
     return s1.val();
   });
   for (var i = 0; i < n / 4; i++) {
-    s1.update(i);
+    s1.set(i);
   }
 }
 
@@ -283,6 +283,6 @@ function updateComputations1to1000(n, sources) {
     });
   }
   for (var i = 0; i < n / 1000; i++) {
-    s1.update(i);
+    s1.set(i);
   }
 }

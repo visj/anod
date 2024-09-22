@@ -35,6 +35,19 @@ export function assert(v1, v2) {
   PASS++;
 }
 
+export function context() {
+    var slice = MESSAGES.slice();
+    return function(callback) {
+        var messages = MESSAGES;
+        MESSAGES = slice;
+        try {
+            callback();
+        } finally {
+            MESSAGES = messages;
+        }
+    }
+}
+
 /**
  * @param {function(): void} callback
  */
@@ -53,11 +66,10 @@ assert.throws = function(callback) {
 }
 
 export function report() {
-    console.log("Executed " + (PASS + FAIL) + " asserts.");
     if (FAIL > 0) {
         console.error("\nFail: " + FAIL + "\nPass: " + PASS);
     } else {
-        console.log("Pass: " + PASS);
+        console.log("\nPass: " + PASS);
     }
-    FAIL = PASS = 0;
+    console.log("Total: " + (PASS + FAIL));
 }

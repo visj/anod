@@ -37,18 +37,13 @@ function Signal() {}
  * @param {T} val
  * @returns {void}
  */
-Signal.prototype.update = function (val) {};
+Signal.prototype.set = function (val) {};
 
 /**
  * @record
  * @template T
  */
 function SignalOptions() {}
-
-/**
- * @type {boolean | undefined}
- */
-SignalOptions.prototype.eager;
 
 /**
  * @type {boolean | undefined}

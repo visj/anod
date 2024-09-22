@@ -5,10 +5,11 @@ import { test, assert, Anod } from "../../helper/index.js";
  * @param {Anod} anod
  */
 export function run(anod) {
+  var { value, effect, compute } = anod;
   test("subcomputations", function () {
     test("does not register a dependency on the subcomputation", function () {
       anod.root(function () {
-        var d = anod.value(1);
+        var d = value(1);
         var outerCount = 0;
         var innerCount = 0;
         function outerCounter() {
@@ -17,9 +18,9 @@ export function run(anod) {
         function innerCounter() {
           innerCount++;
         }
-        anod.effect(function () {
+        effect(function () {
           outerCounter();
-          anod.effect(function () {
+          effect(function () {
             innerCounter();
             return d.val();
           });
@@ -27,7 +28,7 @@ export function run(anod) {
 
         outerCount = innerCount = 0;
 
-        d.update(2);
+        d.set(2);
 
         assert(innerCount, 1);
         assert(outerCount, 0);
@@ -47,16 +48,18 @@ export function run(anod) {
         innerCounter = function () {
           innerCount++;
         };
-        anod.effect(function () {
+        effect(function () {
           outerCounter();
           d.val();
-          g = anod.compute(function () {
+          g = compute(function () {
             innerCounter();
             return e.val();
           });
         });
         h = g;
-        h.val();
+        effect(function() {
+          h.val();
+        });
       }
 
       test("creates child on intestialization", function () {
@@ -69,7 +72,7 @@ export function run(anod) {
       test("does not depend on child's dependencies", function () {
         anod.root(function () {
           init();
-          e.update(3);
+          e.set(3);
           assert(outerCount, 1);
           assert(innerCount, 2);
         });
@@ -80,7 +83,7 @@ export function run(anod) {
           init();
         });
         r1.dispose();
-        e.update(3);
+        e.set(3);
         assert(g.val(), null);
       });
     });

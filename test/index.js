@@ -37,13 +37,11 @@ async function assertCount(tests) {
  *
  * @param {Anod} anod
  */
-async function run(files, tests, anod) {
-  console.log("Expected " + (await assertCount(files)) + " asserts.");
+function run(tests, anod) {
   for (let i = 0; i < tests.length; i++) {
     const test = tests[i];
-    await test.run(anod);
+    test.run(anod);
   }
-  report();
 }
 
 async function loadTests(folder) {
@@ -52,14 +50,14 @@ async function loadTests(folder) {
 }
 
 (async function () {
+  process.on("exit", report);
   const files = (
     await Promise.all([loadTests("core"), loadTests("array")])
   ).flat();
   const tests = await Promise.all(
     files.map((file) => import(path.join(TEST_FOLDER, file)))
   );
-  console.log("-- Testing bundled version --");
-  await run(files, tests, anod);
-  console.log("-- Testing minified version --");
-  // await run(files, tests, anodmin);
+  console.log("Expect " + (2 * (await assertCount(files))) + " asserts.");
+  run(tests, anod);
+  run(tests, anodmin);
 })();

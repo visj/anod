@@ -21,11 +21,11 @@ export function run(anod) {
       c2.val();
       assert(order, "c2c1");
       order = "";
-      d1.update(1);
+      d1.set(1);
       c2.val();
       assert(order, "c1");
       order = "";
-      d1.update(d1.peek() + 1);
+      d1.set(d1.peek() + 1);
       c2.val();
       assert(order, "c1c2");
     });
@@ -50,7 +50,7 @@ export function run(anod) {
         });
       });
       order = "";
-      d1.update(1);
+      d1.set(1);
       assert(order, "c1cl1e1e2");
     });
 
@@ -80,7 +80,7 @@ export function run(anod) {
           c4.val();
           c3.val();
         });
-        d1.update(d1.peek() + 1);
+        d1.set(d1.peek() + 1);
         assert(count, 1);
       });
     });

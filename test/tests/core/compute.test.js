@@ -5,91 +5,69 @@ import { test, assert, Anod } from "../../helper/index.js";
  * @param {Anod} anod
  */
 export function run(anod) {
+  var { value, compute } = anod;
   test("compute", function () {
-    test("creation", function () {
-      test("returns initial value of wrapped function", function () {
-        anod.root(function () {
-          var c1 = anod.compute(function () {
-            return 1;
-          });
-          assert(c1.val(), 1);
-        });
+    test("returns initial value of wrapped function", function () {
+      var c1 = compute(function () {
+        return 1;
       });
+      assert(c1.val(), 1);
     });
 
-    test("evaluation", function () {
-      test("occurs once when called", function () {
-        anod.root(function () {
-          var calls = 0;
-          var c1 = anod.compute(function () {
-            calls++;
-          });
-          assert(calls, 0);
-          c1.val();
-          assert(calls, 1);
-        });
+    test("does not run until read", function () {
+      var calls = 0;
+      var c1 = compute(function () {
+        calls++;
       });
-
-      test("does not re-occur when read", function () {
-        anod.root(function () {
-          var calls = 0;
-          var c1 = anod.compute(function () {
-            calls++;
-          });
-
-          c1.val();
-          c1.val();
-          c1.val();
-
-          assert(calls, 1);
-        });
-      });
+      assert(calls, 0);
+      c1.val();
+      assert(calls, 1);
     });
 
-    test("with a dependency on an data", function () {
+    test("does not re-occur when read", function () {
+      var calls = 0;
+      var c1 = compute(function () {
+        calls++;
+      });
+      c1.val();
+      c1.val();
+      c1.val();
+      assert(calls, 1);
+    });
+
+    test("with a dependency on signal", function () {
       test("updates when data is set", function () {
-        anod.root(function () {
-          var s1 = anod.value(1);
-          var fevals = 0;
-          var c1 = anod.compute(function () {
-            fevals++;
-            s1.val();
-          });
-
-          fevals = 0;
-
-          s1.update(s1.peek() + 1);
-          c1.val();
-          assert(fevals, 1);
+        var s1 = value(1);
+        var count = 0;
+        var c1 = compute(function () {
+          count++;
+          return s1.val();
         });
+        count = 0;
+        s1.set(2);
+        assert(c1.val(), 2);
+        assert(count, 1);
       });
 
       test("does not update when data is read", function () {
-        anod.root(function () {
-          var s1 = anod.value(1);
-          var evals = 0;
-          anod.compute(function () {
-            evals++;
-            s1.val();
-          });
-
-          evals = 0;
-
-          s1.val();
-          assert(evals, 0);
+        var s1 = value(1);
+        var count = 0;
+        compute(function () {
+          count++;
+          return s1.val();
         });
+        count = 0;
+        s1.val();
+        assert(count, 0);
       });
 
       test("updates return value", function () {
-        anod.root(function () {
-          var s1 = anod.value(1);
-          var c1 = anod.compute(function () {
-            return s1.val();
-          });
-
-          s1.update(2);
-          assert(c1.val(), 2);
+        var s1 = value(1);
+        var c1 = compute(function () {
+          return s1.val();
         });
+        s1.set(2);
+        assert(c1.val(), 2);
       });
     });
 
@@ -118,7 +96,7 @@ export function run(anod) {
       test("updates on active dependencies", function () {
         anod.root(function () {
           init();
-          s2.update(5);
+          s2.set(5);
           assert(c1.val(), 5);
           assert(evals, 1);
         });
@@ -127,7 +105,7 @@ export function run(anod) {
       test("does not update on inactive dependencies", function () {
         anod.root(function () {
           init();
-          s3.update(5);
+          s3.set(5);
           assert(evals, 0);
           assert(c1.val(), 1);
         });
@@ -136,9 +114,9 @@ export function run(anod) {
       test("deactivates obsolete dependencies", function () {
         anod.root(function () {
           init();
-          s1.update(false);
+          s1.set(false);
           evals = 0;
-          s2.update(5);
+          s2.set(5);
           assert(evals, 0);
         });
       });
@@ -146,9 +124,9 @@ export function run(anod) {
       test("activates new dependencies", function () {
         anod.root(function () {
           init();
-          s1.update(false);
+          s1.set(false);
           evals = 0;
-          s3.update(5);
+          s3.set(5);
           c1.val();
           assert(evals, 1);
         });
@@ -166,7 +144,7 @@ export function run(anod) {
           });
           c1.val();
           calls = 0;
-          s1.update(2);
+          s1.set(2);
           c1.val();
           assert(calls, 0);
         });
@@ -226,7 +204,7 @@ export function run(anod) {
       test("occurs when computation updates", function () {
         anod.root(function () {
           init();
-          s1.update(2);
+          s1.set(2);
           assert(c2.val(), 2);
           assert(callsOne, 1);
           assert(callsTwo, 1);
@@ -242,7 +220,7 @@ export function run(anod) {
             return c1 ? c1.val() : s1.val();
           }, 0);
           assert.throws(function () {
-            s1.update(0);
+            s1.set(0);
             c1.val();
           });
         });
@@ -276,7 +254,7 @@ export function run(anod) {
             calls += "c3";
           });
           calls = "";
-          s1.update(s1.peek() + 1);
+          s1.set(s1.peek() + 1);
           c3.val();
           assert(calls, "c1c2c3");
         });
@@ -315,7 +293,7 @@ export function run(anod) {
             return c1.val() + c2.val() + c3.val() + c4.val() + c5.val();
           });
           calls = 0;
-          s1.update(s1.peek() + 1);
+          s1.set(s1.peek() + 1);
           c6.val();
           assert(calls, 1);
         });
@@ -363,7 +341,7 @@ export function run(anod) {
           });
 
           calls = 0;
-          s1.update(s1.peek() + 1);
+          s1.set(s1.peek() + 1);
           c7.val();
           assert(calls, 1);
         });

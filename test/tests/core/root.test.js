@@ -30,14 +30,14 @@ export function run(anod) {
                 assert(innerRuns , 1);
 
                 // trigger the outer computation, making more inners
-                outerTrigger.update(outerTrigger.peek() + 1);
-                outerTrigger.update(outerTrigger.peek() + 1);
+                outerTrigger.set(outerTrigger.peek() + 1);
+                outerTrigger.set(outerTrigger.peek() + 1);
 
                 assert(innerRuns , 3);
 
                 // now trigger inner value: three orphaned computations should equal three runs
                 innerRuns = 0;
-                innerTrigger.update(innerTrigger.peek() + 1);
+                innerTrigger.set(innerTrigger.peek() + 1);
 
                 assert(innerRuns , 3);
             });
@@ -50,11 +50,11 @@ export function run(anod) {
 
                 assert(c.val() , 1);
 
-                s.update(2);
+                s.set(2);
 
                 assert(c.val() , 2);
 
-                s.update(3);
+                s.set(3);
 
                 assert(c.val() , 3);
             });
@@ -64,9 +64,9 @@ export function run(anod) {
             anod.root(function() {
                 var s = anod.value(1);
                 anod.compute(function() { s.val(); });
-                s.update(2);
+                s.set(2);
                 var c2 = anod.compute(function(){ return s.val(); });
-                s.update(3);
+                s.set(3);
                 assert(c2.val() , 3);
             });
         });
