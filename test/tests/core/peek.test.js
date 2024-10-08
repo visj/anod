@@ -14,9 +14,9 @@ export function run(anod) {
         });
 
         test("avoids a dedendency", function () {
-            var s1 = anod.value(1);
-            var s2 = anod.value(2);
-            var s3 = anod.value(3);
+            var s1 = value(1);
+            var s2 = value(2);
+            var s3 = value(3);
             var count = 0;
 
             var c1 = compute(function () {
@@ -38,16 +38,17 @@ export function run(anod) {
         });
 
         test("can take computed values", function () {
-            var s1 = anod.value(1);
-            var s2 = anod.value(2);
-            var s3 = anod.value(3);
+            var s1 = value(1);
+            var s2 = value(2);
+            var s3 = value(3);
             var count = 0;
 
             var c1 = compute(function () {
                 count++;
                 s1.val();
                 sample(function () {
-                    s1.val(); s2.val();
+                    s1.val();
+                    s2.val();
                 });
                 s3.val();
             });

@@ -5,69 +5,71 @@ import { test, assert, Anod } from "../../helper/index.js";
  * @param {Anod} anod
  */
 export function run(anod) {
+    var { value, root, effect, compute } = anod;
     test("root", function () {
         test("allows subcomputations to escape their parents", function () {
-            anod.root(function () {
-                var outerTrigger = anod.value(0);
-                var innerTrigger = anod.value(0);
-                var innerRuns = 0;
+            root(function () {
+                var s1 = value(0);
+                var s2 = value(0);
+                var count = 0;
 
                 anod.effect(function () {
                     // register dependency to outer trigger
-                    outerTrigger.val();
+                    s1.val();
                     // inner computation
                     anod.root(function () {
                         anod.effect(function () {
                             // register dependency on inner trigger
-                            innerTrigger.val();
+                            s2.val();
                             // count total runs
-                            innerRuns++;
+                            count++;
                         });
                     });
                 });
 
                 // at start, we have one inner computation, that's run once
-                assert(innerRuns , 1);
+                assert(count, 1);
 
                 // trigger the outer computation, making more inners
-                outerTrigger.set(outerTrigger.peek() + 1);
-                outerTrigger.set(outerTrigger.peek() + 1);
+                s1.set(s1.peek() + 1);
+                s1.set(s1.peek() + 1);
 
-                assert(innerRuns , 3);
+                assert(count, 3);
 
                 // now trigger inner value: three orphaned computations should equal three runs
-                innerRuns = 0;
-                innerTrigger.set(innerTrigger.peek() + 1);
+                count = 0;
+                s2.set(s2.peek() + 1);
 
-                assert(innerRuns , 3);
+                assert(count, 3);
             });
         });
 
         test("does not batch updates when used at top level", function () {
-            anod.root(function() {
-                var s = anod.value(1);
-                var c = anod.compute(function () { return s.val(); });
-
-                assert(c.val() , 1);
-
-                s.set(2);
-
-                assert(c.val() , 2);
-
-                s.set(3);
-
-                assert(c.val() , 3);
+            root(function () {
+                var s1 = value(1);
+                var c1 = compute(function () {
+                    return s1.val();
+                });
+                assert(c1.val(), 1);
+                s1.set(2);
+                assert(c1.val(), 2);
+                s1.set(3);
+                assert(c1.val(), 3);
             });
         });
 
-        test("persists through entire scope when used at top level", function() {
-            anod.root(function() {
-                var s = anod.value(1);
-                anod.compute(function() { s.val(); });
-                s.set(2);
-                var c2 = anod.compute(function(){ return s.val(); });
-                s.set(3);
-                assert(c2.val() , 3);
+        test("persists through entire scope when used at top level", function () {
+            root(function () {
+                var s1 = value(1);
+                effect(function () { 
+                    s1.val();
+                });
+                s1.set(2);
+                var c2 = compute(function () {
+                    return s1.val();
+                });
+                s1.set(3);
+                assert(c2.val(), 3);
             });
         });
     });

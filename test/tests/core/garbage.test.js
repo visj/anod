@@ -24,14 +24,20 @@ export function run(anod) {
             s1.val();
           }),
         );
-        global.gc();
-        assert(ref.deref() !== void 0, true);
+        // Bind dependencies
+        ref.deref().val();
+        var restore = context();
+        collect(function() {
+          restore(function() {
+            assert(ref.deref() !== void 0, true);
+          })
+        });
       });
 
       test("should be collected when disposed", function () {
         var s1 = anod.value(1);
         var c1 = new WeakRef(
-          anod.compute(function () {
+          compute(function () {
             s1.val();
           }),
         );

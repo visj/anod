@@ -5,7 +5,7 @@ import { test, assert, Anod } from "../../helper/index.js";
  * @param {Anod} anod
  */
 export function run(anod) {
-    var { value, effect, compute, cleanup } = anod;
+    var { value, effect, compute, cleanup, root } = anod;
     test("effect", function () {
         test("that modifies signals", function () {
             test("batch data while executing computation", function () {
@@ -166,9 +166,9 @@ export function run(anod) {
             });
 
             test("runs cleanups in reverse order", function () {
-                var s1 = anod.value(1);
+                var s1 = value(1);
                 var seq = "";
-                anod.effect(function () {
+                effect(function () {
                     s1.val();
                     cleanup(function () {
                         seq += "cl1";
@@ -183,12 +183,12 @@ export function run(anod) {
             });
 
             test("is run only once when a computation is disposed", function () {
-                var s1 = anod.value(1);
+                var s1 = value(1);
                 var calls = 0;
-                var r1 = anod.root(function () {
-                    anod.effect(function () {
+                var r1 = root(function () {
+                    effect(function () {
                         s1.val();
-                        anod.cleanup(function () {
+                        cleanup(function () {
                             calls++;
                         });
                     });

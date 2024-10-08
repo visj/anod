@@ -15,12 +15,13 @@ var State = {
   ReceiveMany: 512,
   Updating: 1024,
   Clearing: 2048,
-  Respond: 4096 ,
+  Respond: 4096,
   Compare: 8192,
   Scope: 16384,
   Cleanup: 32768,
-  Unstable: 65536,
-  Initial: 131072,
+  Initial: 65536,
+  Unstable: 131072,
+  Recycle: 162144
 };
 /**
  * @enum {number}
@@ -198,42 +199,51 @@ function reset() {
 }
 
 /**
- * @param {Send} from
- * @param {Receive} to
+ * @param {Send} send
+ * @param {Receive} receive
  * @returns {void}
  */
-function addReceiver(from, to) {
-  var fromslot = -1;
-  var toslot =
-    to._source1 === null ? -1 : to._sources === null ? 0 : to._sources.length;
-  if (from._node1 === null) {
-    from._node1 = to;
-    from._node1slot = toslot;
-    from._state |= State.SendOne;
-  } else if (from._nodes === null) {
-    fromslot = 0;
-    from._nodes = [to];
-    from._nodeslots = [toslot];
-    from._state |= State.SendMany;
+function connect(send, receive) {
+  var sendslot = -1;
+  var receiveslot =
+    receive._source1 === null ? -1 : receive._sources === null ? 0 : receive._sources.length;
+  if (send._node1 === null) {
+    send._node1 = receive;
+    send._node1slot = receiveslot;
+    send._state |= State.SendOne;
+  } else if (send._nodes === null) {
+    sendslot = 0;
+    send._nodes = [receive];
+    send._nodeslots = [receiveslot];
+    send._state |= State.SendMany;
   } else {
-    fromslot = from._nodes.length;
-    from._nodes[fromslot] = to;
-    from._nodeslots[fromslot] = toslot;
-    from._state |= State.SendMany;
+    sendslot = send._nodes.length;
+    send._nodes[sendslot] = receive;
+    send._nodeslots[sendslot] = receiveslot;
+    send._state |= State.SendMany;
   }
-  if (to._source1 === null) {
-    to._source1 = from;
-    to._source1slot = fromslot;
-    to._state |= State.ReceiveOne;
-  } else if (to._sources === null) {
-    to._sources = [from];
-    to._sourceslots = [fromslot];
-    to._state |= State.ReceiveMany;
+  if (receive._source1 === null) {
+    receive._source1 = send;
+    receive._source1slot = sendslot;
+    receive._state |= State.ReceiveOne;
+  } else if (receive._sources === null) {
+    receive._sources = [send];
+    receive._sourceslots = [sendslot];
+    receive._state |= State.ReceiveMany;
   } else {
-    to._sources[toslot] = from;
-    to._sourceslots[toslot] = fromslot;
-    to._state |= State.ReceiveMany;
+    receive._sources[receiveslot] = send;
+    receive._sourceslots[receiveslot] = sendslot;
+    receive._state |= State.ReceiveMany;
   }
+}
+
+/**
+ * @param {Send} send
+ * @param {Receive} receive
+ * @returns {void}
+ */
+function recycle(send, receive) {
+
 }
 
 /**
@@ -256,16 +266,16 @@ function exec() {
  * @returns {void}
  */
 function start() {
+  var time = 0;
   var cycle = 0;
-  for (
-    var time = ++TIME;
+  while (
     CHANGES._count !== 0 ||
     COMPUTES._count !== 0 ||
     EFFECTS._count !== 0 ||
     UPDATES._count !== 0 ||
-    DISPOSES._count !== 0;
-    time = ++TIME
+    DISPOSES._count !== 0
   ) {
+    time = ++TIME;
     if (DISPOSES._count !== 0) {
       drainDispose(DISPOSES);
     }
@@ -579,7 +589,8 @@ extend(Root, Reactive);
 Root.prototype._dispose = function () {
   if (this._state !== State.Disposed) {
     disposeScope(this);
-    this._children = this._cleanups = null;
+    this._children =
+      this._cleanups = null;
     this._state = State.Disposed;
   }
 };
@@ -832,7 +843,7 @@ function clearReceiver(node, time) {
       state = source._state;
       if (
         state & (State.ReceiveOne | State.ReceiveMany) && (
-          (state & State.WillUpdate) || 
+          (state & State.WillUpdate) ||
           (state & State.MayUpdate && source._utime === time)
         )
       ) {
@@ -850,7 +861,7 @@ function clearReceiver(node, time) {
         state = source._state;
         if (
           state & (State.ReceiveOne | State.ReceiveMany) && (
-            (state & State.WillUpdate) || 
+            (state & State.WillUpdate) ||
             (state & State.MayUpdate && source._utime === time)
           )
         ) {
@@ -953,6 +964,7 @@ function Effect(fn, opts) {
    * @type {number}
    */
   this._dtime = 0;
+  var idle = CONTEXT._idle;
   var owner = CONTEXT._owner;
   var listen = CONTEXT._listen;
   if (owner !== null) {
@@ -965,23 +977,17 @@ function Effect(fn, opts) {
     }
   }
   CONTEXT._owner = CONTEXT._listen = this;
-  if (CONTEXT._idle) {
+  if (idle) {
     reset();
     CONTEXT._idle = false;
-    try {
-      this._next();
-      if (CHANGES._count !== 0 || DISPOSES._count !== 0) {
-        start();
-      }
-    } finally {
-      CONTEXT._idle = true;
-      CONTEXT._owner = CONTEXT._listen = null;
-      if (!(this._state & (State.ReceiveOne | State.ReceiveMany))) {
-        this._detach();
-      }
-    }
-  } else {
+  }
+  try {
     this._next();
+    if (idle && (CHANGES._count !== 0 || DISPOSES._count !== 0)) {
+      start();
+    }
+  } finally {
+    CONTEXT._idle = idle;
     CONTEXT._owner = owner;
     CONTEXT._listen = listen;
     if (!(this._state & (State.ReceiveOne | State.ReceiveMany))) {
@@ -1268,7 +1274,7 @@ Compute.prototype.val = function () {
       ) &&
       (listen = CONTEXT._listen) !== null
     ) {
-      addReceiver(this, listen);
+      connect(this, listen);
     }
   }
   return this._value;
@@ -1317,6 +1323,7 @@ Compute.prototype._detach = function () {
 Compute.prototype._update = function (time) {
   this._time = time;
   var state = this._state;
+  var idle = CONTEXT._idle;
   var owner = CONTEXT._owner;
   var listen = CONTEXT._listen;
   CONTEXT._owner = CONTEXT._listen = null;
@@ -1332,23 +1339,17 @@ Compute.prototype._update = function (time) {
     CONTEXT._listen = this;
   }
   var prev = this._value;
-  if (CONTEXT._idle) {
+  if (idle) {
     reset();
     CONTEXT._idle = false;
-    try {
-      this._value = this._next();
-      if (CHANGES._count !== 0 || DISPOSES._count !== 0) {
-        start();
-      }
-    } finally {
-      CONTEXT._idle = true;
-      CONTEXT._owner = CONTEXT._listen = null;
-      if (!(this._state & (State.ReceiveOne | State.ReceiveMany))) {
-        this._detach();
-      }
-    }
-  } else {
+  }
+  try {
     this._value = this._next();
+    if (idle && (CHANGES._count !== 0 || DISPOSES._count !== 0)) {
+      start();
+    }
+  } finally {
+    CONTEXT._idle = idle;
     CONTEXT._owner = owner;
     CONTEXT._listen = listen;
     if (!(this._state & (State.ReceiveOne | State.ReceiveMany))) {
@@ -1502,7 +1503,7 @@ Data.prototype.val = function () {
     ) &&
     (listen = CONTEXT._listen) !== null
   ) {
-    addReceiver(this, listen);
+    connect(this, listen);
   }
   return this._value;
 };
@@ -1712,7 +1713,8 @@ export {
   CONTEXT,
   extend,
   reset,
-  addReceiver,
+  connect,
+  recycle,
   exec,
   start,
   disposeScope,

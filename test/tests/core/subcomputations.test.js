@@ -5,10 +5,10 @@ import { test, assert, Anod } from "../../helper/index.js";
  * @param {Anod} anod
  */
 export function run(anod) {
-  var { value, effect, compute } = anod;
+  var { value, effect, compute, root } = anod;
   test("subcomputations", function () {
     test("does not register a dependency on the subcomputation", function () {
-      anod.root(function () {
+      root(function () {
         var d = value(1);
         var outerCount = 0;
         var innerCount = 0;
@@ -57,29 +57,25 @@ export function run(anod) {
           });
         });
         h = g;
-        effect(function() {
+        effect(function () {
           h.val();
         });
       }
 
-      test("creates child on intestialization", function () {
-        anod.root(function () {
-          init();
-          assert(h.val(), 2);
-        });
+      test("creates child on initialization", function () {
+        init();
+        assert(h.val(), 2);
       });
 
       test("does not depend on child's dependencies", function () {
-        anod.root(function () {
-          init();
-          e.set(3);
-          assert(outerCount, 1);
-          assert(innerCount, 2);
-        });
+        init();
+        e.set(3);
+        assert(outerCount, 1);
+        assert(innerCount, 2);
       });
 
       test("disposes child when test is disposed", function () {
-        var r1 = anod.root(function () {
+        var r1 = root(function () {
           init();
         });
         r1.dispose();

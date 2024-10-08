@@ -5,7 +5,8 @@ import { test, assert, Anod } from "../../helper/index.js";
  * @param {Anod} anod
  */
 export function run(anod) {
-  var { value, compute, batch, effect } = anod;
+  var { value, compute, effect, batch } = anod;
+  
   test("may dispose", function () {
     test("computation", function () {
       test("does not execute pending disposed nodes", function () {
@@ -64,7 +65,7 @@ export function run(anod) {
         });
         c1.val();
         s1.set(1);
-        anod.batch(function () {
+        batch(function () {
           s2.set(1);
           s1.set(2);
         });

@@ -25,7 +25,7 @@ export function test(msg, callback) {
 /**
  * @template T
  * @param {T} v1
- * @param {T | string} v2
+ * @param {T} v2
  */
 export function assert(v1, v2) {
   if (v1 !== v2) {
