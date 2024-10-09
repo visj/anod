@@ -238,15 +238,6 @@ function connect(send, receive) {
 }
 
 /**
- * @param {Send} send
- * @param {Receive} receive
- * @returns {void}
- */
-function recycle(send, receive) {
-
-}
-
-/**
  * @returns {void}
  */
 function exec() {
@@ -370,126 +361,144 @@ Respond.prototype._update = function (time) { };
 
 /**
  * @interface
- * @template T
  */
-function Send() { }
+function SendOne() { }
 
 /**
  * @package
  * @type {Receive | null}
  */
-Send.prototype._node1;
+SendOne.prototype._node1;
 
 /**
  * @package
  * @type {number}
  */
-Send.prototype._node1slot;
+SendOne.prototype._node1slot;
+
+/**
+ * @interface
+ */
+function SendMany() { }
 
 /**
  * @package
  * @type {Array<Receive> | null}
  */
-Send.prototype._nodes;
+SendMany.prototype._nodes;
 
 /**
  * @package
  * @type {Array<number> | null}
  */
-Send.prototype._nodeslots;
+SendMany.prototype._nodeslots;
+
+/**
+ * @interface
+ * @extends {SendOne}
+ * @extends {SendMany}
+ */
+function Send() { }
 
 /**
  * @interface
  */
-function Receive() { }
+function ReceiveBase() { }
 
 /**
  * @package
  * @type {Receive | null}
  */
-Receive.prototype._owner;
+ReceiveBase.prototype._owner;
 
 /**
  * @package
- * @type {?}
+ * @type {number}
  */
-Receive.prototype._next;
+ReceiveBase.prototype._time;
+
+/**
+ * @package
+ * @type {number}
+ */
+ReceiveBase.prototype._utime;
+
+/**
+ * @package
+ * @type {number}
+ */
+ReceiveBase.prototype._dtime;
+
+/**
+ * @package
+ * @param {number} time
+ * @returns {void}
+ */
+ReceiveBase.prototype._receiveMayDispose = function (time) { };
+
+/**
+ * @package
+ * @param {number} time
+ * @returns {void}
+ */
+ReceiveBase.prototype._receiveWillDispose = function (time) { };
+
+/**
+ * @package
+ * @param {number} time
+ * @returns {void}
+ */
+ReceiveBase.prototype._receiveMayUpdate = function (time) { };
+
+/**
+ * @package
+ * @param {number} time
+ * @returns {void}
+ */
+ReceiveBase.prototype._receiveWillUpdate = function (time) { };
+
+/**
+ * @interface
+ * @extends {ReceiveBase}
+ */
+function ReceiveOne() { }
 
 /**
  * @package
  * @type {Send | null}
  */
-Receive.prototype._source1;
+ReceiveOne.prototype._source1;
 
 /**
  * @package
  * @type {number}
  */
-Receive.prototype._source1slot;
+ReceiveOne.prototype._source1slot;
+
+/**
+ * @interface
+ * @extends {ReceiveBase}
+ */
+function ReceiveMany() { }
 
 /**
  * @package
  * @type {Array<Send> | null | undefined}
  */
-Receive.prototype._sources;
+ReceiveMany.prototype._sources;
 
 /**
  * @package
  * @type {Array<number> | null | undefined}
  */
-Receive.prototype._sourceslots;
+ReceiveMany.prototype._sourceslots;
 
 /**
- * @package
- * @type {number}
+ * @interface
+ * @extends {ReceiveOne}
+ * @extends {ReceiveMany}
  */
-Receive.prototype._time;
-
-/**
- * @package
- * @type {number}
- */
-Receive.prototype._utime;
-
-/**
- * @package
- * @type {number}
- */
-Receive.prototype._dtime;
-
-/**
- * @package
- * @returns {void}
- */
-Receive.prototype._detach = function () { };
-
-/**
- * @package
- * @param {number} time
- * @returns {void}
- */
-Receive.prototype._receiveMayDispose = function (time) { };
-
-/**
- * @package
- * @param {number} time
- * @returns {void}
- */
-Receive.prototype._receiveWillDispose = function (time) { };
-
-/**
- * @package
- * @param {number} time
- * @returns {void}
- */
-Receive.prototype._receiveMayUpdate = function (time) { };
-
-/**
- * @package
- * @param {number} time
- * @returns {void}
- */
-Receive.prototype._receiveWillUpdate = function (time) { };
+function Receive() { }
 
 /**
  * @interface
@@ -1112,10 +1121,16 @@ Effect.prototype._update = function (time) {
     (state | State.Updating) &
     ~(State.Clearing | State.MayDispose | State.MayUpdate | State.WillUpdate);
   CONTEXT._owner = this;
-  this._next();
-  this._state &= ~(State.Updating);
-  CONTEXT._owner = owner;
-  CONTEXT._listen = listen;
+  try {
+    this._next();
+  } finally {
+    this._state &= ~State.Updating;
+    CONTEXT._owner = owner;
+    CONTEXT._listen = listen;
+    if (!(this._state & (State.ReceiveOne | State.ReceiveMany))) {
+      this._detach();
+    }
+  }
 };
 
 /**
@@ -1612,6 +1627,18 @@ function compute(fn, opts) {
 }
 
 /**
+ * @template T
+ * @param {function(): T} fn
+ * @param {SignalOptions<T>=} opts
+ * @returns {ReadonlySignal<T>}
+ */
+function $compute(fn, opts) {
+  var node = new Compute(fn, opts);
+  node._state |= State.Unstable;
+  return node;
+}
+
+/**
  * @public
  * @param {function(): void} fn
  * @param {SignalOptions=} opts
@@ -1619,6 +1646,18 @@ function compute(fn, opts) {
  */
 function effect(fn, opts) {
   return new Effect(fn, opts);
+}
+
+/**
+ * @public
+ * @param {function(): void} fn
+ * @param {SignalOptions=} opts
+ * @returns {RootSignal}
+ */
+function $effect(fn, opts) {
+  var node = new Effect(fn, opts);
+  node._state |= State.Unstable;
+  return node;
 }
 
 /**
@@ -1680,7 +1719,9 @@ window["anod"]["root"] = root;
 window["anod"]["data"] = data;
 window["anod"]["value"] = value;
 window["anod"]["compute"] = compute;
+window["anod"]["$compute"] = $compute;
 window["anod"]["effect"] = effect;
+window["anod"]["$effect"] = $effect;
 window["anod"]["batch"] = batch;
 window["anod"]["sample"] = sample;
 window["anod"]["cleanup"] = cleanup;
@@ -1714,7 +1755,6 @@ export {
   extend,
   reset,
   connect,
-  recycle,
   exec,
   start,
   disposeScope,
@@ -1735,7 +1775,9 @@ export {
   data,
   value,
   compute,
+  $compute,
   effect,
+  $effect,
   batch,
   sample,
   cleanup,

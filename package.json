@@ -19,7 +19,8 @@
     }
   },
   "scripts": {
-    "test": "node --expose-gc test/index.js"
+    "test": "node --expose-gc test/index.js",
+    "test-min": "node --expose-gc test/index.min.js"
   },
   "keywords": [
     "reactive",

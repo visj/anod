@@ -1,75 +1,91 @@
-var MESSAGES = [];
-
+/** @type {number} */
 var PASS = 0;
+/** @type {number} */
 var FAIL = 0;
-
-/** @type {import("../../dist/index") & import("../../dist/array")} */
-export var Anod;
+/**
+ * @const
+ * @type {Test}
+ */
+var ROOT = new Test([]);
 
 /**
- *
- * @param {string} msg
- * @param {function(): void} callback
+ * @constructor
+ * @param {Array<string>} messages
  */
-export function test(msg, callback) {
-    try {
-        MESSAGES.push(msg);
-        callback();
-    } catch (err) {
-        console.error(MESSAGES.join(" -> ") + ": " + err.message);
-    } finally {
-        MESSAGES.pop();
-    }
+function Test(messages) {
+    /**
+     * @type {Array<string>}
+     */
+    this.messages = messages;
+    /**
+     * @type {string | null}
+     */
+    this._scope = null;
 }
+
+/**
+ * 
+ * @param {string} message 
+ * @param {function(Test): void} callback 
+ * @returns {void}
+ */
+Test.prototype.test = function(message, callback) {
+    callback(new Test(this.messages.concat(message)));
+};
+
+/**
+ * @returns {string}
+ */
+Test.prototype.scope = function() {
+    if (this._scope === null) {
+        this._scope = this.messages.join(" -> ");
+    }
+    return this._scope;
+};
 
 /**
  * @template T
- * @param {T} v1
- * @param {T} v2
+ * @param {T} expected 
+ * @param {T} actual 
  */
-export function assert(v1, v2) {
-  if (v1 !== v2) {
-      FAIL++;
-      throw new Error("Expected " + v2 + ", got " + v1);
-  }
-  PASS++;
-}
-
-export function context() {
-    var slice = MESSAGES.slice();
-    return function(callback) {
-        var messages = MESSAGES;
-        MESSAGES = slice;
-        try {
-            callback();
-        } finally {
-            MESSAGES = messages;
-        }
+Test.prototype.assert = function(expected, actual) {
+    if (expected === actual) {
+        PASS++;
+    } else {
+        FAIL++;
+        console.error(this.scope() + ": Expected " + expected + ", got " + actual);
     }
-}
+};
+
+Test.prototype.throws = function(callback) {
+    var thrown = false;
+    try {
+        callback();
+    } catch (_) {
+        thrown = true;
+    }
+    if (thrown) {
+        PASS++;
+    } else {
+        FAIL++;
+        console.error(this.scope() + ": Expected function " + callback.name + " to throw");
+    }
+};
 
 /**
- * @param {function(): void} callback
+ *
+ * @param {string} message
+ * @param {function(Test): void} callback
  */
-assert.throws = function(callback) {
-  var thrown = false;
-  try {
-      callback();
-  } catch (err) {
-      thrown = true;
-  }
-  if (!thrown) {
-      FAIL++;
-      throw new Error("Expected function to throw");
-  }
-  PASS++;
+export function test(message, callback) {
+    ROOT.test(message, callback);
 }
 
 export function report() {
     if (FAIL > 0) {
-        console.error("\nFail: " + FAIL + "\nPass: " + PASS);
+        console.error("Fail: " + FAIL + "\nPass: " + PASS);
     } else {
-        console.log("\nPass: " + PASS);
+        console.log("Pass: " + PASS);
     }
     console.log("Total: " + (PASS + FAIL));
 }

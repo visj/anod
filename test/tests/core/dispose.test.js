@@ -1,90 +1,154 @@
-import { test, assert, Anod } from "../../helper/index.js";
+import { test } from "../../helper/index.js";
+import { value, compute, effect, root, batch, $effect } from "../../../build/index.js";
 
-/**
- *
- * @param {Anod} anod
- */
-export function run(anod) {
-  var { value, compute, effect, root } = anod;
-  test("dispose", function () {
-    test("root", function () {
-      test("disables updates and sets computation's value to null", function () {
-        var count, s1, c1;
-        var r1 = root(function () {
-          count = 0;
-          s1 = value(0);
+test("dispose", function (t) {
+  t.test("root", function (t) {
+    t.test("disables updates and sets computation's value to null", function (t) {
+      var count, s1, c1;
+      var r1 = root(function () {
+        count = 0;
+        s1 = value(0);
 
-          c1 = compute(function () {
-            count++;
-            return s1.val();
-          });
-
-          assert(c1.val(), 0);
-          assert(count, 1);
-
-          s1.set(1);
-
-          assert(c1.val(), 1);
-          assert(count, 2);
+        c1 = compute(function () {
+          count++;
+          return s1.val();
         });
-        r1.dispose();
-        s1.set(2);
 
-        assert(count, 2);
-        assert(c1.val(), null);
+        t.assert(c1.val(), 0);
+        t.assert(count, 1);
+
+        s1.set(1);
+
+        t.assert(c1.val(), 1);
+        t.assert(count, 2);
       });
-    });
+      r1.dispose();
+      s1.set(2);
 
-    test("computations", function () {
-      test("persists through cycle when manually disposed", function () {
-        root(function () {
-          var s1 = value(0);
-          var c1 = compute(function () {
-            return s1.val();
-          });
-          var count = 0;
+      t.assert(count, 2);
+      t.assert(c1.val(), null);
+    });
+  });
+
+  t.test("computations", function (t) {
+    t.test("persists through cycle when manually disposed", function (t) {
+      root(function () {
+        var s1 = value(0);
+        var c1 = compute(function () {
+          return s1.val();
+        });
+        var count = 0;
+        effect(function () {
           effect(function () {
-            effect(function () {
-              if (s1.val() > 0) {
-                c1.dispose();
-              }
-            });
-            effect(function () {
-              count += c1.val();
-            });
+            if (s1.val() > 0) {
+              c1.dispose();
+            }
           });
-          s1.set(s1.peek() + 1);
-          s1.set(s1.peek() + 1);
-          assert(count, 1);
+          effect(function () {
+            count += c1.val();
+          });
         });
-      });
-    });
-
-    test("unmount", function () {
-      test("does not unmount pending computations with changing dependencies", function () {
-        var s1 = value(true);
-        var s2 = value(0);
-        var s3 = value(0);
-        var calls = 0;
-        effect(function () {
-          if (!s1.val()) {
-            s1.dispose();
-            s2.dispose();
-            s3.set(s3.peek() + 1);
-          }
-        });
-        effect(function () {
-          calls++;
-          if (s1.val()) {
-            s2.val();
-          } else {
-            s3.val();
-          }
-        }, { unstable: true });
-        calls = 0;
-        s1.set(false);
-        assert(calls, 2);
+        s1.set(s1.peek() + 1);
+        s1.set(s1.peek() + 1);
+        t.assert(count, 1);
       });
     });
   });
-}
+
+  t.test("unmount", function (t) {
+    t.test("does not unmount pending computations with changing dependencies", function (t) {
+      var s1 = value(true);
+      var s2 = value(0);
+      var s3 = value(0);
+      var calls = 0;
+      effect(function () {
+        if (!s1.val()) {
+          s1.dispose();
+          s2.dispose();
+          s3.set(s3.peek() + 1);
+        }
+      });
+      $effect(function () {
+        calls++;
+        if (s1.val()) {
+          s2.val();
+        } else {
+          s3.val();
+        }
+      });
+      calls = 0;
+      s1.set(false);
+      t.assert(calls, 2);
+    });
+  });
+
+  t.test("may dispose", function (t) {
+    t.test("computation", function (t) {
+      t.test("does not execute pending disposed nodes", function (t) {
+        var s1 = value(0);
+        var order = "";
+        var c1 = compute(function () {
+          order += "c1";
+          return s1.val();
+        });
+        var c3;
+        effect(function () {
+          order += "e1";
+          if (c3) {
+            c3.val();
+          }
+          s1.val();
+        })
+        effect(function () {
+          c1.val();
+          order += "e2";
+          if (s1.peek() === 0) {
+            c3 = compute(function () {
+              order += "c3";
+              s1.val();
+            });
+          }
+        });
+        t.assert(order, "e1c1e2");
+        order = "";
+        s1.set(1);
+        t.assert(order, "c1e1e2");
+      });
+
+      t.test("does not update if called while being in may dispose state", function (t) {
+        var s1 = value(1);
+        var s2 = value(1);
+        var count = 0;
+        var c1;
+        var c2 = compute(function () {
+          return s1.val() < 2;
+        });
+        compute(function () {
+          s2.val();
+          if (c1 !== void 0) {
+            c1.val();
+          }
+        });
+        effect(function () {
+          c2.val();
+          if (c1 === void 0) {
+            c1 = compute(function () {
+              count++;
+              return s2.val();
+            });
+          }
+        });
+        c1.val();
+        s1.set(1);
+        batch(function () {
+          s2.set(1);
+          s1.set(2);
+        });
+        // c1 is disposed but called from previous compute, should not update
+        c1.val();
+        t.assert(count, 1);
+      });
+    });
+  });
+});
+

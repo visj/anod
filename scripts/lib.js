@@ -114,7 +114,8 @@ async function bundleCore() {
   esm += "export " + internals;
   const symbols = internals
     .slice(internals.indexOf("{") + 1, internals.indexOf("}"))
-    .split(",");
+    .split(",")
+    .filter(s => s.trim() !== "");
   for (const symbol of symbols) {
     iife += "," + symbol + ":" + symbol;
   }
@@ -242,8 +243,8 @@ async function concatBundleLibrary() {
     + "  SignalValue,\n"
     + "  SignalOptions\n"
     + "};";
-  let windowRegex = /window\["anod"\]\["\w+"\] = \w+;\s*/g;
-  let importsRegex = /import\s*{[^}]*}\s*from\s*['"]\.\/core\.js['"]\;\s*/g;
+  let windowRegex = /window\["anod"\]\["[\$\w]+"\]\s+=\s+[\$\w]+;\s*/g;
+  let importsRegex = /import\s*\{[^\}]*\}\s*from\s*['"]\.\/core\.js['"]\;\s*/g;
   core = core.replace(windowRegex, "");
   array = array.replace(windowRegex, "").replace(importsRegex, "");
   const code = [api, core, array].join("\n");
@@ -254,12 +255,17 @@ async function bundleLibrary() {
   await Promise.all([concatBundleLibrary(), closureBundleLibrary()]);
 }
 
+async function cleanup() {
+  await fs.promises.rm("./temp", { recursive: true });
+}
+
 async function main() {
   try {
     await fs.promises.mkdir("./dist", { recursive: true });
     await fs.promises.mkdir("./build", { recursive: true });
     await bundleLibrary();
     await bundleBench();
+    await cleanup();
   } catch (err) {
     console.error(err);
   }

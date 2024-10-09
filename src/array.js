@@ -1,24 +1,13 @@
-// import {
-//   Send,
-//   Receive,
-//   TIME,
-//   CONTEXT,
-//   CHANGES,
-//   State,
-//   Type,
-//   Root,
-//   Data,
-//   Compute,
-//   type,
-//   extend,
-//   addReceiver,
-//   readSource,
-//   sendWillUpdate,
-//   disposeReceiver,
-//   compute,
-//   exec,
-//   reset
-// } from "./core.js";
+import {
+    Send,
+    Receive,
+    TIME,
+    CONTEXT,
+    CHANGES,
+    State,
+    Root,
+    Data,
+} from "./core.js";
 
 // /**
 //  * @interface
@@ -1103,34 +1092,61 @@
 //   change.params = params;
 // }
 
-// /**
-//  * @struct
-//  * @template T
-//  * @constructor
-//  * @param {Array<T>=} val
-//  * @extends {ReactiveIterator<T, undefined, Change<T>>}
-//  * @implements {DataArrayInterface<T>}
-//  */
-// function DataArray(val) {
-//   Data.call(/** @type {?} */ (this), val || []);
-//   /**
-//    * @public
-//    * @type {function(): number}
-//    */
-//   this.length = getLength(this);
-//   /**
-//    * @package
-//    * @override
-//    * @type {Change<T>}
-//    */
-//   this._mut = new Change(Mutation.None);
-//   /**
-//    * @package
-//    * @override
-//    * @type {Change<T>}
-//    */
-//   this._next = new Change(Mutation.None);
-// }
+/**
+ * @struct
+ * @template T
+ * @constructor
+ * @param {Array<T>=} val
+ */
+function DataArray(val) {
+    /**
+     * @package
+     * @type {number}
+     */
+    this._state = State.Void;
+    /**
+     * @package
+     * @type {T}
+     */
+    this._value = val;
+    /**
+     * @package
+     * @type {Receive | null}
+     */
+    this._node1 = null;
+    /**
+     * @package
+     * @type {number}
+     */
+    this._node1slot = -1;
+    /**
+     * @package
+     * @type {Array<Receive> | null}
+     */
+    this._nodes = null;
+    /**
+     * @package
+     * @type {Array<number> | null}
+     */
+    this._nodeslots = null;
+    // /**
+    //  * @public
+    //  * @type {function(): number}
+    //  */
+    // this.length = getLength(this);
+    // /**
+    //  * @package
+    //  * @override
+    //  * @type {Change<T>}
+    //  */
+    // this._mut = new Change(Mutation.None);
+    // /**
+    //  * @package
+    //  * @override
+    //  * @type {Change<T>}
+    //  */
+    // this._next = new Change(Mutation.None);
+}
 
 // extend(DataArray, ReactiveIterator, Data);
 
@@ -1141,7 +1157,7 @@
 //  * @returns {void}
 //  */
 // DataArray.prototype.update = function (val) {
-//   this._mutate(Mutation.Assign | Mutation.Reorder, -1, -1, -1, val);
+//     this._mutate(Mutation.Assign | Mutation.Reorder, -1, -1, -1, val);
 // };
 
 // /**
@@ -1154,28 +1170,28 @@
 //  * @returns {void}
 //  */
 // DataArray.prototype._mutate = function (type, index, remove, insert, params) {
-//   var state = this._state;
-//   if (
-//     !(state & (State.WillDispose | State.ShallDispose | State.Disposed))
-//   ) {
-//     var next = this._next;
-//     if (CONTEXT._idle) {
-//       mutate(next, type, index, remove, insert, params);
-//       this._apply();
-//       if (state & (State.SendOne | State.SendMany)) {
-//         reset();
-//         sendWillUpdate(this, TIME + 1);
-//         exec();
-//       }
-//     } else {
-//       if (next.type !== Mutation.None) {
-//         throw new Error("Conflict");
-//       }
-//       mutate(next, type, index, remove, insert, params);
-//       this._state |= State.ShallUpdate;
-//       CHANGES._add(this);
+//     var state = this._state;
+//     if (
+//         !(state & (State.WillDispose | State.ShallDispose | State.Disposed))
+//     ) {
+//         var next = this._next;
+//         if (CONTEXT._idle) {
+//             // mutate(next, type, index, remove, insert, params);
+//             this._apply();
+//             if (state & (State.SendOne | State.SendMany)) {
+//                 // reset();
+//                 // sendWillUpdate(this, TIME + 1);
+//                 // exec();
+//             }
+//         } else {
+//             if (next.type !== Mutation.None) {
+//                 throw new Error("Conflict");
+//             }
+//             // mutate(next, type, index, remove, insert, params);
+//             this._state |= State.ShallUpdate;
+//             // CHANGES._add(this);
+//         }
 //     }
-//   }
 // };
 
 // /**
@@ -1183,83 +1199,83 @@
 //  * @returns {void}
 //  */
 // DataArray.prototype._apply = function () {
-//   /** @type {number} */
-//   var i;
-//   /** @type {number} */
-//   var len;
-//   /** @type {Array<T>} */
-//   var items;
-//   /** @type {Change} */
-//   var mut = this._mut;
-//   /** @type {Change} */
-//   var next = this._next;
-//   var value = /** @type {Array<T>} */ (this._value);
-//   switch (next.type & Mutation.TypeMask) {
-//     case Mutation.Pop:
-//       value.pop();
-//       break;
-//     case Mutation.Push:
-//       if (next.inserts === 1) {
-//         value.push(/** @type {T} */ (next.params));
-//       } else {
-//         Array.prototype.push.apply(
-//           value,
-//           /** @type {Array<T>} */ (next.params)
-//         );
-//       }
-//       break;
-//     case Mutation.Reverse:
-//       value.reverse();
-//       break;
-//     case Mutation.Shift:
-//       value.shift();
-//       break;
-//     case Mutation.Sort:
-//       value.sort(
-//         /** @type {(function(T,T): number) | undefined} */ (next.params)
-//       );
-//       break;
-//     case Mutation.Splice:
-//       len = next.inserts;
-//       if (len === 0) {
-//         value.splice(next.index, next.deletes);
-//       } else if (len === 1) {
-//         value.splice(next.index, next.deletes, /** @type {T} */ (next.params));
-//       } else {
-//         var args = /** @type {Array<number | T>} */ ([
-//           next.index,
-//           next.deletes
-//         ]);
-//         items = /** @type {Array<T>} */ (next.params);
-//         for (i = 0; i < len; i++) {
-//           args[i + 2] = items[i];
-//         }
-//         Array.prototype.splice.apply(value, args);
-//       }
-//       break;
-//     case Mutation.Unshift:
-//       if (next.inserts === 1) {
-//         value.unshift(/** @type {T} */ (next.params));
-//       } else {
-//         Array.prototype.unshift.apply(
-//           value,
-//           /** @type {Array<T>} */ (next.params)
-//         );
-//       }
-//       break;
-//     case Mutation.Assign:
-//       this._value = /** @type {Array<T>} */ (next.params);
-//       break;
-//     case Mutation.Custom:
-//       this._value = /** @type {function(Array<T>, Change): Array<T>} */ (
-//         next.params
-//       )(value, next);
-//       break;
-//   }
-//   mut.type = Mutation.None;
-//   mut.params = null;
-//   this._mut = next;
-//   this._next = mut;
+//     /** @type {number} */
+//     var i;
+//     /** @type {number} */
+//     var len;
+//     /** @type {Array<T>} */
+//     var items;
+//     /** @type {Change} */
+//     var mut = this._mut;
+//     /** @type {Change} */
+//     var next = this._next;
+//     var value = /** @type {Array<T>} */ (this._value);
+//     switch (next.type & Mutation.TypeMask) {
+//         case Mutation.Pop:
+//             value.pop();
+//             break;
+//         case Mutation.Push:
+//             if (next.inserts === 1) {
+//                 value.push(/** @type {T} */(next.params));
+//             } else {
+//                 Array.prototype.push.apply(
+//                     value,
+//           /** @type {Array<T>} */(next.params)
+//                 );
+//             }
+//             break;
+//         case Mutation.Reverse:
+//             value.reverse();
+//             break;
+//         case Mutation.Shift:
+//             value.shift();
+//             break;
+//         case Mutation.Sort:
+//             value.sort(
+//         /** @type {(function(T,T): number) | undefined} */(next.params)
+//             );
+//             break;
+//         case Mutation.Splice:
+//             len = next.inserts;
+//             if (len === 0) {
+//                 value.splice(next.index, next.deletes);
+//             } else if (len === 1) {
+//                 value.splice(next.index, next.deletes, /** @type {T} */(next.params));
+//             } else {
+//                 var args = /** @type {Array<number | T>} */ ([
+//                     next.index,
+//                     next.deletes
+//                 ]);
+//                 items = /** @type {Array<T>} */ (next.params);
+//                 for (i = 0; i < len; i++) {
+//                     args[i + 2] = items[i];
+//                 }
+//                 Array.prototype.splice.apply(value, args);
+//             }
+//             break;
+//         case Mutation.Unshift:
+//             if (next.inserts === 1) {
+//                 value.unshift(/** @type {T} */(next.params));
+//             } else {
+//                 Array.prototype.unshift.apply(
+//                     value,
+//           /** @type {Array<T>} */(next.params)
+//                 );
+//             }
+//             break;
+//         case Mutation.Assign:
+//             this._value = /** @type {Array<T>} */ (next.params);
+//             break;
+//         case Mutation.Custom:
+//             this._value = /** @type {function(Array<T>, Change): Array<T>} */ (
+//                 next.params
+//             )(value, next);
+//             break;
+//     }
+//     mut.type = Mutation.None;
+//     mut.params = null;
+//     this._mut = next;
+//     this._next = mut;
 // };
 
 // /**
@@ -1269,9 +1285,9 @@
 //  * @returns {void}
 //  */
 // DataArray.prototype._update = function (time) {
-//   this._apply();
-//   this._state &= ~State.ShallUpdate;
-//   sendWillUpdate(this, time);
+//     this._apply();
+//     this._state &= ~State.ShallUpdate;
+//     sendWillUpdate(this, time);
 // };
 
 // /**
@@ -1280,7 +1296,7 @@
 //  * @returns {void}
 //  */
 // DataArray.prototype.modify = function (callbackFn) {
-//   this._mutate(Mutation.Custom | Mutation.Reorder, -1, -1, -1, callbackFn);
+//     this._mutate(Mutation.Custom | Mutation.Reorder, -1, -1, -1, callbackFn);
 // };
 
 // /**
@@ -1288,7 +1304,7 @@
 //  * @returns {void}
 //  */
 // DataArray.prototype.pop = function () {
-//   this._mutate(Mutation.Pop | Mutation.Remove, this._value.length - 1, 1, 0);
+//     this._mutate(Mutation.Pop | Mutation.Remove, this._value.length - 1, 1, 0);
 // };
 
 // /**
@@ -1297,27 +1313,27 @@
 //  * @returns {void}
 //  */
 // DataArray.prototype.push = function (elementN) {
-//   /** @type {T | Array<T>} */
-//   var params;
-//   /** @type {number} */
-//   var len = arguments.length;
-//   if (len > 0) {
-//     if (len === 1) {
-//       params = elementN;
-//     } else {
-//       params = new Array(len);
-//       for (var i = 0; i < len; i++) {
-//         params[i] = arguments[i];
-//       }
+//     /** @type {T | Array<T>} */
+//     var params;
+//     /** @type {number} */
+//     var len = arguments.length;
+//     if (len > 0) {
+//         if (len === 1) {
+//             params = elementN;
+//         } else {
+//             params = new Array(len);
+//             for (var i = 0; i < len; i++) {
+//                 params[i] = arguments[i];
+//             }
+//         }
+//         this._mutate(
+//             Mutation.Push | Mutation.Insert,
+//             this._value.length,
+//             0,
+//             len,
+//             params
+//         );
 //     }
-//     this._mutate(
-//       Mutation.Push | Mutation.Insert,
-//       this._value.length,
-//       0,
-//       len,
-//       params
-//     );
-//   }
 // };
 
 // /**
@@ -1325,7 +1341,7 @@
 //  * @returns {void}
 //  */
 // DataArray.prototype.reverse = function () {
-//   this._mutate(Mutation.Reverse | Mutation.Reorder, -1, 0, 0);
+//     this._mutate(Mutation.Reverse | Mutation.Reorder, -1, 0, 0);
 // };
 
 // /**
@@ -1333,7 +1349,7 @@
 //  * @returns {void}
 //  */
 // DataArray.prototype.shift = function () {
-//   this._mutate(Mutation.Shift | Mutation.Remove, 0, 1, 0);
+//     this._mutate(Mutation.Shift | Mutation.Remove, 0, 1, 0);
 // };
 
 // /**
@@ -1342,7 +1358,7 @@
 //  * @returns {void}
 //  */
 // DataArray.prototype.sort = function (compareFn) {
-//   this._mutate(Mutation.Sort | Mutation.Reorder, -1, 0, 0, compareFn);
+//     this._mutate(Mutation.Sort | Mutation.Reorder, -1, 0, 0, compareFn);
 // };
 
 // /**
@@ -1353,30 +1369,30 @@
 //  * @returns {void}
 //  */
 // DataArray.prototype.splice = function (start, deleteCount, items) {
-//   /** @type {T | Array<T>} */
-//   var params;
-//   var len = arguments.length;
-//   if (len > 1) {
-//     var mutation = Mutation.Splice;
-//     if (deleteCount == null) {
-//       deleteCount = 0;
-//     }
-//     if (deleteCount > 0) {
-//       mutation |= Mutation.Remove;
-//     }
-//     if (len > 2) {
-//       mutation |= Mutation.Insert;
-//       if (len === 3) {
-//         params = items;
-//       } else {
-//         params = new Array(len - 2);
-//         for (var j = 0, i = 2; i < len; i++, j++) {
-//           params[j] = arguments[i];
+//     /** @type {T | Array<T>} */
+//     var params;
+//     var len = arguments.length;
+//     if (len > 1) {
+//         var mutation = Mutation.Splice;
+//         if (deleteCount == null) {
+//             deleteCount = 0;
 //         }
-//       }
+//         if (deleteCount > 0) {
+//             mutation |= Mutation.Remove;
+//         }
+//         if (len > 2) {
+//             mutation |= Mutation.Insert;
+//             if (len === 3) {
+//                 params = items;
+//             } else {
+//                 params = new Array(len - 2);
+//                 for (var j = 0, i = 2; i < len; i++, j++) {
+//                     params[j] = arguments[i];
+//                 }
+//             }
+//         }
+//         this._mutate(mutation, start, deleteCount, len - 2, params);
 //     }
-//     this._mutate(mutation, start, deleteCount, len - 2, params);
-//   }
 // };
 
 // /**
@@ -1385,21 +1401,21 @@
 //  * @returns {void}
 //  */
 // DataArray.prototype.unshift = function (elementN) {
-//   /** @type {T | Array<T>} */
-//   var args;
-//   /** @type {number} */
-//   var len = arguments.length;
-//   if (len > 0) {
-//     if (len === 1) {
-//       args = elementN;
-//     } else {
-//       args = new Array(len);
-//       for (var i = 0; i < len; i++) {
-//         args[i] = arguments[i];
-//       }
+//     /** @type {T | Array<T>} */
+//     var args;
+//     /** @type {number} */
+//     var len = arguments.length;
+//     if (len > 0) {
+//         if (len === 1) {
+//             args = elementN;
+//         } else {
+//             args = new Array(len);
+//             for (var i = 0; i < len; i++) {
+//                 args[i] = arguments[i];
+//             }
+//         }
+//         this._mutate(Mutation.Unshift | Mutation.Insert, 0, 0, len, args);
 //     }
-//     this._mutate(Mutation.Unshift | Mutation.Insert, 0, 0, len, args);
-//   }
 // };
 
 // /**
@@ -1408,38 +1424,38 @@
 //  * @returns {SignalArray<T>}
 //  */
 // function array(val) {
-//   return new DataArray(val);
+//     return new DataArray(val);
 // }
 
-// window["anod"]["array"] = array;
-// window["anod"]["ComputeArray"] = ComputeArray;
-// window["anod"]["DataArray"] = DataArray;
+// // window["anod"]["array"] = array;
+// // window["anod"]["ComputeArray"] = ComputeArray;
+// // window["anod"]["DataArray"] = DataArray;
 
-// export {
-//   ComputeArrayInterface,
-//   DataArrayInterface,
-//   IteratorState,
-//   Mutation,
-//   iterateCompute,
-//   read,
-//   ReactiveIterator,
-//   getLength,
-//   atIterator,
-//   everyIterator,
-//   filterIterator,
-//   findIterator,
-//   findIndexIterator,
-//   findLastIterator,
-//   findLastIndexIterator,
-//   forEachIterator,
-//   includesIterator,
-//   indexOfIterator,
-//   joinIterator,
-//   lastIndexOfIterator,
-//   reduceIterator,
-//   reduceRightIterator,
-//   someIterator,
-//   ComputeArray,
-//   DataArray,
-//   array
-// };
+// // export {
+// //   ComputeArrayInterface,
+// //   DataArrayInterface,
+// //   IteratorState,
+// //   Mutation,
+// //   iterateCompute,
+// //   read,
+// //   ReactiveIterator,
+// //   getLength,
+// //   atIterator,
+// //   everyIterator,
+// //   filterIterator,
+// //   findIterator,
+// //   findIndexIterator,
+// //   findLastIterator,
+// //   findLastIndexIterator,
+// //   forEachIterator,
+// //   includesIterator,
+// //   indexOfIterator,
+// //   joinIterator,
+// //   lastIndexOfIterator,
+// //   reduceIterator,
+// //   reduceRightIterator,
+// //   someIterator,
+// //   ComputeArray,
+// //   DataArray,
+// //   array
+// // };
