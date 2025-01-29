@@ -57,6 +57,11 @@ Test.prototype.assert = function(expected, actual) {
     }
 };
 
+/**
+ * 
+ * @param {function(...?): ?} callback
+ * @returns {void}
+ */
 Test.prototype.throws = function(callback) {
     var thrown = false;
     try {

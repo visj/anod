@@ -1,12 +1,4 @@
-export interface Context {
-  _idle: boolean,
-  _owner: RootSignal | null,
-  _listen: ReadonlySignal | null
-}
-
-export declare var CONTEXT: Context;
-
-export interface RootSignal {
+export interface DisposableSignal {
 
   /**
    *
@@ -14,28 +6,36 @@ export interface RootSignal {
   dispose(): void;
 }
 
-export interface ReadonlySignal<T = any> extends RootSignal {
+export interface ReadonlySignal<T = any> extends DisposableSignal {
   /**
    *
    */
-    peek(): T;
+  peek(): T;
   /**
    *
    */
   val(): T;
 }
 
+export interface Signal<T = any> extends ReadonlySignal<T> {
+  /**
+   *
+   * @param val
+   */
+  set(val: T): void;
+}
+
 export declare var Root: {
-  new <T = any>(callback: () => T): RootSignal;
-  readonly prototype: RootSignal;
+  new <T = any>(callback: () => T): DisposableSignal;
+  readonly prototype: DisposableSignal;
 };
 
 export declare var Effect: {
   new <T = any>(
     fn: () => void,
     opts?: SignalOptions<T>
-  ): RootSignal;
-  readonly prototype: RootSignal;
+  ): DisposableSignal;
+  readonly prototype: DisposableSignal;
 };
 
 export declare var Compute: {
@@ -46,18 +46,10 @@ export declare var Compute: {
   readonly prototype: ReadonlySignal;
 };
 
-export interface Signal<T = any> extends ReadonlySignal<T> {
-  /**
-   *
-   * @param val
-   */
-  set(val: T): void;
-}
-
 export declare var Data: {
-  new<T = any>(
+  new <T = any>(
     val: T,
-    equality?: ((a: T, b: T) => boolean) | null
+    eq?: ((a: T, b: T) => boolean) | null
   ): Signal<T>;
   readonly prototype: Signal;
 };
@@ -79,11 +71,11 @@ export declare function data<T>(val: T): Signal<T>;
 /**
  *
  * @param val
- * @param equality
+ * @param eq
  */
 export declare function value<T>(
   val: T,
-  equality?: ((a: T, b: T) => boolean) | null,
+  eq?: ((a: T, b: T) => boolean) | null,
 ): Signal<T>;
 /**
  *
@@ -114,7 +106,7 @@ export declare function compute<T, U>(
  *
  * @param callback
  */
-export declare function effect<T>(callback: () => T): RootSignal;
+export declare function effect<T>(callback: () => T): DisposableSignal;
 /**
  *
  * @param fn
@@ -122,7 +114,7 @@ export declare function effect<T>(callback: () => T): RootSignal;
  */
 export declare function effect<T>(
   fn: (prev: T) => T
-): RootSignal;
+): DisposableSignal;
 /**
  *
  * @param fn
@@ -132,7 +124,7 @@ export declare function effect<T>(
 export declare function effect(
   fn: () => void,
   opts: SignalOptions<void>,
-): RootSignal;
+): DisposableSignal;
 
 /**
  *

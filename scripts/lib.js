@@ -234,7 +234,7 @@ async function concatBundleLibrary() {
   api =
     api + "\n" +
     "export {" + "\n"
-    + "  RootSignal,\n"
+    + "  DisposableSignal,\n"
     + "  ReadonlySignal,\n"
     + "  Signal,\n"
     + "  SignalIterator,\n"

@@ -1,17 +1,17 @@
 /**
  * @interface
  */
-function RootSignal() {}
+function DisposableSignal() {}
 
 /**
  * @returns {void}
  */
-RootSignal.prototype.dispose = function () {};
+DisposableSignal.prototype.dispose = function () {};
 
 /**
  * @interface
  * @template T
- * @extends {RootSignal}
+ * @extends {DisposableSignal}
  */
 function ReadonlySignal() {}
 
@@ -117,7 +117,7 @@ SignalIterator.prototype.findIndex = function (callbackFn, opts) {};
 SignalIterator.prototype.findLast = function (callbackFn, opts) {};
 
 /**
- * @param {function(T,number): boolean} callbackFn
+ * @param {function(T, number): boolean} callbackFn
  * @param {SignalOptions=} opts
  * @returns {ReadonlySignal<number>}
  */

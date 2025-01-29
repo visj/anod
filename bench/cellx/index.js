@@ -16,7 +16,7 @@ import { Signal } from "signal-polyfill";
 import * as anod from "../../dist/index.js";
 
 let rand = 0;
-const BATCHED = true;
+const BATCHED = false;
 const RUNS_PER_TIER = 2500;
 const LAYER_TIERS = [
   1, 2, 3, 4, 5, 10, 15, 20, 25, 50, 100, 500, 1000
