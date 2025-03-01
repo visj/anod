@@ -15,8 +15,8 @@ test("effect", function (t) {
         }
       });
       s1.set(true);
-      t.assert(s2.val(), 1);
-      t.assert(v1, 0);
+      t.equal(s2.val(), 1);
+      t.equal(v1, 0);
     });
     t.test("throws when continually setting a direct dependency", function (t) {
       var s1 = value(1);
@@ -63,7 +63,7 @@ test("effect", function (t) {
           s2.set(2);
         });
       });
-      t.assert(s2.val(), 2);
+      t.equal(s2.val(), 2);
     });
 
     t.test("batch data while propagating", function (t) {
@@ -86,9 +86,9 @@ test("effect", function (t) {
       });
       seq = "";
       s1.set(true);
-      t.assert(seq, "c1c2");
-      t.assert(s2.val(), 1);
-      t.assert(v1, 0);
+      t.equal(seq, "c1c2");
+      t.equal(s2.val(), 1);
+      t.equal(v1, 0);
     });
     t.test("continue running until changes stop", function (t) {
       var seq = "";
@@ -99,8 +99,8 @@ test("effect", function (t) {
           s1.set(s1.peek() + 1);
         }
       });
-      t.assert(seq, "012345678910");
-      t.assert(s1.val(), 10);
+      t.equal(seq, "012345678910");
+      t.equal(s1.val(), 10);
     });
   });
 
@@ -130,7 +130,7 @@ test("effect", function (t) {
     });
     seq = "";
     s1.set(1);
-    t.assert(seq, "c1e1e2s2{0}c2e2s2{1}e3s2{1}");
+    t.equal(seq, "c1e1e2s2{0}c2e2s2{1}e3s2{1}");
   });
 
   t.test("cleanup", function (t) {
@@ -143,9 +143,9 @@ test("effect", function (t) {
           count++;
         });
       });
-      t.assert(count, 0);
+      t.equal(count, 0);
       s1.set(2);
-      t.assert(count, 1);
+      t.equal(count, 1);
     });
 
     t.test("can be called from within a subcomputation", function (t) {
@@ -159,9 +159,9 @@ test("effect", function (t) {
           });
         });
       });
-      t.assert(calls, 0);
+      t.equal(calls, 0);
       s1.set(2);
-      t.assert(calls, 1);
+      t.equal(calls, 1);
     });
 
     t.test("accepts multiple cleanup functions", function (t) {
@@ -176,9 +176,9 @@ test("effect", function (t) {
           calls++;
         });
       });
-      t.assert(calls, 0);
+      t.equal(calls, 0);
       s1.set(2);
-      t.assert(calls, 2);
+      t.equal(calls, 2);
     });
 
     t.test("runs cleanups in reverse order", function (t) {
@@ -193,9 +193,9 @@ test("effect", function (t) {
           seq += "cl2";
         });
       });
-      t.assert(seq, "");
+      t.equal(seq, "");
       s1.set(2);
-      t.assert(seq, "cl2cl1");
+      t.equal(seq, "cl2cl1");
     });
 
     t.test("is run only once when a computation is disposed", function (t) {
@@ -208,14 +208,14 @@ test("effect", function (t) {
             calls++;
           });
         });
-        t.assert(calls, 0);
+        t.equal(calls, 0);
         s1.set(s1.peek() + 1);
-        t.assert(calls, 1);
+        t.equal(calls, 1);
       });
       r1.dispose();
-      t.assert(calls, 2);
+      t.equal(calls, 2);
       s1.set(s1.peek() + 1);
-      t.assert(calls, 2);
+      t.equal(calls, 2);
     });
   });
 });

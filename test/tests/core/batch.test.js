@@ -6,9 +6,9 @@ test("batch", function (t) {
     var s1 = value(1);
     batch(function () {
       s1.set(2);
-      t.assert(s1.val(), 1);
+      t.equal(s1.val(), 1);
     });
-    t.assert(s1.val(), 2);
+    t.equal(s1.val(), 2);
   });
 
   t.test("stops propagation within tests scope", function (t) {
@@ -18,8 +18,8 @@ test("batch", function (t) {
     });
     batch(function () {
       s1.set(2);
-      t.assert(c1.val(), 1);
+      t.equal(c1.val(), 1);
     });
-    t.assert(c1.val(), 2);
+    t.equal(c1.val(), 2);
   });
 });	

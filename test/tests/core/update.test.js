@@ -34,8 +34,8 @@ test("update", function (t) {
 
       s1.set(2);
 
-     t.assert(innerCount, 1);
-     t.assert(outerCount, 0);
+     t.equal(innerCount, 1);
+     t.equal(outerCount, 0);
     });
   });
 
@@ -83,14 +83,14 @@ test("update", function (t) {
 
    t.test("creates child on initialization", function (t) {
       init();
-     t.assert(c2.val(), 2);
+     t.equal(c2.val(), 2);
     });
 
    t.test("does not depend on child's dependencies", function () {
       init();
       s2.set(3);
-     t.assert(outerCount, 1);
-     t.assert(innerCount, 2);
+     t.equal(outerCount, 1);
+     t.equal(innerCount, 2);
     });
 
    t.test("disposes child when test is disposed", function (t) {
@@ -99,7 +99,7 @@ test("update", function (t) {
       });
       r1.dispose();
       s2.set(3);
-     t.assert(c1.val(), null);
+     t.equal(c1.val(), null);
     });
   });
 
@@ -115,17 +115,17 @@ test("update", function (t) {
         order += "c2";
         return c1.val();
       });
-     t.assert(order, "");
+     t.equal(order, "");
       c2.val();
-     t.assert(order, "c2c1");
+     t.equal(order, "c2c1");
       order = "";
       s1.set(1);
       c2.val();
-     t.assert(order, "c1");
+     t.equal(order, "c1");
       order = "";
       s1.set(s1.peek() + 1);
       c2.val();
-     t.assert(order, "c1c2");
+     t.equal(order, "c1c2");
     });
   
    t.test("updates downstream pending nodes", function (t) {
@@ -149,7 +149,7 @@ test("update", function (t) {
       });
       order = "";
       s1.set(1);
-     t.assert(order, "c1cl1e1e2");
+     t.equal(order, "c1cl1e1e2");
     });
   
    t.test("does not update if pending source disposes", function (t) {
@@ -179,7 +179,7 @@ test("update", function (t) {
           c3.val();
         });
         s1.set(s1.peek() + 1);
-       t.assert(count, 1);
+       t.equal(count, 1);
       });
     });
   });

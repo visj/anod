@@ -44,11 +44,25 @@ Test.prototype.scope = function() {
 };
 
 /**
+ * 
+ * @param {boolean} assert 
+ * @param {string=} message 
+ */
+Test.prototype.assert = function(assert, message) {
+    if (assert === true) {
+        PASS++;
+    } else {
+        FAIL++;
+        console.error(this.scope() + ": " + (message || ""));
+    }
+};
+
+/**
  * @template T
  * @param {T} expected 
  * @param {T} actual 
  */
-Test.prototype.assert = function(expected, actual) {
+Test.prototype.equal = function(expected, actual) {
     if (expected === actual) {
         PASS++;
     } else {

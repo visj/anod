@@ -1,5 +1,12 @@
 import { test } from "../../helper/index.js";
-import { value, compute, effect, root, batch, $effect } from "../../../build/index.js";
+import { 
+  value,
+  compute,
+  effect,
+  root,
+  batch,
+  $effect
+} from "../../../build/index.js";
 
 test("dispose", function (t) {
   t.test("root", function (t) {
@@ -14,19 +21,19 @@ test("dispose", function (t) {
           return s1.val();
         });
 
-        t.assert(c1.val(), 0);
-        t.assert(count, 1);
+        t.equal(c1.val(), 0);
+        t.equal(count, 1);
 
         s1.set(1);
 
-        t.assert(c1.val(), 1);
-        t.assert(count, 2);
+        t.equal(c1.val(), 1);
+        t.equal(count, 2);
       });
       r1.dispose();
       s1.set(2);
 
-      t.assert(count, 2);
-      t.assert(c1.val(), null);
+      t.equal(count, 2);
+      t.equal(c1.val(), null);
     });
   });
 
@@ -50,7 +57,7 @@ test("dispose", function (t) {
         });
         s1.set(s1.peek() + 1);
         s1.set(s1.peek() + 1);
-        t.assert(count, 1);
+        t.equal(count, 1);
       });
     });
   });
@@ -78,7 +85,7 @@ test("dispose", function (t) {
       });
       calls = 0;
       s1.set(false);
-      t.assert(calls, 2);
+      t.equal(calls, 2);
     });
   });
 
@@ -109,10 +116,10 @@ test("dispose", function (t) {
             });
           }
         });
-        t.assert(order, "e1c1e2");
+        t.equal(order, "e1c1e2");
         order = "";
         s1.set(1);
-        t.assert(order, "c1e1e2");
+        t.equal(order, "c1e1e2");
       });
 
       t.test("does not update if called while being in may dispose state", function (t) {
@@ -146,7 +153,7 @@ test("dispose", function (t) {
         });
         // c1 is disposed but called from previous compute, should not update
         c1.val();
-        t.assert(count, 1);
+        t.equal(count, 1);
       });
     });
   });

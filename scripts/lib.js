@@ -130,7 +130,7 @@ async function bundleCore() {
 async function bundleArray() {
   const code = (await fs.promises.readFile("./temp/array.js", "utf-8"))
     .replace(/\n/g, " ");
-  let param = "__anod__";
+  let param = "$";
   const array = code.split('"./core.js";');
   const parts = array[1].split(/(window\.anod\.[\$\w]*)/g);
   let esm = array[0] + '"./index.js";' + parts[0];
@@ -167,32 +167,10 @@ async function bundleArray() {
     }
   }
   iife += "})(anod);";
-  let [iifeCode, esmCode] = await Promise.all([
-    esbuild.build({
-      stdin: { contents: iife },
-      minify: true,
-      write: false,
-      target: "ES5"
-    }),
-    esbuild.build({
-      stdin: { contents: esm },
-      minify: true,
-      write: false,
-      target: "ES5"
-    })
-  ]);
-  if (iifeCode.errors.length || esmCode.errors.length) {
-    console.error(iifeCode.errors);
-    console.error(esmCode.errors);
-    return;
-  }
   await Promise.all([
     fs.promises.copyFile("./array.d.ts", "./dist/array.d.ts"),
-    fs.promises.writeFile("./dist/array.js", esmCode.outputFiles[0].contents),
-    fs.promises.writeFile(
-      "./build/array.min.js",
-      iifeCode.outputFiles[0].contents
-    )
+    fs.promises.writeFile("./dist/array.js", esm),
+    fs.promises.writeFile("./build/array.min.js", iife)
   ]);
 }
 

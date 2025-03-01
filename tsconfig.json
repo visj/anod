@@ -8,5 +8,5 @@
     "baseUrl": ".",
     "strict": true
   },
-  "include": ["src/**/*", "*.ts", "*.json"]
+  "include": ["src/**/*", "*.ts", "*.json", "derp.js", "derp.js"]
 }

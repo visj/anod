@@ -17,14 +17,14 @@ test("root", function (t) {
           });
         });
       });
-      t.assert(count, 1);
+      t.equal(count, 1);
       s1.set(s1.peek() + 1);
       s1.set(s1.peek() + 1);
 
-      t.assert(count, 3);
+      t.equal(count, 3);
       count = 0;
       s2.set(s2.peek() + 1);
-      t.assert(count, 3);
+      t.equal(count, 3);
     });
   });
 
@@ -34,11 +34,11 @@ test("root", function (t) {
       var c1 = compute(function () {
         return s1.val();
       });
-      t.assert(c1.val(), 1);
+      t.equal(c1.val(), 1);
       s1.set(2);
-      t.assert(c1.val(), 2);
+      t.equal(c1.val(), 2);
       s1.set(3);
-      t.assert(c1.val(), 3);
+      t.equal(c1.val(), 3);
     });
   });
 
@@ -53,7 +53,7 @@ test("root", function (t) {
         return s1.val();
       });
       s1.set(3);
-      t.assert(c2.val(), 3);
+      t.equal(c2.val(), 3);
     });
   });
 });

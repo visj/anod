@@ -1,140 +1,82 @@
-import { ReadonlySignal, ReadonlySignal, Options } from "./index";
+import { ReadonlySignal } from "./index";
 
 type Value<T> = T | ReadonlySignal<T> | (() => T);
 
-type IteratorOptions<T> = Partial<
-  Pick<Options<T, never>, "source" | "unstable" | "compare" | "lazy">
->;
-
 export interface SignalIterator<T = any> extends ReadonlySignal<ReadonlyArray<T>> {
-  readonly length: () => number;
+  length(): number;
 
-  at(index: Value<number>, opts?: IteratorOptions<T>): ReadonlySignal<T>;
+  at(index: Value<number>): ReadonlySignal<T>;
 
-  concat(
-    items: T | T[] | Value<T> | Value<T[]>,
-    opts?: IteratorOptions<T>
-  ): SignalIterator<T>;
+  concat(...items: Array<T | Value<T>>): SignalIterator<T>;
 
-  every(
-    callbackFn: (element: T, index: number) => boolean,
-    opts?: IteratorOptions<T>
-  ): ReadonlySignal<boolean>;
+  every(callbackFn: (element: T, index: number) => boolean): ReadonlySignal<boolean>;
 
-  filter(
-    callbackFn: (element: T, index: number) => boolean,
-    opts?: IteratorOptions<T>
-  ): SignalIterator<T>;
+  filter(callbackFn: (element: T, index: number) => boolean): SignalIterator<T>;
 
-  find(
-    callbackFn: (element: T, index: number) => boolean,
-    opts?: IteratorOptions<T>
-  ): ReadonlySignal<T | undefined>;
+  find(callbackFn: (element: T, index: number) => boolean): ReadonlySignal<T | undefined>;
 
-  findIndex(
-    callbackFn: (element: T, index: number) => boolean,
-    opts?: IteratorOptions<T>
-  ): ReadonlySignal<number>;
+  findIndex(callbackFn: (element: T, index: number) => boolean): ReadonlySignal<number>;
 
-  findLast(
-    callbackFn: (element: T, index: number) => boolean,
-    opts?: IteratorOptions<T>
-  ): ReadonlySignal<T | undefined>;
+  findLast(callbackFn: (element: T, index: number) => boolean): ReadonlySignal<T | undefined>;
 
-  findLastIndex(
-    callbackFn: (element: T, index: number) => boolean,
-    opts?: IteratorOptions<T>
-  ): ReadonlySignal<number>;
+  findLastIndex(callbackFn: (element: T, index: number) => boolean): ReadonlySignal<number>;
 
-  forEach(
-    callbackFn: (element: T, index: number) => void,
-    opts?: IteratorOptions<T>
-  ): void;
+  forEach(callbackFn: (element: T, index: number) => void): void;
 
-  includes(
-    searchElement: Value<T>,
-    fromIndex?: Value<number>,
-    opts?: IteratorOptions<T>
-  ): ReadonlySignal<boolean>;
+  includes(searchElement: Value<T>, fromIndex?: Value<number>): ReadonlySignal<boolean>;
 
-  indexOf(
-    searchElement: Value<T>,
-    fromIndex?: Value<number>,
-    opts?: IteratorOptions<T>
-  ): ReadonlySignal<number>;
+  indexOf(searchElement: Value<T>, fromIndex?: Value<number>): ReadonlySignal<number>;
 
-  join(separator?: Value<string>, opts?: IteratorOptions<T>): ReadonlySignal<string>;
+  join(separator?: Value<string>): ReadonlySignal<string>;
 
-  lastIndexOf(
-    searchElement: Value<T>,
-    fromIndex?: Value<number>,
-    opts?: IteratorOptions<T>
-  ): ReadonlySignal<number>;
+  lastIndexOf(searchElement: Value<T>, fromIndex?: Value<number>): ReadonlySignal<number>;
 
-  map<U>(
-    callbackFn: (element: T, index: ReadonlySignal<number>) => U,
-    opts?: IteratorOptions<T>
-  ): SignalIterator<U>;
+  map<U>(callbackFn: (element: T, index: ReadonlySignal<number>) => U): SignalIterator<U>;
 
-  reduce(
-    callbackFn: (previousValue: T, currentValue: T, currentIndex: number) => T
-  ): ReadonlySignal<T>;
+  reduce(callbackFn: (previousValue: T, currentValue: T, currentIndex: number) => T): ReadonlySignal<T>;
 
   reduce(
     callbackFn: (previousValue: T, currentValue: T, currentIndex: number) => T,
-    initialValue: Value<T>,
-    opts?: IteratorOptions<T>
+    initialValue: Value<T>
   ): ReadonlySignal<T>;
 
   reduce<U>(
     callbackFn: (previousValue: U, currentValue: T, currentIndex: number) => U,
-    initialValue: Value<U>,
-    opts?: IteratorOptions<T>
+    initialValue: Value<U>
   ): ReadonlySignal<U>;
 
-  reduceRight(
-    callbackFn: (previousValue: T, currentValue: T, currentIndex: number) => T
-  ): ReadonlySignal<T>;
+  reduceRight(callbackFn: (previousValue: T, currentValue: T, currentIndex: number) => T): ReadonlySignal<T>;
 
   reduceRight(
     callbackFn: (previousValue: T, currentValue: T, currentIndex: number) => T,
-    initialValue: Value<T>,
-    opts?: IteratorOptions<T>
+    initialValue: Value<T>
   ): ReadonlySignal<T>;
 
   reduceRight<U>(
     callbackFn: (previousValue: U, currentValue: T, currentIndex: number) => U,
-    initialValue: Value<U>,
-    opts?: IteratorOptions<T>
+    initialValue: Value<U>
   ): ReadonlySignal<U>;
 
-  slice(
-    start?: Value<number>,
-    end?: Value<number>,
-    opts?: IteratorOptions<T>
-  ): SignalIterator<T>;
+  slice(start?: Value<number>, end?: Value<number>): SignalIterator<T>;
 
-  some(
-    callbackFn: (element: T, index: number) => boolean,
-    opts?: IteratorOptions<T>
-  ): ReadonlySignal<boolean>;
+  some(callbackFn: (element: T, index: number) => boolean): ReadonlySignal<boolean>;
 }
 
 export const enum Mutation {
-    None =  0,
-    Custom = 1,
-    Pop = 2,
-    Push = 3,
-    Shift = 4,
-    Reverse = 5,
-    Sort = 6,
-    Splice = 7,
-    Unshift = 8,
-    Assign = 9,
-    TypeMask = 15,
-    Insert = 16,
-    Remove = 32,
-    Reorder = 64
+  None = 0,
+  Custom = 1,
+  Pop = 2,
+  Push = 3,
+  Shift = 4,
+  Reverse = 5,
+  Sort = 6,
+  Splice = 7,
+  Unshift = 8,
+  Assign = 9,
+  TypeMask = 15,
+  Insert = 16,
+  Remove = 32,
+  Reorder = 64
 }
 
 export type Change<T> = {
@@ -145,9 +87,7 @@ export type Change<T> = {
   params: T | T[] | null
 };
 
-export interface SignalArray<T = any>
-  extends SignalIterator<T>,
-    ReadonlySignal<ReadonlyArray<T>> {
+export interface SignalArray<T = any> extends SignalIterator<T>, ReadonlySignal<ReadonlyArray<T>> {
   /**
    *
    * @param callbackFn

@@ -3,13 +3,13 @@ import { data, value, batch, effect, compute, root, sample } from "../../../buil
 
 test("data", function (t) {
     t.test("takes and returns an intestial value", function (t) {
-        t.assert(data(1).val(), 1);
+        t.equal(data(1).val(), 1);
     });
 
     t.test("can be set by passing in a new value", function (t) {
         var s1 = data(1);
         s1.set(2);
-        t.assert(s1.val(), 2);
+        t.equal(s1.val(), 2);
     });
 
     t.test("does not throw if set to the same value twice in a batch", function (t) {
@@ -18,7 +18,7 @@ test("data", function (t) {
             s1.set(2);
             s1.set(2);
         });
-        t.assert(s1.val(), 2);
+        t.equal(s1.val(), 2);
     });
 
     t.test("throws if set to two different values in a batch", function (t) {
@@ -38,7 +38,7 @@ test("data", function (t) {
             s1.set(2);
         });
         c1.val();
-        t.assert(s1.val(), 2);
+        t.equal(s1.val(), 2);
     });
 
     t.test("throws if set to two different values in a computation", function (t) {
@@ -55,13 +55,13 @@ test("data", function (t) {
 test("value", function (t) {
     t.test("takes and returns an intestial value", function (t) {
         var s1 = value(1).val();
-        t.assert(s1, 1);
+        t.equal(s1, 1);
     });
 
     t.test("can be set by passing in a new value", function (t) {
         var s1 = value(1);
         s1.set(2);
-        t.assert(s1.val(), 2);
+        t.equal(s1.val(), 2);
     });
 
     t.test("does not propagate if set to equal value", function (t) {
@@ -73,9 +73,9 @@ test("value", function (t) {
                 return ++count;
             });
 
-            t.assert(c1.val(), 1);
+            t.equal(c1.val(), 1);
             s1.set(1);
-            t.assert(c1.val(), 1);
+            t.equal(c1.val(), 1);
         });
     });
 
@@ -88,11 +88,11 @@ test("value", function (t) {
                 return ++counter;
             });
 
-            t.assert(c1.val(), 1);
+            t.equal(c1.val(), 1);
             s1.set(1);
-            t.assert(c1.val(), 1);
+            t.equal(c1.val(), 1);
             s1.set(2);
-            t.assert(c1.val(), 2);
+            t.equal(c1.val(), 2);
         });
     });
 
@@ -107,11 +107,11 @@ test("value", function (t) {
                 return ++count;
             });
 
-            t.assert(c1.val(), 1);
+            t.equal(c1.val(), 1);
             s1.set([1]);
-            t.assert(c1.val(), 1);
+            t.equal(c1.val(), 1);
             s1.set([2]);
-            t.assert(c1.val(), 2);
+            t.equal(c1.val(), 2);
         });
     });
 });
@@ -119,7 +119,7 @@ test("value", function (t) {
 test("peek", function (t) {
     t.test("returns the value of a data", function (t) {
         var s1 = value(1);
-        t.assert(s1.peek(), 1);
+        t.equal(s1.peek(), 1);
     });
 
     t.test("avoids a dedendency", function (t) {
@@ -137,13 +137,13 @@ test("peek", function (t) {
         effect(function () {
             c1.val();
         });
-        t.assert(count, 1);
+        t.equal(count, 1);
         s1.set(5);
-        t.assert(count, 2);
+        t.equal(count, 2);
         s2.set(4);
-        t.assert(count, 2);
+        t.equal(count, 2);
         s3.set(6);
-        t.assert(count, 3);
+        t.equal(count, 3);
     });
 
     t.test("can take computed values", function (t) {
@@ -164,10 +164,10 @@ test("peek", function (t) {
         effect(function () {
             c1.val();
         });
-        t.assert(count, 1);
+        t.equal(count, 1);
         s2.set(4);
-        t.assert(count, 1);
+        t.equal(count, 1);
         s1.set(5);
-        t.assert(count, 2);
+        t.equal(count, 2);
     });
 });

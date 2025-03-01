@@ -19,7 +19,7 @@ if (global.gc) {
       // Bind dependencies
       ref.deref().val();
       collect(function () {
-        t.assert(ref.deref() !== void 0, true);
+        t.equal(ref.deref() !== void 0, true);
       });
     });
 
@@ -33,7 +33,7 @@ if (global.gc) {
       c1.deref().val();
       s1.dispose();
       collect(function () {
-        t.assert(c1.deref(), void 0);
+        t.equal(c1.deref(), void 0);
       })
     });
 
@@ -48,11 +48,11 @@ if (global.gc) {
         return { s1, c1 };
       }
       var { s1, c1 } = local();
-      t.assert(c1.deref().val(), 1);
+      t.equal(c1.deref().val(), 1);
       s1.deref().dispose();
       collect(function () {
-        t.assert(s1.deref(), void 0);
-        t.assert(c1.deref(), void 0);
+        t.equal(s1.deref(), void 0);
+        t.equal(c1.deref(), void 0);
       });
     });
   });
