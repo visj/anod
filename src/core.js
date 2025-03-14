@@ -386,6 +386,20 @@ Respond.prototype._update = function (time) { };
 
 /**
  * @interface
+ * @template T
+ */
+function SendBase() { }
+
+/**
+ * @package
+ * @type {(function(T, T): boolean) | null | undefined}
+ */
+SendBase.prototype._compare;
+
+/**
+ * @interface
+ * @template T
+ * @extends {SendBase<T>}
  */
 function SendOne() { }
 
@@ -403,6 +417,8 @@ SendOne.prototype._node1slot;
 
 /**
  * @interface
+ * @template T
+ * @extends {SendBase<T>}
  */
 function SendMany() { }
 
@@ -420,13 +436,15 @@ SendMany.prototype._nodeslots;
 
 /**
  * @interface
- * @extends {SendOne}
- * @extends {SendMany}
+ * @template T
+ * @extends {SendOne<T>}
+ * @extends {SendMany<T>}
  */
 function Send() { }
 
 /**
  * @interface
+ * @template T
  */
 function ReceiveBase() { }
 
@@ -435,6 +453,12 @@ function ReceiveBase() { }
  * @type {Receive | null}
  */
 ReceiveBase.prototype._owner;
+
+/**
+ * @package
+ * @type {(function(...?): T) | null}
+ */
+ReceiveBase.prototype._next;
 
 /**
  * @package
@@ -484,7 +508,8 @@ ReceiveBase.prototype._receiveWillUpdate = function (time) { };
 
 /**
  * @interface
- * @extends {ReceiveBase}
+ * @template T
+ * @extends {ReceiveBase<T>}
  */
 function ReceiveOne() { }
 
@@ -502,7 +527,8 @@ ReceiveOne.prototype._source1slot;
 
 /**
  * @interface
- * @extends {ReceiveBase}
+ * @template T
+ * @extends {ReceiveBase<T>}
  */
 function ReceiveMany() { }
 
@@ -520,8 +546,9 @@ ReceiveMany.prototype._sourceslots;
 
 /**
  * @interface
- * @extends {ReceiveOne}
- * @extends {ReceiveMany}
+ * @template T
+ * @extends {ReceiveOne<T>}
+ * @extends {ReceiveMany<T>}
  */
 function Receive() { }
 
@@ -592,6 +619,7 @@ Reactive.prototype._value;
 Reactive.prototype.val = function () { };
 
 /**
+ * @public
  * @returns {T}
  */
 Reactive.prototype.peek = function () {
@@ -608,7 +636,7 @@ function IRoot() { }
 /**
  * @struct
  * @constructor
- * @param {function(): void} fn
+ * @param {function(): *} fn
  * @extends {Disposable}
  * @implements {IRoot}
  */
@@ -748,8 +776,8 @@ function removeSender(receive, slot) {
  */
 function sendMayDispose(owner, time) {
   var children = owner._children;
-  var len = children.length;
-  for (var i = 0; i < len; i++) {
+  var ln = children.length;
+  for (var i = 0; i < ln; i++) {
     var node = children[i];
     if (node._time < time && node._dtime < time) {
       node._receiveMayDispose(time);
@@ -944,7 +972,7 @@ function clearReceiver(node, time) {
  * @interface
  * @extends {Scope}
  * @extends {Respond}
- * @extends {Receive}
+ * @extends {Receive<void>}
  * @extends {IDisposable}
  */
 function IEffect() { }
@@ -1196,9 +1224,9 @@ Effect.prototype._update = function (time) {
 /**
  * @interface
  * @template T
- * @extends {Send}
+ * @extends {Send<T>}
  * @extends {Respond}
- * @extends {Receive}
+ * @extends {Receive<T>}
  * @extends {ReadonlySignal<T>}
  */
 function ICompute() { }
@@ -1292,7 +1320,7 @@ function Compute(fn, opts, flags) {
   this._dtime = 0;
   /**
    * @package
-   * @type {(function(T, T): void) | null | undefined}
+   * @type {(function(T, T): boolean) | null | undefined}
    */
   this._compare = void 0;
   /**
@@ -1655,8 +1683,9 @@ Data.prototype._update = function (time) {
 };
 
 /**
- * @param {function(): void} fn
- * @returns {DisposableSignal}
+ * @template T
+ * @param {function(): T} fn
+ * @returns {DisposableSignal<T>}
  */
 function root(fn) {
   return new Root(fn);

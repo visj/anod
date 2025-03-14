@@ -192,13 +192,13 @@ async function closureBundleLibrary() {
     ];
     exec(cmd.join(" "), async (err, stdout, stderr) => {
       if (err) {
-        reject(err);
-      } else if (stderr) {
-        reject(stderr);
-      } else {
-        resolve({ stdout, stderr });
+        return reject(err);
+      }
+      if (stderr) {
+        console.warn(stderr);
       }
       await Promise.all[(bundleCore(), bundleArray())];
+      resolve({ stdout, stderr });
     });
   });
 }

@@ -1,7 +1,7 @@
 /**
  * @template T
- * @param {Array<T>} actual 
- * @param {Array<T>} expected 
+ * @param {IArrayLike<T>} actual 
+ * @param {IArrayLike<T>} expected 
  * @returns {boolean}
  */
 export function shallowEq(actual, expected) {

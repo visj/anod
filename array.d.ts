@@ -62,37 +62,13 @@ export interface SignalIterator<T = any> extends ReadonlySignal<ReadonlyArray<T>
   some(callbackFn: (element: T, index: number) => boolean): ReadonlySignal<boolean>;
 }
 
-export const enum Mutation {
-  None = 0,
-  Custom = 1,
-  Pop = 2,
-  Push = 3,
-  Shift = 4,
-  Reverse = 5,
-  Sort = 6,
-  Splice = 7,
-  Unshift = 8,
-  Assign = 9,
-  TypeMask = 15,
-  Insert = 16,
-  Remove = 32,
-  Reorder = 64
-}
-
-export type Change<T> = {
-  type: number,
-  index: number,
-  deletes: number,
-  inserts: number,
-  params: T | T[] | null
-};
-
 export interface SignalArray<T = any> extends SignalIterator<T>, ReadonlySignal<ReadonlyArray<T>> {
+  set(val: T[]): void;
   /**
    *
    * @param callbackFn
    */
-  modify(callbackFn: (array: T[], change: Change<T>) => T[]): void;
+  modify(callbackFn: (array: T[]) => T[]): void;
   /**
    *
    */

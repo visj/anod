@@ -1,4 +1,9 @@
 /**
+ * @typedef {string | number | bigint | boolean | undefined | symbol | null}
+ */
+var primitive;
+
+/**
  * @interface
  */
 function DisposableSignal() {}
@@ -11,7 +16,7 @@ DisposableSignal.prototype.dispose = function () {};
 /**
  * @interface
  * @template T
- * @extends {DisposableSignal}
+ * @extends {DisposableSignal<T>}
  */
 function ReadonlySignal() {}
 
@@ -68,13 +73,13 @@ function SignalIterator() {}
 SignalIterator.prototype.length = function() {};
 
 /**
- * @param {number | Signal<number> | (function(): number)} index
+ * @param {number | ReadonlySignal<number> | (function(): number)} index
  * @returns {ReadonlySignal<T | undefined>}
  */
 SignalIterator.prototype.at = function (index) {};
 
 /**
- * @param {...(T | Array<T> | Signal<T> | Signal<Array<T>>)} items
+ * @param {...(T | Array<T> | ReadonlySignal<T> | ReadonlySignal<Array<T>>)} items
  * @returns {SignalIterator<T>}
  */
 SignalIterator.prototype.concat = function (items) {};
@@ -116,48 +121,49 @@ SignalIterator.prototype.findLast = function (callbackFn) {};
 SignalIterator.prototype.findLastIndex = function (callbackFn) {};
 
 /**
- * @param {function(T,number): void} callbackFn
+ * @param {function(T, number): void} callbackFn
  * @returns {ReadonlySignal<void>}
  */
 SignalIterator.prototype.forEach = function (callbackFn) {};
 
 /**
- * @param {T | Signal<T> | (function(): T)} searchElement
+ * @param {T | ReadonlySignal<T> | (function(): T)} searchElement
  * @returns {ReadonlySignal<boolean>}
  */
 SignalIterator.prototype.includes = function (searchElement) {};
 
 /**
- * @param {T | Signal<T> | (function(): T)} searchElement
+ * @param {T | ReadonlySignal<T> | (function(): T)} searchElement
  * @param {number | Signal<number> | (function(): number)=} fromIndex
  * @returns {ReadonlySignal<number>}
  */
 SignalIterator.prototype.indexOf = function (searchElement, fromIndex) {};
 
 /**
- * @param {string | Signal<string> | (function(): string)=} separator
+ * @param {string | ReadonlySignal<string> | (function(): string)=} separator
  * @returns {ReadonlySignal<string>}
  */
 SignalIterator.prototype.join = function (separator) {};
 
 /**
- * @param {T | Signal<T> | (function(): T)} searchElement
- * @param {number | Signal<number> | (function(): number)=} fromIndex
+ * @param {T | ReadonlySignal<T> | (function(): T)} searchElement
+ * @param {number | ReadonlySignal<number> | (function(): number)=} fromIndex
  * @returns {ReadonlySignal<number>}
  */
 SignalIterator.prototype.lastIndexOf = function (searchElement, fromIndex) {};
 
 /**
  * @template U
- * @param {function(T, Signal<number>): U} callbackFn
+ * @param {function(T, ReadonlySignal<number>): U} callbackFn
+ * @param {function(T): primitive=} keyFn
  * @returns {SignalIterator<U>}
  */
-SignalIterator.prototype.map = function (callbackFn) {};
+SignalIterator.prototype.map = function (callbackFn, keyFn) {};
 
 /**
  * @template U, V
  * @param {function((T | U), T, number): V} callbackFn
- * @param {U | Signal<U> | (function(): U)=} initialValue
+ * @param {U | ReadonlySignal<U> | (function(): U)=} initialValue
  * @returns {ReadonlySignal<V>}
  */
 SignalIterator.prototype.reduce = function (callbackFn, initialValue) {};
@@ -165,14 +171,14 @@ SignalIterator.prototype.reduce = function (callbackFn, initialValue) {};
 /**
  * @template U
  * @param {function((T | U), T, number): U} callbackFn
- * @param {U | Signal<U> | (function(): U)=} initialValue
+ * @param {U | ReadonlySignal<U> | (function(): U)=} initialValue
  * @returns {ReadonlySignal<U>}
  */
 SignalIterator.prototype.reduceRight = function (callbackFn, initialValue) {};
 
 /**
- * @param {number | Signal<number> | (function(): number)=} start
- * @param {number | Signal<number> | (function(): number)=} end
+ * @param {number | ReadonlySignal<number> | (function(): number)=} start
+ * @param {number | ReadonlySignal<number> | (function(): number)=} end
  * @returns {SignalIterator<T>}
  */
 SignalIterator.prototype.slice = function (start, end) {};

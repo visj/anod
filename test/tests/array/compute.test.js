@@ -9,7 +9,7 @@ test("compute", function (t) {
             var s2 = s1.filter(function (item) {
                 return item % 2 !== 0;
             });
-            t.assert(shallowEq(s2.val(), [2, 4]));
+            t.assert(shallowEq(s2.val(), [1, 3, 5]));
         });
     });
 });

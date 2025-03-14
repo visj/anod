@@ -9,6 +9,7 @@ import "./tests/core/signal.test.js";
 import "./tests/core/update.test.js";
 
 import "./tests/array/array.test.js";
+import "./tests/array/compute.test.js";
 import "./tests/array/reduce.test.js";
 
 process.on("exit", report);
