@@ -23,7 +23,7 @@ var State = {
   Cleanup: 32768,
   Initial: 65536,
   Unstable: 131072,
-  Recycle: 162144
+  Ignore: 262144
 };
 /**
  * @enum {number}
@@ -1447,7 +1447,9 @@ Compute.prototype._update = function (time) {
     } else {
       disposeReceiver(this);
     }
-    CONTEXT._listen = this;
+    if (!(state & State.Ignore)) {
+      CONTEXT._listen = this;
+    }
   }
   var prev = this._value;
   if (idle) {

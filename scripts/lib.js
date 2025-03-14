@@ -227,6 +227,12 @@ async function concatBundleLibrary() {
   array = array.replace(windowRegex, "").replace(importsRegex, "");
   const code = [api, core, array].join("\n");
   await fs.promises.writeFile("./build/index.js", code);
+  let [coreDef, arrayDef] = await Promise.all([
+    fs.promises.readFile("./index.d.ts", "utf-8"),
+    fs.promises.readFile("./array.d.ts", "utf-8")
+  ]);
+  const def = [coreDef, arrayDef].join("\n");
+  await fs.promises.writeFile("./build/index.d.ts", def);
 }
 
 async function bundleLibrary() {
