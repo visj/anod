@@ -2,7 +2,6 @@ import { test } from "../../helper/index.js";
 import { array } from "../../../build/index.js";
 import { shallowEq } from "../../helper/array.js";
 
-
 test("array", function (t) {
     t.test("set", function(t) {
         t.test("assigns new array value", function(t) {

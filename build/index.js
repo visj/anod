@@ -155,7 +155,7 @@ SignalIterator.prototype.lastIndexOf = function (searchElement, fromIndex) {};
 /**
  * @template U
  * @param {function(T, ReadonlySignal<number>): U} callbackFn
- * @param {function(T): primitive=} keyFn
+ * @param {function(T): (string | number | symbol)=} keyFn
  * @returns {SignalIterator<U>}
  */
 SignalIterator.prototype.map = function (callbackFn, keyFn) {};
@@ -287,7 +287,7 @@ var State = {
   Cleanup: 32768,
   Initial: 65536,
   Unstable: 131072,
-  Ignore: 262144
+  Bound: 262144
 };
 /**
  * @enum {number}
@@ -433,11 +433,8 @@ var CONTEXT = {
  * @returns {void}
  */
 function extend(child, parent) {
-  /** @constructor */
-  function ctor() { }
-  ctor.prototype = parent.prototype;
-  child.prototype = new ctor();
-  child.constructor = child;
+  child.prototype = Object.create(parent.prototype);
+  child.prototype.constructor = child;
 }
 
 /**
@@ -561,20 +558,23 @@ function start() {
 function disposeScope(scope) {
   /** @type {number} */
   var len;
+  /** @type {number} */
   var state = scope._state;
   if (state & State.Scope) {
     var children = scope._children;
-    for (len = children.length; len--;) {
-      children.pop()._dispose();
+    for (len = children.length - 1; len >= 0; len--) {
+      children[len]._dispose();
     }
     scope._state &= ~State.Scope;
+    children.length = 0;
   }
   if (state & State.Cleanup) {
     var cleanups = scope._cleanups;
-    for (len = cleanups.length; len--;) {
-      cleanups.pop()(true);
+    for (len = cleanups.length - 1; len >= 0; len--) {
+      cleanups[len](true);
     }
     scope._state &= ~State.Cleanup;
+    cleanups.length = 0;
   }
 }
 
@@ -1711,7 +1711,7 @@ Compute.prototype._update = function (time) {
     } else {
       disposeReceiver(this);
     }
-    if (!(state & State.Ignore)) {
+    if (!(state & State.Bound)) {
       CONTEXT._listen = this;
     }
   }
@@ -2171,6 +2171,16 @@ var Mutations = {
 var ArrayProto = Array.prototype;
 
 /**
+ * @const
+ */
+var splice = ArrayProto.splice;
+
+/**
+ * @const
+ */
+var concat = ArrayProto.concat;
+
+/**
  * @package
  * @type {number}
  */
@@ -2373,7 +2383,7 @@ function concatIterator(source, value, args) {
       var param = params[i];
       slice[i] = argValue(param, argType(param));
     }
-    return ArrayProto.concat.apply(source, slice);
+    return concat.apply(source, slice);
   }
   return source.concat(args.arg1());
 }
@@ -2641,7 +2651,7 @@ ReactiveIterator.prototype.indexOf = function (searchElement, fromIndex) {
  * @returns {string}
  */
 function joinIterator(source, value, args) {
-  var separator = /** @type {string | undefined} */(args.arg1());
+  var separator = args.arg1();
   return source.join(separator);
 }
 
@@ -2684,21 +2694,195 @@ ReactiveIterator.prototype.lastIndexOf = function (searchElement, fromIndex) {
 
 /**
  * @template T, U
+ * @this {ComputeMapArray<T, U>}
  * @param {ReadonlyArray<T>} source
  * @param {Array<U>} value
- * @param {Arguments<(function(T, ReadonlySignal<number>): U), (function(T): primitive) | undefined>} args
- * @param {Array<RootIndex<T>>} roots
+ * @param {Arguments<(function(T, ReadonlySignal<number>): U), (function(T): (string | number | symbol)) | undefined>} args
+ * @param {Array<MapRoot<T>>} roots
  * @returns {Array<U>}
  */
 function mapIterator(source, value, args, roots) {
-  var callbackFn = args.arg1();
-  return source.map(callbackFn);
+  /** @type {number} */
+  var i;
+  /** @type {number} */
+  var j;
+  /** @type {T} */
+  var val;
+  /** @type {MapRoot<T>} */
+  var root;
+  var rlen = value.length;
+  var slen = source.length;
+  var map = args._arg1;
+  var pure = map.length < 2;
+  if (rlen === 0) {
+    if (slen > 0) {
+      for (i = 0; i < slen; i++) {
+        root = new MapRoot(source[i], pure ? null : new MapIndex(i));
+        roots[i] = root;
+        value[i] = mapRoot(root, map);
+      }
+    }
+  } else if (slen === 0) {
+    if (rlen > 0) {
+      value.length = 0;
+      for (i = 0; i < rlen; i++) {
+        roots[i]._dispose();
+        roots[i] = null;
+      }
+    }
+  } else {
+    if (args._type2 === ArgType.Callback) {
+      var keyFn = args._arg1;
+    } else {
+      var rmin = 0;
+      var rmax = rlen - 1;
+      var smin = 0;
+      var smax = slen - 1;
+      while (
+        rmin <= rmax &&
+        smin <= smax &&
+        roots[rmin]._value === source[smin]
+      ) {
+        // Common prefix, just increment forward
+        rmin++;
+        smin++;
+      }
+      while (
+        rmin <= rmax &&
+        smin <= smax &&
+        roots[rmax]._value === source[smax]
+      ) {
+        // Common suffix, we don't know if the index
+        // will change until we have diffed the middle part
+        rmax--;
+        smax--;
+      }
+      /** @type {Array<MapRoot>} */
+      var newRoots;
+      /** @type {Array<U>} */
+      var newValue;
+      if (smin > smax) {
+        // We matched all source values
+        if (rmin <= rmax) {
+          // But not all root values,
+          // simple remove cases
+          for (i = rmin; i <= rmax; i++) {
+            roots[i]._dispose();
+          }
+          roots.splice(rmin, rmax - rmin + 1);
+          value.splice(rmin, rmax - rmin + 1);
+          if (!pure) {
+            for (i = rmin; i < rlen; i++) {
+              // todo
+            }
+          }
+        }
+      } else if (rmin > rmax) {
+        // We matched all existing
+        if (smin <= smax) {
+          // But not all source values,
+          // simple insert cases
+          newRoots = [rmin, 0];
+          newValue = [rmin, 0];
+          for (i = smin, j = 2; i <= smax; i++, j++) {
+            root = new MapRoot(source[i], pure ? null : new MapIndex(i));
+            newRoots[j] = root;
+            newValue[j] = mapRoot(root, map);
+          }
+          splice.apply(roots, newRoots);
+          splice.apply(value, newValue);
+        }
+      } else {
+        // Need to reconcile
+        var oldLen = rmax - rmin + 1;
+        var newLen = smax - smin + 1;
+        // 1) Build newIndices (item → headIndex) + newIndicesNext (linked list)
+        /** @type {Map<T, number>} */
+        var indexMap = new Map();
+        /** @type {TypedArray<number>} */
+        var indexNext = new Int32Array(newLen);
+        for (i = smax; i >= smin; i--) {
+          val = source[i];
+          j = indexMap.get(val);
+          indexMap.set(val, i);
+          indexNext[i - smin] = (j === void 0 ? -1 : j);
+        }
+
+        // 2) Allocate temp slots
+        newRoots = new Array(newLen);
+        newValue = new Array(newLen);
+
+        // // 3) Sweep old roots: reuse or dispose
+        // for (i = rmin; i <= rmax; i++) {
+        //   val = roots[i]._value;
+        //   j = indexMap.get(val);
+        //   if (j !== void 0 && j !== -1) {
+        //     // reuse this root at new position j
+        //     var idx = j - smin;
+        //     tempRoots[idx] = oldRoots[i];
+        //     tempValues[idx] = oldValues[i];
+        //     if (!noindex) oldRoots[i]._index.set(j);
+        //     // advance the linked list for this key
+        //     prev = indexNext[idx];
+        //     if (prev === -1) {
+        //       indexMap.delete(key);
+        //     } else {
+        //       indexMap.set(key, smin + prev);
+        //     }
+        //   } else {
+        //     // no match → dispose
+        //     oldRoots[i]._dispose();
+        //   }
+        // }
+
+        // // 4) Overwrite in-place & collect fresh inserts
+        // var insRoots = [];
+        // var insValues = [];
+        // for (var k = 0; k < newLen; k++) {
+        //   var dest = rmin + k;
+        //   var reused = tempRoots[k];
+        //   if (reused !== undefined) {
+        //     // keep existing root/value
+        //     roots[dest] = reused;
+        //     value[dest] = tempValues[k];
+        //   } else {
+        //     // create new root
+        //     var nr = new MapRoot(source[smin + k], pure ? new MapIndex(smin + k) : null);
+        //     var mv = mapRoot(nr, cb);
+        //     roots[dest] = nr;
+        //     value[dest] = mv;
+        //     insRoots.push(nr);
+        //     insValues.push(mv);
+        //   }
+        // }
+        // // 5) Single splice to remove old‐tail or insert new‐tail
+        // if (newLen < oldLen) {
+        //   // drop the excess old slots
+        //   roots.splice(rmin + newLen, oldLen - newLen);
+        //   value.splice(rmin + newLen, oldLen - newLen);
+        // } else if (insRoots.length) {
+        //   // insert the extra new slots
+        //   splice.apply(
+        //     roots,
+        //     [rmin + oldLen, 0].concat(insRoots)
+        //   );
+        //   splice.apply(
+        //     value,
+        //     [rmin + oldLen, 0].concat(insValues)
+        //   );
+        // }
+        // done—prefix [0..rmin-1] and suffix remain untouched
+      }
+    }
+
+  }
+  return value;
 }
 
 /**
  * @template U
  * @param {function(T, ReadonlySignal<number>): U} callbackFn
- * @param {function(T): primitive=} keyFn
+ * @param {function(T): (string | number | symbol)=} keyFn
  * @returns {SignalIterator<U>}
  */
 ReactiveIterator.prototype.map = function (callbackFn, keyFn) {
@@ -2882,72 +3066,6 @@ ComputeReduce.prototype._apply = function () {
  */
 function ComputeArrayStub() { }
 
-// /**
-//  * @package
-//  * @type {number}
-//  */
-// ComputeArray.prototype._time;
-
-// /**
-//  * @package
-//  * @type {number}
-//  */
-// ComputeArray.prototype._utime;
-
-// /**
-//  * @package
-//  * @type {number}
-//  */
-// ComputeArrayStub.prototype._dtime;
-
-// /**
-//  * @package
-//  * @type {Receive | null}
-//  */
-// ComputeArrayStub.prototype._node1;
-
-// /**
-//  * @package
-//  * @type {number}
-//  */
-// ComputeArrayStub.prototype._node1slot;
-
-// /**
-//  * @package
-//  * @type {Array<Receive> | null}
-//  */
-// ComputeArrayStub.prototype._nodes;
-
-// /**
-//  * @package
-//  * @type {Array<number> | null}
-//  */
-// ComputeArrayStub.prototype._nodeslots;
-
-// /**
-//  * @package
-//  * @type {Send | null}
-//  */
-// ComputeArrayStub.prototype._source1;
-
-// /**
-//  * @package
-//  * @type {number}
-//  */
-// ComputeArrayStub.prototype._source1slot;
-
-// /**
-//  * @package
-//  * @type {Receive | null}
-//  */
-// ComputeArrayStub.prototype._owner;
-
-// /**
-//  * @package
-//  * @type {(function(...?): T) | null}
-//  */
-// ComputeArrayStub.prototype._next;
-
 /**
  * @package
  * @returns {void}
@@ -3021,7 +3139,7 @@ function ComputeArray(source, fn, arg1, type1, arg2, type2) {
    * @package
    * @type {number}
    */
-  this._state = State.Initial | State.WillUpdate | State.Ignore;
+  this._state = State.Initial | State.WillUpdate | State.Bound;
   /**
    * @package
    * @type {Array<U>}
@@ -3119,7 +3237,7 @@ ComputeArray.prototype._apply = function () {
  * @param {number} val
  * @extends {Compute<number>}
  */
-function ComputeIndex(val) {
+function MapIndex(val) {
   /**
    * @package
    * @type {number}
@@ -3152,30 +3270,39 @@ function ComputeIndex(val) {
   this._nodeslots = null;
   /**
    * @package
-   * @type {Send | null}
-   */
-  this._source1 = null;
-  /**
-   * @package
-   * @type {number}
-   */
-  this._source1slot = 0;
-  /**
-   * @package
    * @type {number}
    */
   this._time = 0;
 }
+
+extend(MapIndex, Compute);
+
+/**
+ * @package
+ * @override
+ * @returns {void}
+ */
+MapIndex.prototype._dispose = function () {
+  var state = this._state;
+  if (state !== State.Disposed) {
+    if (state & State.Send) {
+      disposeSender(this);
+    }
+    this._value = null;
+    this._state = State.Disposed;
+  }
+};
 
 /**
  * @struct
  * @template T
  * @constructor
  * @param {T} val
- * @param {ComputeIndex=} index
+ * @param {MapIndex | null} index
+ * @param {string | number | symbol=} key
  * @extends {Root}
  */
-function RootIndex(val, index) {
+function MapRoot(val, index, key) {
   /**
    * @package
    * @type {number}
@@ -3198,39 +3325,61 @@ function RootIndex(val, index) {
   this._value = val;
   /**
    * @package
-   * @type {ComputeIndex<number> | null | undefined}
+   * @type {MapIndex | null}
    */
   this._index = index;
+  /**
+   * @package 
+   * @type {string | number | symbol | undefined}
+   */
+  this._key = key;
 }
 
-extend(RootIndex, Root);
+extend(MapRoot, Root);
+
+/**
+ * @package
+ * @override
+ * @returns {void}
+ */
+MapRoot.prototype._dispose = function () {
+  if (this._state !== State.Disposed) {
+    disposeScope(this);
+    if (this._index !== null) {
+      this._index._dispose();
+    }
+    this._children =
+      this._cleanups = null;
+    this._state = State.Disposed;
+  }
+};
 
 /**
  * @package
  * @template T, U
+ * @param {MapRoot<T, U>} root 
  * @param {(function(T): U) | (function(T, ReadonlySignal<number>): U)} fn 
- * @param {number} index
  * @returns {U}
  */
-RootIndex.prototype._map = function (fn, index) {
+function mapRoot(root, fn) {
   var owner = CONTEXT._owner;
   var listen = CONTEXT._listen;
-  CONTEXT._owner = this;
+  CONTEXT._owner = root;
   CONTEXT._listen = null;
   try {
-    return fn(this._value, this._index);
+    return fn(root._value, root._index);
   } finally {
     CONTEXT._owner = owner;
     CONTEXT._listen = listen;
   }
-};
+}
 
 /**
  * @struct
  * @template T, U, V, W
  * @constructor
  * @param {ReactiveIterator<T>} source
- * @param {function(ReadonlyArray<T>, Array<U>, Arguments<V, W>, Array<RootIndex<T>>): Array<U>} fn
+ * @param {function(ReadonlyArray<T>, Array<U>, Arguments<V, W>, Array<MapRoot<T>>): Array<U>} fn
  * @param {V | ReadonlySignal<V> | (function(): V)=} arg1
  * @param {ArgType=} type1
  * @param {W | ReadonlySignal<W> | (function(): W)=} arg2
@@ -3242,7 +3391,7 @@ function ComputeMapArray(source, fn, arg1, type1, arg2, type2) {
   ComputeArray.call(this, source, fn, arg1, type1, arg2, type2);
   /**
    * @package
-   * @type {Array<RootIndex<T>>}
+   * @type {Array<MapRoot<T>>}
    */
   this._roots = [];
 }
@@ -3497,7 +3646,6 @@ DataArray.prototype._apply = function () {
       break;
     case Mutations.Unshift:
       if (mut & Mutation.InsertRange) {
-        console.log(args, typeof(args));
         ArrayProto.unshift.apply(value, /** @type {Array<T>} */(args));
       } else {
         value.unshift(/** @type {T} */(args));

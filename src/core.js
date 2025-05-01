@@ -23,7 +23,7 @@ var State = {
   Cleanup: 32768,
   Initial: 65536,
   Unstable: 131072,
-  Ignore: 262144
+  Bound: 262144
 };
 /**
  * @enum {number}
@@ -169,11 +169,8 @@ var CONTEXT = {
  * @returns {void}
  */
 function extend(child, parent) {
-  /** @constructor */
-  function ctor() { }
-  ctor.prototype = parent.prototype;
-  child.prototype = new ctor();
-  child.constructor = child;
+  child.prototype = Object.create(parent.prototype);
+  child.prototype.constructor = child;
 }
 
 /**
@@ -297,20 +294,23 @@ function start() {
 function disposeScope(scope) {
   /** @type {number} */
   var len;
+  /** @type {number} */
   var state = scope._state;
   if (state & State.Scope) {
     var children = scope._children;
-    for (len = children.length; len--;) {
-      children.pop()._dispose();
+    for (len = children.length - 1; len >= 0; len--) {
+      children[len]._dispose();
     }
     scope._state &= ~State.Scope;
+    children.length = 0;
   }
   if (state & State.Cleanup) {
     var cleanups = scope._cleanups;
-    for (len = cleanups.length; len--;) {
-      cleanups.pop()(true);
+    for (len = cleanups.length - 1; len >= 0; len--) {
+      cleanups[len](true);
     }
     scope._state &= ~State.Cleanup;
+    cleanups.length = 0;
   }
 }
 
@@ -1447,7 +1447,7 @@ Compute.prototype._update = function (time) {
     } else {
       disposeReceiver(this);
     }
-    if (!(state & State.Ignore)) {
+    if (!(state & State.Bound)) {
       CONTEXT._listen = this;
     }
   }
