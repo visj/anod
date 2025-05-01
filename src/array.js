@@ -1242,7 +1242,7 @@ extend(MapRoot, Root);
  */
 MapRoot.prototype._dispose = function () {
   if (this._state !== State.Disposed) {
-    disposeScope(this);
+    disposeScope(this, true);
     if (this._index !== null) {
       this._index._dispose();
     }

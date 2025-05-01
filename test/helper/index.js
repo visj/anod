@@ -59,11 +59,11 @@ Test.prototype.assert = function(assert, message) {
 
 /**
  * @template T
- * @param {T} expected 
  * @param {T} actual 
+ * @param {T} expected 
  */
-Test.prototype.equal = function(expected, actual) {
-    if (expected === actual) {
+Test.prototype.equal = function(actual, expected) {
+    if (actual === expected) {
         PASS++;
     } else {
         FAIL++;
