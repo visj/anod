@@ -351,6 +351,24 @@ function drainDispose(queue) {
  * @param {number} time
  * @returns {void}
  */
+function drainMayUpdate(queue, time) {
+  var items = queue._items;
+  for (var i = 0; i < queue._count; i++) {
+    var item = items[i];
+    if (item._state & State.WillUpdate) {
+      item._update(time);
+    }
+    items[i] = null;
+  }
+  queue._count = 0;
+}
+
+/**
+ *
+ * @param {Queue<Respond>} queue
+ * @param {number} time
+ * @returns {void}
+ */
 function drainUpdate(queue, time) {
   var items = queue._items;
   for (var i = 0; i < queue._count; i++) {
@@ -535,10 +553,10 @@ function start() {
       drainUpdate(CHANGES, time);
     }
     if (COMPUTES._count !== 0) {
-      drainUpdate(COMPUTES, time);
+      drainMayUpdate(COMPUTES, time);
     }
     if (UPDATES._count !== 0) {
-      drainUpdate(UPDATES, time);
+      drainMayUpdate(UPDATES, time);
     }
     if (EFFECTS._count !== 0) {
       drainUpdate(EFFECTS, time);
