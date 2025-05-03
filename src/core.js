@@ -87,13 +87,21 @@ function drainDispose(queue) {
  * @param {number} time
  * @returns {void}
  */
-function drainMayUpdate(queue, time) {
+function drainUpdate(queue, time) {
   var items = queue._items;
   for (var i = 0; i < queue._count; i++) {
     var item = items[i];
-    if (item._state & State.WillUpdate) {
-      item._update(time);
-    }
+    item._update(time);
+    items[i] = null;
+  }
+  queue._count = 0;
+}
+
+function drainReceive(queue, time) {
+  var items = queue._items;
+  for (var i = 0; i < queue._count; i++) {
+    var item = items[i];
+    sendMayUpdate(item, time);
     items[i] = null;
   }
   queue._count = 0;
@@ -105,11 +113,13 @@ function drainMayUpdate(queue, time) {
  * @param {number} time
  * @returns {void}
  */
-function drainUpdate(queue, time) {
+function drainMayUpdate(queue, time) {
   var items = queue._items;
   for (var i = 0; i < queue._count; i++) {
     var item = items[i];
-    item._update(time);
+    if (item._state & State.WillUpdate) {
+      item._update(time);
+    }
     items[i] = null;
   }
   queue._count = 0;
@@ -154,6 +164,11 @@ var DISPOSES = new Queue();
  * @type {Queue<Respond>}
  */
 var CHANGES = new Queue();
+/**
+ * @const
+ * @type {Queue<Send>}
+ */
+var RECEIVES = new Queue();
 /**
  * @const
  * @type {Queue<Respond>}
@@ -219,9 +234,20 @@ function reset() {
  * @returns {void}
  */
 function connect(send, receive) {
+  var sources = receive._sources;
   var sendslot = -1;
   var receiveslot =
-    receive._source1 === null ? -1 : receive._sources === null ? 0 : receive._sources.length;
+    receive._source1 === null ? -1 : sources === null ? 0 : sources.length;
+  if (receiveslot >= 0) {
+    if (
+      (receive._source1 === send) || (receiveslot > 0 && (
+      receiveslot > 1 ?
+        (sources[receiveslot - 1] === send || sources[receiveslot - 2] === send) :
+        sources[0] === send
+    ))) {
+      return;
+    }
+  }
   if (send._node1 === null) {
     send._node1 = receive;
     send._node1slot = receiveslot;
@@ -276,6 +302,7 @@ function start() {
   var cycle = 0;
   while (
     CHANGES._count !== 0 ||
+    RECEIVES._count !== 0 ||
     COMPUTES._count !== 0 ||
     EFFECTS._count !== 0 ||
     UPDATES._count !== 0 ||
@@ -287,6 +314,9 @@ function start() {
     }
     if (CHANGES._count !== 0) {
       drainUpdate(CHANGES, time);
+    }
+    if (RECEIVES._count !== 0) {
+      drainReceive(RECEIVES, time);
     }
     if (COMPUTES._count !== 0) {
       drainMayUpdate(COMPUTES, time);
@@ -740,8 +770,8 @@ function removeReceiver(send, slot) {
       var nodeslots = send._nodeslots;
       var last = nodes.pop();
       var lastslot = nodeslots.pop();
-      var ln = nodes.length;
-      if (slot !== ln) {
+      var len = nodes.length;
+      if (slot !== len) {
         nodes[slot] = last;
         nodeslots[slot] = lastslot;
         if (lastslot === -1) {
@@ -750,7 +780,7 @@ function removeReceiver(send, slot) {
           last._sourceslots[lastslot] = slot;
         }
       }
-      if (ln === 0) {
+      if (len === 0) {
         send._state &= ~State.SendMany;
       }
     }
@@ -939,11 +969,11 @@ function refresh(node, time) {
 function clearReceiver(node, time) {
   node._state |= State.Clearing;
   if (node._state & State.MayDispose && node._dtime === time) {
+    node._state &= ~State.MayDispose;
     var owner = node._owner;
     if (owner._state & (State.WillUpdate | State.MayUpdate | State.MayDispose)) {
       refresh(owner, time);
     }
-    node._state &= ~State.MayDispose;
   }
   clear: if (
     (node._state &
@@ -961,10 +991,8 @@ function clearReceiver(node, time) {
       source = /** @type {Receive} */ (node._source1);
       state = source._state;
       if (
-        state & State.Receive && (
-          (state & State.WillUpdate) ||
-          (state & State.MayUpdate && source._utime === time)
-        )
+        (state & State.WillUpdate) ||
+        (state & State.MayUpdate && source._utime === time)
       ) {
         refresh(source, time);
         if (node._state & (State.WillDispose | State.WillUpdate)) {
@@ -979,10 +1007,8 @@ function clearReceiver(node, time) {
         source = /** @type {Receive} */ (sources[i]);
         state = source._state;
         if (
-          state & State.Receive && (
-            (state & State.WillUpdate) ||
-            (state & State.MayUpdate && source._utime === time)
-          )
+          (state & State.WillUpdate) ||
+          (state & State.MayUpdate && source._utime === time)
         ) {
           refresh(source, time);
           if (node._state & (State.WillDispose | State.WillUpdate)) {
@@ -1131,9 +1157,7 @@ Effect.prototype._dispose = function () {
     if (state & State.Receive) {
       disposeReceiver(this, true);
     }
-    this._children =
-      this._cleanups =
-      this._next =
+    this._next =
       null;
     this._state = State.Disposed;
   }
@@ -1201,10 +1225,10 @@ Effect.prototype._receiveMayUpdate = function (time) {
 Effect.prototype._receiveWillUpdate = function (time) {
   this._time = time;
   this._state = (this._state | State.WillUpdate) & ~State.MayUpdate;
+  EFFECTS._add(this);
   if (this._state & State.Scope) {
     sendWillDispose(this._children, time);
   }
-  EFFECTS._add(this);
 };
 
 /**
@@ -1419,15 +1443,15 @@ Compute.prototype.val = function () {
 Compute.prototype._dispose = function () {
   var state = this._state;
   if (state !== State.Disposed) {
+    this._value =
+      this._next =
+      this._compare = null;
     if (state & State.Send) {
       disposeSender(this);
     }
     if (state & State.Receive) {
       disposeReceiver(this, true);
     }
-    this._value =
-      this._next =
-      this._compare = null;
     this._state = State.Disposed;
   }
 };
@@ -1484,6 +1508,12 @@ Compute.prototype._update = function (time) {
   }
   try {
     this._apply();
+    if (state & State.Send && prev !== this._value) {
+      sendWillUpdate(this, time);
+      if (RECEIVES._count !== 0) {
+        drainReceive(RECEIVES, time);
+      }
+    }
     if (idle && (CHANGES._count !== 0 || DISPOSES._count !== 0)) {
       start();
     }
@@ -1495,9 +1525,6 @@ Compute.prototype._update = function (time) {
     if (!(this._state & State.Receive)) {
       this._detach();
     }
-  }
-  if (state & State.Send && prev !== this._value) {
-    sendWillUpdate(this, time);
   }
 };
 
@@ -1532,7 +1559,7 @@ Compute.prototype._receiveMayUpdate = function (time) {
   this._utime = time;
   this._state = (this._state | State.MayUpdate) & ~State.Clearing;
   if (this._state & State.Send) {
-    sendMayUpdate(this, time);
+    RECEIVES._add(this);
   }
 };
 
@@ -1548,7 +1575,7 @@ Compute.prototype._receiveWillUpdate = function (time) {
   if (this._state & State.Send) {
     COMPUTES._add(this);
     if (this._utime < time) {
-      sendMayUpdate(this, time);
+      RECEIVES._add(this);
     }
   }
 };
@@ -1686,7 +1713,7 @@ Data.prototype.set = function (val) {
 Data.prototype._dispose = function () {
   if (this._state !== State.Disposed) {
     disposeSender(this);
-    this._value = 
+    this._value =
       this._next = null;
     this._state = State.Disposed;
   }
