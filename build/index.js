@@ -505,9 +505,9 @@ function connect(send, receive) {
   if (receiveslot >= 0) {
     if (
       (receive._source1 === send) || (receiveslot > 0 && (
-      receiveslot > 1 ?
-        (sources[receiveslot - 1] === send || sources[receiveslot - 2] === send) :
-        sources[0] === send
+      receiveslot === 1 ?
+        sources[0] === send :
+        (sources[receiveslot - 1] === send || sources[receiveslot - 2] === send)
     ))) {
       return;
     }
@@ -1843,10 +1843,6 @@ Compute.prototype._receiveWillUpdate = function (time) {
     }
   }
 };
-
-function ComputeOpts() {
-
-}
 
 /**
  * @interface
