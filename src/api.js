@@ -154,11 +154,17 @@ SignalIterator.prototype.lastIndexOf = function (searchElement, fromIndex) {};
 
 /**
  * @template U
- * @param {function(T, ReadonlySignal<number>): U} callbackFn
- * @param {function(T): (string | number | symbol)=} keyFn
+ * @param {function(T, number): U} callbackFn
  * @returns {SignalIterator<U>}
  */
-SignalIterator.prototype.map = function (callbackFn, keyFn) {};
+SignalIterator.prototype.map = function (callbackFn) {};
+
+// /**
+//  * @template U
+//  * @param {function(T, ReadonlySignal<number>): U} callbackFn
+//  * @returns {SignalIterator<U>}
+//  */
+// SignalIterator.prototype.mapRoot = function (callbackFn) {};
 
 /**
  * @template U, V

@@ -30,7 +30,14 @@ function Test(messages) {
  * @returns {void}
  */
 Test.prototype.test = function(message, callback) {
-    callback(new Test(this.messages.concat(message)));
+    try {
+        var messages = this.messages.slice();
+        messages.push(message);
+        callback(new Test(messages));
+    } catch (err) {
+        FAIL++;
+        console.error(this.scope() + ": " + (message || ""));
+    }
 };
 
 /**
@@ -61,13 +68,14 @@ Test.prototype.assert = function(assert, message) {
  * @template T
  * @param {T} actual 
  * @param {T} expected 
+ * @param {string=} message
  */
-Test.prototype.equal = function(actual, expected) {
+Test.prototype.equal = function(actual, expected, message) {
     if (actual === expected) {
         PASS++;
     } else {
         FAIL++;
-        console.error(this.scope() + ": Expected " + expected + ", got " + actual);
+        console.error(this.scope() + ": Expected " + expected + ", got " + actual, message || "");
     }
 };
 

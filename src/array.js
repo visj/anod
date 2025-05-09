@@ -25,72 +25,8 @@ import {
   IReactive,
   Reactive,
   connect,
+  Cleanup,
 } from "./core.js";
-
-/**
- * @const
- * @enum {number}
- */
-var Mutation = {
-  None: 0,
-  TypeMask: 1023,
-  InsertOne: 1024,
-  InsertRange: 2048,
-  RemoveOne: 4096,
-  RemoveRange: 8192,
-  OrderSort: 16384,
-  OrderReverse: 32768,
-  Assign: 65536,
-  Modify: 131072,
-  ModifyRange: 262144
-};
-
-/**
- * @const
- * @enum {number}
- */
-var Mutations = {
-  Set: 1,
-  Pop: 2,
-  Push: 3,
-  Reverse: 4,
-  Shift: 5,
-  Sort: 6,
-  Splice: 7,
-  Unshift: 8,
-  Fill: 9,
-  CopyWithin: 10,
-  Modify: 11,
-};
-
-/**
- * @const
- */
-var ArrayProto = Array.prototype;
-
-/**
- * @const
- */
-var splice = ArrayProto.splice;
-
-/**
- * @const
- */
-var concat = ArrayProto.concat;
-
-/**
- * @package
- * @type {number}
- */
-var MUT_SEED = Mutations.Modify;
-
-/**
- * @public
- * @returns {number}
- */
-function mutation() {
-  return ++MUT_SEED;
-}
 
 /**
  * @enum {number}
@@ -149,12 +85,7 @@ function argValue(val, type) {
 function Arguments(arg1, type1, arg2, type2) {
   /**
    * @package
-   * @type {number}
-   */
-  this.index = -1;
-  /**
-   * @package
-   * @type {T | undefined}
+   * @type {T}
    */
   this._arg1 = arg1;
   /**
@@ -164,7 +95,7 @@ function Arguments(arg1, type1, arg2, type2) {
   this._type1 = type1 || ArgType.NotReactive;
   /**
    * @package
-   * @type {U | undefined}
+   * @type {U}
    */
   this._arg2 = arg2;
   /**
@@ -188,6 +119,44 @@ Arguments.prototype.arg1 = function () {
  */
 Arguments.prototype.arg2 = function () {
   return argValue(this._arg2, this._type2);
+};
+
+/**
+ * @const
+ * @enum {number}
+ */
+var Mut = {
+  Mask: 15,
+  InsertOne: 16,
+  RemoveOne: 32,
+  InsertMany: 64,
+  RemoveMany: 128,
+  RemoveOrInsert: 16 | 32 | 64 | 128,
+  HeadOnly: 256,
+  TailOnly: 512,
+  Reorder: 1024,
+};
+
+/**
+ * @const
+ * @enum {number}
+ */
+var Mutation = {
+  None: 0,
+  Set: 1,
+  Modify: 2,
+  Pop: 3 | Mut.RemoveOne | Mut.TailOnly,
+  PushOne: 4 | Mut.InsertOne | Mut.TailOnly,
+  PushMany: 5 | Mut.InsertMany | Mut.TailOnly,
+  Reverse: 6 | Mut.Reorder,
+  Shift: 7 | Mut.InsertOne | Mut.HeadOnly,
+  Sort: 8 | Mut.Reorder,
+  Splice: 9,
+  UnshiftOne: 10 | Mut.InsertOne | Mut.HeadOnly,
+  UnshiftMany: 11 | Mut.InsertOne | Mut.HeadOnly,
+  Fill: 12,
+  CopyWithin: 13,
+  Extension: 14,
 };
 
 /**
@@ -228,7 +197,11 @@ ReactiveIterator.prototype.length = function () {
  */
 function atIterator(source, value, args) {
   var index = args.arg1();
-  return source.at(index);
+  var length = source.length;
+  if (index < 0) {
+    index += length;
+  }
+  return index < length ? source[index] : void 0;
 }
 
 /**
@@ -281,7 +254,7 @@ function concatIterator(source, value, args) {
       var param = params[i];
       slice[i] = argValue(param, argType(param));
     }
-    return concat.apply(source, slice);
+    return Array.prototype.concat.apply(source, slice);
   }
   return source.concat(args.arg1());
 }
@@ -292,25 +265,31 @@ function concatIterator(source, value, args) {
  * @returns {SignalIterator<T>}
  */
 ReactiveIterator.prototype.concat = function (items) {
-  var len = arguments.length;
-  switch (len) {
-    case 0:
-      return new ComputeArray(this, copyIterator);
-    case 1:
-      return new ComputeArray(this, concatIterator, items, argType(items));
+  var length = arguments.length;
+  if (length === 0) {
+    return new ComputeArray(this, copyIterator);
   }
   /**
    * @type {Array<T | Array<T> | ReadonlySignal<T> | ReadonlySignal<Signal<T>>>}
    */
-  var args = new Array(len);
-  for (var i = 0; i < len; i++) {
-    args[i] = arguments[i];
+  var args;
+  /** @type {ArgType} */
+  var type;
+  if (length === 1) {
+    args = items;
+    type = argType(items);
+  } else {
+    args = new Array(length);
+    for (var i = 0; i < length; i++) {
+      args[i] = arguments[i];
+    }
+    type = ArgType.Variadic;
   }
   return new ComputeArray(
     this,
     concatIterator,
     args,
-    ArgType.Variadic
+    type
   );
 };
 
@@ -592,207 +571,282 @@ ReactiveIterator.prototype.lastIndexOf = function (searchElement, fromIndex) {
 
 /**
  * @template T, U
- * @this {ComputeMapArray<T, U>}
  * @param {ReadonlyArray<T>} source
- * @param {Array<U>} value
- * @param {Arguments<(function(T, ReadonlySignal<number>): U), (function(T): (string | number | symbol)) | undefined>} args
- * @param {Array<MapRoot<T>>} roots
+ * @param {Array<U>} values
+ * @param {Arguments<(function(T, number): U), Array<T>>} args
  * @returns {Array<U>}
  */
-function mapIterator(source, value, args, roots) {
-  /** @type {number} */
+function mapIterator(source, values, args) {
   var i;
-  /** @type {number} */
-  var j;
-  /** @type {T} */
   var val;
-  /** @type {MapRoot<T>} */
-  var root;
-  var rlen = value.length;
   var slen = source.length;
-  var map = args._arg1;
-  var pure = map.length < 2;
-  if (rlen === 0) {
+  var vlen = values.length;
+  var cache = args._arg2;
+  var callbackFn = args._arg1;
+  if (vlen === 0) {
     if (slen > 0) {
       for (i = 0; i < slen; i++) {
-        root = new MapRoot(source[i], pure ? null : new MapIndex(i));
-        roots[i] = root;
-        value[i] = mapRoot(root, map);
+        val = source[i];
+        cache[i] = val;
+        values[i] = callbackFn(val, i);
       }
     }
   } else if (slen === 0) {
-    if (rlen > 0) {
-      value.length = 0;
-      for (i = 0; i < rlen; i++) {
-        roots[i]._dispose();
-        roots[i] = null;
-      }
+    if (vlen > 0) {
+      cache.length = 0;
+      values.length = 0;
     }
   } else {
-    if (args._type2 === ArgType.Callback) {
-      var keyFn = args._arg1;
-    } else {
-      var rmin = 0;
-      var rmax = rlen - 1;
-      var smin = 0;
-      var smax = slen - 1;
-      while (
-        rmin <= rmax &&
-        smin <= smax &&
-        roots[rmin]._value === source[smin]
-      ) {
-        // Common prefix, just increment forward
-        rmin++;
-        smin++;
-      }
-      while (
-        rmin <= rmax &&
-        smin <= smax &&
-        roots[rmax]._value === source[smax]
-      ) {
-        // Common suffix, we don't know if the index
-        // will change until we have diffed the middle part
-        rmax--;
-        smax--;
-      }
-      /** @type {Array<MapRoot>} */
-      var newRoots;
-      /** @type {Array<U>} */
-      var newValue;
-      if (smin > smax) {
-        // We matched all source values
-        if (rmin <= rmax) {
-          // But not all root values,
-          // simple remove cases
-          for (i = rmin; i <= rmax; i++) {
-            roots[i]._dispose();
-          }
-          roots.splice(rmin, rmax - rmin + 1);
-          value.splice(rmin, rmax - rmin + 1);
-          if (!pure) {
-            for (i = rmin; i < rlen; i++) {
-              // todo
-            }
-          }
-        }
-      } else if (rmin > rmax) {
-        // We matched all existing
-        if (smin <= smax) {
-          // But not all source values,
-          // simple insert cases
-          newRoots = [rmin, 0];
-          newValue = [rmin, 0];
-          for (i = smin, j = 2; i <= smax; i++, j++) {
-            root = new MapRoot(source[i], pure ? null : new MapIndex(i));
-            newRoots[j] = root;
-            newValue[j] = mapRoot(root, map);
-          }
-          splice.apply(roots, newRoots);
-          splice.apply(value, newValue);
-        }
-      } else {
-        // Need to reconcile
-        var oldLen = rmax - rmin + 1;
-        var newLen = smax - smin + 1;
-        // 1) Build newIndices (item → headIndex) + newIndicesNext (linked list)
-        /** @type {Map<T, number>} */
-        var indexMap = new Map();
-        /** @type {TypedArray<number>} */
-        var indexNext = new Int32Array(newLen);
-        for (i = smax; i >= smin; i--) {
-          val = source[i];
-          j = indexMap.get(val);
-          indexMap.set(val, i);
-          indexNext[i - smin] = (j === void 0 ? -1 : j);
-        }
-
-        // 2) Allocate temp slots
-        newRoots = new Array(newLen);
-        newValue = new Array(newLen);
-
-        // // 3) Sweep old roots: reuse or dispose
-        // for (i = rmin; i <= rmax; i++) {
-        //   val = roots[i]._value;
-        //   j = indexMap.get(val);
-        //   if (j !== void 0 && j !== -1) {
-        //     // reuse this root at new position j
-        //     var idx = j - smin;
-        //     tempRoots[idx] = oldRoots[i];
-        //     tempValues[idx] = oldValues[i];
-        //     if (!noindex) oldRoots[i]._index.set(j);
-        //     // advance the linked list for this key
-        //     prev = indexNext[idx];
-        //     if (prev === -1) {
-        //       indexMap.delete(key);
-        //     } else {
-        //       indexMap.set(key, smin + prev);
-        //     }
-        //   } else {
-        //     // no match → dispose
-        //     oldRoots[i]._dispose();
-        //   }
-        // }
-
-        // // 4) Overwrite in-place & collect fresh inserts
-        // var insRoots = [];
-        // var insValues = [];
-        // for (var k = 0; k < newLen; k++) {
-        //   var dest = rmin + k;
-        //   var reused = tempRoots[k];
-        //   if (reused !== undefined) {
-        //     // keep existing root/value
-        //     roots[dest] = reused;
-        //     value[dest] = tempValues[k];
-        //   } else {
-        //     // create new root
-        //     var nr = new MapRoot(source[smin + k], pure ? new MapIndex(smin + k) : null);
-        //     var mv = mapRoot(nr, cb);
-        //     roots[dest] = nr;
-        //     value[dest] = mv;
-        //     insRoots.push(nr);
-        //     insValues.push(mv);
-        //   }
-        // }
-        // // 5) Single splice to remove old‐tail or insert new‐tail
-        // if (newLen < oldLen) {
-        //   // drop the excess old slots
-        //   roots.splice(rmin + newLen, oldLen - newLen);
-        //   value.splice(rmin + newLen, oldLen - newLen);
-        // } else if (insRoots.length) {
-        //   // insert the extra new slots
-        //   splice.apply(
-        //     roots,
-        //     [rmin + oldLen, 0].concat(insRoots)
-        //   );
-        //   splice.apply(
-        //     value,
-        //     [rmin + oldLen, 0].concat(insValues)
-        //   );
-        // }
-        // done—prefix [0..rmin-1] and suffix remain untouched
+    var minlen = slen < vlen ? slen : vlen;
+    for (i = 0; i < minlen; i++) {
+      val = source[i];
+      if (val !== cache[i]) {
+        cache[i] = val;
+        values[i] = callbackFn(val, i);
       }
     }
-
+    if (slen > vlen) {
+      for (; i < slen; i++) {
+        val = source[i];
+        cache[i] = val;
+        values[i] = callbackFn(val, i);
+      }
+    } else if (vlen > slen) {
+      cache.length = slen;
+      values.length = slen;
+    }
   }
-  return value;
+  return values;
 }
 
 /**
  * @template U
- * @param {function(T, ReadonlySignal<number>): U} callbackFn
- * @param {function(T): (string | number | symbol)=} keyFn
+ * @param {function(T, number): U} callbackFn
  * @returns {SignalIterator<U>}
  */
-ReactiveIterator.prototype.map = function (callbackFn, keyFn) {
-  return new ComputeMapArray(
+ReactiveIterator.prototype.map = function (callbackFn) {
+  return new ComputeArray(
     this,
     mapIterator,
     callbackFn,
     ArgType.NotReactive,
-    keyFn,
-    argType(keyFn)
+    []
   );
 };
+
+// /**
+//  * @template T, U
+//  * @param {ComputeMapArray<T, U>} owner
+//  * @param {ReadonlyArray<T>} source
+//  */
+// function mapRootIterator(owner, source) {
+//   /** @type {number} */
+//   var i;
+//   /** @type {number} */
+//   var j;
+//   /** @type {T} */
+//   var val;
+//   /** @type {Array<MapRoot<T>>} */
+//   var roots = owner._roots;
+//   /** @type {Array<T>} */
+//   var slice = owner._slice;
+//   /** @type {Array<U>} */
+//   var values = owner._value;
+//   /** @type {Arguments<(function(T, ReadonlySignal<number>): U), boolean>} */
+//   var args = owner._args;
+//   var oldlen = slice.length;
+//   var newlen = source.length;
+//   var pure = args._arg2;
+//   var callbackFn = args._arg1;
+//   if (oldlen === 0) {
+//     if (newlen > 0) {
+//       for (i = 0; i < newlen; i++) {
+//         mapCreate(owner);
+//       }
+//     }
+//   } else if (newlen === 0) {
+//     if (oldlen > 0) {
+//       values.length = 0;
+//       for (i = 0; i < oldlen; i++) {
+//       }
+//     }
+//   } else {
+//     var rmin = 0;
+//     var rmax = oldlen - 1;
+//     var smin = 0;
+//     var smax = newlen - 1;
+//     /** @type {Array<MapRoot>} */
+//     var newRoots = new Array(newlen);
+//     /** @type {Array<U>} */
+//     var newValues = new Array(newlen);
+//     while (
+//       rmin <= rmax &&
+//       smin <= smax // &&
+//       // roots[rmin]._value === source[smin]
+//     ) {
+//       // Common prefix, just increment forward
+//       rmin++;
+//       smin++;
+//     }
+//     while (
+//       rmin <= rmax &&
+//       smin <= smax // &&
+//       // roots[rmax]._value === source[smax]
+//     ) {
+//       // Common suffix, we don't know if the index
+//       // will change until we have diffed the middle part
+//       rmax--;
+//       smax--;
+//     }
+//     if (smin > smax) {
+//       // We matched all source values
+//       if (rmin <= rmax) {
+//         // But not all root values,
+//         // simple remove cases
+//         for (i = rmin; i <= rmax; i++) {
+//           // mapDispose(owner, i);
+//         }
+//         // roots.splice(rmin, rmax - rmin + 1);
+//         // values.splice(rmin, rmax - rmin + 1);
+//         if (!pure) {
+//           for (i = rmin; i < oldlen; i++) {
+//             // todo
+//           }
+//         }
+//       }
+//     } else if (rmin > rmax) {
+//       // We matched all existing
+//       if (smin <= smax) {
+//         // But not all source values,
+//         // simple insert cases
+//         newRoots = [rmin, 0];
+//         newValues = [rmin, 0];
+//         for (i = smin, j = 2; i <= smax; i++, j++) {
+//           // mapCreate(owner, newRoots, newValues, j, i, source[i], pure, callbackFn);
+//         }
+//         // splice.apply(roots, newRoots);
+//         // splice.apply(values, newValues);
+//       }
+//     } else {
+//       // Need to reconcile the middle slice
+//       var len = smax - smin;
+//       /** @type {number} */
+//       var offset;
+//       var rcount = rmax - rmin + 1;
+//       var scount = smax - smin + 1;
+//       newRoots = new Array(len);
+//       newValues = new Array(len);
+//       if (rcount <= 32) {
+//         // Use a single 32-bit mask for up to 32 roots
+//         var mask = 0;
+//         /** @type {number} */
+//         var free;
+//         /** @type {number} */
+//         var lowbit;
+//         /** @type {number} */
+//         var bitIndex;
+//         for (i = smin, j = 0; i <= smax; i++, j++) {
+//           offset = -1;
+//           val = source[i];
+//           // Only consider bits for actual roots (rcount may be < 32)
+//           free = ~mask & ((1 << rcount) - 1);
+//           while (free !== 0) {
+//             lowbit = free & -free;
+//             bitIndex = Math.clz32(lowbit) ^ 31;
+//             // if (val === roots[rmin + bitIndex]._value) {
+//             //   mask |= lowbit;
+//             //   offset = bitIndex;
+//             //   break;
+//             // }
+//             free &= free - 1;
+//           }
+//           if (offset >= 0) {
+//             // newRoots[j] = roots[rmin + offset];
+//             // newValues[j] = values[rmin + offset];
+//           } else {
+//             //  mapCreate(owner, newRoots, newValues, j, i, val, pure, callbackFn);
+//           }
+//         }
+//         // Dispose any roots not reused
+//         free = ~mask & ((1 << rcount) - 1);
+//         while (free !== 0) {
+//           let lowbit = free & -free;
+//           let bitIndex = Math.clz32(lowbit) ^ 31;
+//           // mapDispose(owner, rmin + bitIndex);
+//           free &= free - 1;
+//         }
+//       } else {
+//         var indexMap = new Map();
+//         var indexNext = new Int32Array(rcount);
+//         // link all old roots by value
+//         for (i = rmax; i >= rmin; i--) {
+//           offset = i - rmin;
+//           // val = roots[i]._value;
+//           j = indexMap.get(val);
+//           indexNext[offset] = j === void 0 ? -1 : j;
+//           indexMap.set(val, offset);
+//         }
+//         // walk through source items
+//         for (i = smin, j = 0; i <= smax; i++, j++) {
+//           val = source[i]
+//           offset = indexMap.get(val);
+//           if (offset >= 0) {
+//             // reuse first available slot
+//             newRoots[j] = roots[rmin + offset];
+//             newValues[j] = values[rmin + offset];
+//             // unlink this slot: use indexNext both as chain and reuse marker
+//             var next = indexNext[offset];
+//             if (next === -1) {
+//               indexMap.delete(val);
+//             } else {
+//               indexMap.set(val, next);
+//             }
+//           } else {
+//             // create brand-new
+//             // mapDispose(owner, rmin + offset);
+//             // mapCreate(owner, newRoots, newValues, j, i, val, pure, callbackFn);
+//           }
+//         }
+//         // dispose any large-case roots never reused
+//         for (i = 0; i < rcount; i++) {
+//           if (indexNext[i] !== -2) {
+//             //  mapDispose(owner, rmin + i);
+//           }
+//         }
+//       }
+
+//       // ── patch back into place ──
+//       // overwrite the first min(rcount, scount) slots in-place
+//       j = Math.min(rcount, scount);
+//       for (i = 0; i < j; i++) {
+//         roots[rmin + i] = newRoots[i];
+//         values[rmin + i] = newValues[i];
+//       }
+//       // handle any extra insertions or removals at the tail
+//       if (scount > rcount) {
+//         splice.apply(roots, [rmin + rcount, 0].concat(newRoots.slice(rcount)));
+//         splice.apply(values, [rmin + rcount, 0].concat(newValues.slice(rcount)));
+//       } else if (scount < rcount) {
+//         roots.splice(rmin + scount, rcount - scount);
+//         values.splice(rmin + scount, rcount - scount);
+//       }
+//     }
+//   }
+// }
+
+// /**
+//  * @template U
+//  * @param {function(T, ReadonlySignal<number>): U} callbackFn
+//  * @returns {SignalIterator<U>}
+//  */
+// ReactiveIterator.prototype.mapRoot = function (callbackFn) {
+//   return new ComputeMapArray(
+//     this,
+//     callbackFn,
+//     ArgType.NotReactive,
+//     callbackFn.length < 2
+//   );
+// };
 
 /**
  * @template T, U, V
@@ -1098,22 +1152,15 @@ function ComputeArray(source, fn, arg1, type1, arg2, type2) {
    * @type {function(ReadonlyArray<T>, Array<U>, Arguments<V, W>, ...?): Array<U>}
    */
   this._next = fn;
-  var owner = CONTEXT._owner;
-  if (owner !== null) {
-    owner._state |= State.Scope;
-    var children = owner._children;
-    if (children === null) {
-      owner._children = [this];
-    } else {
-      children[children.length] = this;
-    }
-  }
   /**
    * @package
    * @type {Arguments<V, W>}
    */
   this._args = new Arguments(arg1, type1, arg2, type2);
   connect(source, this);
+  if (CONTEXT._owner !== null) {
+    CONTEXT._owner._parent(this);
+  }
 }
 
 extend(ComputeArray, ReactiveIterator);
@@ -1195,12 +1242,9 @@ MapIndex.prototype._dispose = function () {
  * @struct
  * @template T
  * @constructor
- * @param {T} val
- * @param {MapIndex | null} index
- * @param {string | number | symbol=} key
  * @extends {Root}
  */
-function MapRoot(val, index, key) {
+function MapRoot() {
   /**
    * @package
    * @type {number}
@@ -1208,103 +1252,129 @@ function MapRoot(val, index, key) {
   this._state = State.Void;
   /**
    * @package
-   * @type {Array<Receive> | null}
+   * @type {Array<Receive>}
    */
   this._children = null;
   /**
-   * @package
-   * @type {Array<function(boolean): void> | null}
+   * @package 
+   * @type {Array<Cleanup>}
    */
   this._cleanups = null;
-  /**
-   * @package
-   * @type {T}
-   */
-  this._value = val;
-  /**
-   * @package
-   * @type {MapIndex | null}
-   */
-  this._index = index;
-  /**
-   * @package 
-   * @type {string | number | symbol | undefined}
-   */
-  this._key = key;
 }
 
-extend(MapRoot, Root);
+
 
 /**
- * @package
- * @override
- * @returns {void}
+ * @interface
+ * @template T
+ * @extends {IComputeArray<T>}
  */
-MapRoot.prototype._dispose = function () {
-  if (this._state !== State.Disposed) {
-    disposeScope(this, true);
-    if (this._index !== null) {
-      this._index._dispose();
-    }
-    this._children =
-      this._cleanups = null;
-    this._state = State.Disposed;
-  }
-};
-
-/**
- * @package
- * @template T, U
- * @param {MapRoot<T, U>} root 
- * @param {(function(T): U) | (function(T, ReadonlySignal<number>): U)} fn 
- * @returns {U}
- */
-function mapRoot(root, fn) {
-  var owner = CONTEXT._owner;
-  var listen = CONTEXT._listen;
-  CONTEXT._owner = root;
-  CONTEXT._listen = null;
-  try {
-    return fn(root._value, root._index);
-  } finally {
-    CONTEXT._owner = owner;
-    CONTEXT._listen = listen;
-  }
-}
+function IComputeMapArray() { }
 
 /**
  * @struct
  * @template T, U, V, W
  * @constructor
  * @param {ReactiveIterator<T>} source
- * @param {function(ReadonlyArray<T>, Array<U>, Arguments<V, W>, Array<MapRoot<T>>): Array<U>} fn
  * @param {V | ReadonlySignal<V> | (function(): V)=} arg1
  * @param {ArgType=} type1
  * @param {W | ReadonlySignal<W> | (function(): W)=} arg2
  * @param {ArgType=} type2
  * @extends {ComputeArray<U>}
- * @implements {IComputeArray<U>}
+ * @implements {IComputeMapArray<U>}
  */
-function ComputeMapArray(source, fn, arg1, type1, arg2, type2) {
-  ComputeArray.call(this, source, fn, arg1, type1, arg2, type2);
+function ComputeMapArray(source, arg1, type1, arg2, type2) {
+  ComputeArray.call(this, source, /** @type {?} */(null), arg1, type1, arg2, type2);
   /**
    * @package
-   * @type {Array<MapRoot<T>>}
+   * @type {number}
    */
-  this._roots = [];
+  this._slot = -1;
+  /**
+   * @package
+   * @type {Array<T>}
+   */
+  this._slice = [];
+  /**
+   * @package
+   * @type {Array<MapRoot<T>> | null}
+   */
+  this._roots = null;
+  /**
+   * @package
+   * @type {Array<MapIndex | null> | null}
+   */
+  this._indices = null;
 }
 
 extend(ComputeMapArray, ComputeArray);
 
 /**
  * @package
- * @override
+ * @param {Receive} child 
  * @returns {void}
  */
-ComputeMapArray.prototype._apply = function () {
-  var source = /** @type {ReactiveIterator<T>} */ (this._source1);
-  this._value = this._next(source.peek(), this._value, this._args, this._roots);
+ComputeMapArray.prototype._parent = function (child) {
+  if (this._slot !== -1) {
+    /** @type {MapRoot<T>} */
+    var root;
+    if (this._roots === null) {
+      root = new MapRoot();
+      this._roots = []
+    }
+  }
 };
+
+/**
+ * @package
+ * @param {Cleanup} cleanup 
+ * @returns {void}
+ */
+ComputeMapArray.prototype._cleanup = function (cleanup) { };
+
+// /**
+//  * @package
+//  * @override
+//  * @returns {void}
+//  */
+// ComputeMapArray.prototype._apply = function () {
+//   try {
+//     var source = /** @type {ReactiveIterator<T>} */ (this._source1).peek();
+//     CONTEXT._owner = this;
+//     mapRootIterator(this, source);
+//   } finally {
+//     CONTEXT._owner = null;
+//   }
+// };
+
+// /**
+//  * @template T, U
+//  * @param {ComputeMapArray} owner
+//  * @param {Array<MapRoot<T>>} roots
+//  * @param {Array<U>} values
+//  * @param {number} slot
+//  * @param {number} index 
+//  * @param {T} val
+//  * @param {boolean} pure
+//  * @param {(function(T): U) | (function(T, ReadonlySignal<number>): U)} callbackFn 
+//  */
+// function mapCreate(owner, value, callbackFn, pure) {
+//   var root = new MapRoot(val, pure ? null : new MapIndex(index));
+//   roots[slot] = root;
+//   try {
+//     values[slot] = callbackFn(root._value, root._index);
+//   } finally {
+//   }
+// };
+
+// /**
+//  * @param {ComputeMapArray} owner
+//  * @param {number} index 
+//  * @returns {void}
+//  */
+// function mapDispose(owner, index) {
+//   // owner._roots[index] = null;
+// };
 
 /**
  * @interface
@@ -1323,36 +1393,6 @@ function IDataArrayStub() { }
  * @implements {IDataArrayStub<T>}
  */
 function DataArrayStub() { }
-
-/**
- * @package
- * @type {T | Object}
- */
-DataArrayStub.prototype._next;
-
-/**
- * @package
- * @type {Receive | null}
- */
-DataArrayStub.prototype._node1;
-
-/**
- * @package
- * @type {number}
- */
-DataArrayStub.prototype._node1slot;
-
-/**
- * @package
- * @type {Array<Receive> | null}
- */
-DataArrayStub.prototype._nodes;
-
-/**
- * @package
- * @type {Array<number> | null}
- */
-DataArrayStub.prototype._nodeslots;
 
 /**
  * @package
@@ -1430,13 +1470,6 @@ Change.prototype.add = function (mut, index, deletes, inserts, data) {
     this.i = index || -1;
     this.r = deletes || -1;
     this.n = inserts || -1;
-  } else if ((this.m & Mutation.Modify) && (mut & Mutation.Modify)) {
-    if (this.m & Mutation.ModifyRange) {
-      /** @type {Array<(function(Array<T>): Array<T>)>} */(this.d).push(data);
-    } else {
-      this.m |= Mutation.ModifyRange;
-      this.d = /** @type {Array<(function(Array<T>): Array<T>)>} */([this.d, data]);
-    }
   } else {
     throw new Error("Conflicting mutation");
   }
@@ -1463,12 +1496,41 @@ Change.prototype.reset = function () {
  * @implements {IDataArray<T>}
  */
 function DataArray(val) {
-  Data.call(/** @type {?} */(this), val || []);
+  /**
+   * @package
+   * @type {number}
+   */
+  this._state = State.Respond;
+  /**
+   * @package
+   * @type {T}
+   */
+  this._value = val;
+  /**
+   * @package
+   * @type {T | Object}
+   */
   this._next = new Change();
   /**
    * @package
-   * @type {Change}
+   * @type {Receive | null}
    */
+  this._node1 = null;
+  /**
+   * @package
+   * @type {number}
+   */
+  this._node1slot = -1;
+  /**
+   * @package
+   * @type {Array<Receive> | null}
+   */
+  this._nodes = null;
+  /**
+   * @package
+   * @type {Array<number> | null}
+   */
+  this._nodeslots = null;
   this._change = new Change();
 }
 
@@ -1485,19 +1547,17 @@ inherit(DataArray, Data);
  * @returns {void}
  */
 DataArray.prototype._mutate = function (mut, index, deletes, inserts, data) {
-  if (!(this._state & (State.QueueDispose | State.Disposed))) {
-    this._next.add(mut, index, deletes, inserts, data);
-    if (CONTEXT._idle) {
-      this._apply();
-      if (this._state & State.Send) {
-        reset();
-        sendWillUpdate(this, TIME + 1);
-        exec();
-      }
-    } else {
-      this._state |= State.WillUpdate;
-      CHANGES._add(this);
+  this._next.add(mut, index, deletes, inserts, data);
+  if (CONTEXT._idle) {
+    this._apply();
+    if (this._state & State.Send) {
+      reset();
+      sendWillUpdate(this, TIME + 1);
+      exec();
     }
+  } else {
+    this._state |= State.WillUpdate;
+    CHANGES._add(this);
   }
 };
 
@@ -1510,59 +1570,51 @@ DataArray.prototype._apply = function () {
   var mut = next.m;
   var args = next.d;
   var value = /** @type {Array<T>} */(this._value);
-  switch (mut & Mutation.TypeMask) {
-    case Mutations.Set:
+  switch (mut & Mut.Mask) {
+    case Mutation.Set & Mut.Mask:
       this._value = /** @type {ReadonlyArray<T>} */(args);
       break;
-    case Mutations.Pop:
+    case Mutation.Pop & Mut.Mask:
       value.pop();
       break;
-    case Mutations.Push:
-      if (mut & Mutation.InsertRange) {
-        ArrayProto.push.apply(value, /** @type {Array<T>} */(args));
-      } else {
-        value.push(/** @type {T} */(args));
-      }
+    case Mutation.PushOne & Mut.Mask:
+      value.push(/** @type {T} */(args));
       break;
-    case Mutations.Reverse:
+    case Mutation.PushMany & Mut.Mask:
+      Array.prototype.push.apply(value, /** @type {Array<T>} */(args));
+      break;
+    case Mutation.Reverse & Mut.Mask:
       value.reverse();
       break;
-    case Mutations.Shift:
+    case Mutation.Shift & Mut.Mask:
       value.shift();
       break;
-    case Mutations.Sort:
+    case Mutation.Sort & Mut.Mask:
       value.sort(/** @type {function(T, T): number} */(args));
       break;
-    case Mutations.Splice:
-      if (mut & Mutation.InsertRange) {
-        ArrayProto.splice.apply(value, /** @type {Array<number | T>} */(args));
-      } else if (mut & Mutation.InsertOne) {
+    case Mutation.Splice & Mut.Mask:
+      if (mut & Mut.InsertMany) {
+        Array.prototype.splice.apply(value, /** @type {Array<number | T>} */(args));
+      } else if (mut & Mut.InsertOne) {
         value.splice(next.i, next.r, /** @type {T} */(args))
       } else {
         value.splice(next.i, next.r);
       }
       break;
-    case Mutations.Unshift:
-      if (mut & Mutation.InsertRange) {
-        ArrayProto.unshift.apply(value, /** @type {Array<T>} */(args));
-      } else {
-        value.unshift(/** @type {T} */(args));
-      }
+    case Mutation.UnshiftOne:
+      value.unshift(/** @type {T} */(args));
       break;
-    case Mutations.Fill:
+    case Mutation.UnshiftMany & Mut.Mask:
+      Array.prototype.unshift.apply(value, /** @type {Array<T>} */(args));
+      break;
+    case Mutation.Fill:
       // todo
       break;
-    case Mutations.CopyWithin:
+    case Mutation.CopyWithin:
       // todo
       break;
-    case Mutations.Modify:
-      if (mut & Mutation.ModifyRange) {
-        /** @type {Array<(function(Array<T>): Array<T>)>} */(args).forEach(function (callbackFn) {
-        value = callbackFn(value);
-      });
-      } else {
-        value = /** @type {function(Array<T>): Array<T>} */(args)(value);
-      }
+    case Mutation.Modify:
+      value = /** @type {function(Array<T>): Array<T>} */(args)(value);
       this._value = value;
       break;
   }
@@ -1579,7 +1631,9 @@ DataArray.prototype._apply = function () {
  * @returns {void}
  */
 DataArray.prototype.set = function (val) {
-  this._mutate(Mutations.Set | Mutation.Assign, -1, -1, -1, val);
+  if (!(this._state & (State.QueueDispose | State.Disposed))) {
+    this._mutate(Mutation.Set, -1, -1, -1, val);
+  }
 };
 
 /**
@@ -1588,7 +1642,9 @@ DataArray.prototype.set = function (val) {
  * @returns {void}
  */
 DataArray.prototype.modify = function (callbackFn) {
-  this._mutate(Mutations.Modify | Mutation.Modify, -1, -1, -1, callbackFn);
+  if (!(this._state & (State.QueueDispose | State.Disposed))) {
+    this._mutate(Mutation.Modify, -1, -1, -1, callbackFn);
+  }
 };
 
 /**
@@ -1596,7 +1652,9 @@ DataArray.prototype.modify = function (callbackFn) {
  * @returns {void}
  */
 DataArray.prototype.pop = function () {
-  this._mutate(Mutations.Pop | Mutation.RemoveOne, this._value.length - 1, 1, 0);
+  if (!(this._state & (State.QueueDispose | State.Disposed))) {
+    this._mutate(Mutation.Pop, this._value.length - 1, 1, 0);
+  }
 };
 
 /**
@@ -1605,26 +1663,28 @@ DataArray.prototype.pop = function () {
  * @returns {void}
  */
 DataArray.prototype.push = function (elementN) {
-  /**
-   * @type {number}
-   */
-  var mut;
-  /** @type {T | Array<T>} */
-  var args;
-  /** @type {number} */
-  var len = arguments.length;
-  if (len > 0) {
-    if (len === 1) {
-      args = elementN;
-      mut = Mutation.InsertOne;
-    } else {
-      args = new Array(len);
-      for (var i = 0; i < len; i++) {
-        args[i] = arguments[i];
+  if (!(this._state & (State.QueueDispose | State.Disposed))) {
+    /** @type {number} */
+    var len = arguments.length;
+    if (len > 0) {
+      /**
+       * @type {number}
+       */
+      var mut;
+      /** @type {T | Array<T>} */
+      var args;
+      if (len === 1) {
+        args = elementN;
+        mut = Mutation.PushOne;
+      } else {
+        args = new Array(len);
+        for (var i = 0; i < len; i++) {
+          args[i] = arguments[i];
+        }
+        mut = Mutation.PushMany;
       }
-      mut = Mutation.InsertRange;
+      this._mutate(mut, this._value.length, 0, len, args);
     }
-    this._mutate(Mutations.Push | mut, this._value.length, 0, len, args);
   }
 };
 
@@ -1633,7 +1693,9 @@ DataArray.prototype.push = function (elementN) {
  * @returns {void}
  */
 DataArray.prototype.reverse = function () {
-  this._mutate(Mutations.Reverse | Mutation.OrderReverse);
+  if (!(this._state & (State.QueueDispose | State.Disposed))) {
+    this._mutate(Mutation.Reverse);
+  }
 };
 
 /**
@@ -1641,7 +1703,9 @@ DataArray.prototype.reverse = function () {
  * @returns {void}
  */
 DataArray.prototype.shift = function () {
-  this._mutate(Mutations.Shift | Mutation.RemoveOne, 0, 1, 0);
+  if (!(this._state & (State.QueueDispose | State.Disposed))) {
+    this._mutate(Mutation.Shift, 0, 1, 0);
+  }
 };
 
 /**
@@ -1650,7 +1714,9 @@ DataArray.prototype.shift = function () {
  * @returns {void}
  */
 DataArray.prototype.sort = function (compareFn) {
-  this._mutate(Mutations.Sort | Mutation.OrderSort, void 0, 0, 0, compareFn);
+  if (!(this._state & (State.QueueDispose | State.Disposed))) {
+    this._mutate(Mutation.Sort, void 0, 0, 0, compareFn);
+  }
 };
 
 /**
@@ -1661,43 +1727,45 @@ DataArray.prototype.sort = function (compareFn) {
  * @returns {void}
  */
 DataArray.prototype.splice = function (start, deleteCount, items) {
-  /**
+  if (!(this._state & (State.QueueDispose | State.Disposed))) {
+    /**
    * @type {T | Array<number | T>} 
    */
-  var args;
-  /**
-   * @const
-   * @type {number}
-   */
-  var len = arguments.length;
-  if (len > 1) {
+    var args;
     /**
+     * @const
      * @type {number}
      */
-    var mut = Mutation.None;
-    if (deleteCount == null || deleteCount < 0) {
-      deleteCount = 0;
-    } else if (deleteCount > 0) {
-      if (deleteCount > 1) {
-        mut |= Mutation.RemoveRange;
-      } else {
-        mut |= Mutation.RemoveOne;
-      }
-    }
-    if (len > 2) {
-      if (len === 3) {
-        args = items;
-        mut |= Mutation.InsertOne;
-      } else {
-        args = new Array(len);
-        for (var i = 0; i < len; i++) {
-          args[i] = arguments[i];
+    var len = arguments.length;
+    if (len > 1) {
+      /**
+       * @type {number}
+       */
+      var mut = Mutation.Splice;
+      if (deleteCount == null || deleteCount < 0) {
+        deleteCount = 0;
+      } else if (deleteCount > 0) {
+        if (deleteCount > 1) {
+          mut |= Mut.RemoveMany;
+        } else {
+          mut |= Mut.RemoveOne;
         }
-        mut |= Mutation.InsertRange;
       }
-    }
-    if (mut !== Mutation.None) {
-      this._mutate(Mutations.Splice | mut, start, deleteCount, len - 2, args);
+      if (len > 2) {
+        if (len === 3) {
+          args = items;
+          mut |= Mut.InsertOne;
+        } else {
+          args = new Array(len);
+          for (var i = 0; i < len; i++) {
+            args[i] = arguments[i];
+          }
+          mut |= Mut.InsertMany;
+        }
+      }
+      if (mut & Mut.RemoveOrInsert) {
+        this._mutate(mut, start, deleteCount, len - 2, args);
+      }
     }
   }
 };
@@ -1708,26 +1776,28 @@ DataArray.prototype.splice = function (start, deleteCount, items) {
  * @returns {void}
  */
 DataArray.prototype.unshift = function (elementN) {
-  /** @type {T | Array<T>} */
-  var args;
-  /** @type {number} */
-  var len = arguments.length;
-  if (len > 0) {
-    /** 
-     * @type {number}
-     */
-    var mut;
-    if (len === 1) {
-      args = elementN;
-      mut = Mutation.InsertOne;
-    } else {
-      args = new Array(len);
-      for (var i = 0; i < len; i++) {
-        args[i] = arguments[i];
+  if (!(this._state & (State.QueueDispose | State.Disposed))) {
+    /** @type {T | Array<T>} */
+    var args;
+    /** @type {number} */
+    var len = arguments.length;
+    if (len > 0) {
+      /** 
+       * @type {number}
+       */
+      var mut;
+      if (len === 1) {
+        args = elementN;
+        mut = Mutation.UnshiftOne;
+      } else {
+        args = new Array(len);
+        for (var i = 0; i < len; i++) {
+          args[i] = arguments[i];
+        }
+        mut = Mutation.UnshiftMany;
       }
-      mut = Mutation.InsertRange;
+      this._mutate(mut, 0, 0, len, args);
     }
-    this._mutate(Mutations.Unshift | mut, 0, 0, len, args);
   }
 };
 

@@ -234,13 +234,13 @@ function reset() {
  * @returns {void}
  */
 function connect(send, receive) {
+  var source1 = receive._source1;
   var sources = receive._sources;
   var sendslot = -1;
-  var receiveslot =
-    receive._source1 === null ? -1 : sources === null ? 0 : sources.length;
-  if (receiveslot >= 0) {
+  var receiveslot = source1 === null ? -1 : sources === null ? 0 : sources.length;
+  if (!(receive._state & State.Initial) && receiveslot >= 0) {
     if (
-      (receive._source1 === send) || (receiveslot > 0 && (
+      (source1 === send) || (receiveslot > 0 && (
       receiveslot === 1 ?
         sources[0] === send :
         (sources[receiveslot - 1] === send || sources[receiveslot - 2] === send)
@@ -403,6 +403,9 @@ function dispose() {
   }
 }
 
+/** @typedef {function(boolean): void} */
+var Cleanup;
+
 /**
  * @interface
  */
@@ -416,9 +419,23 @@ Scope.prototype._children;
 
 /**
  * @package
- * @type {Array<function(boolean): void> | null}
+ * @type {Array<Cleanup> | null}
  */
 Scope.prototype._cleanups;
+
+/**
+ * @package
+ * @param {Receive} child 
+ * @returns {void}
+ */
+Scope.prototype._parent = function(child) { };
+
+/**
+ * @package
+ * @param {Cleanup} cleanup 
+ * @returns {void}
+ */
+Scope.prototype._cleanup = function(cleanup) { };
 
 /**
  * @interface
@@ -708,7 +725,7 @@ function Root(fn) {
   this._children = [];
   /**
    * @package
-   * @type {Array<function(boolean): void> | null}
+   * @type {Array<Cleanup> | null}
    */
   this._cleanups = null;
   var owner = CONTEXT._owner;
@@ -734,6 +751,34 @@ Root.prototype._dispose = function () {
   if (this._state !== State.Disposed) {
     disposeScope(this, true);
     this._state = State.Disposed;
+  }
+};
+
+/**
+ * @package
+ * @param {Receive} child 
+ * @returns {void}
+ */
+Root.prototype._parent = function(child) {
+  this._state |= State.Scope;
+  if (this._children === null) {
+    this._children = [child];
+  } else {
+    this._children.push(child);
+  }
+};
+
+/**
+ * @package
+ * @param {Cleanup} cleanup
+ * @returns {void}
+ */
+Root.prototype._cleanup = function(cleanup) {
+  this._state |= State.Cleanup;
+  if (this._cleanups === null) {
+    this._cleanups = [cleanup];
+  } else {
+    this._cleanups.push(cleanup);
   }
 };
 
@@ -1039,7 +1084,7 @@ function IEffect() { }
  * @param {function(): void} fn
  * @param {SignalOptions=} opts
  * @param {State=} flags
- * @extends {Disposable}
+ * @extends {Root}
  * @implements {IEffect}
  */
 function Effect(fn, opts, flags) {
@@ -1061,7 +1106,7 @@ function Effect(fn, opts, flags) {
   this._children = null;
   /**
    * @package
-   * @type {Array<function(boolean): void> | null}
+   * @type {Array<Cleanup> | null}
    */
   this._cleanups = null;
   /**
@@ -1113,13 +1158,7 @@ function Effect(fn, opts, flags) {
   var owner = CONTEXT._owner;
   var listen = CONTEXT._listen;
   if (owner !== null) {
-    owner._state |= State.Scope;
-    var children = owner._children;
-    if (children === null) {
-      owner._children = [this];
-    } else {
-      children[children.length] = this;
-    }
+    owner._parent(this);
   }
   CONTEXT._owner = CONTEXT._listen = this;
   if (idle) {
@@ -1141,7 +1180,7 @@ function Effect(fn, opts, flags) {
   }
 }
 
-extend(Effect, Disposable);
+extend(Effect, Root);
 
 /**
  * @package
@@ -1380,15 +1419,8 @@ function Compute(fn, opts, flags) {
    * @type {(function(...?): T) | null}
    */
   this._next = fn;
-  var owner = CONTEXT._owner;
-  if (owner !== null) {
-    owner._state |= State.Scope;
-    var children = owner._children;
-    if (children === null) {
-      owner._children = [this];
-    } else {
-      children[children.length] = this;
-    }
+  if (CONTEXT._owner !== null) {
+    CONTEXT._owner._parent(this);
   }
 }
 
@@ -1836,19 +1868,12 @@ function batch(fn) {
 }
 
 /**
- * @param {function(boolean): void} fn
+ * @param {Cleanup} fn
  * @returns {void}
  */
 function cleanup(fn) {
-  var owner = CONTEXT._owner;
-  if (owner !== null) {
-    owner._state |= State.Cleanup;
-    var cleanups = owner._cleanups;
-    if (cleanups === null) {
-      owner._cleanups = [fn];
-    } else {
-      cleanups[cleanups.length] = fn;
-    }
+  if (CONTEXT._owner !== null) {
+    CONTEXT._owner._cleanup(fn);
   }
 }
 
@@ -1856,9 +1881,8 @@ function cleanup(fn) {
  * @returns {void}
  */
 function stable() {
-  var owner = CONTEXT._owner;
-  if (owner !== null) {
-    owner._state &= ~State.Unstable;
+  if (CONTEXT._owner !== null) {
+    CONTEXT._owner._state &= ~State.Unstable;
   }
 }
 
@@ -1890,6 +1914,7 @@ export {
   ReceiveMany,
   Respond,
   Context,
+  Cleanup,
   IReactive,
   IRoot,
   IData,

@@ -17,7 +17,7 @@ import * as anod from "../../dist/index.js";
 
 let rand = 0;
 const BATCHED = true;
-const RUNS_PER_TIER = 300;
+const RUNS_PER_TIER = 1000;
 const LAYER_TIERS = [
   1, 2, 3, 4, 5, 10, 15, 20, 25, 50, 100, 500, 1000
 ];

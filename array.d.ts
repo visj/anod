@@ -31,7 +31,9 @@ export interface SignalIterator<T = any> extends ReadonlySignal<ReadonlyArray<T>
 
   lastIndexOf(searchElement: Value<T>, fromIndex?: Value<number>): ReadonlySignal<number>;
 
-  map<U>(callbackFn: (element: T, index: ReadonlySignal<number>) => U): SignalIterator<U>;
+  map<U>(callbackFn: (element: T, index: number) => U): SignalIterator<U>;
+
+  mapRoot<U>(callbackFn: (element: T, index: ReadonlySignal<number>) => U): SignalIterator<U>;
 
   reduce(callbackFn: (previousValue: T, currentValue: T, currentIndex: number) => T): ReadonlySignal<T>;
 
