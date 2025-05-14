@@ -3564,6 +3564,21 @@ ComputeMapArray.prototype._cleanup = function (cleanup) { };
 // };
 
 /**
+ * @const
+ * @enum {number}
+ */
+var MutPos = {
+  Mutation: 0,
+  Index: 1,
+  Inserts: 2,
+  Removes: 3,
+  NextMutation: 4,
+  NextIndex: 5,
+  NextInserts: 6,
+  NextRemoves: 7
+};
+
+/**
  * @interface
  * @template T
  * @extends {IData<ReadonlyArray<T>>}
@@ -3603,78 +3618,6 @@ DataArrayStub.prototype._update = function (time) { };
 function IDataArray() { }
 
 /**
- * @final
- * @struct
- * @template T
- * @constructor
- */
-function Change() {
-  /**
-   * @package
-   * @type {number}
-   * Mutation flag
-   */
-  this.m = Mutation.None;
-  /**
-   * @package 
-   * @type {number}
-   * Index of mutation
-   */
-  this.i = -1;
-  /**
-   * @package
-   * @type {number}
-   * Number of added items
-   */
-  this.n = -1;
-  /**
-   * @package
-   * @type {number}
-   * Number of removed items
-   */
-  this.r = -1;
-  /**
-   * @package
-   * @type {T | Array<T> | (function(T, T): number) | (function(Array<T>): Array<T>) | Array<(function(Array<T>): Array<T>)> | null | undefined}
-   * Mutation data
-   */
-  this.d = null;
-}
-
-/**
- * @package
- * @param {number} mut 
- * @param {number=} index 
- * @param {number=} deletes
- * @param {number=} inserts
- * @param {T | Array<T> | (function(T, T): number) | (function(Array<T>): Array<T>)=} data
- * @returns {void}
- */
-Change.prototype.add = function (mut, index, deletes, inserts, data) {
-  if (this.m === Mutation.None) {
-    this.m = mut;
-    this.d = data;
-    this.i = index || -1;
-    this.r = deletes || -1;
-    this.n = inserts || -1;
-  } else {
-    throw new Error("Conflicting mutation");
-  }
-};
-
-/**
- * @package
- * @returns {void}
- */
-Change.prototype.reset = function () {
-  this.m = Mutation.None;
-  this.i =
-    this.n =
-    this.r = -1;
-  this.d = null;
-};
-
-/**
  * @struct
  * @template T
  * @constructor
@@ -3690,14 +3633,14 @@ function DataArray(val) {
   this._state = State.Respond;
   /**
    * @package
-   * @type {T}
+   * @type {ReadonlyArray<T>}
    */
-  this._value = val;
+  this._value = val || [];
   /**
    * @package
-   * @type {T | Object}
+   * @type {T}
    */
-  this._next = new Change();
+  this._next = void 0;
   /**
    * @package
    * @type {Receive | null}
@@ -3718,7 +3661,11 @@ function DataArray(val) {
    * @type {Array<number> | null}
    */
   this._nodeslots = null;
-  this._change = new Change();
+  /**
+   * @package 
+   * @type {Array<number>}
+   */
+  this._mutation = [0, 0, 0, 0, 0, 0, 0, 0];
 }
 
 extend(DataArray, ReactiveIterator);
@@ -3728,13 +3675,29 @@ inherit(DataArray, Data);
  * @package
  * @param {number} mut
  * @param {number=} index
- * @param {number=} deletes
+ * @param {number=} removes
  * @param {number=} inserts
  * @param {T | Array<T> | (function(T, T): boolean)=} data
  * @returns {void}
  */
-DataArray.prototype._mutate = function (mut, index, deletes, inserts, data) {
-  this._next.add(mut, index, deletes, inserts, data);
+DataArray.prototype._mutate = function (mut, index, removes, inserts, data) {
+  var mutation = this._mutation;
+  if (mutation[MutPos.NextMutation] !== Mutation.None) {
+    throw new Error("Conflicting values");
+  }
+  mutation[MutPos.NextMutation] = mut;
+  if (index != null) {
+    mutation[MutPos.NextIndex] = index;
+  }
+  if (inserts != null) {
+    mutation[MutPos.NextInserts] = inserts;
+  }
+  if (removes != null) {
+    mutation[MutPos.NextRemoves] = removes;
+  }
+  if (data != null) {
+    this._next = data;
+  }
   if (CONTEXT._idle) {
     this._apply();
     if (this._state & State.Send) {
@@ -3753,9 +3716,9 @@ DataArray.prototype._mutate = function (mut, index, deletes, inserts, data) {
  * @returns {void}
  */
 DataArray.prototype._apply = function () {
-  var next = this._next;
-  var mut = next.m;
-  var args = next.d;
+  var mutation = this._mutation;
+  var mut = mutation[MutPos.NextMutation];
+  var args = this._next;
   var value = /** @type {Array<T>} */(this._value);
   switch (mut & Mut.Mask) {
     case Mutation.Set & Mut.Mask:
@@ -3783,33 +3746,35 @@ DataArray.prototype._apply = function () {
       if (mut & Mut.InsertMany) {
         Array.prototype.splice.apply(value, /** @type {Array<number | T>} */(args));
       } else if (mut & Mut.InsertOne) {
-        value.splice(next.i, next.r, /** @type {T} */(args))
+        value.splice(mutation[MutPos.NextInserts], mutation[MutPos.NextRemoves], /** @type {T} */(args))
       } else {
-        value.splice(next.i, next.r);
+        value.splice(mutation[MutPos.NextInserts], mutation[MutPos.NextRemoves]);
       }
       break;
-    case Mutation.UnshiftOne:
+    case Mutation.UnshiftOne & Mut.Mask:
       value.unshift(/** @type {T} */(args));
       break;
     case Mutation.UnshiftMany & Mut.Mask:
       Array.prototype.unshift.apply(value, /** @type {Array<T>} */(args));
       break;
-    case Mutation.Fill:
+    case Mutation.Fill & Mut.Mask:
       // todo
       break;
-    case Mutation.CopyWithin:
+    case Mutation.CopyWithin & Mut.Mask:
       // todo
       break;
-    case Mutation.Modify:
-      value = /** @type {function(Array<T>): Array<T>} */(args)(value);
-      this._value = value;
+    case Mutation.Modify & Mut.Mask:
+      this._value = /** @type {function(Array<T>): Array<T>} */(args)(value);
       break;
   }
-  this._change.m = next.m;
-  this._change.i = next.i;
-  this._change.r = next.r;
-  this._change.n = next.n;
-  next.reset();
+  mutation[MutPos.Mutation] = mutation[MutPos.NextMutation];
+  mutation[MutPos.Index] = mutation[MutPos.NextIndex];
+  mutation[MutPos.Inserts] = mutation[MutPos.NextInserts];
+  mutation[MutPos.Removes] = mutation[MutPos.NextRemoves];
+  mutation[MutPos.NextMutation] =
+    mutation[MutPos.NextIndex] = 
+    mutation[MutPos.NextInserts] = 
+    mutation[MutPos.NextRemoves] = Mutation.None;
 };
 
 /**
