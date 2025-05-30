@@ -9,8 +9,22 @@ import "./tests/core/signal.test.js";
 import "./tests/core/update.test.js";
 
 import "./tests/array/array.test.js";
-import "./tests/array/compute.test.js";
-// import "./tests/array/mapRoot.test.js";
+import "./tests/array/at.test.js";
+import "./tests/array/concat.test.js";
+import "./tests/array/every.test.js";
+import "./tests/array/filter.test.js";
+import "./tests/array/find.test.js";
+import "./tests/array/findIndex.test.js";
+import "./tests/array/findLast.test.js";
+import "./tests/array/findLastIndex.test.js";
+import "./tests/array/forEach.test.js";
+import "./tests/array/includes.test.js";
+import "./tests/array/indexOf.test.js";
+import "./tests/array/join.test.js";
+import "./tests/array/lastIndexOf.test.js";
+import "./tests/array/map.test.js";
 import "./tests/array/reduce.test.js";
+import "./tests/array/slice.test.js";
+import "./tests/array/some.test.js";
 
 process.on("exit", report);

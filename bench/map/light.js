@@ -59,7 +59,7 @@ async function collectGarbage() {
     if (typeof global.gc !== "function") return;
     for (let i = 0; i < 3; i++) {
         global.gc();
-        await new Promise(r => setTimeout(r, 100));
+        await new Promise(r => setTimeout(r, 200));
     }
 }
 
@@ -140,10 +140,23 @@ async function runBenchCase(size, iters, repeats) {
         }
     ];
 
-    for (const fw of frameworks.filter(fw => fw.name == "Preact")) {
+
+
+    for (const fw of frameworks) {
         const results = [];
         for (let r = 0; r < repeats; r++) {
-            const updateFn = fw.makeUpdateFn();
+            let updateFn = fw.makeUpdateFn();
+
+            // Warm-up phase: Run 10% of iters (minimum 100, maximum 1000) to stabilize JIT and allocations
+            const warmUpIters = Math.min(Math.max(Math.floor(iters * 0.1), 100), 1000);
+            for (let i = 0; i < warmUpIters; i++) {
+                updateFn();
+            }
+            // Reset idx to 0 after warm-up to ensure consistent sequence usage
+            updateFn = fw.makeUpdateFn(); // Assumes updateFn closure allows idx reset; see note below
+            // Force GC after warm-up to clean up any temporary allocations
+            if (typeof global.gc === "function") await collectGarbage();
+
             const { time, mem } = await measureTime(`${fw.name} N=${size}`, updateFn, iters);
             results.push({ time, mem });
         }

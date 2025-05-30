@@ -4,8 +4,7 @@ import {
   compute,
   effect,
   root,
-  batch,
-  $effect
+  batch
 } from "../../../build/index.js";
 
 test("dispose", function (t) {
@@ -75,14 +74,14 @@ test("dispose", function (t) {
           s3.set(s3.peek() + 1);
         }
       });
-      $effect(function () {
+      effect(function () {
         calls++;
         if (s1.val()) {
           s2.val();
         } else {
           s3.val();
         }
-      });
+      }, { unstable: true });
       calls = 0;
       s1.set(false);
       t.equal(calls, 2);

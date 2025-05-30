@@ -2,7 +2,6 @@ import { test } from "../../helper/index.js";
 import {
   value,
   compute,
-  $compute,
   Signal,
   ReadonlySignal
 } from "../../../build/index.js";
@@ -88,10 +87,10 @@ test("compute", function (t){
       s1 = value(true);
       s2 = value(1);
       s3 = value(2);
-      c1 = $compute(function () {
+      c1 = compute(function () {
         count++;
         return s1.val() ? s2.val() : s3.val();
-      });
+      }, { unstable: true });
       count = 0;
     }
 

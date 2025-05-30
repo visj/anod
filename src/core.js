@@ -22,8 +22,7 @@ var State = {
   Scope: 16384,
   Cleanup: 32768,
   Initial: 65536,
-  Unstable: 131072,
-  Bound: 262144
+  Unstable: 131072
 };
 /**
  * @enum {number}
@@ -241,10 +240,10 @@ function connect(send, receive) {
   if (!(receive._state & State.Initial) && receiveslot >= 0) {
     if (
       (source1 === send) || (receiveslot > 0 && (
-      receiveslot === 1 ?
-        sources[0] === send :
-        (sources[receiveslot - 1] === send || sources[receiveslot - 2] === send)
-    ))) {
+        receiveslot === 1 ?
+          sources[0] === send :
+          (sources[receiveslot - 1] === send || sources[receiveslot - 2] === send)
+      ))) {
       return;
     }
   }
@@ -428,14 +427,14 @@ Scope.prototype._cleanups;
  * @param {Receive} child 
  * @returns {void}
  */
-Scope.prototype._parent = function(child) { };
+Scope.prototype._parent = function (child) { };
 
 /**
  * @package
  * @param {Cleanup} cleanup 
  * @returns {void}
  */
-Scope.prototype._cleanup = function(cleanup) { };
+Scope.prototype._cleanup = function (cleanup) { };
 
 /**
  * @interface
@@ -759,7 +758,7 @@ Root.prototype._dispose = function () {
  * @param {Receive} child 
  * @returns {void}
  */
-Root.prototype._parent = function(child) {
+Root.prototype._parent = function (child) {
   this._state |= State.Scope;
   if (this._children === null) {
     this._children = [child];
@@ -773,7 +772,7 @@ Root.prototype._parent = function(child) {
  * @param {Cleanup} cleanup
  * @returns {void}
  */
-Root.prototype._cleanup = function(cleanup) {
+Root.prototype._cleanup = function (cleanup) {
   this._state |= State.Cleanup;
   if (this._cleanups === null) {
     this._cleanups = [cleanup];
@@ -1081,14 +1080,14 @@ function IEffect() { }
 /**
  * @struct
  * @constructor
- * @param {function(): void} fn
+ * @param {function(...?): void} fn
  * @param {SignalOptions=} opts
  * @param {State=} flags
  * @extends {Root}
  * @implements {IEffect}
  */
 function Effect(fn, opts, flags) {
-  var state = State.WillUpdate | flags;
+  var state = State.Initial | State.WillUpdate | flags;
   if (opts != null) {
     if (opts.unstable) {
       state |= State.Unstable;
@@ -1116,7 +1115,7 @@ function Effect(fn, opts, flags) {
   this._owner = null;
   /**
    * @package
-   * @type {(function(): void) | null}
+   * @type {(function(...?): void) | null}
    */
   this._next = fn;
   /**
@@ -1154,29 +1153,8 @@ function Effect(fn, opts, flags) {
    * @type {number}
    */
   this._dtime = 0;
-  var idle = CONTEXT._idle;
-  var owner = CONTEXT._owner;
-  var listen = CONTEXT._listen;
-  if (owner !== null) {
-    owner._parent(this);
-  }
-  CONTEXT._owner = CONTEXT._listen = this;
-  if (idle) {
-    reset();
-    CONTEXT._idle = false;
-  }
-  try {
-    this._apply();
-    if (idle && (CHANGES._count !== 0 || DISPOSES._count !== 0)) {
-      start();
-    }
-  } finally {
-    CONTEXT._idle = idle;
-    CONTEXT._owner = owner;
-    CONTEXT._listen = listen;
-    if (!(this._state & State.Receive)) {
-      this._detach();
-    }
+  if (CONTEXT._owner !== null) {
+    CONTEXT._owner._parent(this);
   }
 }
 
@@ -1285,25 +1263,39 @@ Effect.prototype._apply = function () {
  * @returns {void}
  */
 Effect.prototype._update = function (time) {
+  this._time = time;
   var state = this._state;
+  var idle = CONTEXT._idle;
   var owner = CONTEXT._owner;
   var listen = CONTEXT._listen;
-  CONTEXT._owner = CONTEXT._listen = null;
-  if (state & (State.Scope | State.Cleanup)) {
-    disposeScope(this, false);
-  }
-  if (state & State.Unstable) {
-    disposeReceiver(this, false);
-    CONTEXT._listen = this;
-  }
   this._state =
     (state | State.Updating) &
     ~(State.Clearing | State.MayDispose | State.MayUpdate | State.WillUpdate);
+  CONTEXT._owner = CONTEXT._listen = null;
+  if (!(state & State.Initial) && state & (State.Scope | State.Cleanup)) {
+    disposeScope(this, false);
+  }
+  if (state & (State.Initial | State.Unstable)) {
+    if (state & State.Initial) {
+      this._state &= ~State.Initial;
+    } else {
+      disposeReceiver(this, false);
+    }
+    CONTEXT._listen = this;
+  }
+  if (idle) {
+    reset();
+    CONTEXT._idle = false;
+  }
   CONTEXT._owner = this;
   try {
     this._apply();
+    if (idle && (CHANGES._count !== 0 || DISPOSES._count !== 0)) {
+      start();
+    }
   } finally {
     this._state &= ~State.Updating;
+    CONTEXT._idle = idle;
     CONTEXT._owner = owner;
     CONTEXT._listen = listen;
     if (!(this._state & State.Receive)) {
@@ -1529,9 +1521,7 @@ Compute.prototype._update = function (time) {
     } else {
       disposeReceiver(this, false);
     }
-    if (!(state & State.Bound)) {
-      CONTEXT._listen = this;
-    }
+    CONTEXT._listen = this;
   }
   var prev = this._value;
   if (idle) {
@@ -1810,33 +1800,15 @@ function compute(fn, opts) {
 }
 
 /**
- * @template T
- * @param {function(): T} fn
- * @param {SignalOptions<T>=} opts
- * @returns {ReadonlySignal<T>}
- */
-function $compute(fn, opts) {
-  return new Compute(fn, opts, State.Unstable);
-}
-
-/**
  * @public
  * @param {function(): void} fn
  * @param {SignalOptions=} opts
  * @returns {DisposableSignal}
  */
 function effect(fn, opts) {
-  return new Effect(fn, opts);
-}
-
-/**
- * @public
- * @param {function(): void} fn
- * @param {SignalOptions=} opts
- * @returns {DisposableSignal}
- */
-function $effect(fn, opts) {
-  return new Effect(fn, opts, State.Unstable);
+  var effect = new Effect(fn, opts);
+  effect._update(TIME);
+  return effect;
 }
 
 /**
@@ -1890,9 +1862,7 @@ window["anod"]["root"] = root;
 window["anod"]["data"] = data;
 window["anod"]["value"] = value;
 window["anod"]["compute"] = compute;
-window["anod"]["$compute"] = $compute;
 window["anod"]["effect"] = effect;
-window["anod"]["$effect"] = $effect;
 window["anod"]["batch"] = batch;
 window["anod"]["sample"] = sample;
 window["anod"]["cleanup"] = cleanup;
@@ -1953,9 +1923,7 @@ export {
   data,
   value,
   compute,
-  $compute,
   effect,
-  $effect,
   batch,
   sample,
   cleanup,

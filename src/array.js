@@ -20,6 +20,8 @@ import {
   IData,
   ICompute,
   Compute,
+  IEffect,
+  Effect,
   disposeScope,
   disposeSender,
   IReactive,
@@ -92,7 +94,7 @@ function Arguments(arg1, type1, arg2, type2) {
    * @package
    * @type {ArgType}
    */
-  this._type1 = type1 || ArgType.NotReactive;
+  this._type1 = type1 != null ? type1 : ArgType.NotReactive;
   /**
    * @package
    * @type {U}
@@ -102,7 +104,7 @@ function Arguments(arg1, type1, arg2, type2) {
    * @package
    * @type {ArgType}
    */
-  this._type2 = type2 || ArgType.NotReactive;
+  this._type2 = type2 != null ? type2 : ArgType.NotReactive;
 }
 
 /**
@@ -236,27 +238,35 @@ function copyIterator(source, value, args) {
  * @returns {Array<T>}
  */
 function concatIterator(source, value, args) {
-  if (args._type1 === ArgType.Variadic) {
-    /**
-     * @type {Array<T | Array<T> | Signal<T> | Array<Signal<T>>>}
-     */
-    var params = args.arg1();
-    /**
-     * @const
-     * @type {number}
-     */
-    var len = params.length;
-    /**
-     * @type {Array<T | Array<T>>}
-     */
-    var slice = new Array(len);
-    for (var i = 0; i < len; i++) {
-      var param = params[i];
-      slice[i] = argValue(param, argType(param));
-    }
-    return Array.prototype.concat.apply(source, slice);
-  }
   return source.concat(args.arg1());
+}
+
+/**
+ * @template T
+ * @param {ReadonlyArray<T>} source
+ * @param {Array<T>} value
+ * @param {Arguments<T | Array<T>, undefined>} args
+ * @returns {Array<T>}
+ */
+function concatVariadicIterator(source, value, args) {
+  /**
+   * @type {Array<T | Array<T> | Signal<T> | Array<Signal<T>>>}
+   */
+  var params = args.arg1();
+  /**
+   * @const
+   * @type {number}
+   */
+  var len = params.length;
+  /**
+   * @type {Array<T | Array<T>>}
+   */
+  var slice = new Array(len);
+  for (var i = 0; i < len; i++) {
+    var param = params[i];
+    slice[i] = argValue(param, argType(param));
+  }
+  return Array.prototype.concat.apply(source, slice);
 }
 
 /**
@@ -265,32 +275,42 @@ function concatIterator(source, value, args) {
  * @returns {SignalIterator<T>}
  */
 ReactiveIterator.prototype.concat = function (items) {
+  /** @type {ComputeArray<T>} */
+  var array;
   var length = arguments.length;
   if (length === 0) {
-    return new ComputeArray(this, copyIterator);
-  }
-  /**
-   * @type {Array<T | Array<T> | ReadonlySignal<T> | ReadonlySignal<Signal<T>>>}
-   */
-  var args;
-  /** @type {ArgType} */
-  var type;
-  if (length === 1) {
-    args = items;
-    type = argType(items);
+    array = new ComputeArray(this, copyIterator);
   } else {
-    args = new Array(length);
-    for (var i = 0; i < length; i++) {
-      args[i] = arguments[i];
+    /**
+     * @type {Array<T | Array<T> | ReadonlySignal<T> | ReadonlySignal<Signal<T>>>}
+     */
+    var args;
+    /** @type {ArgType} */
+    var type;
+    /**
+     * @type {function(ReadonlyArray<T>, Array<T>, Arguments<T | Array<T>, undefined>): Array<T>}
+     */
+    var iteratorFn;
+    if (length === 1) {
+      args = items;
+      type = argType(items);
+      iteratorFn = concatIterator;
+    } else {
+      args = new Array(length);
+      for (var i = 0; i < length; i++) {
+        args[i] = arguments[i];
+      }
+      type = ArgType.NotReactive;
+      iteratorFn = concatVariadicIterator;
     }
-    type = ArgType.Variadic;
+    array = new ComputeArray(
+      this,
+      iteratorFn,
+      args,
+      type
+    );
   }
-  return new ComputeArray(
-    this,
-    concatIterator,
-    args,
-    type
-  );
+  return array;
 };
 
 /**
@@ -445,49 +465,60 @@ ReactiveIterator.prototype.findLastIndex = function (callbackFn) {
 /**
  * @template T
  * @param {ReadonlyArray<T>} source
- * @param {void} value
  * @param {Arguments<(function(T, number): void), undefined>} args
  * @returns {void}
  */
-function forEachIterator(source, value, args) {
-  var callbackFn = args.arg1();
-  source.forEach(callbackFn);
+function forEachIterator(source, args) {
+  var length = source.length;
+  var callbackFn = args._arg1;
+  for (var i = 0; i < length; i++) {
+    callbackFn(source[i], i);
+  }
 }
 
 /**
  * @param {function(T, number): void} callbackFn
- * @returns {ReadonlySignal<void>}
+ * @returns {DisposableSignal<void>}
  */
 ReactiveIterator.prototype.forEach = function (callbackFn) {
-  return new ComputeReduce(
+  var effect = new EffectReduce(
     this,
     forEachIterator,
     callbackFn
   );
+  effect._update(TIME);
+  return effect;
 };
 
 /**
  * @template T
  * @param {ReadonlyArray<T>} source
  * @param {boolean} prev
- * @param {Arguments<T, undefined>} args
+ * @param {Arguments<T, number>} args
  * @returns {boolean}
  */
 function includesIterator(source, prev, args) {
   var searchElement = args.arg1();
-  return source.includes(searchElement);
+  if (args._arg2 === ArgType.Void) {
+    return source.includes(searchElement);
+  }
+  var fromIndex = args.arg2();
+  return source.includes(searchElement, fromIndex);
 }
 
 /**
  * @param {T | ReadonlySignal<T> | (function(): T)} searchElement
+ * @param {number | ReadonlySignal<number> | (function(): number)=} fromIndex
  * @returns {ReadonlySignal<boolean>}
  */
-ReactiveIterator.prototype.includes = function (searchElement) {
+ReactiveIterator.prototype.includes = function (searchElement, fromIndex) {
   return new ComputeReduce(
     this,
     includesIterator,
-    searchElement,
-    argType(searchElement)
+    /** @type {T} */(searchElement),
+    argType(searchElement),
+    /** @type {number} */(fromIndex),
+    arguments.length < 2 ? ArgType.Void : argType(fromIndex),
   );
 };
 
@@ -537,7 +568,12 @@ function joinIterator(source, value, args) {
  * @returns {ReadonlySignal<string>}
  */
 ReactiveIterator.prototype.join = function (separator) {
-  return new ComputeReduce(this, joinIterator, separator, argType(separator));
+  return new ComputeReduce(
+    this,
+    joinIterator,
+    separator,
+    argType(separator)
+  );
 };
 
 /**
@@ -550,7 +586,7 @@ ReactiveIterator.prototype.join = function (separator) {
 function lastIndexOfIterator(source, value, args) {
   var searchElement = args.arg1();
   var fromIndex = args.arg2();
-  return source.lastIndexOf(searchElement, fromIndex);
+  return fromIndex == null ? source.lastIndexOf(searchElement) : source.lastIndexOf(searchElement, fromIndex);
 }
 
 /**
@@ -577,7 +613,9 @@ ReactiveIterator.prototype.lastIndexOf = function (searchElement, fromIndex) {
  * @returns {Array<U>}
  */
 function mapIterator(source, values, args) {
+  /** @type {number} */
   var i;
+  /** @type {T} */
   var val;
   var slen = source.length;
   var vlen = values.length;
@@ -634,234 +672,30 @@ ReactiveIterator.prototype.map = function (callbackFn) {
   );
 };
 
-// /**
-//  * @template T, U
-//  * @param {ComputeMapArray<T, U>} owner
-//  * @param {ReadonlyArray<T>} source
-//  */
-// function mapRootIterator(owner, source) {
-//   /** @type {number} */
-//   var i;
-//   /** @type {number} */
-//   var j;
-//   /** @type {T} */
-//   var val;
-//   /** @type {Array<MapRoot<T>>} */
-//   var roots = owner._roots;
-//   /** @type {Array<T>} */
-//   var slice = owner._slice;
-//   /** @type {Array<U>} */
-//   var values = owner._value;
-//   /** @type {Arguments<(function(T, ReadonlySignal<number>): U), boolean>} */
-//   var args = owner._args;
-//   var oldlen = slice.length;
-//   var newlen = source.length;
-//   var pure = args._arg2;
-//   var callbackFn = args._arg1;
-//   if (oldlen === 0) {
-//     if (newlen > 0) {
-//       for (i = 0; i < newlen; i++) {
-//         mapCreate(owner);
-//       }
-//     }
-//   } else if (newlen === 0) {
-//     if (oldlen > 0) {
-//       values.length = 0;
-//       for (i = 0; i < oldlen; i++) {
-//       }
-//     }
-//   } else {
-//     var rmin = 0;
-//     var rmax = oldlen - 1;
-//     var smin = 0;
-//     var smax = newlen - 1;
-//     /** @type {Array<MapRoot>} */
-//     var newRoots = new Array(newlen);
-//     /** @type {Array<U>} */
-//     var newValues = new Array(newlen);
-//     while (
-//       rmin <= rmax &&
-//       smin <= smax // &&
-//       // roots[rmin]._value === source[smin]
-//     ) {
-//       // Common prefix, just increment forward
-//       rmin++;
-//       smin++;
-//     }
-//     while (
-//       rmin <= rmax &&
-//       smin <= smax // &&
-//       // roots[rmax]._value === source[smax]
-//     ) {
-//       // Common suffix, we don't know if the index
-//       // will change until we have diffed the middle part
-//       rmax--;
-//       smax--;
-//     }
-//     if (smin > smax) {
-//       // We matched all source values
-//       if (rmin <= rmax) {
-//         // But not all root values,
-//         // simple remove cases
-//         for (i = rmin; i <= rmax; i++) {
-//           // mapDispose(owner, i);
-//         }
-//         // roots.splice(rmin, rmax - rmin + 1);
-//         // values.splice(rmin, rmax - rmin + 1);
-//         if (!pure) {
-//           for (i = rmin; i < oldlen; i++) {
-//             // todo
-//           }
-//         }
-//       }
-//     } else if (rmin > rmax) {
-//       // We matched all existing
-//       if (smin <= smax) {
-//         // But not all source values,
-//         // simple insert cases
-//         newRoots = [rmin, 0];
-//         newValues = [rmin, 0];
-//         for (i = smin, j = 2; i <= smax; i++, j++) {
-//           // mapCreate(owner, newRoots, newValues, j, i, source[i], pure, callbackFn);
-//         }
-//         // splice.apply(roots, newRoots);
-//         // splice.apply(values, newValues);
-//       }
-//     } else {
-//       // Need to reconcile the middle slice
-//       var len = smax - smin;
-//       /** @type {number} */
-//       var offset;
-//       var rcount = rmax - rmin + 1;
-//       var scount = smax - smin + 1;
-//       newRoots = new Array(len);
-//       newValues = new Array(len);
-//       if (rcount <= 32) {
-//         // Use a single 32-bit mask for up to 32 roots
-//         var mask = 0;
-//         /** @type {number} */
-//         var free;
-//         /** @type {number} */
-//         var lowbit;
-//         /** @type {number} */
-//         var bitIndex;
-//         for (i = smin, j = 0; i <= smax; i++, j++) {
-//           offset = -1;
-//           val = source[i];
-//           // Only consider bits for actual roots (rcount may be < 32)
-//           free = ~mask & ((1 << rcount) - 1);
-//           while (free !== 0) {
-//             lowbit = free & -free;
-//             bitIndex = Math.clz32(lowbit) ^ 31;
-//             // if (val === roots[rmin + bitIndex]._value) {
-//             //   mask |= lowbit;
-//             //   offset = bitIndex;
-//             //   break;
-//             // }
-//             free &= free - 1;
-//           }
-//           if (offset >= 0) {
-//             // newRoots[j] = roots[rmin + offset];
-//             // newValues[j] = values[rmin + offset];
-//           } else {
-//             //  mapCreate(owner, newRoots, newValues, j, i, val, pure, callbackFn);
-//           }
-//         }
-//         // Dispose any roots not reused
-//         free = ~mask & ((1 << rcount) - 1);
-//         while (free !== 0) {
-//           let lowbit = free & -free;
-//           let bitIndex = Math.clz32(lowbit) ^ 31;
-//           // mapDispose(owner, rmin + bitIndex);
-//           free &= free - 1;
-//         }
-//       } else {
-//         var indexMap = new Map();
-//         var indexNext = new Int32Array(rcount);
-//         // link all old roots by value
-//         for (i = rmax; i >= rmin; i--) {
-//           offset = i - rmin;
-//           // val = roots[i]._value;
-//           j = indexMap.get(val);
-//           indexNext[offset] = j === void 0 ? -1 : j;
-//           indexMap.set(val, offset);
-//         }
-//         // walk through source items
-//         for (i = smin, j = 0; i <= smax; i++, j++) {
-//           val = source[i]
-//           offset = indexMap.get(val);
-//           if (offset >= 0) {
-//             // reuse first available slot
-//             newRoots[j] = roots[rmin + offset];
-//             newValues[j] = values[rmin + offset];
-//             // unlink this slot: use indexNext both as chain and reuse marker
-//             var next = indexNext[offset];
-//             if (next === -1) {
-//               indexMap.delete(val);
-//             } else {
-//               indexMap.set(val, next);
-//             }
-//           } else {
-//             // create brand-new
-//             // mapDispose(owner, rmin + offset);
-//             // mapCreate(owner, newRoots, newValues, j, i, val, pure, callbackFn);
-//           }
-//         }
-//         // dispose any large-case roots never reused
-//         for (i = 0; i < rcount; i++) {
-//           if (indexNext[i] !== -2) {
-//             //  mapDispose(owner, rmin + i);
-//           }
-//         }
-//       }
-
-//       // ── patch back into place ──
-//       // overwrite the first min(rcount, scount) slots in-place
-//       j = Math.min(rcount, scount);
-//       for (i = 0; i < j; i++) {
-//         roots[rmin + i] = newRoots[i];
-//         values[rmin + i] = newValues[i];
-//       }
-//       // handle any extra insertions or removals at the tail
-//       if (scount > rcount) {
-//         splice.apply(roots, [rmin + rcount, 0].concat(newRoots.slice(rcount)));
-//         splice.apply(values, [rmin + rcount, 0].concat(newValues.slice(rcount)));
-//       } else if (scount < rcount) {
-//         roots.splice(rmin + scount, rcount - scount);
-//         values.splice(rmin + scount, rcount - scount);
-//       }
-//     }
-//   }
-// }
-
-// /**
-//  * @template U
-//  * @param {function(T, ReadonlySignal<number>): U} callbackFn
-//  * @returns {SignalIterator<U>}
-//  */
-// ReactiveIterator.prototype.mapRoot = function (callbackFn) {
-//   return new ComputeMapArray(
-//     this,
-//     callbackFn,
-//     ArgType.NotReactive,
-//     callbackFn.length < 2
-//   );
-// };
-
 /**
  * @template T, U, V
  * @param {ReadonlyArray<T>} source
  * @param {V} prev
  * @param {Arguments<(function((T | U), T, number): V), U | undefined>} args
+ * @param {number} length
  * @returns {V}
  */
-function reduceIterator(source, prev, args) {
-  var callbackFn = args.arg1();
+function reduceIterator(source, prev, args, length) {
+  var i = 0;
+  var initialValue;
   if (args._type2 === ArgType.Void) {
-    return source.reduce(callbackFn);
+    if (length === 0) {
+      throw new TypeError("Reduce of empty array with no initial value");
+    }
+    initialValue = source[i++];
+  } else {
+    initialValue = args.arg2();
   }
-  var initialValue = args.arg2();
-  return source.reduce(callbackFn, initialValue);
+  var callbackFn = args._arg1;
+  for (; i < length; i++) {
+    initialValue = callbackFn(initialValue, source[i], i);
+  }
+  return initialValue;
 }
 
 /**
@@ -948,11 +782,17 @@ ReactiveIterator.prototype.slice = function (start, end) {
  * @param {ReadonlyArray<T>} source
  * @param {boolean} value
  * @param {Arguments<function(T, number): boolean, void>} args
+ * @param {number} length
  * @returns {boolean}
  */
-function someIterator(source, value, args) {
+function someIterator(source, value, args, length) {
   var callbackFn = args.arg1();
-  return source.some(callbackFn);
+  for (var i = 0; i < length; i++) {
+    if (callbackFn(source[i], i)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /**
@@ -966,7 +806,6 @@ ReactiveIterator.prototype.some = function (callbackFn) {
 /**
  * @interface
  * @template T
- * @extends {Receive<T>}
  * @extends {ICompute<T>}
  */
 function IComputeReduce() { }
@@ -976,7 +815,7 @@ function IComputeReduce() { }
  * @template T, U, V, W
  * @constructor
  * @param {ReactiveIterator<T>} source
- * @param {function(Array<T>, U, Arguments<V, W>): U} fn
+ * @param {function(Array<T>, U, Arguments<V, W>, number): U} fn
  * @param {V | Signal<V> | (function(): V)=} arg1
  * @param {ArgType=} type1
  * @param {W | Signal<W> | (function(): W)=} arg2
@@ -1003,7 +842,51 @@ extend(ComputeReduce, Compute);
  */
 ComputeReduce.prototype._apply = function () {
   var source = /** @type {ReactiveIterator<T>} */ (this._source1);
-  this._value = this._next(source.peek(), this._value, this._args);
+  var array = source.peek();
+  var length = array.length;
+  this._value = this._next(array, this._value, this._args, length);
+};
+
+/**
+ * @interface
+ * @template T
+ * @extends {IEffect}
+ */
+function IEffectReduce() { }
+
+/**
+ * @struct
+ * @template T, V, W
+ * @constructor
+ * @param {ReactiveIterator<T>} source
+ * @param {function(Array<T>, Arguments<V, W>): void} fn
+ * @param {V | Signal<V> | (function(): V)=} arg1
+ * @param {ArgType=} type1
+ * @param {W | Signal<W> | (function(): W)=} arg2
+ * @param {ArgType=} type2
+ * @extends {Effect}
+ * @implements {IEffectReduce}
+ */
+function EffectReduce(source, fn, arg1, type1, arg2, type2) {
+  Effect.call(this, fn);
+  /**
+   * @package
+   * @type {Arguments<V, W>}
+   */
+  this._args = new Arguments(arg1, type1, arg2, type2);
+  connect(source, this);
+}
+
+extend(EffectReduce, Effect);
+
+/**
+ * @package
+ * @override
+ * @returns {void}
+ */
+EffectReduce.prototype._apply = function () {
+  var source = /** @type {ReactiveIterator<T>} */ (this._source1);
+  this._next(source.peek(), this._args);
 };
 
 /**
@@ -1011,12 +894,96 @@ ComputeReduce.prototype._apply = function () {
  * cannot handle multiple prototype inheritance
  * @struct
  * @abstract
- * @template T
+ * @template T, V, W
  * @constructor
  * @extends {ReactiveIterator<T>}
  * @implements {IReactiveIterator<T>}
  */
 function ComputeArrayStub() { }
+
+/**
+ * @package
+ * @type {Receive | null}
+ */
+ComputeArrayStub.prototype._node1;
+
+/**
+ * @package
+ * @type {number}
+ */
+ComputeArrayStub.prototype._node1slot;
+
+/**
+ * @package
+ * @type {Array<Receive> | null}
+ */
+ComputeArrayStub.prototype._nodes;
+
+/**
+ * @package
+ * @type {Array<number> | null}
+ */
+ComputeArrayStub.prototype._nodeslots;
+
+/**
+ * @package
+ * @type {(function(...?): T) | null}
+ */
+ComputeArrayStub.prototype._next;
+
+/**
+ * @package
+ * @type {Receive | null}
+ */
+ComputeArrayStub.prototype._owner;
+
+/**
+ * @package
+ * @type {number}
+ */
+ComputeArrayStub.prototype._time;
+
+/**
+ * @package
+ * @type {number}
+ */
+ComputeArrayStub.prototype._utime;
+
+/**
+ * @package
+ * @type {number}
+ */
+ComputeArrayStub.prototype._dtime;
+
+/**
+ * @package
+ * @type {Send | null}
+ */
+ComputeArrayStub.prototype._source1;
+
+/**
+ * @package
+ * @type {number}
+ */
+ComputeArrayStub.prototype._source1slot;
+
+/**
+ * @package
+ * @type {Array<Send> | null | undefined}
+ */
+ComputeArrayStub.prototype._sources;
+
+/**
+ * @package
+ * @type {Array<number> | null | undefined}
+ */
+ComputeArrayStub.prototype._sourceslots;
+
+/**
+ * @package 
+ * @type {Arguments<V, W>}
+ */
+ComputeArrayStub.prototype._args;
 
 /**
  * @package
@@ -1078,93 +1045,21 @@ function IComputeArray() { }
  * @template T, U, V, W
  * @constructor
  * @param {ReactiveIterator<T>} source
- * @param {function(ReadonlyArray<T>, Array<U>, Arguments<V, W>, ...?): Array<U>} fn
+ * @param {function(ReadonlyArray<T>, Array<U>, Arguments<V, W>): Array<U>} fn
  * @param {V | ReadonlySignal<V> | (function(): V)=} arg1
  * @param {ArgType=} type1
  * @param {W | ReadonlySignal<W> | (function(): W)=} arg2
  * @param {ArgType=} type2
- * @extends {ComputeArrayStub<U>}
+ * @extends {ComputeArrayStub<U, V, W>}
  * @implements {IComputeArray<U>}
  */
 function ComputeArray(source, fn, arg1, type1, arg2, type2) {
-  /**
-   * @package
-   * @type {number}
-   */
-  this._state = State.Initial | State.WillUpdate | State.Bound;
-  /**
-   * @package
-   * @type {Array<U>}
-   */
+  ComputeReduce.call(/** @type {?} */(this), source, fn, arg1, type1, arg2, type2);
   this._value = [];
-  /**
-   * @package
-   * @type {Receive | null}
-   */
-  this._node1 = null;
-  /**
-   * @package
-   * @type {number}
-   */
-  this._node1slot = -1;
-  /**
-   * @package
-   * @type {Array<Receive> | null}
-   */
-  this._nodes = null;
-  /**
-   * @package
-   * @type {Array<number> | null}
-   */
-  this._nodeslots = null;
-  /**
-   * @package
-   * @type {Receive | null}
-   */
-  this._owner = null;
-  /**
-   * @package
-   * @type {Send | null}
-   */
-  this._source1 = null;
-  /**
-   * @package
-   * @type {number}
-   */
-  this._source1slot = 0;
-  /**
-   * @package
-   * @type {number}
-   */
-  this._time = 0;
-  /**
-   * @package
-   * @type {number}
-   */
-  this._utime = 0;
-  /**
-   * @package
-   * @type {number}
-   */
-  this._dtime = 0;
-  /**
-   * @package
-   * @type {function(ReadonlyArray<T>, Array<U>, Arguments<V, W>, ...?): Array<U>}
-   */
-  this._next = fn;
-  /**
-   * @package
-   * @type {Arguments<V, W>}
-   */
-  this._args = new Arguments(arg1, type1, arg2, type2);
-  connect(source, this);
-  if (CONTEXT._owner !== null) {
-    CONTEXT._owner._parent(this);
-  }
 }
 
 extend(ComputeArray, ReactiveIterator);
-inherit(ComputeArray, Compute);
+inherit(ComputeArray, ComputeReduce);
 
 /**
  * @package
@@ -1175,206 +1070,6 @@ ComputeArray.prototype._apply = function () {
   var source = /** @type {ReactiveIterator<T>} */ (this._source1);
   this._value = this._next(source.peek(), this._value, this._args);
 };
-
-/**
- * @struct
- * @constructor
- * @param {number} val
- * @extends {Compute<number>}
- */
-function MapIndex(val) {
-  /**
-   * @package
-   * @type {number}
-   */
-  this._state = State.Void;
-  /**
-   * @package
-   * @type {T}
-   */
-  this._value = val;
-  /**
-   * @package
-   * @type {Receive | null}
-   */
-  this._node1 = null;
-  /**
-   * @package
-   * @type {number}
-   */
-  this._node1slot = -1;
-  /**
-   * @package
-   * @type {Array<Receive> | null}
-   */
-  this._nodes = null;
-  /**
-   * @package
-   * @type {Array<number> | null}
-   */
-  this._nodeslots = null;
-  /**
-   * @package
-   * @type {number}
-   */
-  this._time = 0;
-}
-
-extend(MapIndex, Compute);
-
-/**
- * @package
- * @override
- * @returns {void}
- */
-MapIndex.prototype._dispose = function () {
-  var state = this._state;
-  if (state !== State.Disposed) {
-    if (state & State.Send) {
-      disposeSender(this);
-    }
-    this._value = null;
-    this._state = State.Disposed;
-  }
-};
-
-/**
- * @struct
- * @template T
- * @constructor
- * @extends {Root}
- */
-function MapRoot() {
-  /**
-   * @package
-   * @type {number}
-   */
-  this._state = State.Void;
-  /**
-   * @package
-   * @type {Array<Receive>}
-   */
-  this._children = null;
-  /**
-   * @package 
-   * @type {Array<Cleanup>}
-   */
-  this._cleanups = null;
-}
-
-
-
-/**
- * @interface
- * @template T
- * @extends {IComputeArray<T>}
- */
-function IComputeMapArray() { }
-
-/**
- * @struct
- * @template T, U, V, W
- * @constructor
- * @param {ReactiveIterator<T>} source
- * @param {V | ReadonlySignal<V> | (function(): V)=} arg1
- * @param {ArgType=} type1
- * @param {W | ReadonlySignal<W> | (function(): W)=} arg2
- * @param {ArgType=} type2
- * @extends {ComputeArray<U>}
- * @implements {IComputeMapArray<U>}
- */
-function ComputeMapArray(source, arg1, type1, arg2, type2) {
-  ComputeArray.call(this, source, /** @type {?} */(null), arg1, type1, arg2, type2);
-  /**
-   * @package
-   * @type {number}
-   */
-  this._slot = -1;
-  /**
-   * @package
-   * @type {Array<T>}
-   */
-  this._slice = [];
-  /**
-   * @package
-   * @type {Array<MapRoot<T>> | null}
-   */
-  this._roots = null;
-  /**
-   * @package
-   * @type {Array<MapIndex | null> | null}
-   */
-  this._indices = null;
-}
-
-extend(ComputeMapArray, ComputeArray);
-
-/**
- * @package
- * @param {Receive} child 
- * @returns {void}
- */
-ComputeMapArray.prototype._parent = function (child) {
-  if (this._slot !== -1) {
-    /** @type {MapRoot<T>} */
-    var root;
-    if (this._roots === null) {
-      root = new MapRoot();
-      this._roots = []
-    }
-  }
-};
-
-/**
- * @package
- * @param {Cleanup} cleanup 
- * @returns {void}
- */
-ComputeMapArray.prototype._cleanup = function (cleanup) { };
-
-// /**
-//  * @package
-//  * @override
-//  * @returns {void}
-//  */
-// ComputeMapArray.prototype._apply = function () {
-//   try {
-//     var source = /** @type {ReactiveIterator<T>} */ (this._source1).peek();
-//     CONTEXT._owner = this;
-//     mapRootIterator(this, source);
-//   } finally {
-//     CONTEXT._owner = null;
-//   }
-// };
-
-// /**
-//  * @template T, U
-//  * @param {ComputeMapArray} owner
-//  * @param {Array<MapRoot<T>>} roots
-//  * @param {Array<U>} values
-//  * @param {number} slot
-//  * @param {number} index 
-//  * @param {T} val
-//  * @param {boolean} pure
-//  * @param {(function(T): U) | (function(T, ReadonlySignal<number>): U)} callbackFn 
-//  */
-// function mapCreate(owner, value, callbackFn, pure) {
-//   var root = new MapRoot(val, pure ? null : new MapIndex(index));
-//   roots[slot] = root;
-//   try {
-//     values[slot] = callbackFn(root._value, root._index);
-//   } finally {
-//   }
-// };
-
-// /**
-//  * @param {ComputeMapArray} owner
-//  * @param {number} index 
-//  * @returns {void}
-//  */
-// function mapDispose(owner, index) {
-//   // owner._roots[index] = null;
-// };
 
 /**
  * @const
@@ -1559,9 +1254,9 @@ DataArray.prototype._apply = function () {
       if (mut & Mut.InsertMany) {
         Array.prototype.splice.apply(value, /** @type {Array<number | T>} */(args));
       } else if (mut & Mut.InsertOne) {
-        value.splice(mutation[MutPos.NextInserts], mutation[MutPos.NextRemoves], /** @type {T} */(args))
+        value.splice(mutation[MutPos.NextIndex], mutation[MutPos.NextRemoves], /** @type {T} */(args))
       } else {
-        value.splice(mutation[MutPos.NextInserts], mutation[MutPos.NextRemoves]);
+        value.splice(mutation[MutPos.NextIndex], mutation[MutPos.NextRemoves]);
       }
       break;
     case Mutation.UnshiftOne & Mut.Mask:
@@ -1585,8 +1280,8 @@ DataArray.prototype._apply = function () {
   mutation[MutPos.Inserts] = mutation[MutPos.NextInserts];
   mutation[MutPos.Removes] = mutation[MutPos.NextRemoves];
   mutation[MutPos.NextMutation] =
-    mutation[MutPos.NextIndex] = 
-    mutation[MutPos.NextInserts] = 
+    mutation[MutPos.NextIndex] =
+    mutation[MutPos.NextInserts] =
     mutation[MutPos.NextRemoves] = Mutation.None;
 };
 
@@ -1597,7 +1292,7 @@ DataArray.prototype._apply = function () {
  */
 DataArray.prototype.set = function (val) {
   if (!(this._state & (State.QueueDispose | State.Disposed))) {
-    this._mutate(Mutation.Set, -1, -1, -1, val);
+    this._mutate(Mutation.Set, 0, 0, 0, val);
   }
 };
 
@@ -1608,7 +1303,7 @@ DataArray.prototype.set = function (val) {
  */
 DataArray.prototype.modify = function (callbackFn) {
   if (!(this._state & (State.QueueDispose | State.Disposed))) {
-    this._mutate(Mutation.Modify, -1, -1, -1, callbackFn);
+    this._mutate(Mutation.Modify, 0, 0, 0, callbackFn);
   }
 };
 
@@ -1779,12 +1474,10 @@ window["anod"]["array"] = array;
 window["anod"]["DataArray"] = DataArray;
 window["anod"]["ComputeReduce"] = ComputeReduce;
 window["anod"]["ComputeArray"] = ComputeArray;
-window["anod"]["ComputeMapArray"] = ComputeMapArray;
 
 export {
   array,
   DataArray,
   ComputeReduce,
-  ComputeArray,
-  ComputeMapArray
+  ComputeArray
 }

@@ -122,19 +122,20 @@ SignalIterator.prototype.findLastIndex = function (callbackFn) {};
 
 /**
  * @param {function(T, number): void} callbackFn
- * @returns {ReadonlySignal<void>}
+ * @returns {DisposableSignal<void>}
  */
 SignalIterator.prototype.forEach = function (callbackFn) {};
 
 /**
  * @param {T | ReadonlySignal<T> | (function(): T)} searchElement
+ * @param {number | ReadonlySignal<number> | (function(): number)=} fromIndex
  * @returns {ReadonlySignal<boolean>}
  */
-SignalIterator.prototype.includes = function (searchElement) {};
+SignalIterator.prototype.includes = function (searchElement, fromIndex) {};
 
 /**
  * @param {T | ReadonlySignal<T> | (function(): T)} searchElement
- * @param {number | Signal<number> | (function(): number)=} fromIndex
+ * @param {number | ReadonlySignal<number> | (function(): number)=} fromIndex
  * @returns {ReadonlySignal<number>}
  */
 SignalIterator.prototype.indexOf = function (searchElement, fromIndex) {};
@@ -158,13 +159,6 @@ SignalIterator.prototype.lastIndexOf = function (searchElement, fromIndex) {};
  * @returns {SignalIterator<U>}
  */
 SignalIterator.prototype.map = function (callbackFn) {};
-
-// /**
-//  * @template U
-//  * @param {function(T, ReadonlySignal<number>): U} callbackFn
-//  * @returns {SignalIterator<U>}
-//  */
-// SignalIterator.prototype.mapRoot = function (callbackFn) {};
 
 /**
  * @template U, V

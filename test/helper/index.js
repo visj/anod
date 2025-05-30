@@ -21,6 +21,10 @@ function Test(messages) {
      * @type {string | null}
      */
     this._scope = null;
+    /**
+     * @type {number}
+     */
+    this._testnr = 0;
 }
 
 /**
@@ -47,7 +51,7 @@ Test.prototype.scope = function() {
     if (this._scope === null) {
         this._scope = this.messages.join(" -> ");
     }
-    return this._scope;
+    return "#" + this._testnr + " " + this._scope;
 };
 
 /**
@@ -56,6 +60,7 @@ Test.prototype.scope = function() {
  * @param {string=} message 
  */
 Test.prototype.assert = function(assert, message) {
+    this._testnr++;
     if (assert === true) {
         PASS++;
     } else {
@@ -71,6 +76,7 @@ Test.prototype.assert = function(assert, message) {
  * @param {string=} message
  */
 Test.prototype.equal = function(actual, expected, message) {
+    this._testnr++;
     if (actual === expected) {
         PASS++;
     } else {
@@ -85,6 +91,7 @@ Test.prototype.equal = function(actual, expected, message) {
  * @returns {void}
  */
 Test.prototype.throws = function(callback) {
+    this._testnr++;
     var thrown = false;
     try {
         callback();

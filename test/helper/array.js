@@ -12,7 +12,11 @@ export function shallowEq(actual, expected) {
         return false;
     }
     for (var i = 0; i < actual.length; i++) {
-        if (actual[i] !== expected[i]) {
+        if (actual[i] instanceof Array && expected[i] instanceof Array) {
+            if (!shallowEq(actual[i], expected[i])) {
+                return false;
+            }
+        } else if (actual[i] !== expected[i]) {
             return false;
         }
     }
