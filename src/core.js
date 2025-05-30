@@ -1276,9 +1276,7 @@ Effect.prototype._update = function (time) {
     disposeScope(this, false);
   }
   if (state & (State.Initial | State.Unstable)) {
-    if (state & State.Initial) {
-      this._state &= ~State.Initial;
-    } else {
+    if (state & State.Unstable) {
       disposeReceiver(this, false);
     }
     CONTEXT._listen = this;
@@ -1294,7 +1292,7 @@ Effect.prototype._update = function (time) {
       start();
     }
   } finally {
-    this._state &= ~State.Updating;
+    this._state &= ~(State.Initial | State.Updating);
     CONTEXT._idle = idle;
     CONTEXT._owner = owner;
     CONTEXT._listen = listen;
@@ -1516,9 +1514,7 @@ Compute.prototype._update = function (time) {
     (this._state | State.Updating) &
     ~(State.WillUpdate | State.Clearing | State.MayDispose | State.MayUpdate);
   if (state & (State.Initial | State.Unstable)) {
-    if (state & State.Initial) {
-      this._state &= ~State.Initial;
-    } else {
+    if (state & State.Unstable) {
       disposeReceiver(this, false);
     }
     CONTEXT._listen = this;
@@ -1540,7 +1536,7 @@ Compute.prototype._update = function (time) {
       start();
     }
   } finally {
-    this._state &= ~State.Updating;
+    this._state &= ~(State.Initial | State.Updating);
     CONTEXT._idle = idle;
     CONTEXT._owner = owner;
     CONTEXT._listen = listen;
