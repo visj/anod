@@ -66,10 +66,10 @@ function argType(arg) {
  */
 function argValue(val, type) {
   switch (type) {
-    case ArgType.Callback:
-      return /** @type {function(): T} */(val)();
     case ArgType.Reactive:
       return /** @type {Reactive<T>} */(val).val();
+    case ArgType.Callback:
+      return /** @type {function(): T} */(val)();
   }
   return /** @type {T} */(val);
 }
@@ -210,7 +210,9 @@ function atIterator(source, value, args) {
   if (index < 0) {
     index += length;
   }
-  return index < length ? source[index] : void 0;
+  if (index < length) {
+    return source[index];
+  }
 }
 
 /**
@@ -283,10 +285,10 @@ function concatVariadicIterator(source, value, args) {
  */
 ReactiveIterator.prototype.concat = function (items) {
   /** @type {ComputeArray<T>} */
-  var array;
+  var iterator;
   var length = arguments.length;
   if (length === 0) {
-    array = new ComputeArray(this, copyIterator);
+    iterator = new ComputeArray(this, copyIterator);
   } else {
     /**
      * @type {Array<T | Array<T> | ReadonlySignal<T> | ReadonlySignal<Signal<T>>>}
@@ -310,14 +312,14 @@ ReactiveIterator.prototype.concat = function (items) {
       type = ArgType.NotReactive;
       iteratorFn = concatVariadicIterator;
     }
-    array = new ComputeArray(
+    iterator = new ComputeArray(
       this,
       iteratorFn,
       args,
       type
     );
   }
-  return array;
+  return iterator;
 };
 
 /**
@@ -333,10 +335,10 @@ ReactiveIterator.prototype.concat = function (items) {
  * @returns {boolean}
  */
 function everyIterator(source, value, args, length, mut, index, inserts, removes) {
-  var i = 0;
   if (length === 0) {
     return true;
   }
+  var i = 0;
   if (!(mut & Mut.Reset)) {
     if (value) {
       if (!(mut & Mut.Insert)) {
@@ -365,6 +367,7 @@ function everyIterator(source, value, args, length, mut, index, inserts, removes
       return false;
     }
   }
+  args._arg2 = -1;
   return true;
 }
 
@@ -377,9 +380,7 @@ ReactiveIterator.prototype.every = function (callbackFn) {
   return new ComputeReduce(
     this,
     everyIterator,
-    callbackFn,
-    ArgType.Void,
-    -1
+    callbackFn
   );
 };
 
@@ -416,7 +417,7 @@ ReactiveIterator.prototype.filter = function (callbackFn) {
  * @returns {T | undefined}
  */
 function findIterator(source, value, args) {
-  var callbackFn = args.arg1();
+  var callbackFn = args._arg1;
   return source.find(callbackFn);
 }
 
@@ -527,13 +528,11 @@ function forEachIterator(source, value, args) {
  * @returns {DisposableSignal<void>}
  */
 ReactiveIterator.prototype.forEach = function (callbackFn) {
-  var effect = new EffectReduce(
+  return new EffectReduce(
     this,
     forEachIterator,
     callbackFn
   );
-  effect._update(TIME);
-  return effect;
 };
 
 /**
@@ -972,6 +971,7 @@ function EffectReduce(source, fn, arg1, type1, arg2, type2) {
    */
   this._args = new Arguments(arg1, type1, arg2, type2);
   connect(source, this);
+  this._update(TIME);
 }
 
 extend(EffectReduce, Effect);
@@ -1365,7 +1365,7 @@ DataArray.prototype._apply = function () {
   mutation[MutPos.Inserts] = mutation[MutPos.NextInserts];
   mutation[MutPos.Removes] = mutation[MutPos.NextRemoves];
   mutation[MutPos.NextMutation] = Mutation.None;
-    mutation[MutPos.NextIndex] =
+  mutation[MutPos.NextIndex] =
     mutation[MutPos.NextInserts] =
     mutation[MutPos.NextRemoves] = -1;
 };
@@ -1559,10 +1559,12 @@ window["anod"]["array"] = array;
 window["anod"]["DataArray"] = DataArray;
 window["anod"]["ComputeReduce"] = ComputeReduce;
 window["anod"]["ComputeArray"] = ComputeArray;
+window["anod"]["EffectReduce"] = EffectReduce;
 
 export {
   array,
   DataArray,
   ComputeReduce,
-  ComputeArray
+  ComputeArray,
+  EffectReduce
 }

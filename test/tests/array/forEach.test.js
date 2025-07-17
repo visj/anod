@@ -14,12 +14,12 @@ test("forEach", function (t) {
         });
 
         t.test("with index", function (t) {
-            var s1 = array(['a', 'b', 'c']);
+            var s1 = array(["a", "b", "c"]);
             var result = [];
             s1.forEach(function (item, index) {
                 result.push(index + item);
             });
-            t.assert(shallowEq(result, ['0a', '1b', '2c']));
+            t.assert(shallowEq(result, ["0a", "1b", "2c"]));
         });
 
         t.test("empty array", function (t) {

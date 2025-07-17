@@ -87,7 +87,9 @@ test("map", function (t) {
         t.test("callback errors", function (t) {
             var s1 = array([1, 2, 3]);
             var s2 = s1.map(function (item) {
-                if (item === 2) throw new Error('Test error');
+                if (item === 2) {
+                    throw new Error('Test error');
+                }
                 return item * 2;
             });
             t.throws(function() {

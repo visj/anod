@@ -13,7 +13,7 @@ test("findIndex", function (t) {
         });
 
         t.test("with index", function (t) {
-            var s1 = array(['a', 'b', 'c']);
+            var s1 = array(["a", "b", "c"]);
             var s2 = s1.findIndex(function (item, index) {
                 return index === 1;
             });

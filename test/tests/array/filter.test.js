@@ -13,11 +13,11 @@ test("filter", function (t) {
         });
 
         t.test("with index", function (t) {
-            var s1 = array(['a', 'b', 'c']);
+            var s1 = array(["a", "b", "c"]);
             var s2 = s1.filter(function (item, index) {
                 return index > 0;
             });
-            t.assert(shallowEq(s2.val(), ['b', 'c']));
+            t.assert(shallowEq(s2.val(), ["b", "c"]));
         });
 
         t.test("empty array", function (t) {

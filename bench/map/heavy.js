@@ -115,20 +115,20 @@ async function runBenchCase(size, iters, repeats) {
   const sequences = Array.from({ length: iters }, () => shuffle(base));
 
   const frameworks = [
-    {
-      name: 'Anod',
-      makeUpdateFn: () => {
-        const s = array(base);
-        const c = s.mapRoot(id => {
-          return createComponent(generateDataForId(id));
-        });
-        c.val(); let idx = 0;
-        return () => {
-          s.set(sequences[idx]);
-          c.val(); idx++;
-        };
-      }
-    },
+    // {
+    //   name: 'Anod',
+    //   makeUpdateFn: () => {
+    //     const s = array(base);
+    //     const c = s.map(id => {
+    //       return createComponent(generateDataForId(id));
+    //     });
+    //     c.val(); let idx = 0;
+    //     return () => {
+    //       s.set(sequences[idx]);
+    //       c.val(); idx++;
+    //     };
+    //   }
+    // },
     // {
     //     name: 'Preact',
     //     makeUpdateFn: () => {
@@ -140,17 +140,17 @@ async function runBenchCase(size, iters, repeats) {
     //         return () => { s.value = sequences[idx]; c.value; idx++; };
     //     }
     // },
-    // {
-    //     name: 'Solid',
-    //     makeUpdateFn: () => {
-    //         const [s, setS] = createSignal(base);
-    //         const c = mapArray(s, id => {
-    //             return createComponent(generateDataForId(id));
-    //         });
-    //         c(); let idx = 0;
-    //         return () => { setS(sequences[idx]); c(); idx++; };
-    //     }
-    // },
+    {
+        name: 'Solid',
+        makeUpdateFn: () => {
+            const [s, setS] = createSignal(base);
+            const c = mapArray(s, id => {
+                return createComponent(generateDataForId(id));
+            });
+            c(); let idx = 0;
+            return () => { setS(sequences[idx]); c(); idx++; };
+        }
+    },
   ];
 
   for (const fw of frameworks) {

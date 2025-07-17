@@ -13,11 +13,11 @@ test("find", function (t) {
         });
 
         t.test("with index", function (t) {
-            var s1 = array(['a', 'b', 'c']);
+            var s1 = array(["a", "b", "c"]);
             var s2 = s1.find(function (item, index) {
                 return index === 1;
             });
-            t.assert(s2.val() === 'b');
+            t.assert(s2.val() === "b");
         });
 
         t.test("empty array", function (t) {

@@ -17,8 +17,8 @@ test("join", function (t) {
         });
 
         t.test("with separator", function (t) {
-            var s1 = array(['a', 'b', 'c']);
-            var s2 = s1.join('-');
+            var s1 = array(["a", "b", "c"]);
+            var s2 = s1.join("-");
             t.assert(s2.val() === "a-b-c");
         });
 
@@ -85,13 +85,13 @@ test("join", function (t) {
 
         t.test("various separators", function (t) {
             var s1 = array([1, 2, 3]);
-            var s2 = s1.join('');
+            var s2 = s1.join("");
             t.assert(s2.val() === "123");
 
-            var s3 = s1.join(' ');
+            var s3 = s1.join(" ");
             t.assert(s3.val() === "1 2 3");
 
-            var s4 = s1.join('--');
+            var s4 = s1.join("--");
             t.assert(s4.val() === "1--2--3");
         });
     });
