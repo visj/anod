@@ -1,22 +1,28 @@
 {
   "name": "anod",
-  "version": "0.4.0",
+  "version": "0.2.0",
   "description": "",
   "type": "module",
-  "types": "core.d.ts",
+  "types": "dist/index.d.ts",
   "main": "./dist/index.js",
   "module": "./dist/index.js",
   "exports": {
     ".": {
-      "types": "./lib.core.d.ts",
+      "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "module": "./dist/index.js"
     },
     "./array": {
-      "types": "./lib.array.d.ts",
+      "types": "./dist/array.d.ts",
       "import": "./dist/array.js",
       "module": "./dist/array.js"
     }
+  },
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public"
   },
   "scripts": {
     "test": "node --expose-gc test/index.js",
@@ -26,8 +32,7 @@
     "reactive",
     "javascript",
     "synchronous",
-    "signal",
-    "dependency"
+    "signal"
   ],
   "repository": {
     "type": "git",
