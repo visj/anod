@@ -1,5 +1,5 @@
 # anod
-anod is a reactive library based on [S.js](https://github.com/adamhaile/S) and [SArray](https://github.com/adamhaile/S-array), but with several changes inspired by [Solid](https://github.com/solidjs/solid), [ivi](https://github.com/localvoid/ivi) and [Signals](https://github.com/preactjs/signals) by PreactJS. It provides lightweight wrapper objects that turn regular values and arrays into reactive counterparts.
+anod is a reactive library based on [S.js](https://github.com/adamhaile/S) and [SArray](https://github.com/adamhaile/S-array), but with several changes inspired by [Solid](https://github.com/solidjs/solid), [ivi](https://github.com/localvoid/ivi) and [Signals](https://github.com/preactjs/signals) by PreactJS. It provides lightweight wrapper objects that turn regular values and arrays into reactive objects.
 ## Example
 ```js
 import { value, batch, effect } from "anod";
@@ -39,6 +39,20 @@ batch(function() {
 // Prints "Member list (has children): Astrid, Leif, Siv, Sonja. Event planned, stay tuned!"
 ```
 ## API
-`root(fn: () => T): DisposableSignal`
+#### `root(fn: () => T): DisposableSignal`
+Creates a root wrapper allowing to dispose any children computations created.
+```js
+const r1 = root(function() {
+    const v1 = value(1);
+    effect(function() {
+        console.log(v1.val());
+    });
+});
+v1.set(2);
+r1.dispose();
+v1.set(3); // nothing happens
+```
+#### `data<T>(val: T): Signal<T>` / `value<T>(val: T, eq?: ((a: T, b: T) => boolean) | null): Signal<T>`
 
-test
+
+#### 

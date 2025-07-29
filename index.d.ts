@@ -75,7 +75,7 @@ export declare function data<T>(val: T): Signal<T>;
  */
 export declare function value<T>(
   val: T,
-  eq?: ((a: T, b: T) => boolean) | null,
+  eq?: ((a: T, b: T) => boolean) | null
 ): Signal<T>;
 /**
  *
