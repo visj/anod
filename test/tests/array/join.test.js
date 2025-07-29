@@ -12,7 +12,7 @@ test("join", function (t) {
 
         t.test("with undefined", function (t) {
             var s1 = array([1, 2, 3, 4, 5]);
-            var s2 = s1.join(void 0);
+            var s2 = s1.join(undefined);
             t.assert(s2.val() === "1,2,3,4,5");
         });
 

@@ -143,7 +143,7 @@ test("compute", function (t){
 
   t.test("returns undefined from void function", function (t){
     var c1 = compute(function () { });
-    t.equal(c1.val(), void 0);
+    t.equal(c1.val(), undefined);
   });
 
   t.test("with a dependency on a computation", function (t){

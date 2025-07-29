@@ -19,7 +19,7 @@ if (global.gc) {
       // Bind dependencies
       ref.deref().val();
       collect(function () {
-        t.equal(ref.deref() !== void 0, true);
+        t.equal(ref.deref() !== undefined, true);
       });
     });
 
@@ -33,7 +33,7 @@ if (global.gc) {
       c1.deref().val();
       s1.dispose();
       collect(function () {
-        t.equal(c1.deref(), void 0);
+        t.equal(c1.deref(), undefined);
       })
     });
 
@@ -51,8 +51,8 @@ if (global.gc) {
       t.equal(c1.deref().val(), 1);
       s1.deref().dispose();
       collect(function () {
-        t.equal(s1.deref(), void 0);
-        t.equal(c1.deref(), void 0);
+        t.equal(s1.deref(), undefined);
+        t.equal(c1.deref(), undefined);
       });
     });
   });

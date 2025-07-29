@@ -1610,7 +1610,7 @@ function Compute(fn, opts, flags) {
    * @package
    * @type {T}
    */
-  this._value = void 0;
+  this._value = undefined;
   /**
    * @package
    * @type {Receive | null}
@@ -1675,7 +1675,7 @@ function Compute(fn, opts, flags) {
    * @package
    * @type {(function(T, T): boolean) | null | undefined}
    */
-  this._compare = void 0;
+  this._compare = undefined;
   /**
    * @package
    * @type {(function(...?): T) | null}
@@ -1894,7 +1894,7 @@ function IData() { }
  */
 function Data(val, eq) {
   var state = State.Void;
-  if (eq !== void 0) {
+  if (eq !== undefined) {
     if (eq === null) {
       state |= State.Respond;
     } else {
@@ -2357,7 +2357,7 @@ function atIterator(source, value, args) {
   if (index < 0) {
     index += length;
   }
-  return index < length ? source[index] : void 0;
+  return index < length ? source[index] : undefined;
 }
 
 /**
@@ -3066,7 +3066,7 @@ function IComputeReduce() { }
  * @implements {IComputeReduce<U>}
  */
 function ComputeReduce(source, fn, arg1, type1, arg2, type2) {
-  Compute.call(this, fn, void 0, State.Stable);
+  Compute.call(this, fn, undefined, State.Stable);
   /**
    * @package
    * @type {Arguments<V, W>}
@@ -3111,12 +3111,12 @@ function IEffectReduce() { }
  * @implements {IEffectReduce}
  */
 function EffectReduce(source, fn, arg1, type1, arg2, type2) {
-  Effect.call(this, fn, void 0, State.Stable);
+  Effect.call(this, fn, undefined, State.Stable);
   /**
    * @package
    * @type {undefined}
    */
-  this._value = void 0;
+  this._value = undefined;
   /**
    * @package
    * @type {Arguments<V, W>}
@@ -3396,7 +3396,7 @@ function DataArray(val) {
    * @package
    * @type {T}
    */
-  this._next = void 0;
+  this._next = undefined;
   /**
    * @package
    * @type {Receive | null}
@@ -3624,7 +3624,7 @@ DataArray.prototype.shift = function () {
 DataArray.prototype.sort = function (compareFn) {
   if (!(this._state & (State.QueueDispose | State.Disposed))) {
     if (this._value.length > 0) {
-      this._mutate(Mutation.Sort, void 0, 0, 0, compareFn);
+      this._mutate(Mutation.Sort, undefined, 0, 0, compareFn);
     }
   }
 };

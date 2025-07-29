@@ -81,31 +81,8 @@ export declare function value<T>(
  *
  * @param fn
  */
-export declare function compute<T>(fn: () => T): ReadonlySignal<T>;
+export declare function compute<T>(fn: () => T, opts?: SignalOptions<T> | boolean): ReadonlySignal<T>;
 
-/**
- *
- * @param fn
- * @param opts
- */
-export declare function compute<T>(
-  fn: () => T,
-  opts: SignalOptions<T>,
-): ReadonlySignal<T>;
-
-/**
- *
- * @param fn
- */
-export declare function effect<T>(fn: () => T): DisposableSignal;
-/**
- *
- * @param fn
- * @param seed
- */
-export declare function effect<T>(
-  fn: (prev: T) => T
-): DisposableSignal;
 /**
  *
  * @param fn
@@ -113,7 +90,7 @@ export declare function effect<T>(
  */
 export declare function effect(
   fn: () => void,
-  opts: SignalOptions<void>,
+  opts?: SignalOptions<void> | boolean,
 ): DisposableSignal;
 
 /**

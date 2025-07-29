@@ -131,13 +131,13 @@ test("dispose", function (t) {
         });
         compute(function () {
           s2.val();
-          if (c1 !== void 0) {
+          if (c1 !== undefined) {
             c1.val();
           }
         });
         effect(function () {
           c2.val();
-          if (c1 === void 0) {
+          if (c1 === undefined) {
             c1 = compute(function () {
               count++;
               return s2.val();

@@ -1346,7 +1346,7 @@ function Compute(fn, opts, flags) {
    * @package
    * @type {T}
    */
-  this._value = void 0;
+  this._value = undefined;
   /**
    * @package
    * @type {Receive | null}
@@ -1411,7 +1411,7 @@ function Compute(fn, opts, flags) {
    * @package
    * @type {(function(T, T): boolean) | null | undefined}
    */
-  this._compare = void 0;
+  this._compare = undefined;
   /**
    * @package
    * @type {(function(...?): T) | null}
@@ -1630,7 +1630,7 @@ function IData() { }
  */
 function Data(val, eq) {
   var state = State.Void;
-  if (eq !== void 0) {
+  if (eq !== undefined) {
     if (eq === null) {
       state |= State.Respond;
     } else {
