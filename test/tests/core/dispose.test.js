@@ -81,7 +81,7 @@ test("dispose", function (t) {
         } else {
           s3.val();
         }
-      }, { unstable: true });
+      });
       calls = 0;
       s1.set(false);
       t.equal(calls, 2);

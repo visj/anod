@@ -4,6 +4,8 @@ function now() {
   return performance.now();
 }
 
+var stable = true;
+
 var COUNT = 1e6;
 
 var lines = [];
@@ -164,25 +166,25 @@ function createComputations1000to1(n, sources) {
 function createComputation0(i) {
   effect(function () {
     return i;
-  });
+  }, stable);
 }
 
 function createComputation1(s1) {
   effect(function () {
     return s1.val();
-  });
+  }, stable);
 }
 
 function createComputation2(s1, s2) {
   effect(function () {
     return s1.val() + s2.val();
-  });
+  }, stable);
 }
 
 function createComputation4(s1, s2, s3, s4) {
   effect(function () {
     return s1.val() + s2.val() + s3.val() + s4.val();
-  });
+  }, stable);
 }
 
 function createComputation1000(ss, offset) {
@@ -192,14 +194,14 @@ function createComputation1000(ss, offset) {
       sum += ss[offset + i].val();
     }
     return sum;
-  });
+  }, stable);
 }
 
 function updateComputations1to1(n, sources) {
   var s1 = sources[0];
   effect(function () {
     return s1.val();
-  });
+  }, stable);
   for (var i = 0; i < n; i++) {
     s1.set(i);
   }
@@ -210,7 +212,7 @@ function updateComputations2to1(n, sources) {
     s2 = sources[1];
   effect(function () {
     return s1.val() + s2.val();
-  });
+  }, stable);
   for (var i = 0; i < n; i++) {
     s1.set(i);
   }
@@ -223,7 +225,7 @@ function updateComputations4to1(n, sources) {
     s4 = sources[3];
   effect(function () {
     return s1.val() + s2.val() + s3.val() + s4.val();
-  });
+  }, stable);
   for (var i = 0; i < n; i++) {
     s1.set(i);
   }
@@ -237,7 +239,7 @@ function updateComputations1000to1(n, sources) {
       sum += sources[i].val();
     }
     return sum;
-  });
+  }, stable);
   for (var i = 0; i < n; i++) {
     s1.set(i);
   }
@@ -247,10 +249,10 @@ function updateComputations1to2(n, sources) {
   var s1 = sources[0];
   effect(function () {
     return s1.val();
-  });
+  }, stable);
   effect(function () {
     return s1.val();
-  });
+  }, stable);
   for (var i = 0; i < n / 2; i++) {
     s1.set(i);
   }
@@ -260,16 +262,16 @@ function updateComputations1to4(n, sources) {
   var s1 = sources[0];
   effect(function () {
     return s1.val();
-  });
+  }, stable);
   effect(function () {
     return s1.val();
-  });
+  }, stable);
   effect(function () {
     return s1.val();
-  });
+  }, stable);
   effect(function () {
     return s1.val();
-  });
+  }, stable);
   for (var i = 0; i < n / 4; i++) {
     s1.set(i);
   }
@@ -280,7 +282,7 @@ function updateComputations1to1000(n, sources) {
   for (var i = 0; i < 1000; i++) {
     effect(function () {
       return s1.val();
-    });
+    }, stable);
   }
   for (var i = 0; i < n / 1000; i++) {
     s1.set(i);

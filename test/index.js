@@ -8,7 +8,6 @@ import "./tests/core/root.test.js";
 import "./tests/core/signal.test.js";
 import "./tests/core/update.test.js";
 
-import "./tests/array/array.test.js";
 import "./tests/array/at.test.js";
 import "./tests/array/concat.test.js";
 import "./tests/array/every.test.js";
@@ -23,8 +22,15 @@ import "./tests/array/indexOf.test.js";
 import "./tests/array/join.test.js";
 import "./tests/array/lastIndexOf.test.js";
 import "./tests/array/map.test.js";
+import "./tests/array/modify.test.js";
+import "./tests/array/push.test.js";
 import "./tests/array/reduce.test.js";
+import "./tests/array/reverse.test.js";
+import "./tests/array/shift.test.js";
 import "./tests/array/slice.test.js";
 import "./tests/array/some.test.js";
+import "./tests/array/sort.test.js";
+import "./tests/array/splice.test.js";
+import "./tests/array/unshift.test.js";
 
 process.on("exit", report);

@@ -142,7 +142,7 @@ async function runBenchCase(size, iters, repeats) {
 
 
 
-    for (const fw of frameworks.filter(f => f.name === "Preact")) {
+    for (const fw of frameworks) {
         const results = [];
         for (let r = 0; r < repeats; r++) {
             let updateFn = fw.makeUpdateFn();
@@ -179,7 +179,7 @@ async function runBenchCase(size, iters, repeats) {
 
 // main
 (async function main() {
-    const sizes = [10, 30, 100, 300, 500, 1000];
+    const sizes = [10, 30, 100, 300, 500];
     const iters = 100000;
     const repeats = 5;
 

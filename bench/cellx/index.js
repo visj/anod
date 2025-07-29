@@ -16,7 +16,7 @@ import { Signal } from "signal-polyfill";
 import * as anod from "../../dist/index.js";
 
 let rand = 0;
-const BATCHED = true;
+const BATCHED = false;
 const RUNS_PER_TIER = 1000;
 const LAYER_TIERS = [
   1, 2, 3, 4, 5, 10, 15, 20, 25, 50, 100, 500, 1000
@@ -330,10 +330,10 @@ function runAnod(layers) {
   for (let i = layers; i--;) {
     layer = ((m) => {
       return {
-        a: anod.compute(() => (rand % 2 ? m.b.val() : m.c.val())),
-        b: anod.compute(() => m.a.val() - m.c.val()),
-        c: anod.compute(() => m.b.val() + m.d.val()),
-        d: anod.compute(() => m.c.val()),
+        a: anod.compute(() => (rand % 2 ? m.b.val() : m.c.val()), true),
+        b: anod.compute(() => m.a.val() - m.c.val(), true),
+        c: anod.compute(() => m.b.val() + m.d.val(), true),
+        d: anod.compute(() => m.c.val(), true),
       };
     })(layer);
   }

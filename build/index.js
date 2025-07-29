@@ -53,7 +53,7 @@ function SignalOptions() {}
 /**
  * @type {boolean | undefined}
  */
-SignalOptions.prototype.unstable;
+SignalOptions.prototype.stable;
 
 /**
  * @type {(function(T, T): boolean) | null | undefined}
@@ -280,13 +280,14 @@ var State = {
   ReceiveMany: 512,
   Receive: /* ReceiveOne | ReceiveMany */ 768,
   Updating: 1024,
-  Clearing: 2048,
-  Respond: 4096,
-  Compare: 8192,
-  Scope: 16384,
-  Cleanup: 32768,
-  Initial: 65536,
-  Unstable: 131072
+  Changed: 2048,
+  Stable: 4096,
+  Clearing: 8192,
+  Respond: 16384,
+  Compare: 32768,
+  Scope: 65536,
+  Cleanup: 131072,
+  Initial: 262144,
 };
 /**
  * @enum {number}
@@ -1333,6 +1334,25 @@ function clearReceiver(node, time) {
 }
 
 /**
+ * @template T
+ * @param {number} flags 
+ * @param {SignalOptions<T> | boolean=} opts 
+ * @returns {number}
+ */
+function state(flags, opts) {
+  if (opts) {
+    if (opts === true) {
+      flags |= State.Stable;
+    } else {
+      if (opts.stable) {
+        flags |= State.Stable;
+      }
+    }
+  }
+  return flags;
+}
+
+/**
  * @interface
  * @extends {Scope}
  * @extends {Respond}
@@ -1345,23 +1365,17 @@ function IEffect() { }
  * @struct
  * @constructor
  * @param {function(...?): void} fn
- * @param {SignalOptions=} opts
+ * @param {SignalOptions | boolean=} opts
  * @param {State=} flags
  * @extends {Root}
  * @implements {IEffect}
  */
 function Effect(fn, opts, flags) {
-  var state = State.Initial | State.WillUpdate | flags;
-  if (opts != null) {
-    if (opts.unstable) {
-      state |= State.Unstable;
-    }
-  }
   /**
    * @package
    * @type {number}
    */
-  this._state = state;
+  this._state = state(State.Initial | State.WillUpdate | flags, opts);
   /**
    * @package
    * @type {Array<Receive> | null}
@@ -1539,8 +1553,8 @@ Effect.prototype._update = function (time) {
   if (!(state & State.Initial) && state & (State.Scope | State.Cleanup)) {
     disposeScope(this, false);
   }
-  if (state & (State.Initial | State.Unstable)) {
-    if (state & State.Unstable) {
+  if ((state & State.Initial) || !(state & State.Stable)) {
+    if ((state & (State.Initial | State.Stable)) === 0) {
       disposeReceiver(this, false);
     }
     CONTEXT._listen = this;
@@ -1581,23 +1595,17 @@ function ICompute() { }
  * @template T
  * @constructor
  * @param {function(...?): T} fn
- * @param {SignalOptions=} opts
+ * @param {SignalOptions<T> | boolean=} opts
  * @param {State=} flags
  * @extends {Reactive<T>}
  * @implements {ICompute<T>}
  */
 function Compute(fn, opts, flags) {
-  var state = State.Initial | State.WillUpdate | flags;
-  if (opts != null) {
-    if (opts.unstable) {
-      state |= State.Unstable;
-    }
-  }
   /**
    * @package
    * @type {number}
    */
-  this._state = state;
+  this._state = state(State.Initial | State.WillUpdate | flags, opts);
   /**
    * @package
    * @type {T}
@@ -1759,7 +1767,11 @@ Compute.prototype._detach = function () {
  * @returns {void}
  */
 Compute.prototype._apply = function () {
+  var prev = this._value;
   this._value = this._next();
+  if (this._value !== prev) {
+    this._state |= State.Changed;
+  }
 };
 
 /**
@@ -1777,20 +1789,19 @@ Compute.prototype._update = function (time) {
   this._state =
     (this._state | State.Updating) &
     ~(State.WillUpdate | State.Clearing | State.MayDispose | State.MayUpdate);
-  if (state & (State.Initial | State.Unstable)) {
-    if (state & State.Unstable) {
+  if ((state & State.Initial) || !(state & State.Stable)) {
+    if ((state & (State.Initial | State.Stable)) === 0) {
       disposeReceiver(this, false);
     }
     CONTEXT._listen = this;
   }
-  var prev = this._value;
   if (idle) {
     reset();
     CONTEXT._idle = false;
   }
   try {
     this._apply();
-    if (state & State.Send && prev !== this._value) {
+    if ((this._state & State.Send) && (this._state & State.Changed)) {
       sendWillUpdate(this, time);
       if (RECEIVES._count !== 0) {
         drainReceive(RECEIVES, time);
@@ -1800,7 +1811,7 @@ Compute.prototype._update = function (time) {
       start();
     }
   } finally {
-    this._state &= ~(State.Initial | State.Updating);
+    this._state &= ~(State.Initial | State.Updating | State.Changed);
     CONTEXT._idle = idle;
     CONTEXT._owner = owner;
     CONTEXT._listen = listen;
@@ -2008,6 +2019,7 @@ Data.prototype._dispose = function () {
 Data.prototype._apply = function () {
   this._value = this._next;
   this._next = VOID;
+  this._state |= State.Changed;
   this._state &= ~State.WillUpdate;
 };
 
@@ -2052,7 +2064,7 @@ function value(value, eq) {
 /**
  * @template T
  * @param {function(): T} fn
- * @param {SignalOptions<T>=} opts
+ * @param {SignalOptions<T> | boolean=} opts
  * @returns {ReadonlySignal<T>}
  */
 function compute(fn, opts) {
@@ -2062,7 +2074,7 @@ function compute(fn, opts) {
 /**
  * @public
  * @param {function(): void} fn
- * @param {SignalOptions=} opts
+ * @param {SignalOptions | boolean=} opts
  * @returns {DisposableSignal}
  */
 function effect(fn, opts) {
@@ -2106,15 +2118,6 @@ function batch(fn) {
 function cleanup(fn) {
   if (CONTEXT._owner !== null) {
     CONTEXT._owner._cleanup(fn);
-  }
-}
-
-/**
- * @returns {void}
- */
-function stable() {
-  if (CONTEXT._owner !== null) {
-    CONTEXT._owner._state &= ~State.Unstable;
   }
 }
 
@@ -2172,8 +2175,7 @@ export {
   effect,
   batch,
   sample,
-  cleanup,
-  stable
+  cleanup
 };
 /**
  * @enum {number}
@@ -2355,9 +2357,7 @@ function atIterator(source, value, args) {
   if (index < 0) {
     index += length;
   }
-  if (index < length) {
-    return source[index];
-  }
+  return index < length ? source[index] : void 0;
 }
 
 /**
@@ -2737,7 +2737,7 @@ ReactiveIterator.prototype.indexOf = function (searchElement, fromIndex) {
     /** @type {T} */(searchElement),
     argType(searchElement),
     /** @type {number} */(fromIndex),
-    argType(searchElement)
+    argType(fromIndex)
   );
 };
 
@@ -2875,7 +2875,7 @@ function reduceIterator(source, prev, args, length) {
   var initialValue;
   if (args._type2 === ArgType.Void) {
     if (length === 0) {
-      throw new TypeError("Reduce of empty array with no initial value");
+      return;
     }
     initialValue = source[i++];
   } else {
@@ -3017,10 +3017,11 @@ ReactiveIterator.prototype.some = function (callbackFn) {
 
 /**
  * @template T
- * @this {ICompute<T> | IEffect}
+ * @param {ICompute<T> | IEffect} node
+ * @returns {T}
  */
-function applyReduce() {
-  var source = /** @type {ReactiveIterator<T>} */ (this._source1);
+function next(node) {
+  var source = /** @type {ReactiveIterator<T>} */ (node._source1);
   var array = source.peek();
   var length = array.length;
   /** @type {number} */
@@ -3031,17 +3032,17 @@ function applyReduce() {
   var inserts;
   /** @type {number} */
   var removes;
-  if (this._state & State.Initial) {
+  var mutation = source._mutation;
+  if ((node._state & State.Initial) || mutation == null) {
     mut = Mutation.None;
     index = inserts = removes = -1;
   } else {
-    var mutation = source._mutation;
     mut = mutation[MutPos.Mutation];
     index = mutation[MutPos.Index];
     inserts = mutation[MutPos.Inserts];
     removes = mutation[MutPos.Removes];
   }
-  this._value = this._next(array, this._value, this._args, length, mut, index, inserts, removes);
+  return node._next(array, node._value, node._args, length, mut, index, inserts, removes);
 }
 
 /**
@@ -3065,7 +3066,7 @@ function IComputeReduce() { }
  * @implements {IComputeReduce<U>}
  */
 function ComputeReduce(source, fn, arg1, type1, arg2, type2) {
-  Compute.call(this, fn);
+  Compute.call(this, fn, void 0, State.Stable);
   /**
    * @package
    * @type {Arguments<V, W>}
@@ -3081,7 +3082,13 @@ extend(ComputeReduce, Compute);
  * @override
  * @returns {void}
  */
-ComputeReduce.prototype._apply = applyReduce;
+ComputeReduce.prototype._apply = function() {
+  var prev = this._value;
+  this._value = next(this);
+  if (this._value !== prev) {
+    this._state |= State.Changed;
+  }
+};
 
 /**
  * @interface
@@ -3104,7 +3111,7 @@ function IEffectReduce() { }
  * @implements {IEffectReduce}
  */
 function EffectReduce(source, fn, arg1, type1, arg2, type2) {
-  Effect.call(this, fn);
+  Effect.call(this, fn, void 0, State.Stable);
   /**
    * @package
    * @type {undefined}
@@ -3126,7 +3133,9 @@ extend(EffectReduce, Effect);
  * @override
  * @returns {void}
  */
-EffectReduce.prototype._apply = applyReduce;
+EffectReduce.prototype._apply = function () {
+  next(this); 
+};
 
 /**
  * This only exists because Closure Compiler
@@ -3305,7 +3314,10 @@ inherit(ComputeArray, ComputeReduce);
  * @override
  * @returns {void}
  */
-ComputeArray.prototype._apply = applyReduce;
+ComputeArray.prototype._apply = function() {
+  this._state |= State.Changed;
+  this._value = next(this);
+};
 
 /**
  * @const
@@ -3543,7 +3555,9 @@ DataArray.prototype.modify = function (callbackFn) {
  */
 DataArray.prototype.pop = function () {
   if (!(this._state & (State.QueueDispose | State.Disposed))) {
-    this._mutate(Mutation.Pop, this._value.length - 1, 1, 0);
+    if (this._value.length > 0) {
+      this._mutate(Mutation.Pop, this._value.length - 1, 1, 0);
+    }
   }
 };
 
@@ -3584,7 +3598,9 @@ DataArray.prototype.push = function (elementN) {
  */
 DataArray.prototype.reverse = function () {
   if (!(this._state & (State.QueueDispose | State.Disposed))) {
-    this._mutate(Mutation.Reverse);
+    if (this._value.length > 0) {
+      this._mutate(Mutation.Reverse);
+    }
   }
 };
 
@@ -3594,7 +3610,9 @@ DataArray.prototype.reverse = function () {
  */
 DataArray.prototype.shift = function () {
   if (!(this._state & (State.QueueDispose | State.Disposed))) {
-    this._mutate(Mutation.Shift, 0, 1, 0);
+    if (this._value.length > 0) {
+      this._mutate(Mutation.Shift, 0, 1, 0);
+    }
   }
 };
 
@@ -3605,7 +3623,9 @@ DataArray.prototype.shift = function () {
  */
 DataArray.prototype.sort = function (compareFn) {
   if (!(this._state & (State.QueueDispose | State.Disposed))) {
-    this._mutate(Mutation.Sort, void 0, 0, 0, compareFn);
+    if (this._value.length > 0) {
+      this._mutate(Mutation.Sort, void 0, 0, 0, compareFn);
+    }
   }
 };
 
@@ -3619,42 +3639,49 @@ DataArray.prototype.sort = function (compareFn) {
 DataArray.prototype.splice = function (start, deleteCount, items) {
   if (!(this._state & (State.QueueDispose | State.Disposed))) {
     /**
-   * @type {T | Array<number | T>} 
-   */
-    var args;
+     * @type {T | Array<number | T>} 
+     */
+    var slice;
+    /**
+     * @type {number}
+     */
+    var length = this._value.length;
     /**
      * @const
      * @type {number}
      */
-    var len = arguments.length;
-    if (len > 1) {
+    var args = arguments.length;
+    if (args > 0) {
       /**
        * @type {number}
        */
       var mut = Mutation.Splice;
-      if (deleteCount == null || deleteCount < 0) {
+      if (args === 1) {
+        deleteCount = length;
+      } else if (deleteCount == null || deleteCount < 0) {
         deleteCount = 0;
-      } else if (deleteCount > 0) {
+      }
+      if (deleteCount > 0) {
         if (deleteCount > 1) {
           mut |= Mut.RemoveMany;
         } else {
           mut |= Mut.RemoveOne;
         }
       }
-      if (len > 2) {
-        if (len === 3) {
-          args = items;
+      if (args > 2) {
+        if (args === 3) {
+          slice = items;
           mut |= Mut.InsertOne;
         } else {
-          args = new Array(len);
-          for (var i = 0; i < len; i++) {
-            args[i] = arguments[i];
+          slice = new Array(args);
+          for (var i = 0; i < args; i++) {
+            slice[i] = arguments[i];
           }
           mut |= Mut.InsertMany;
         }
       }
       if (mut & Mut.InsertOrRemove) {
-        this._mutate(mut, start, deleteCount, len - 2, args);
+        this._mutate(mut, start, deleteCount, args - 2, slice);
       }
     }
   }

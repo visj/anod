@@ -11,7 +11,7 @@ import {
 } from "../../../build/index.js";
 
 test("update", function (t) {
- t.test("does not register a dependency on the subcomputation", function (t) {
+  t.test("does not register a dependency on the subcomputation", function (t) {
     root(function () {
       var s1 = value(1);
       var outerCount = 0;
@@ -34,12 +34,12 @@ test("update", function (t) {
 
       s1.set(2);
 
-     t.equal(innerCount, 1);
-     t.equal(outerCount, 0);
+      t.equal(innerCount, 1);
+      t.equal(outerCount, 0);
     });
   });
 
- t.test("with child", function (t) {
+  t.test("with child", function (t) {
     /** @type {Signal<number>} */
     var s1;
     /** @type {Signal<number>} */
@@ -81,30 +81,30 @@ test("update", function (t) {
       });
     }
 
-   t.test("creates child on initialization", function (t) {
+    t.test("creates child on initialization", function (t) {
       init();
-     t.equal(c2.val(), 2);
+      t.equal(c2.val(), 2);
     });
 
-   t.test("does not depend on child's dependencies", function () {
+    t.test("does not depend on child's dependencies", function () {
       init();
       s2.set(3);
-     t.equal(outerCount, 1);
-     t.equal(innerCount, 2);
+      t.equal(outerCount, 1);
+      t.equal(innerCount, 2);
     });
 
-   t.test("disposes child when test is disposed", function (t) {
+    t.test("disposes child when test is disposed", function (t) {
       var r1 = root(function () {
         init();
       });
       r1.dispose();
       s2.set(3);
-     t.equal(c1.val(), null);
+      t.equal(c1.val(), null);
     });
   });
 
- t.test("may update", function (t) {
-   t.test("does not trigger downstream computations unless changed", function (t) {
+  t.test("may update", function (t) {
+    t.test("does not trigger downstream computations unless changed", function (t) {
       var s1 = data(1);
       var order = "";
       var c1 = compute(function () {
@@ -115,20 +115,20 @@ test("update", function (t) {
         order += "c2";
         return c1.val();
       });
-     t.equal(order, "");
+      t.equal(order, "");
       c2.val();
-     t.equal(order, "c2c1");
+      t.equal(order, "c2c1");
       order = "";
       s1.set(1);
       c2.val();
-     t.equal(order, "c1");
+      t.equal(order, "c1");
       order = "";
       s1.set(s1.peek() + 1);
       c2.val();
-     t.equal(order, "c1c2");
+      t.equal(order, "c1c2");
     });
-  
-   t.test("updates downstream pending nodes", function (t) {
+
+    t.test("updates downstream pending nodes", function (t) {
       var s1 = value(0);
       var s2 = value(0);
       var order = "";
@@ -149,10 +149,10 @@ test("update", function (t) {
       });
       order = "";
       s1.set(1);
-     t.equal(order, "c1cl1e1e2");
+      t.equal(order, "c1cl1e1e2");
     });
-  
-   t.test("does not update if pending source disposes", function (t) {
+
+    t.test("does not update if pending source disposes", function (t) {
       root(function () {
         var s1 = value(0);
         var s2 = value(0);
@@ -179,7 +179,7 @@ test("update", function (t) {
           c3.val();
         });
         s1.set(s1.peek() + 1);
-       t.equal(count, 1);
+        t.equal(count, 1);
       });
     });
   });

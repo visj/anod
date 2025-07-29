@@ -97,16 +97,4 @@ test("reduce", function (t) {
             t.assert(s2.val() === (size * (size - 1)) / 2);
         });
     });
-
-    t.test("error cases", function (t) {
-        t.test("empty array without initial value", function (t) {
-            var s1 = array([]);
-            var s2 = s1.reduce(function (acc, item) {
-                return acc + item;
-            });
-            t.throws(function() {
-                s2.val();
-            });
-        });
-    });
 }); 

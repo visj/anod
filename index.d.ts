@@ -55,14 +55,14 @@ export declare var Data: {
 };
 
 export interface SignalOptions<T> {
-  unstable?: boolean;
+  stable?: boolean;
 }
 
 /**
  *
  * @param fn
  */
-export declare function root<T>(fn: () => T): ReadonlySignal<T>;
+export declare function root<T>(fn: () => T): DisposableSignal;
 /**
  *
  * @param val
@@ -79,34 +79,25 @@ export declare function value<T>(
 ): Signal<T>;
 /**
  *
- * @param callback
+ * @param fn
  */
-export declare function compute<T>(callback: () => T): ReadonlySignal<T>;
+export declare function compute<T>(fn: () => T): ReadonlySignal<T>;
+
 /**
  *
  * @param fn
- * @param seed
- */
-export declare function compute<T>(
-  fn: (prev: T) => T,
-  seed: T,
-): ReadonlySignal<T>;
-/**
- *
- * @param fn
- * @param seed
  * @param opts
  */
-export declare function compute<T, U>(
+export declare function compute<T>(
   fn: () => T,
   opts: SignalOptions<T>,
 ): ReadonlySignal<T>;
 
 /**
  *
- * @param callback
+ * @param fn
  */
-export declare function effect<T>(callback: () => T): DisposableSignal;
+export declare function effect<T>(fn: () => T): DisposableSignal;
 /**
  *
  * @param fn
@@ -118,7 +109,6 @@ export declare function effect<T>(
 /**
  *
  * @param fn
- * @param seed
  * @param opts
  */
 export declare function effect(

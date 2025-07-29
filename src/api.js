@@ -53,7 +53,7 @@ function SignalOptions() {}
 /**
  * @type {boolean | undefined}
  */
-SignalOptions.prototype.unstable;
+SignalOptions.prototype.stable;
 
 /**
  * @type {(function(T, T): boolean) | null | undefined}

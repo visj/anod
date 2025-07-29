@@ -90,7 +90,7 @@ test("compute", function (t){
       c1 = compute(function () {
         count++;
         return s1.val() ? s2.val() : s3.val();
-      }, { unstable: true });
+      }, { stable: true });
       count = 0;
     }
 

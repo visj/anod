@@ -55,7 +55,7 @@ export declare var Data: {
 };
 
 export interface SignalOptions<T> {
-  unstable?: boolean;
+  stable?: boolean;
 }
 
 /**

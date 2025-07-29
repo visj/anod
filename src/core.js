@@ -16,13 +16,14 @@ var State = {
   ReceiveMany: 512,
   Receive: /* ReceiveOne | ReceiveMany */ 768,
   Updating: 1024,
-  Clearing: 2048,
-  Respond: 4096,
-  Compare: 8192,
-  Scope: 16384,
-  Cleanup: 32768,
-  Initial: 65536,
-  Unstable: 131072
+  Changed: 2048,
+  Stable: 4096,
+  Clearing: 8192,
+  Respond: 16384,
+  Compare: 32768,
+  Scope: 65536,
+  Cleanup: 131072,
+  Initial: 262144,
 };
 /**
  * @enum {number}
@@ -1069,6 +1070,25 @@ function clearReceiver(node, time) {
 }
 
 /**
+ * @template T
+ * @param {number} flags 
+ * @param {SignalOptions<T> | boolean=} opts 
+ * @returns {number}
+ */
+function state(flags, opts) {
+  if (opts) {
+    if (opts === true) {
+      flags |= State.Stable;
+    } else {
+      if (opts.stable) {
+        flags |= State.Stable;
+      }
+    }
+  }
+  return flags;
+}
+
+/**
  * @interface
  * @extends {Scope}
  * @extends {Respond}
@@ -1081,23 +1101,17 @@ function IEffect() { }
  * @struct
  * @constructor
  * @param {function(...?): void} fn
- * @param {SignalOptions=} opts
+ * @param {SignalOptions | boolean=} opts
  * @param {State=} flags
  * @extends {Root}
  * @implements {IEffect}
  */
 function Effect(fn, opts, flags) {
-  var state = State.Initial | State.WillUpdate | flags;
-  if (opts != null) {
-    if (opts.unstable) {
-      state |= State.Unstable;
-    }
-  }
   /**
    * @package
    * @type {number}
    */
-  this._state = state;
+  this._state = state(State.Initial | State.WillUpdate | flags, opts);
   /**
    * @package
    * @type {Array<Receive> | null}
@@ -1275,8 +1289,8 @@ Effect.prototype._update = function (time) {
   if (!(state & State.Initial) && state & (State.Scope | State.Cleanup)) {
     disposeScope(this, false);
   }
-  if (state & (State.Initial | State.Unstable)) {
-    if (state & State.Unstable) {
+  if ((state & State.Initial) || !(state & State.Stable)) {
+    if ((state & (State.Initial | State.Stable)) === 0) {
       disposeReceiver(this, false);
     }
     CONTEXT._listen = this;
@@ -1317,23 +1331,17 @@ function ICompute() { }
  * @template T
  * @constructor
  * @param {function(...?): T} fn
- * @param {SignalOptions=} opts
+ * @param {SignalOptions<T> | boolean=} opts
  * @param {State=} flags
  * @extends {Reactive<T>}
  * @implements {ICompute<T>}
  */
 function Compute(fn, opts, flags) {
-  var state = State.Initial | State.WillUpdate | flags;
-  if (opts != null) {
-    if (opts.unstable) {
-      state |= State.Unstable;
-    }
-  }
   /**
    * @package
    * @type {number}
    */
-  this._state = state;
+  this._state = state(State.Initial | State.WillUpdate | flags, opts);
   /**
    * @package
    * @type {T}
@@ -1495,7 +1503,11 @@ Compute.prototype._detach = function () {
  * @returns {void}
  */
 Compute.prototype._apply = function () {
+  var prev = this._value;
   this._value = this._next();
+  if (this._value !== prev) {
+    this._state |= State.Changed;
+  }
 };
 
 /**
@@ -1513,20 +1525,19 @@ Compute.prototype._update = function (time) {
   this._state =
     (this._state | State.Updating) &
     ~(State.WillUpdate | State.Clearing | State.MayDispose | State.MayUpdate);
-  if (state & (State.Initial | State.Unstable)) {
-    if (state & State.Unstable) {
+  if ((state & State.Initial) || !(state & State.Stable)) {
+    if ((state & (State.Initial | State.Stable)) === 0) {
       disposeReceiver(this, false);
     }
     CONTEXT._listen = this;
   }
-  var prev = this._value;
   if (idle) {
     reset();
     CONTEXT._idle = false;
   }
   try {
     this._apply();
-    if (state & State.Send && prev !== this._value) {
+    if ((this._state & State.Send) && (this._state & State.Changed)) {
       sendWillUpdate(this, time);
       if (RECEIVES._count !== 0) {
         drainReceive(RECEIVES, time);
@@ -1536,7 +1547,7 @@ Compute.prototype._update = function (time) {
       start();
     }
   } finally {
-    this._state &= ~(State.Initial | State.Updating);
+    this._state &= ~(State.Initial | State.Updating | State.Changed);
     CONTEXT._idle = idle;
     CONTEXT._owner = owner;
     CONTEXT._listen = listen;
@@ -1744,6 +1755,7 @@ Data.prototype._dispose = function () {
 Data.prototype._apply = function () {
   this._value = this._next;
   this._next = VOID;
+  this._state |= State.Changed;
   this._state &= ~State.WillUpdate;
 };
 
@@ -1788,7 +1800,7 @@ function value(value, eq) {
 /**
  * @template T
  * @param {function(): T} fn
- * @param {SignalOptions<T>=} opts
+ * @param {SignalOptions<T> | boolean=} opts
  * @returns {ReadonlySignal<T>}
  */
 function compute(fn, opts) {
@@ -1798,7 +1810,7 @@ function compute(fn, opts) {
 /**
  * @public
  * @param {function(): void} fn
- * @param {SignalOptions=} opts
+ * @param {SignalOptions | boolean=} opts
  * @returns {DisposableSignal}
  */
 function effect(fn, opts) {
@@ -1845,15 +1857,6 @@ function cleanup(fn) {
   }
 }
 
-/**
- * @returns {void}
- */
-function stable() {
-  if (CONTEXT._owner !== null) {
-    CONTEXT._owner._state &= ~State.Unstable;
-  }
-}
-
 window["anod"]["root"] = root;
 window["anod"]["data"] = data;
 window["anod"]["value"] = value;
@@ -1862,7 +1865,6 @@ window["anod"]["effect"] = effect;
 window["anod"]["batch"] = batch;
 window["anod"]["sample"] = sample;
 window["anod"]["cleanup"] = cleanup;
-window["anod"]["stable"] = stable;
 window["anod"]["Root"] = Root;
 window["anod"]["Data"] = Data;
 window["anod"]["Effect"] = Effect;
@@ -1922,6 +1924,5 @@ export {
   effect,
   batch,
   sample,
-  cleanup,
-  stable
+  cleanup
 };
