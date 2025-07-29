@@ -22,7 +22,10 @@ const childExists = members.some(member => member.age < 18);
 const memberNames = members.map(member => member.name).join(", ");
 
 effect(() => {
-    console.log(`Member list${childExists.val() ? " (has children)" : ""}: ${memberNames.val()}.${eventPlanned.val() ? " Event planned, stay tuned!" : ""}`);
+    const childText = childExists.
+    val() ? " (has children)" : "";
+    const eventText = eventPlanned.val() ? " Event planned, stay tuned!" : "";
+    console.log(`Member list${childText}: ${memberNames.val()}.${eventText}`);
 });
 // Prints "Member list: Leif, Siv, Sonja."
 
@@ -36,7 +39,7 @@ batch(function() {
     members.pop();
     eventPlanned.set(true);
 });
-// Prints "Member list (has children): Astrid, Leif, Siv, Sonja. Event planned, stay tuned!"
+// Prints "Member list: Astrid, Leif, Siv, Sonja. Event planned, stay tuned!"
 ```
 ## API
 #### `root(fn: () => T): DisposableSignal`
