@@ -22,8 +22,7 @@ const childExists = members.some(member => member.age < 18);
 const memberNames = members.map(member => member.name).join(", ");
 
 effect(() => {
-    const childText = childExists.
-    val() ? " (has children)" : "";
+    const childText = childExists.val() ? " (has children)" : "";
     const eventText = eventPlanned.val() ? " Event planned, stay tuned!" : "";
     console.log(`Member list${childText}: ${memberNames.val()}.${eventText}`);
 });
