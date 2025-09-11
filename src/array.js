@@ -154,7 +154,7 @@ var Mutation = {
   PushOne: 4 | Mut.InsertOne | Mut.TailOnly,
   PushMany: 5 | Mut.InsertMany | Mut.TailOnly,
   Reverse: 6 | Mut.Reorder,
-  Shift: 7 | Mut.InsertOne | Mut.HeadOnly,
+  Shift: 7 | Mut.RemoveOne | Mut.HeadOnly,
   Sort: 8 | Mut.Reorder,
   Splice: 9,
   UnshiftOne: 10 | Mut.InsertOne | Mut.HeadOnly,
@@ -933,9 +933,10 @@ extend(ComputeReduce, Compute);
 /**
  * @package
  * @override
+ * @param {number} time
  * @returns {void}
  */
-ComputeReduce.prototype._apply = function() {
+ComputeReduce.prototype._apply = function(time) {
   var prev = this._value;
   this._value = next(this);
   if (this._value !== prev) {
@@ -1249,7 +1250,7 @@ function DataArray(val) {
    * @package
    * @type {T}
    */
-  this._next = undefined;
+  this._next = void 0;
   /**
    * @package
    * @type {Receive | null}
@@ -1308,10 +1309,11 @@ DataArray.prototype._mutate = function (mut, index, removes, inserts, data) {
     this._next = data;
   }
   if (CONTEXT._idle) {
-    this._apply();
+    var time = TIME + 1;
+    this._apply(time);
     if (this._state & State.Send) {
       reset();
-      sendWillUpdate(this, TIME + 1);
+      sendWillUpdate(this, time);
       exec();
     }
   } else {
@@ -1322,9 +1324,10 @@ DataArray.prototype._mutate = function (mut, index, removes, inserts, data) {
 
 /**
  * @package
+ * @param {number} time
  * @returns {void}
  */
-DataArray.prototype._apply = function () {
+DataArray.prototype._apply = function (time) {
   var mutation = this._mutation;
   var args = this._next;
   var value = /** @type {Array<T>} */(this._value);

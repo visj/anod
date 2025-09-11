@@ -709,9 +709,10 @@ function Respond() { }
 
 /**
  * @package
+ * @param {number} time
  * @returns {void}
  */
-Respond.prototype._apply = function () { };
+Respond.prototype._apply = function (time) { };
 
 /**
  * @package
@@ -1528,9 +1529,10 @@ Effect.prototype._receiveWillUpdate = function (time) {
 
 /**
  * @package
+ * @param {number} time
  * @returns {void}
  */
-Effect.prototype._apply = function () {
+Effect.prototype._apply = function (time) {
   this._next();
 };
 
@@ -1565,7 +1567,7 @@ Effect.prototype._update = function (time) {
   }
   CONTEXT._owner = this;
   try {
-    this._apply();
+    this._apply(time);
     if (idle && (CHANGES._count !== 0 || DISPOSES._count !== 0)) {
       start();
     }
@@ -1764,9 +1766,10 @@ Compute.prototype._detach = function () {
 
 /**
  * @package
+ * @param {number} time
  * @returns {void}
  */
-Compute.prototype._apply = function () {
+Compute.prototype._apply = function (time) {
   var prev = this._value;
   this._value = this._next();
   if (this._value !== prev) {
@@ -1800,7 +1803,7 @@ Compute.prototype._update = function (time) {
     CONTEXT._idle = false;
   }
   try {
-    this._apply();
+    this._apply(time);
     if ((this._state & State.Send) && (this._state & State.Changed)) {
       sendWillUpdate(this, time);
       if (RECEIVES._count !== 0) {
@@ -1979,10 +1982,13 @@ Data.prototype.set = function (val) {
         : val !== this._value)
     ) {
       if (CONTEXT._idle) {
+        var time = TIME + 1;
+        this._next = val;
+        this._apply(time);
         this._value = val;
         if (state & State.Send) {
           reset();
-          sendWillUpdate(this, TIME + 1);
+          sendWillUpdate(this, time);
           exec();
         }
       } else {
@@ -2014,9 +2020,10 @@ Data.prototype._dispose = function () {
 
 /**
  * @package
+ * @param {number} time
  * @returns {void}
  */
-Data.prototype._apply = function () {
+Data.prototype._apply = function (time) {
   this._value = this._next;
   this._next = VOID;
   this._state |= State.Changed;
@@ -2029,7 +2036,7 @@ Data.prototype._apply = function () {
  * @returns {void}
  */
 Data.prototype._update = function (time) {
-  this._apply();
+  this._apply(time);
   sendWillUpdate(this, time);
 };
 
@@ -2301,7 +2308,7 @@ var Mutation = {
   PushOne: 4 | Mut.InsertOne | Mut.TailOnly,
   PushMany: 5 | Mut.InsertMany | Mut.TailOnly,
   Reverse: 6 | Mut.Reorder,
-  Shift: 7 | Mut.InsertOne | Mut.HeadOnly,
+  Shift: 7 | Mut.RemoveOne | Mut.HeadOnly,
   Sort: 8 | Mut.Reorder,
   Splice: 9,
   UnshiftOne: 10 | Mut.InsertOne | Mut.HeadOnly,
@@ -3080,9 +3087,10 @@ extend(ComputeReduce, Compute);
 /**
  * @package
  * @override
+ * @param {number} time
  * @returns {void}
  */
-ComputeReduce.prototype._apply = function() {
+ComputeReduce.prototype._apply = function(time) {
   var prev = this._value;
   this._value = next(this);
   if (this._value !== prev) {
@@ -3396,7 +3404,7 @@ function DataArray(val) {
    * @package
    * @type {T}
    */
-  this._next = undefined;
+  this._next = void 0;
   /**
    * @package
    * @type {Receive | null}
@@ -3455,10 +3463,11 @@ DataArray.prototype._mutate = function (mut, index, removes, inserts, data) {
     this._next = data;
   }
   if (CONTEXT._idle) {
-    this._apply();
+    var time = TIME + 1;
+    this._apply(time);
     if (this._state & State.Send) {
       reset();
-      sendWillUpdate(this, TIME + 1);
+      sendWillUpdate(this, time);
       exec();
     }
   } else {
@@ -3469,9 +3478,10 @@ DataArray.prototype._mutate = function (mut, index, removes, inserts, data) {
 
 /**
  * @package
+ * @param {number} time
  * @returns {void}
  */
-DataArray.prototype._apply = function () {
+DataArray.prototype._apply = function (time) {
   var mutation = this._mutation;
   var args = this._next;
   var value = /** @type {Array<T>} */(this._value);

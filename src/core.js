@@ -445,9 +445,10 @@ function Respond() { }
 
 /**
  * @package
+ * @param {number} time
  * @returns {void}
  */
-Respond.prototype._apply = function () { };
+Respond.prototype._apply = function (time) { };
 
 /**
  * @package
@@ -1264,9 +1265,10 @@ Effect.prototype._receiveWillUpdate = function (time) {
 
 /**
  * @package
+ * @param {number} time
  * @returns {void}
  */
-Effect.prototype._apply = function () {
+Effect.prototype._apply = function (time) {
   this._next();
 };
 
@@ -1301,7 +1303,7 @@ Effect.prototype._update = function (time) {
   }
   CONTEXT._owner = this;
   try {
-    this._apply();
+    this._apply(time);
     if (idle && (CHANGES._count !== 0 || DISPOSES._count !== 0)) {
       start();
     }
@@ -1500,9 +1502,10 @@ Compute.prototype._detach = function () {
 
 /**
  * @package
+ * @param {number} time
  * @returns {void}
  */
-Compute.prototype._apply = function () {
+Compute.prototype._apply = function (time) {
   var prev = this._value;
   this._value = this._next();
   if (this._value !== prev) {
@@ -1536,7 +1539,7 @@ Compute.prototype._update = function (time) {
     CONTEXT._idle = false;
   }
   try {
-    this._apply();
+    this._apply(time);
     if ((this._state & State.Send) && (this._state & State.Changed)) {
       sendWillUpdate(this, time);
       if (RECEIVES._count !== 0) {
@@ -1715,10 +1718,13 @@ Data.prototype.set = function (val) {
         : val !== this._value)
     ) {
       if (CONTEXT._idle) {
+        var time = TIME + 1;
+        this._next = val;
+        this._apply(time);
         this._value = val;
         if (state & State.Send) {
           reset();
-          sendWillUpdate(this, TIME + 1);
+          sendWillUpdate(this, time);
           exec();
         }
       } else {
@@ -1750,9 +1756,10 @@ Data.prototype._dispose = function () {
 
 /**
  * @package
+ * @param {number} time
  * @returns {void}
  */
-Data.prototype._apply = function () {
+Data.prototype._apply = function (time) {
   this._value = this._next;
   this._next = VOID;
   this._state |= State.Changed;
@@ -1765,7 +1772,7 @@ Data.prototype._apply = function () {
  * @returns {void}
  */
 Data.prototype._update = function (time) {
-  this._apply();
+  this._apply(time);
   sendWillUpdate(this, time);
 };
 

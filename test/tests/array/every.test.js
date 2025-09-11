@@ -169,4 +169,223 @@ test("every", function (t) {
             t.assert(s2.val() === true);
         });
     });
+
+    t.test("state creep and mutation edge cases", function (t) {
+        t.test("multiple mutations causing state creep", function (t) {
+            var s1 = array([1, 2, 3, 4, 5]);
+            var s2 = s1.every(function (item) { return item > 0; });
+            t.assert(s2.val() === true);
+
+            // First mutation: insert at beginning
+            s1.unshift(0);
+            t.assert(s2.val() === false);
+
+            // Second mutation: remove the problematic element
+            s1.shift();
+            t.assert(s2.val() === true);
+
+            // Third mutation: insert at end
+            s1.push(6);
+            t.assert(s2.val() === true);
+
+            // Fourth mutation: insert problematic element in middle
+            s1.splice(2, 0, 0);
+            t.assert(s2.val() === false);
+
+            // Fifth mutation: remove problematic element
+            s1.splice(2, 1);
+            t.assert(s2.val() === true);
+        });
+
+        t.test("complex reorder scenarios", function (t) {
+            var s1 = array([1, 2, 3, 4, 5]);
+            var s2 = s1.every(function (item) { return item > 0; });
+            t.assert(s2.val() === true);
+
+            // Reverse should maintain true
+            s1.reverse();
+            t.assert(s2.val() === true);
+
+            // Sort should maintain true
+            s1.sort(function(a, b) { return b - a; });
+            t.assert(s2.val() === true);
+
+            // Insert problematic element and reorder
+            s1.push(0);
+            t.assert(s2.val() === false);
+            s1.sort(function(a, b) { return a - b; });
+            t.assert(s2.val() === false);
+        });
+
+        t.test("rapid successive mutations", function (t) {
+            var s1 = array([1, 2, 3]);
+            var s2 = s1.every(function (item) { return item > 0; });
+            t.assert(s2.val() === true);
+
+            // Rapid mutations
+            s1.push(4);
+            s1.push(5);
+            s1.push(0);
+            t.assert(s2.val() === false);
+
+            s1.pop();
+            t.assert(s2.val() === true);
+
+            s1.unshift(0);
+            s1.unshift(1);
+            t.assert(s2.val() === false);
+        });
+
+        t.test("mutation at exact failure point", function (t) {
+            var s1 = array([1, 2, 3, 4, 5]);
+            var s2 = s1.every(function (item) { return item < 4; });
+            t.assert(s2.val() === false);
+
+            // Remove the element that caused failure
+            s1.splice(3, 1);
+            t.assert(s2.val() === true);
+
+            // Add it back
+            s1.splice(3, 0, 4);
+            t.assert(s2.val() === false);
+        });
+
+        t.test("empty array edge cases", function (t) {
+            var s1 = array([]);
+            var s2 = s1.every(function (item) { return item > 0; });
+            t.assert(s2.val() === true);
+
+            // Add elements
+            s1.push(1, 2, 3);
+            t.assert(s2.val() === true);
+
+            // Add problematic element
+            s1.push(0);
+            t.assert(s2.val() === false);
+
+            // Clear array
+            s1.set([]);
+            t.assert(s2.val() === true);
+        });
+
+        t.test("callback that changes during iteration", function (t) {
+            var s1 = array([1, 2, 3, 4, 5]);
+            var threshold = 3;
+            var s2 = s1.every(function (item) { return item < threshold; });
+            t.assert(s2.val() === false);
+
+            // Change threshold
+            threshold = 6;
+            t.assert(s2.val() === true);
+
+            // Change back
+            threshold = 3;
+            t.assert(s2.val() === false);
+        });
+
+        t.test("multiple every calls on same array", function (t) {
+            var s1 = array([1, 2, 3, 4, 5]);
+            var s2 = s1.every(function (item) { return item > 0; });
+            var s3 = s1.every(function (item) { return item < 10; });
+            var s4 = s1.every(function (item) { return item % 2 === 0; });
+
+            t.assert(s2.val() === true);
+            t.assert(s3.val() === true);
+            t.assert(s4.val() === false);
+
+            // Mutate array
+            s1.push(6);
+            t.assert(s2.val() === true);
+            t.assert(s3.val() === true);
+            t.assert(s4.val() === false);
+
+            s1.push(0);
+            t.assert(s2.val() === false);
+            t.assert(s3.val() === true);
+            t.assert(s4.val() === false);
+        });
+
+        t.test("splice with complex indices", function (t) {
+            var s1 = array([1, 2, 3, 4, 5]);
+            var s2 = s1.every(function (item) { return item > 0; });
+            t.assert(s2.val() === true);
+
+            // Splice at beginning
+            s1.splice(0, 1, 0);
+            t.assert(s2.val() === false);
+
+            // Splice at end
+            s1.splice(4, 0, 6);
+            t.assert(s2.val() === false);
+
+            // Splice in middle
+            s1.splice(2, 1, 7);
+            t.assert(s2.val() === false);
+
+            // Reset to all positive
+            s1.set([1, 2, 3, 4, 5]);
+            t.assert(s2.val() === true);
+        });
+
+        t.test("modify callback edge cases", function (t) {
+            var s1 = array([1, 2, 3, 4, 5]);
+            var s2 = s1.every(function (item) { return item > 0; });
+            t.assert(s2.val() === true);
+
+            // Use modify to change array
+            s1.modify(function(arr) {
+                arr[2] = 0;
+                return arr;
+            });
+            t.assert(s2.val() === false);
+
+            // Modify back
+            s1.modify(function(arr) {
+                arr[2] = 3;
+                return arr;
+            });
+            t.assert(s2.val() === true);
+        });
+
+        t.test("set operation edge cases", function (t) {
+            var s1 = array([1, 2, 3, 4, 5]);
+            var s2 = s1.every(function (item) { return item > 0; });
+            t.assert(s2.val() === true);
+
+            // Set to empty array
+            s1.set([]);
+            t.assert(s2.val() === true);
+
+            // Set to array with problematic element
+            s1.set([1, 2, 0, 4, 5]);
+            t.assert(s2.val() === false);
+
+            // Set to all positive
+            s1.set([1, 2, 3, 4, 5]);
+            t.assert(s2.val() === true);
+        });
+
+        t.test("callback that throws", function (t) {
+            var s1 = array([1, 2, 3]);
+            var s2 = s1.every(function (item) {
+                if (item === 2) throw new Error("Test error");
+                return item > 0;
+            });
+            
+            t.throws(function() {
+                s2.val();
+            });
+        });
+
+        t.test("callback that modifies array during iteration", function (t) {
+            var s1 = array([1, 2, 3]);
+            var s2 = s1.every(function (item, index) {
+                if (index === 1) {
+                    s1.push(4);
+                }
+                return item < 5;
+            });
+            t.assert(s2.val() === true);
+        });
+    });
 }); 
