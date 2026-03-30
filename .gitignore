@@ -5,3 +5,4 @@ dist/
 temp/
 test/index.min.js
 .qodo
+build/
