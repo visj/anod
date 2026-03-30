@@ -1,0 +1,27 @@
+{
+  "name": "@anod/list",
+  "version": "0.5.0",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "bundle": "bun scripts/lib.js",
+    "bundle:test": "bun scripts/test.js",
+    "test": "bun test/index.js",
+    "test:min": "bun dist/test.min.js"
+  },
+  "keywords": [],
+  "author": "Vilhelm Sjölund",
+  "license": "MIT",
+  "description": "",
+  "devDependencies": {
+    "@ampproject/remapping": "^2.3.0",
+    "@preact/signals": "^2.8.1",
+    "@preact/signals-core": "^1.13.0",
+    "@rollup/plugin-terser": "^1.0.0",
+    "google-closure-compiler": "^20260225.0.0",
+    "magic-string": "^0.30.21",
+    "mitata": "^1.0.34",
+    "rollup": "^4.59.0",
+    "terser": "^5.0.0"
+  }
+}

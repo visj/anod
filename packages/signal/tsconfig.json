@@ -1,0 +1,19 @@
+{
+  "compilerOptions": {
+    /* Target ES2015 to support Map and Typed Arrays */
+    "target": "ES2020",
+    "lib": ["ES2020", "DOM"],
+
+    "noEmit": true,
+
+    /* Strictness & Module Resolution */
+    "moduleResolution": "node",
+    "strict": true,
+    "skipLibCheck": true
+  },
+  "include": [
+    "src/**.js",
+    "tests/*.js",
+    "types/*.d.ts"
+  ]
+}
