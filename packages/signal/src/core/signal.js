@@ -1603,7 +1603,7 @@ function start(clock) {
 }
 
 /**
- * * @param {Sender} send 
+ * @param {Sender} send 
  * @param {Receiver} receive 
  * @param {number} depslot
  * @returns {number}
@@ -1772,7 +1772,7 @@ function clearOwned(owner) {
 }
 
 /**
- * * @param {Receiver} node
+ * @param {Receiver} node
  * @returns {boolean}
  */
 function unbound(node) {

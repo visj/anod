@@ -63,7 +63,7 @@ async function build() {
             moduleSideEffects: (id) => {
                 // Tell the bundler that types.js has absolutely zero side effects.
                 // This gives it permission to drop the unused imports entirely.
-                if (id.includes('types.js')) {
+                if (id.includes('types.js') || id.includes('api.js')) {
                     return false;
                 }
                 // Keep default behavior for everything else
