@@ -64,6 +64,7 @@ var Flag = {
     _DISPOSED: 64,
     _LOADING: 128,
     _ERROR: 256,
+    _RECOVER: 512,
     _BOUND: 1024,
     _TRACKED: 2048,
     _SCOPE: 4096,
@@ -400,6 +401,18 @@ function Root() {
      * @type {number}
      */
     this._oslot = 0;
+    /**
+     * @type {Owner | null}
+     */
+    this._owner = null;
+    /**
+     * @type {(function(*): boolean) | Array<(function(*): boolean)> | null}
+     */
+    this._recover = null;
+    /**
+     * @type {number}
+     */
+    this._rslot = 0;
 }
 
 /** @const */
@@ -427,6 +440,14 @@ RootProto.dispose = _proto_dispose;
 RootProto.cleanup = function (fn) { addCleanup(this, fn); };
 
 /**
+ * @public
+ * @this {!Root}
+ * @param {function(*): boolean} fn
+ * @returns {void}
+ */
+RootProto.recover = function (fn) { addRecover(this, fn); };
+
+/**
  * @protected
  * @this {!Root}
  * @returns {void}
@@ -436,7 +457,8 @@ RootProto._dispose = function () {
         this._flag |= Flag._DISPOSED;
         clearOwned(this);
         this._cleanup =
-            this._owned = null;
+            this._owned =
+            this._recover = null;
     }
 };
 
@@ -1193,7 +1215,20 @@ function Effect(opts, fn, dep1, dep2, args) {
      * @type {number}
      */
     this._deptail = 0;
+    /**
+     * @type {Owner | null}
+     */
+    this._owner = null;
+    /**
+     * @type {(function(*): boolean) | Array<(function(*): boolean)> | null}
+     */
+    this._recover = null;
+    /**
+     * @type {number}
+     */
+    this._rslot = 0;
     if (CLOCK._state & State._OWNER) {
+        this._owner = CLOCK._scope;
         addOwned(CLOCK._scope, this);
     }
 }
@@ -1247,6 +1282,14 @@ function Effect(opts, fn, dep1, dep2, args) {
     EffectProto.cleanup = function (fn) { addCleanup(this, fn); };
 
     /**
+     * @public
+     * @this {!Effect}
+     * @param {function(*): boolean} fn
+     * @returns {void}
+     */
+    EffectProto.recover = function (fn) { addRecover(this, fn); };
+
+    /**
      * @protected
      * @this {!Effect<U,V,W>}
      * @returns {void}
@@ -1260,7 +1303,9 @@ function Effect(opts, fn, dep1, dep2, args) {
             this._fn =
                 this._owned =
                 this._args =
-                this._cleanup = null;
+                this._cleanup =
+                this._recover =
+                this._owner = null;
         }
     };
 
@@ -1309,8 +1354,11 @@ function startEffect(node) {
             start(CLOCK);
         }
     } catch (err) {
+        let recovered = tryRecover(node, err);
         node._dispose();
-        throw err;
+        if (!recovered) {
+            throw err;
+        }
     } finally {
         CLOCK._state = state;
     }
@@ -1403,7 +1451,34 @@ function addCleanup(node, fn) {
 }
 
 /**
- * @param {Owner} node 
+ * @param {Owner} node
+ * @param {function(*): boolean} fn
+ * @returns {void}
+ */
+function addRecover(node, fn) {
+    let count = node._rslot;
+    switch (count) {
+        case 0:
+            node._recover = fn;
+            node._rslot = 1;
+            break;
+        case 1:
+            node._recover = [/** @type {function(*): boolean} */(node._recover), fn];
+            node._rslot = 4;
+            break;
+        case 2:
+            /** @type {Array<function(*): boolean>} */(node._recover)[0] = fn;
+            node._rslot = 3;
+            break;
+        default:
+            /** @type {Array<function(*): boolean>} */(node._recover)[count - 2] = fn;
+            node._rslot = count + 1;
+    }
+    node._flag |= Flag._RECOVER;
+}
+
+/**
+ * @param {Owner} node
  * @param {Receiver} child
  * @returns {void}
  */
@@ -1533,8 +1608,9 @@ function start(clock) {
                                 runEffect(node);
                             } catch (err) {
                                 clock._state = State._START;
+                                let recovered = tryRecover(node, err);
                                 node._dispose();
-                                if (!thrown) {
+                                if (!recovered && !thrown) {
                                     error = err;
                                     thrown = true;
                                 }
@@ -1558,8 +1634,9 @@ function start(clock) {
                             runEffect(node);
                         } catch (err) {
                             clock._state = State._START;
+                            let recovered = tryRecover(node, err);
                             node._dispose();
-                            if (!thrown) {
+                            if (!recovered && !thrown) {
                                 error = err;
                                 thrown = true;
                             }
@@ -1769,6 +1846,51 @@ function clearOwned(owner) {
             owner._cslot = 2;
         }
     }
+    let rcvcount = owner._rslot;
+    if (rcvcount > 0) {
+        if (rcvcount === 1) {
+            owner._recover = null;
+            owner._rslot = 0;
+        } else {
+            let len = rcvcount - 2;
+            let recover = /** @type {Array<function(*): boolean>} */(owner._recover);
+            for (let i = 0; i < len; i++) {
+                recover[i] = null;
+            }
+            owner._rslot = 2;
+        }
+        owner._flag &= ~Flag._RECOVER;
+    }
+}
+
+/**
+ * Walks the ownership chain looking for recover handlers.
+ * @param {Effect} node
+ * @param {*} error
+ * @returns {boolean} true if error was handled
+ */
+function tryRecover(node, error) {
+    let owner = node._owner;
+    while (owner !== null) {
+        if (owner._flag & Flag._RECOVER) {
+            let count = owner._rslot;
+            if (count === 1) {
+                if (/** @type {function(*): boolean} */(owner._recover)(error) === true) {
+                    return true;
+                }
+            } else if (count > 2) {
+                let fns = /** @type {Array<function(*): boolean>} */(owner._recover);
+                let len = count - 2;
+                for (let i = 0; i < len; i++) {
+                    if (fns[i](error) === true) {
+                        return true;
+                    }
+                }
+            }
+        }
+        owner = owner._owner;
+    }
+    return false;
 }
 
 /**
@@ -2055,7 +2177,7 @@ function effect(fn, opts, args) {
 }
 
 /**
- * * @param {function(): (function(): void | void)} fn 
+ * @param {function(): (function(): void | void)} fn
  * @param {number=} opts
  * @returns {Effect}
  */

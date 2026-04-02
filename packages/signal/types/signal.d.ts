@@ -23,6 +23,7 @@ export const enum Flag {
     DISPOSED = 64,
     LOADING = 128,
     ERROR = 256,
+    RECOVER = 512,
     BOUND = 1024,
     COMPSUB = 2048,
     SCOPE = 4096,
@@ -89,7 +90,9 @@ export interface IAwaitable {
     loading(): boolean;
 }
 
-export interface IRoot extends IDispose<Type.ROOT> { }
+export interface IRoot extends IDispose<Type.ROOT> {
+    recover(fn: (error: any) => boolean): void;
+}
 
 export interface ISignal<T> extends IReadonlySignal<T, Type.SIGNAL> {
     set(value: T): void;
@@ -97,7 +100,9 @@ export interface ISignal<T> extends IReadonlySignal<T, Type.SIGNAL> {
 
 export interface ICompute<T> extends IReadonlySignal<T, Type.COMPUTE>, IAwaitable, IReader { }
 
-export interface IEffect extends IDispose<Type.EFFECT>, IReader { }
+export interface IEffect extends IDispose<Type.EFFECT>, IReader {
+    recover(fn: (error: any) => boolean): void;
+}
 
 export declare function root(fn: () => void): IRoot;
 
@@ -164,6 +169,7 @@ export declare class Root implements IDispose<Type.ROOT> {
     readonly [ANOD]: never;
     readonly t: Type.ROOT;
     dispose(): void;
+    recover(fn: (error: any) => boolean): void;
 }
 
 export declare class Signal<T> implements ISignal<T> {
@@ -205,4 +211,5 @@ export declare class Effect<U = any, V = any, W = any> implements IEffect {
     dispose(): void;
     error(): boolean;
     loading(): boolean;
+    recover(fn: (error: any) => boolean): void;
 }

@@ -22,8 +22,14 @@ Owner.prototype._owned;
 Owner.prototype._oslot;
 /** @package @type {number | undefined} */
 Owner.prototype._level;
+/** @package @type {Owner | null} */
+Owner.prototype._owner;
+/** @package @type {(function(*): boolean) | Array<(function(*): boolean)> | null} */
+Owner.prototype._recover;
+/** @package @type {number} */
+Owner.prototype._rslot;
 
-/** 
+/**
  * @interface 
  * @template T 
  * @extends {Disposer} 
