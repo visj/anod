@@ -77,7 +77,7 @@ function register(fn) {
 /** @const {number} */ const OPT_WEAK = FLAG_WEAK;
 
 /** @const {number} */
-const OPTIONS = OPT_DEFER | OPT_STABLE | OPT_SETUP | OPT_NOTIFY;
+const OPTIONS = OPT_DEFER | OPT_STABLE | OPT_SETUP | OPT_NOTIFY | OPT_WEAK;
 
 /** @const {number} */ const STATE_START = 0;
 /** @const {number} */ const STATE_IDLE = 1;
@@ -1687,6 +1687,20 @@ function clearReceiver(send, slot) {
             }
         }
     }
+    /**
+     * FLAG_WEAK computes release their cached value when the last
+     * subscriber is removed.  The node stays alive (deps intact)
+     * but marks itself STALE so the next .val() recomputes fresh.
+     * This keeps idle weak computes from retaining large objects.
+     */
+    if (
+        (send._flag & FLAG_WEAK) &&
+        send._sub1 === null &&
+        (send._subs === null || send._subs.length === 0)
+    ) {
+        send._flag |= FLAG_STALE;
+        /** @type {Compute} */(send)._value = null;
+    }
 }
 
 /**
@@ -2113,8 +2127,8 @@ function signal(value) {
  * @returns {Compute<T,W>}
  */
 function compute(fn, seed, opts, args) {
-    let _flag = FLAG_SETUP | ((0 | opts) & OPTIONS);
-    let node = new Compute(_flag, fn, null, null, seed, args);
+    let flag = FLAG_SETUP | ((0 | opts) & OPTIONS);
+    let node = new Compute(flag, fn, null, null, seed, args);
     startCompute(node);
     return node;
 }
@@ -2127,8 +2141,8 @@ function compute(fn, seed, opts, args) {
  * @returns {Effect<null,null,W>}
  */
 function effect(fn, opts, args) {
-    let _flag = FLAG_SETUP | ((0 | opts) & OPTIONS);
-    let node = new Effect(_flag, fn, null, null, args);
+    let flag = FLAG_SETUP | ((0 | opts) & OPTIONS);
+    let node = new Effect(flag, fn, null, null, args);
     startEffect(node);
     return node;
 }
@@ -2139,8 +2153,8 @@ function effect(fn, opts, args) {
  * @returns {Effect}
  */
 function scope(fn, opts) {
-    let _flag = FLAG_SETUP | FLAG_SCOPE | ((0 | opts) & OPTIONS);
-    let node = new Effect(_flag, fn, null, null);
+    let flag = FLAG_SETUP | FLAG_SCOPE | ((0 | opts) & OPTIONS);
+    let node = new Effect(flag, fn, null, null);
     let state = CLOCK._state;
     if (state & STATE_SCOPE) {
         setScope(node, CLOCK._scope);
