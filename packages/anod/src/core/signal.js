@@ -40,28 +40,44 @@ function register(fn) {
 /** @const {number} */ const FLAG_STABLE = 2;
 /** @const {number} */ const FLAG_SETUP = 4;
 /** @const {number} */ const FLAG_STALE = 8;
-/** @const {number} */ const FLAG_PENDING = 16;
-/** @const {number} */ const FLAG_RUNNING = 32;
-/** @const {number} */ const FLAG_DISPOSED = 64;
-/** @const {number} */ const FLAG_LOADING = 128;
-/** @const {number} */ const FLAG_ERROR = 256;
-/** @const {number} */ const FLAG_RECOVER = 512;
-/** @const {number} */ const FLAG_BOUND = 1024;
-/** @const {number} */ const FLAG_TRACKED = 2048;
-/** @const {number} */ const FLAG_SCOPE = 4096;
-/** @const {number} */ const FLAG_EQUAL = 8192;
+/** @const {number} */ const FLAG_NOTIFY = 16;
+/** @const {number} */ const FLAG_PENDING = 32;
+/** @const {number} */ const FLAG_RUNNING = 64;
+/** @const {number} */ const FLAG_DISPOSED = 128;
+/** @const {number} */ const FLAG_LOADING = 256;
+/** @const {number} */ const FLAG_ERROR = 512;
+/** @const {number} */ const FLAG_RECOVER = 1024;
+/** @const {number} */ const FLAG_BOUND = 2048;
+/** @const {number} */ const FLAG_TRACKED = 4096;
+/** @const {number} */ const FLAG_SCOPE = 8192;
 /** @const {number} */ const FLAG_WEAK = 16384;
 /** @const {number} */ const FLAG_LIST = 32768;
 /** @const {number} */ const FLAG_RDEP1 = 0x10000;
 /** @const {number} */ const FLAG_RDEP2 = 0x20000;
+/**
+ * Runtime bit set/cleared by the equal() method during a compute
+ * execution.  Separate from FLAG_NOTIFY (the opt) so both features
+ * can coexist on a single node.
+ * Set  → "I am equal, suppress notification"
+ * Clear → default; or if the user explicitly calls equal(false),
+ *         the absence of FLAG_EQUAL combined with the absence of
+ *         FLAG_NOTIFY triggers forced notification (see FLAG_NOTEQUAL).
+ */
+/** @const {number} */ const FLAG_EQUAL = 0x40000;
+/**
+ * Runtime bit set by equal(false) to indicate "I am NOT equal,
+ * force notification regardless of value change".
+ */
+/** @const {number} */ const FLAG_NOTEQUAL = 0x80000;
 
 /** @const {number} */ const OPT_DEFER = FLAG_DEFER;
 /** @const {number} */ const OPT_STABLE = FLAG_STABLE;
 /** @const {number} */ const OPT_SETUP = FLAG_SETUP;
+/** @const {number} */ const OPT_NOTIFY = FLAG_NOTIFY;
 /** @const {number} */ const OPT_WEAK = FLAG_WEAK;
 
 /** @const {number} */
-const OPTIONS = OPT_DEFER | OPT_STABLE | OPT_SETUP;
+const OPTIONS = OPT_DEFER | OPT_STABLE | OPT_SETUP | OPT_NOTIFY;
 
 /** @const {number} */ const STATE_START = 0;
 /** @const {number} */ const STATE_IDLE = 1;
@@ -235,8 +251,8 @@ function loading() {
  * @returns {T}
  */
 function read(sender) {
-    let value = sender.val();
     let flag = this._flag;
+    let value = sender.val();
     if (!(flag & FLAG_RUNNING)) {
         return value;
     }
@@ -741,11 +757,22 @@ function Compute(opts, fn, dep1, dep2, seed, args) {
     ComputeProto.stable = function () { this._flag |= FLAG_STABLE; };
 
     /**
+     * Declares whether the compute's output is semantically equal to
+     * its previous value.  Calling equal(true) suppresses downstream
+     * notification even when the reference changes.  Calling equal(false)
+     * forces notification even when the reference stays the same.
      * @public
      * @this {!Compute}
+     * @param {boolean=} equal
      * @returns {void}
      */
-    ComputeProto.equal = function () { this._flag |= FLAG_EQUAL; };
+    ComputeProto.equal = function (equal) {
+        if (equal === false) {
+            this._flag = (this._flag | FLAG_NOTEQUAL) & ~FLAG_EQUAL;
+        } else {
+            this._flag = (this._flag | FLAG_EQUAL) & ~FLAG_NOTEQUAL;
+        }
+    };
 
     /**
      * @template V,W
@@ -795,9 +822,11 @@ function Compute(opts, fn, dep1, dep2, seed, args) {
         COMPUTE_QUEUE[CLOCK._computes++] = this;
         if (this._ptime < time) {
             this._ptime = time;
-            // Have not been marked as PENDING this cycle
-            this._flag |= FLAG_STALE;
-            if (this._flag & FLAG_TRACKED) {
+            /** Have not been marked as PENDING this cycle */
+            let flag = this._flag |= FLAG_STALE;
+            if (flag & FLAG_NOTIFY) {
+                notifyStale(this, time);
+            } else if (flag & FLAG_TRACKED) {
                 notifyPending(this, time);
             }
         } else {
@@ -836,7 +865,7 @@ function runCompute(node, time) {
     /** @type {T} */
     let value;
     let state = CLOCK._state;
-    node._flag = (opts | FLAG_RUNNING) & ~(FLAG_EQUAL | FLAG_RDEP1 | FLAG_RDEP2);
+    node._flag = (opts | FLAG_RUNNING) & ~(FLAG_EQUAL | FLAG_NOTEQUAL | FLAG_RDEP1 | FLAG_RDEP2);
     CLOCK._state &= RESET;
     try {
         let fn = node._fn;
@@ -887,7 +916,8 @@ function runCompute(node, time) {
         node._flag |= FLAG_ERROR;
     } finally {
         CLOCK._state = state;
-        opts = node._flag &= ~(FLAG_RUNNING | FLAG_STALE);
+        opts = node._flag;
+        node._flag &= ~(FLAG_RUNNING | FLAG_STALE);
     }
     if (opts & FLAG_ERROR) {
         node._value = value;
@@ -895,9 +925,23 @@ function runCompute(node, time) {
     } else {
         let asyncType = isAsync(value);
         if (asyncType === ASYNC_NOT_ASYNC) {
-            if (value !== node._value) {
+            if (opts & (FLAG_NOTIFY | FLAG_EQUAL)) {
                 node._value = value;
-                if (!(opts & FLAG_EQUAL)) {
+            } else if (opts & FLAG_NOTEQUAL) {
+                /**
+                 * The user called equal(false) during this run, meaning
+                 * "I am not equal — force notification" regardless of
+                 * whether the value reference changed.
+                 */
+                node._value = value;
+                notifyStale(node, time);
+            } else {
+                /**
+                 * Default: only notify downstream when the value
+                 * actually changed (strict inequality).
+                 */
+                if (value !== node._value) {
+                    node._value = value;
                     notifyStale(node, time);
                 }
             }
@@ -1805,7 +1849,7 @@ function tryRecover(node, error) {
                 if (/** @type {function(*): boolean} */(owner._recover)(error) === true) {
                     return true;
                 }
-            } else if (count > 2) {
+            } else if (count !== 0) {
                 let fns = /** @type {Array<function(*): boolean>} */(owner._recover);
                 let len = count - 2;
                 for (let i = 0; i < len; i++) {
@@ -2143,14 +2187,14 @@ export {
     STATE_START, STATE_IDLE, STATE_COMPUTE, STATE_OWNER, STATE_SCOPE,
     FLAG_DEFER, FLAG_STABLE, FLAG_SETUP, FLAG_STALE, FLAG_PENDING,
     FLAG_RUNNING, FLAG_DISPOSED, FLAG_LOADING, FLAG_ERROR, FLAG_RECOVER,
-    FLAG_BOUND, FLAG_TRACKED, FLAG_SCOPE, FLAG_EQUAL, FLAG_WEAK,
+    FLAG_BOUND, FLAG_TRACKED, FLAG_SCOPE, FLAG_NOTIFY, FLAG_EQUAL, FLAG_WEAK,
     FLAG_LIST, FLAG_RDEP1, FLAG_RDEP2,
     OP_VALUE, OP_CALLBACK,
     register,
     MUT_COMPUTE, MUT_BITSUB, MUT_ADD, MUT_DEL, MUT_SORT,
     MUT_OP_MASK, MUT_LEN_SHIFT, MUT_LEN_MASK, MUT_POS_SHIFT, MUT_POS_MASK,
     ASYNC_NOT_ASYNC, ASYNC_PROMISE, ASYNC_ITERABLE,
-    OPT_DEFER, OPT_STABLE, OPT_SETUP, OPT_WEAK,
+    OPT_DEFER, OPT_STABLE, OPT_SETUP, OPT_NOTIFY, OPT_WEAK,
     TYPE_ROOT, TYPE_SIGNAL, TYPE_COMPUTE, TYPE_EFFECT,
     TYPEFLAG_MASK, TYPEFLAG_SEND, TYPEFLAG_RECEIVE, TYPEFLAG_OWNER,
     RESET, OPTIONS,

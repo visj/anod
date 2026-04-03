@@ -79,7 +79,7 @@ describe("async", () => {
 
         test("notifies downstream effect when promise settles", async () => {
             const c1 = compute(() => Promise.resolve(42));
-            let received;
+            let received = void 0;
 
             effect((e) => { received = e.read(c1); });
 
