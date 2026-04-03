@@ -119,7 +119,7 @@ Owner nodes (`Root`, scoped `Effect`) track `_owned` children. Disposing an owne
 
 ### Error handling
 
-Errors in compute functions are caught and stored as the node's value with `Flag._ERROR` set. Reading an errored compute via `.val()` / `.peek()` rethrows. Errors in effects cause the effect to be disposed. The `error()` method on Compute/Effect returns whether the node is in an error state.
+Errors in compute functions are caught and stored as the node's value with `Flag._ERROR` set. Reading an errored compute via `.val()` rethrows. Errors in effects cause the effect to be disposed. The `error()` method on Compute/Effect returns whether the node is in an error state.
 
 ### Cycle detection
 

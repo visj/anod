@@ -9,59 +9,6 @@ function Anod() { }
 Anod.prototype.t;
 
 /**
- * @const
- */
-const Type = {};
-
-/**
- * @const
- * @type {number}
- */
-Type.ROOT;
-
-/**
- * @const
- * @type {number}
- */
-Type.SIGNAL;
-
-/**
- * @const
- * @type {number}
- */
-Type.COMPUTE;
-
-/**
- * @const
- * @type {number}
- */
-Type.EFFECT;
-
-/**
- * @const
- */
-const Opt = {};
-
-/**
- * @const
- * @type {number}
- */
-Opt.DEFER;
-
-/**
- * @const
- * @type {number}
- */
-Opt.STABLE;
-
-
-/**
- * @const
- * @type {number}
- */
-Opt.SETUP;
-
-/**
  * @interface
  * @extends {Anod}
  */
@@ -86,12 +33,6 @@ function ReadonlySignal() { }
 ReadonlySignal.prototype.val = function() { };
 
 /**
- * @throws
- * @returns {T}
- */
-ReadonlySignal.prototype.peek = function() { };
-
-/**
  * @interface
  * @template T
  * @extends {ReadonlySignal<T>}
@@ -105,4 +46,4 @@ function WritableSignal() { };
  */
 WritableSignal.prototype.set = function(value) { };
 
-export { Anod, DisposableSignal, ReadonlySignal, WritableSignal, Type, Opt }
+export { Anod, DisposableSignal, ReadonlySignal, WritableSignal }

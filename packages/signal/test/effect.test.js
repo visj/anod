@@ -26,7 +26,7 @@ describe("effect", () => {
             expect(() => {
                 effect((e) => {
                     e.read(s1);
-                    s1.set(s1.peek() + 1); // Triggers runaway cycle
+                    s1.set(s1.val() + 1); // Triggers runaway cycle
                 });
             }).toThrow(); // "Should throw runaway cycle"
         });
@@ -40,7 +40,7 @@ describe("effect", () => {
             expect(() => {
                 effect((e) => {
                     e.read(c3);
-                    s1.set(s1.peek() + 1); // Triggers runaway cycle
+                    s1.set(s1.val() + 1); // Triggers runaway cycle
                 });
             }).toThrow(); // "Should throw runaway cycle through computes"
         });
@@ -136,14 +136,14 @@ describe("effect", () => {
                 });
 
                 expect(calls).toBe(0);
-                s1.set(s1.peek() + 1);
+                s1.set(s1.val() + 1);
                 expect(calls).toBe(1); // "Update causes 1 cleanup"
             });
 
             r1.dispose();
             expect(calls).toBe(2); // "Dispose triggers final cleanup"
 
-            s1.set(s1.peek() + 1);
+            s1.set(s1.val() + 1);
             expect(calls).toBe(2); // "Subsequent sets do nothing because node is dead"
         });
     });

@@ -4,26 +4,21 @@ import { rolldown } from 'rolldown';
 import { minify } from 'terser';
 
 const outputDir = './dist';
-/** Stable property map that the list package will reuse */
+/** Load signal's stable property map so underscore-prefixed properties mangle identically */
+const signalManglePath = path.resolve('../signal/dist/mangle.json');
 const nameCachePath = path.resolve(outputDir, 'mangle.json');
-const typeFile = './types/signal.d.ts';
 
 async function build() {
     console.log('1. Bundling with Rolldown...');
 
     const bundle = await rolldown({
         input: {
-            index: './src/index.js',
-            internal: './src/internal.js',
+            index: './src/list.js',
         },
-        treeshake: {
-            moduleSideEffects: (id) => {
-                if (id.includes('types.js') || id.includes('api.js')) {
-                    return false;
-                }
-                return true;
-            }
-        }
+        external: [
+            '@anod/signal',
+            '@anod/signal/internal',
+        ],
     });
 
     const { output } = await bundle.generate({
@@ -31,14 +26,18 @@ async function build() {
         format: 'esm',
         sourcemap: true,
         entryFileNames: '[name].mjs',
-        chunkFileNames: 'signal.mjs'
     });
 
     console.log('2. Minifying and mangling properties with Terser...');
 
+    /**
+     * Load signal's mangle.json as the starting nameCache.
+     * This ensures all _-prefixed properties (e.g. _value, _flag, _state)
+     * get the exact same mangled names as the signal package.
+     */
     let nameCache = {};
-    if (fs.existsSync(nameCachePath)) {
-        nameCache = JSON.parse(fs.readFileSync(nameCachePath, 'utf8'));
+    if (fs.existsSync(signalManglePath)) {
+        nameCache = JSON.parse(fs.readFileSync(signalManglePath, 'utf8'));
     }
 
     if (!fs.existsSync(outputDir)) {
@@ -71,10 +70,10 @@ async function build() {
         }
     }
 
+    /** Save the combined property map (signal's entries + any new list-specific ones) */
     fs.writeFileSync(nameCachePath, JSON.stringify(nameCache, null, 2));
-    fs.copyFileSync(typeFile, path.resolve(outputDir, 'index.d.ts'));
 
-    console.log('Success! Outputs written to dist/ and stable map saved to mangle.json.');
+    console.log('Success! Output written to dist/');
 }
 
 build().catch(console.error);

@@ -50,8 +50,8 @@ describe("dispose", () => {
                     });
                 });
 
-                s1.set(s1.peek() + 1);
-                s1.set(s1.peek() + 1);
+                s1.set(s1.val() + 1);
+                s1.set(s1.val() + 1);
                 expect(count).toBe(0); // "Disposed node should not contribute to count"
             });
         });

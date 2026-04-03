@@ -18,8 +18,6 @@ var __ANOD_INTERNAL__ = {};
 __ANOD_CORE__.Signal = function(value) {};
 /** @return {T} */
 __ANOD_CORE__.Signal.prototype.val = function() {};
-/** @return {T} */
-__ANOD_CORE__.Signal.prototype.peek = function() {};
 
 /**
  * @constructor

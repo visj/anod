@@ -1,6 +1,12 @@
 import {
-    Opt,
-    Type,
+    OPT_DEFER,
+    OPT_STABLE,
+    OPT_SETUP,
+    OPT_WEAK,
+    TYPE_ROOT,
+    TYPE_SIGNAL,
+    TYPE_COMPUTE,
+    TYPE_EFFECT,
     Root,
     Signal,
     Compute,
@@ -14,8 +20,14 @@ import {
 } from "./core/signal.js";
 
 export {
-    Opt,
-    Type,
+    OPT_DEFER,
+    OPT_STABLE,
+    OPT_SETUP,
+    OPT_WEAK,
+    TYPE_ROOT,
+    TYPE_SIGNAL,
+    TYPE_COMPUTE,
+    TYPE_EFFECT,
     Root,
     Signal,
     Compute,

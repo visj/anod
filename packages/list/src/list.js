@@ -1,11 +1,15 @@
 // 1. Destructure the RUNTIME variables from the fake globals
-import { 
-    Signal, Compute, Effect, computeOne, effectOne 
+import {
+    Signal, Compute, Effect, OPT_SETUP, OPT_STABLE
 } from '@anod/signal';
 
-import { 
-    CLOCK, State, Op, Flag, Opt, notify, scheduleSignal, 
-    isPrimitive, isFunction, isSignal 
+import {
+    CLOCK, STATE_IDLE,
+    FLAG_LIST,
+    OP_COPY_WITHIN, OP_FILL, OP_FILL_RANGE, OP_POP, OP_PUSH, OP_PUSH_ARRAY,
+    OP_REVERSE, OP_SHIFT, OP_SORT, OP_SPLICE, OP_UNSHIFT, OP_UNSHIFT_ARRAY,
+    notify, scheduleSignal,
+    isPrimitive, isFunction, isSignal
 } from '@anod/signal/internal';
 
 /** @const */
@@ -44,7 +48,7 @@ function read(source) {
  * @returns {Compute<T,Array<U>,null,W>}
  */
 function computeArray(source, fn, args, opts) {
-    return computeOne(source, fn, void 0, 0 | opts, args);
+    return source.derive(fn, void 0, 0 | opts, args);
 }
 
 /**
@@ -64,7 +68,7 @@ function at(source, seed, args) {
  * @returns {Compute<T|undefined,Array<T>,null,number | ReadonlySignal<number> | (function(): number)>}
  */
 SignalProto.at = ComputeProto.at = function (index) {
-    return computeArray(this, at, index, isSignal(index) ? Opt.SETUP : 0);
+    return computeArray(this, at, index, isSignal(index) ? OPT_SETUP : 0);
 };
 
 /**
@@ -100,7 +104,7 @@ SignalProto.concat = ComputeProto.concat = function (...items) {
     let len = items.length;
     if (len === 1) {
         let item = items[0];
-        return computeArray(this, concat, /** @type {!Array} */(item), isSignal(item) ? Opt.SETUP : 0);
+        return computeArray(this, concat, /** @type {!Array} */(item), isSignal(item) ? OPT_SETUP : 0);
     }
     // Cast items to * so W is uniformly inferred as *
     return computeArray(this, concatN, /** @type {!Array} */(items));
@@ -258,7 +262,7 @@ function flat(source, seed, depth) {
  * @returns {Compute<Array<T>,Array<T>,null,number|ReadonlySignal<number>|(function(): number)|undefined>}
  */
 SignalProto.flat = ComputeProto.flat = function (depth) {
-    return computeArray(this, flat, depth, isSignal(depth) ? Opt.SETUP : 0);
+    return computeArray(this, flat, depth, isSignal(depth) ? OPT_SETUP : 0);
 };
 
 /**
@@ -300,7 +304,7 @@ function forEach(source, cb) {
  * @returns {Effect<Array<T>,null, ((function(T, number): ((function(): void) | void)))>}
  */
 SignalProto.forEach = ComputeProto.forEach = function (cb, opts) {
-    return effectOne(this, forEach, opts, cb);
+    return this.watch(forEach, opts, cb);
 };
 
 // --- includes ---
@@ -336,7 +340,7 @@ function includes2(source, seed, args) {
  */
 SignalProto.includes = ComputeProto.includes = function (searchElement, fromIndex) {
     if (arguments.length === 1) {
-        return computeArray(this, includes1, searchElement, isSignal(searchElement) ? Opt.SETUP : 0);
+        return computeArray(this, includes1, searchElement, isSignal(searchElement) ? OPT_SETUP : 0);
     }
     let unstable = isSignal(searchElement) || isSignal(fromIndex);
     return computeArray(this, includes2, /** @type {*} */([searchElement, fromIndex]), 0);
@@ -376,7 +380,7 @@ function indexOf2(source, seed, args) {
  */
 SignalProto.indexOf = ComputeProto.indexOf = function (searchElement, fromIndex) {
     if (arguments.length === 1) {
-        return computeArray(this, indexOf1, searchElement, isSignal(searchElement) ? Opt.SETUP : 0);
+        return computeArray(this, indexOf1, searchElement, isSignal(searchElement) ? OPT_SETUP : 0);
     }
     let unstable = isSignal(searchElement) || isSignal(fromIndex);
     return computeArray(this, indexOf2, /** @type {*} */([searchElement, fromIndex]), 0);
@@ -402,7 +406,7 @@ function join(source, seed, separator) {
  * @returns {Compute<string, Array<T>, null, string | ReadonlySignal<string> | (function(): string) | undefined>}
  */
 SignalProto.join = ComputeProto.join = function (separator) {
-    return computeArray(this, join, separator, isSignal(separator) ? Opt.SETUP : 0);
+    return computeArray(this, join, separator, isSignal(separator) ? OPT_SETUP : 0);
 };
 
 
@@ -491,7 +495,7 @@ function reduce2(source, seed, args) {
  * @returns {Compute<U, Array<T>, null, *>}
  */
 SignalProto.reduce = ComputeProto.reduce = function (cb, initialValue, opts) {
-    let unstable = opts !== Opt.STABLE;
+    let unstable = opts !== OPT_STABLE;
     if (arguments.length === 1) {
         return /** @type {Compute<U, Array<T>, null, *>} */(
             computeArray(this, reduce1, /** @type {*} */(cb), opts)
@@ -539,7 +543,7 @@ function reduceRight2(source, seed, args) {
  * @returns {Compute<U, Array<T>, null, *>}
  */
 SignalProto.reduceRight = ComputeProto.reduceRight = function (cb, initialValue, opts) {
-    let unstable = opts !== Opt.STABLE;
+    let unstable = opts !== OPT_STABLE;
     if (arguments.length === 1) {
         return /** @type {Compute<U, Array<T>, null, *>} */(
             computeArray(this, reduceRight1, /** @type {*} */(cb), opts)
@@ -656,11 +660,11 @@ SignalProto.values = ComputeProto.values = function () {
  * @returns {void}
  */
 SignalProto.copyWithin = function (target, start, end) {
-    if (CLOCK._state & State.IDLE) {
+    if (CLOCK._state & STATE_IDLE) {
         this._value.copyWithin(target, start, end)
         notify(this);
     } else {
-        scheduleSignal(this, Op.CopyWithin, [target, start, end]);
+        scheduleSignal(this, OP_COPY_WITHIN, [target, start, end]);
     }
 };
 
@@ -673,14 +677,14 @@ SignalProto.copyWithin = function (target, start, end) {
  * @returns {void}
  */
 SignalProto.fill = function (value, start, end) {
-    if (CLOCK._state & State.IDLE) {
+    if (CLOCK._state & STATE_IDLE) {
         this._value.fill(value, start, end);
         notify(this);
     } else {
         if (arguments.length === 1) {
-            scheduleSignal(this, Op.Fill, value);
+            scheduleSignal(this, OP_FILL, value);
         } else {
-            scheduleSignal(this, Op.FillRange, [value, start, end]);
+            scheduleSignal(this, OP_FILL_RANGE, [value, start, end]);
         }
     }
 };
@@ -691,11 +695,11 @@ SignalProto.fill = function (value, start, end) {
  * @returns {void}
  */
 SignalProto.pop = function () {
-    if (CLOCK._state & State.IDLE) {
+    if (CLOCK._state & STATE_IDLE) {
         this._value.pop();
         notify(this);
     } else {
-        scheduleSignal(this, Op.Pop, null);
+        scheduleSignal(this, OP_POP, null);
     }
 };
 
@@ -708,7 +712,7 @@ SignalProto.pop = function () {
 SignalProto.push = function (...items) {
     let len = items.length;
     if (len > 0) {
-        if (CLOCK._state & State.IDLE) {
+        if (CLOCK._state & STATE_IDLE) {
             if (len === 1) {
                 this._value.push(items[0]);
             } else {
@@ -717,9 +721,9 @@ SignalProto.push = function (...items) {
             notify(this);
         } else {
             if (len === 1) {
-                scheduleSignal(this, Op.Push, items[0]);
+                scheduleSignal(this, OP_PUSH, items[0]);
             } else {
-                scheduleSignal(this, Op.PushArray, items);
+                scheduleSignal(this, OP_PUSH_ARRAY, items);
             }
         }
     }
@@ -731,11 +735,11 @@ SignalProto.push = function (...items) {
  * @returns {void}
  */
 SignalProto.reverse = function () {
-    if (CLOCK._state & State.IDLE) {
+    if (CLOCK._state & STATE_IDLE) {
         this._value.reverse();
         notify(this);
     } else {
-        scheduleSignal(this, Op.Reverse, null);
+        scheduleSignal(this, OP_REVERSE, null);
     }
 };
 
@@ -745,11 +749,11 @@ SignalProto.reverse = function () {
  * @returns {void}
  */
 SignalProto.shift = function () {
-    if (CLOCK._state & State.IDLE) {
+    if (CLOCK._state & STATE_IDLE) {
         this._value.shift();
         notify(this);
     } else {
-        scheduleSignal(this, Op.Shift, null);
+        scheduleSignal(this, OP_SHIFT, null);
     }
 };
 
@@ -760,11 +764,11 @@ SignalProto.shift = function () {
  * @returns {void}
  */
 SignalProto.sort = function (compareFn) {
-    if (CLOCK._state & State.IDLE) {
+    if (CLOCK._state & STATE_IDLE) {
         this._value.sort(compareFn);
         notify(this);
     } else {
-        scheduleSignal(this, Op.Sort, compareFn);
+        scheduleSignal(this, OP_SORT, compareFn);
     }
 };
 
@@ -777,7 +781,7 @@ SignalProto.sort = function (compareFn) {
  * @returns {void}
  */
 SignalProto.splice = function (start, deleteCount, ...items) {
-    if (CLOCK._state & State.IDLE) {
+    if (CLOCK._state & STATE_IDLE) {
         let value = this._value;
         if (items.length === 0) {
             if (arguments.length === 1) {
@@ -790,7 +794,7 @@ SignalProto.splice = function (start, deleteCount, ...items) {
         }
         notify(this);
     } else {
-        scheduleSignal(this, Op.Splice, [start, deleteCount, items]);
+        scheduleSignal(this, OP_SPLICE, [start, deleteCount, items]);
     }
 };
 
@@ -803,7 +807,7 @@ SignalProto.splice = function (start, deleteCount, ...items) {
 SignalProto.unshift = function (...items) {
     let len = items.length;
     if (len > 0) {
-        if (CLOCK._state & State.IDLE) {
+        if (CLOCK._state & STATE_IDLE) {
             if (len === 1) {
                 this._value.unshift(items[0]);
             } else {
@@ -812,9 +816,9 @@ SignalProto.unshift = function (...items) {
             notify(this);
         } else {
             if (len === 1) {
-                scheduleSignal(this, Op.Unshift, items[0]);
+                scheduleSignal(this, OP_UNSHIFT, items[0]);
             } else {
-                scheduleSignal(this, Op.UnshiftArray, items);
+                scheduleSignal(this, OP_UNSHIFT_ARRAY, items);
             }
         }
     }
@@ -826,7 +830,7 @@ SignalProto.unshift = function (...items) {
  * @returns {Signal<!Array<T>>}
  */
 function list(value) {
-    return new Signal(value, Flag.LIST);
+    return new Signal(value, FLAG_LIST);
 }
 
 export { list }

@@ -112,12 +112,6 @@ function ReadonlySignal() { }
 ReadonlySignal.prototype.val = function() { };
 
 /**
- * @throws
- * @returns {T}
- */
-ReadonlySignal.prototype.peek = function() { };
-
-/**
  * @returns {void}
  */
 ReadonlySignal.prototype.dispose = function() { };

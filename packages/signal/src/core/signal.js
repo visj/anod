@@ -1,133 +1,81 @@
 import { Anod } from "./api.js";
 import { Disposer, Owner, Sender, Receiver, Clock, ISignal, ICompute, IEffect } from "./types.js";
 
-/**
- * @const
- * @enum {number}
- */
-var Op = {
-    Value: 1,
-    Callback: 2,
-    CopyWithin: 3,
-    Fill: 4,
-    FillRange: 5,
-    Pop: 6,
-    Push: 7,
-    PushArray: 8,
-    Reverse: 9,
-    Shift: 10,
-    Sort: 11,
-    Splice: 12,
-    Unshift: 13,
-    UnshiftArray: 14,
-};
+/** @const {number} */ const OP_VALUE = 1;
+/** @const {number} */ const OP_CALLBACK = 2;
+/** @const {number} */ const OP_COPY_WITHIN = 3;
+/** @const {number} */ const OP_FILL = 4;
+/** @const {number} */ const OP_FILL_RANGE = 5;
+/** @const {number} */ const OP_POP = 6;
+/** @const {number} */ const OP_PUSH = 7;
+/** @const {number} */ const OP_PUSH_ARRAY = 8;
+/** @const {number} */ const OP_REVERSE = 9;
+/** @const {number} */ const OP_SHIFT = 10;
+/** @const {number} */ const OP_SORT = 11;
+/** @const {number} */ const OP_SPLICE = 12;
+/** @const {number} */ const OP_UNSHIFT = 13;
+/** @const {number} */ const OP_UNSHIFT_ARRAY = 14;
 
-/**
- * @const
- * @enum {number}
- */
-var Mut = {
-    /* Not used */
-    _COMPUTE: 1,
-    _BITSUB: 2,
-    _ADD: 4,
-    _DEL: 8,
-    _SORT: 16,
-    _OP_MASK: 15,
-    _LEN_SHIFT: 4,
-    _LEN_MASK: 0x7FF,
-    _POS_SHIFT: 14,
-    _POS_MASK: 0x1FFF
-};
+/** @const {number} */ const MUT_COMPUTE = 1;
+/** @const {number} */ const MUT_BITSUB = 2;
+/** @const {number} */ const MUT_ADD = 4;
+/** @const {number} */ const MUT_DEL = 8;
+/** @const {number} */ const MUT_SORT = 16;
+/** @const {number} */ const MUT_OP_MASK = 15;
+/** @const {number} */ const MUT_LEN_SHIFT = 4;
+/** @const {number} */ const MUT_LEN_MASK = 0x7FF;
+/** @const {number} */ const MUT_POS_SHIFT = 14;
+/** @const {number} */ const MUT_POS_MASK = 0x1FFF;
 
-/**
- * @const
- * @enum {number}
- */
-var AsyncType = {
-    NotAsync: 0,
-    Promise: 1,
-    Iterable: 2
-};
+/** @const {number} */ const ASYNC_NOT_ASYNC = 0;
+/** @const {number} */ const ASYNC_PROMISE = 1;
+/** @const {number} */ const ASYNC_ITERABLE = 2;
 
-/**
- * @const
- * @enum {number}
- */
-var Flag = {
-    _DEFER: 1,
-    _STABLE: 2,
-    _SETUP: 4,
-    _STALE: 8,
-    _PENDING: 16,
-    _RUNNING: 32,
-    _DISPOSED: 64,
-    _LOADING: 128,
-    _ERROR: 256,
-    _RECOVER: 512,
-    _BOUND: 1024,
-    _TRACKED: 2048,
-    _SCOPE: 4096,
-    _EQUAL: 8192,
-    _WEAK: 16384,
-    _LIST: 32768,
-    _RDEP1: 0x10000,
-    _RDEP2: 0x20000
-};
+/** @const {number} */ const FLAG_DEFER = 1;
+/** @const {number} */ const FLAG_STABLE = 2;
+/** @const {number} */ const FLAG_SETUP = 4;
+/** @const {number} */ const FLAG_STALE = 8;
+/** @const {number} */ const FLAG_PENDING = 16;
+/** @const {number} */ const FLAG_RUNNING = 32;
+/** @const {number} */ const FLAG_DISPOSED = 64;
+/** @const {number} */ const FLAG_LOADING = 128;
+/** @const {number} */ const FLAG_ERROR = 256;
+/** @const {number} */ const FLAG_RECOVER = 512;
+/** @const {number} */ const FLAG_BOUND = 1024;
+/** @const {number} */ const FLAG_TRACKED = 2048;
+/** @const {number} */ const FLAG_SCOPE = 4096;
+/** @const {number} */ const FLAG_EQUAL = 8192;
+/** @const {number} */ const FLAG_WEAK = 16384;
+/** @const {number} */ const FLAG_LIST = 32768;
+/** @const {number} */ const FLAG_RDEP1 = 0x10000;
+/** @const {number} */ const FLAG_RDEP2 = 0x20000;
 
-/**
- * @const
- * @public
- * @enum {number}
- */
-var Opt = {
-    DEFER: Flag._DEFER,
-    STABLE: Flag._STABLE,
-    SETUP: Flag._SETUP,
-    WEAK: Flag._WEAK
-};
+/** @const {number} */ const OPT_DEFER = FLAG_DEFER;
+/** @const {number} */ const OPT_STABLE = FLAG_STABLE;
+/** @const {number} */ const OPT_SETUP = FLAG_SETUP;
+/** @const {number} */ const OPT_WEAK = FLAG_WEAK;
 
-/**
- * @const
- * @type {number}
- */
-var OPTIONS = Opt.DEFER | Opt.STABLE | Opt.SETUP;
+/** @const {number} */
+const OPTIONS = OPT_DEFER | OPT_STABLE | OPT_SETUP;
 
-/**
- * @const
- * @enum {number}
- */
-var State = {
-    _START: 0,
-    _IDLE: 1,
-    _COMPUTE: 2,
-    _OWNER: 8,
-    _SCOPE: 16,
-};
+/** @const {number} */ const STATE_START = 0;
+/** @const {number} */ const STATE_IDLE = 1;
+/** @const {number} */ const STATE_COMPUTE = 2;
+/** @const {number} */ const STATE_OWNER = 8;
+/** @const {number} */ const STATE_SCOPE = 16;
 
-var RESET = ~(State._IDLE | State._OWNER);
+/** @const {number} */
+const RESET = ~(STATE_IDLE | STATE_OWNER);
 
-/**
- * @const
- * @enum {number}
- */
-var TypeFlag = {
-    _MASK: 7,
-    _SEND: 8,
-    _RECEIVE: 16,
-    _OWNER: 32
-};
+/** @const {number} */ const TYPEFLAG_MASK = 7;
+/** @const {number} */ const TYPEFLAG_SEND = 8;
+/** @const {number} */ const TYPEFLAG_RECEIVE = 16;
+/** @const {number} */ const TYPEFLAG_OWNER = 32;
 
-/**
- * @const
- * @enum {number}
- */
-var Type = {
-    _ROOT: 1 | TypeFlag._OWNER,
-    _SIGNAL: 2 | TypeFlag._SEND,
-    _COMPUTE: 3 | TypeFlag._SEND | TypeFlag._RECEIVE,
-    _EFFECT: 4 | TypeFlag._OWNER | TypeFlag._RECEIVE,
-};
+/** @const {number} */ const TYPE_ROOT = 1 | TYPEFLAG_OWNER;
+/** @const {number} */ const TYPE_SIGNAL = 2 | TYPEFLAG_SEND;
+/** @const {number} */ const TYPE_COMPUTE = 3 | TYPEFLAG_SEND | TYPEFLAG_RECEIVE;
+/** @const {number} */ const TYPE_EFFECT = 4 | TYPEFLAG_OWNER | TYPEFLAG_RECEIVE;
 
 /**
  * 
@@ -135,7 +83,7 @@ var Type = {
  */
 function clock() {
     let c = {
-        _state: State._IDLE,
+        _state: STATE_IDLE,
         _time: 1,
         _version: 1,
         _minlevel: 0,
@@ -181,9 +129,9 @@ var EFFECT_QUEUE = [];
  */
 function isAsync(value) {
     return (value != null && (typeof value === 'object' || typeof value === 'function'))
-        ? (typeof value[Symbol.asyncIterator] === 'function' ? AsyncType.Iterable
-            : (typeof value.then === 'function' ? AsyncType.Promise : AsyncType.NotAsync))
-        : AsyncType.NotAsync;
+        ? (typeof value[Symbol.asyncIterator] === 'function' ? ASYNC_ITERABLE
+            : (typeof value.then === 'function' ? ASYNC_PROMISE : ASYNC_NOT_ASYNC))
+        : ASYNC_NOT_ASYNC;
 }
 
 /**
@@ -192,7 +140,7 @@ function isAsync(value) {
  * @returns {boolean} 
  */
 function isSignal(value) {
-    return value !== null && typeof value === 'object' && (/** @type {Anod} */(value).t & TypeFlag._SEND) !== 0;
+    return value !== null && typeof value === 'object' && (/** @type {Anod} */(value).t & TYPEFLAG_SEND) !== 0;
 }
 
 /**
@@ -250,8 +198,8 @@ function scheduleCompute(node) {
  * @returns {void}
  */
 function _proto_dispose() {
-    if (!(this._flag & Flag._DISPOSED)) {
-        if (CLOCK._state & State._IDLE) {
+    if (!(this._flag & FLAG_DISPOSED)) {
+        if (CLOCK._state & STATE_IDLE) {
             this._dispose();
         } else {
             DISPOSE_QUEUE[CLOCK._disposes++] = this;
@@ -264,7 +212,7 @@ function _proto_dispose() {
  * @returns {boolean}
  */
 function _proto_error() {
-    return (this._flag & Flag._ERROR) !== 0;
+    return (this._flag & FLAG_ERROR) !== 0;
 }
 
 /**
@@ -272,7 +220,7 @@ function _proto_error() {
  * @returns {boolean}
  */
 function _proto_loading() {
-    return (this._flag & Flag._LOADING) !== 0;
+    return (this._flag & FLAG_LOADING) !== 0;
 }
 
 /**
@@ -283,29 +231,29 @@ function _proto_loading() {
  */
 function _proto_read(sender) {
     let value;
-    if (sender.t & TypeFlag._RECEIVE) {
-        value = sender.peek();
+    if (sender.t & TYPEFLAG_RECEIVE) {
+        value = sender.val();
     } else {
         value = sender._value;
     }
     let flag = this._flag;
-    if (!(flag & Flag._RUNNING)) {
+    if (!(flag & FLAG_RUNNING)) {
         return value;
     }
-    if ((flag & Flag._BOUND) || ((flag & Flag._STABLE) && !(flag & Flag._SETUP))) {
+    if ((flag & FLAG_BOUND) || ((flag & FLAG_STABLE) && !(flag & FLAG_SETUP))) {
         return value;
     }
     if (sender._version === this._version) {
         return value;
     }
     sender._version = this._version;
-    if (!(flag & Flag._SETUP)) {
-        if (!(flag & Flag._RDEP1) && sender === this._dep1) {
-            this._flag |= Flag._RDEP1;
+    if (!(flag & FLAG_SETUP)) {
+        if (!(flag & FLAG_RDEP1) && sender === this._dep1) {
+            this._flag |= FLAG_RDEP1;
             return value;
         }
-        if (!(flag & Flag._RDEP2) && sender === this._dep2) {
-            this._flag |= Flag._RDEP2;
+        if (!(flag & FLAG_RDEP2) && sender === this._dep2) {
+            this._flag |= FLAG_RDEP2;
             return value;
         }
         if (this._deps !== null && this._dephead < this._deptail && sender === this._deps[this._dephead * 2]) {
@@ -345,10 +293,10 @@ function _proto_read(sender) {
  * @returns {!Compute<V,T,null,W>}
  */
 function _proto_derive(fn, seed, opts, args) {
-    let _flag = Flag._BOUND | Flag._STABLE | ((0 | opts) & OPTIONS);
+    let _flag = FLAG_BOUND | FLAG_STABLE | ((0 | opts) & OPTIONS);
     let node = new Compute(_flag, fn, this, null, seed, args);
     node._dep1slot = subscribe(this, node, 0);
-    if (!(_flag & Flag._DEFER)) {
+    if (!(_flag & FLAG_DEFER)) {
         startCompute(node);
     }
     return node;
@@ -363,10 +311,10 @@ function _proto_derive(fn, seed, opts, args) {
  * @returns {!Effect<T,null,W>}
  */
 function _proto_watch(fn, opts, args) {
-    let _flag = Flag._BOUND | Flag._STABLE | ((0 | opts) & OPTIONS);
+    let _flag = FLAG_BOUND | FLAG_STABLE | ((0 | opts) & OPTIONS);
     let node = new Effect(_flag, fn, this, null, args);
     node._dep1slot = subscribe(this, node, 0);
-    if (!(_flag & Flag._DEFER)) {
+    if (!(_flag & FLAG_DEFER)) {
         startEffect(node);
     }
     return node;
@@ -381,7 +329,7 @@ function Root() {
      * @protected
      * @type {number}
      */
-    this._flag = Flag._SCOPE;
+    this._flag = FLAG_SCOPE;
     /**
      * @protected
      * @type {(function(): void) | Array<(function(): void)> | null}
@@ -422,7 +370,7 @@ var RootProto = Root.prototype;
  * @const
  * @type {number}
  */
-RootProto.t = Type._ROOT;
+RootProto.t = TYPE_ROOT;
 
 /**
  * @public
@@ -453,8 +401,8 @@ RootProto.recover = function (fn) { addRecover(this, fn); };
  * @returns {void}
  */
 RootProto._dispose = function () {
-    if (!(this._flag & Flag._DISPOSED)) {
-        this._flag |= Flag._DISPOSED;
+    if (!(this._flag & FLAG_DISPOSED)) {
+        this._flag |= FLAG_DISPOSED;
         clearOwned(this);
         this._cleanup =
             this._owned =
@@ -470,9 +418,9 @@ RootProto._dispose = function () {
 function startRoot(root, fn) {
     let state = CLOCK._state;
     let scope = CLOCK._scope;
-    CLOCK._state &= (RESET | State._IDLE);
+    CLOCK._state &= (RESET | STATE_IDLE);
     CLOCK._scope = root;
-    CLOCK._state |= State._OWNER;
+    CLOCK._state |= STATE_OWNER;
     try {
         let cleanup = fn(root);
         if (typeof cleanup === 'function') {
@@ -537,7 +485,7 @@ function Signal(value, opts) {
      * @const
      * @type {number}
      */
-    SignalProto.t = Type._SIGNAL;
+    SignalProto.t = TYPE_SIGNAL;
 
     /**
      * @public
@@ -557,26 +505,17 @@ function Signal(value, opts) {
     /**
      * @public
      * @this {!Signal<T>}
-     * @returns {T}
-     */
-    SignalProto.peek = function () {
-        return this._value;
-    };
-
-    /**
-     * @public
-     * @this {!Signal<T>}
      * @param {T} value
      * @returns {void}
      */
     SignalProto.set = function (value) {
         if (this._value !== value) {
-            if (CLOCK._state & State._IDLE) {
+            if (CLOCK._state & STATE_IDLE) {
                 this._value = value;
                 notify(this);
             } else {
-                this._flag |= Flag._STALE;
-                scheduleSignal(this, Op.Value, value);
+                this._flag |= FLAG_STALE;
+                scheduleSignal(this, OP_VALUE, value);
             }
         }
     };
@@ -608,7 +547,7 @@ function Signal(value, opts) {
      * @returns {void}
      */
     SignalProto._dispose = function () {
-        if (!(this._flag & Flag._DISPOSED)) {
+        if (!(this._flag & FLAG_DISPOSED)) {
             clearSubs(this);
             this._value = null;
         }
@@ -631,7 +570,7 @@ function Compute(opts, fn, dep1, dep2, seed, args) {
      * @protected
      * @type {number}
      */
-    this._flag = Flag._STALE | opts;
+    this._flag = FLAG_STALE | opts;
     /**
      * @protected
      * @type {T}
@@ -703,7 +642,7 @@ function Compute(opts, fn, dep1, dep2, seed, args) {
      * @type {number}
      */
     this._deptail = 0;
-    if (CLOCK._state & State._OWNER) {
+    if (CLOCK._state & STATE_OWNER) {
         addOwned(CLOCK._scope, this);
     }
 }
@@ -716,7 +655,7 @@ function Compute(opts, fn, dep1, dep2, seed, args) {
      * @const
      * @type {number}
      */
-    ComputeProto.t = Type._COMPUTE;
+    ComputeProto.t = TYPE_COMPUTE;
 
     /**
      * @const
@@ -751,48 +690,38 @@ function Compute(opts, fn, dep1, dep2, seed, args) {
      * @this {!Compute<T,U,V,W>}
      * @returns {T}
      */
-    ComputeProto.peek = function () {
+    ComputeProto.val = function () {
         let clock = CLOCK;
         let time = clock._time;
         let state = clock._state;
         let opts = this._flag;
-        if (opts & Flag._ERROR) {
+        if (opts & FLAG_ERROR) {
             throw this._value;
         }
-        if (opts & Flag._RUNNING) {
+        if (opts & FLAG_RUNNING) {
             throw new Error('Circular dependency');
         }
-        if (opts & Flag._STALE) {
-            if (state & State._IDLE) {
+        if (opts & FLAG_STALE) {
+            if (state & STATE_IDLE) {
                 try {
                     runCompute(this, time);
                     if (clock._signals > 0 || clock._disposes > 0) {
                         start(clock);
                     }
                 } finally {
-                    clock._state = State._IDLE;
+                    clock._state = STATE_IDLE;
                 }
             } else {
                 runCompute(this, time);
             }
         } else if (
-            (opts & Flag._PENDING) &&
-            (state & State._COMPUTE) &&
+            (opts & FLAG_PENDING) &&
+            (state & STATE_COMPUTE) &&
             this._ptime === time
         ) {
             refresh(this, time);
         }
         return this._value;
-    };
-
-    /**
-     * @public
-     * @throws
-     * @this {!Compute<T,U,V,W>}
-     * @returns {T}
-     */
-    ComputeProto.val = function () {
-        return this.peek();
     };
 
     /**
@@ -809,14 +738,14 @@ function Compute(opts, fn, dep1, dep2, seed, args) {
      * @this {!Compute}
      * @returns {void}
      */
-    ComputeProto.stable = function () { this._flag |= Flag._STABLE; };
+    ComputeProto.stable = function () { this._flag |= FLAG_STABLE; };
 
     /**
      * @public
      * @this {!Compute}
      * @returns {void}
      */
-    ComputeProto.equal = function () { this._flag |= Flag._EQUAL; };
+    ComputeProto.equal = function () { this._flag |= FLAG_EQUAL; };
 
     /**
      * @template V,W
@@ -845,8 +774,8 @@ function Compute(opts, fn, dep1, dep2, seed, args) {
      * @returns {void}
      */
     ComputeProto._dispose = function () {
-        if (!(this._flag & Flag._DISPOSED)) {
-            this._flag |= Flag._DISPOSED;
+        if (!(this._flag & FLAG_DISPOSED)) {
+            this._flag |= FLAG_DISPOSED;
             clearSubs(this);
             clearDeps(this);
             this._fn =
@@ -867,12 +796,12 @@ function Compute(opts, fn, dep1, dep2, seed, args) {
         if (this._ptime < time) {
             this._ptime = time;
             // Have not been marked as PENDING this cycle
-            this._flag |= Flag._STALE;
-            if (this._flag & Flag._TRACKED) {
+            this._flag |= FLAG_STALE;
+            if (this._flag & FLAG_TRACKED) {
                 notifyPending(this, time);
             }
         } else {
-            this._flag = (this._flag | Flag._STALE) & ~Flag._PENDING;
+            this._flag = (this._flag | FLAG_STALE) & ~FLAG_PENDING;
         }
     };
 }
@@ -907,16 +836,16 @@ function runCompute(node, time) {
     /** @type {T} */
     let value;
     let state = CLOCK._state;
-    node._flag = (opts | Flag._RUNNING) & ~(Flag._EQUAL | Flag._RDEP1 | Flag._RDEP2);
+    node._flag = (opts | FLAG_RUNNING) & ~(FLAG_EQUAL | FLAG_RDEP1 | FLAG_RDEP2);
     CLOCK._state &= RESET;
     try {
         let fn = node._fn;
         let args = node._args;
-        if (opts & Flag._BOUND) {
+        if (opts & FLAG_BOUND) {
             let dep1 = node._dep1;
             let dep2 = node._dep2;
-            if (opts & Flag._SETUP) {
-                node._flag &= ~Flag._SETUP;
+            if (opts & FLAG_SETUP) {
+                node._flag &= ~FLAG_SETUP;
                 let version = ++CLOCK._version;
                 node._version = version;
                 dep1._version = version;
@@ -924,57 +853,57 @@ function runCompute(node, time) {
                     dep2._version = version;
                 }
             }
-            if (opts & Flag._LIST) {
-                value = fn(node, dep1.peek(), value, args, opts, dep1._mod);
+            if (opts & FLAG_LIST) {
+                value = fn(node, dep1.val(), value, args, opts, dep1._mod);
             } else if (dep2 === null) {
-                value = fn(node, dep1.peek(), value, args);
+                value = fn(node, dep1.val(), value, args);
             } else {
-                value = fn(node, dep1.peek(), dep2.peek(), value, args);
+                value = fn(node, dep1.val(), dep2.val(), value, args);
             }
         } else {
-            if ((opts & (Flag._STABLE | Flag._SETUP)) === Flag._STABLE) {
+            if ((opts & (FLAG_STABLE | FLAG_SETUP)) === FLAG_STABLE) {
                 value = fn(node, value);
             } else {
                 node._version = ++CLOCK._version;
-                if (opts & Flag._SETUP) {
-                    node._flag &= ~Flag._SETUP;
+                if (opts & FLAG_SETUP) {
+                    node._flag &= ~FLAG_SETUP;
                     value = fn(node, value, args);
                 } else {
                     node._dephead = 0;
                     node._deptail = node._deps !== null ? node._deps.length / 2 : 0;
                     let innerState = (
-                        (node._dep1 !== null ? Flag._RDEP1 : 0) |
-                        (node._dep2 !== null ? Flag._RDEP2 : 0)
+                        (node._dep1 !== null ? FLAG_RDEP1 : 0) |
+                        (node._dep2 !== null ? FLAG_RDEP2 : 0)
                     );
                     value = fn(node, value, args);
                     let newlen = node._deps !== null ? node._deps.length / 2 : 0;
-                    pruneDeps(node, node._dephead, node._deptail, newlen, innerState, (node._flag & (Flag._RDEP1 | Flag._RDEP2)));
+                    pruneDeps(node, node._dephead, node._deptail, newlen, innerState, (node._flag & (FLAG_RDEP1 | FLAG_RDEP2)));
                 }
             }
         }
-        node._flag &= ~Flag._ERROR;
+        node._flag &= ~FLAG_ERROR;
     } catch (err) {
         value = err;
-        node._flag |= Flag._ERROR;
+        node._flag |= FLAG_ERROR;
     } finally {
         CLOCK._state = state;
-        opts = node._flag &= ~(Flag._RUNNING | Flag._STALE);
+        opts = node._flag &= ~(FLAG_RUNNING | FLAG_STALE);
     }
-    if (opts & Flag._ERROR) {
+    if (opts & FLAG_ERROR) {
         node._value = value;
         notifyStale(node, time);
     } else {
         let asyncType = isAsync(value);
-        if (asyncType === AsyncType.NotAsync) {
+        if (asyncType === ASYNC_NOT_ASYNC) {
             if (value !== node._value) {
                 node._value = value;
-                if (!(opts & Flag._EQUAL)) {
+                if (!(opts & FLAG_EQUAL)) {
                     notifyStale(node, time);
                 }
             }
         } else {
-            node._flag |= Flag._LOADING;
-            if (asyncType === AsyncType.Promise) {
+            node._flag |= FLAG_LOADING;
+            if (asyncType === ASYNC_PROMISE) {
                 resolvePromise(new WeakRef(node), /** @type {IThenable<T>} */(value), time);
             } else {
                 resolveIterator(new WeakRef(node), /** @type {AsyncIterator<T> | AsyncIterable<T>} */(value), time);
@@ -993,14 +922,14 @@ function runCompute(node, time) {
 function resolvePromise(ref, promise, time) {
     promise.then((val) => {
         let node = ref.deref();
-        if (node !== void 0 && !(node._flag & Flag._DISPOSED) && node._time === time) {
-            node._flag &= ~Flag._ERROR;
+        if (node !== void 0 && !(node._flag & FLAG_DISPOSED) && node._time === time) {
+            node._flag &= ~FLAG_ERROR;
             settle(node, val);
         }
     }, (err) => {
         let node = ref.deref();
-        if (node !== void 0 && !(node._flag & Flag._DISPOSED) && node._time === time) {
-            node._flag |= Flag._ERROR;
+        if (node !== void 0 && !(node._flag & FLAG_DISPOSED) && node._time === time) {
+            node._flag |= FLAG_ERROR;
             settle(node, err);
         }
     });
@@ -1023,7 +952,7 @@ function resolveIterator(ref, iterable, time) {
     let onNext = (result) => {
         let node = ref.deref();
 
-        if (node === void 0 || (node._flag & Flag._DISPOSED) || node._time !== time) {
+        if (node === void 0 || (node._flag & FLAG_DISPOSED) || node._time !== time) {
             // If the iterator has a return method, call it to allow cleanup
             if (typeof iterator.return === 'function') {
                 iterator.return();
@@ -1037,15 +966,15 @@ function resolveIterator(ref, iterable, time) {
 
         iterator.next().then(onNext, onError);
 
-        node._flag &= ~Flag._ERROR;
+        node._flag &= ~FLAG_ERROR;
         settle(node, result.value);
     };
 
     /** @param {*} err */
     let onError = (err) => {
         let node = ref.deref();
-        if (node !== void 0 && !(node._flag & Flag._DISPOSED) && node._time === time) {
-            node._flag |= Flag._ERROR;
+        if (node !== void 0 && !(node._flag & FLAG_DISPOSED) && node._time === time) {
+            node._flag |= FLAG_ERROR;
             settle(node, err);
         }
     };
@@ -1062,10 +991,10 @@ function resolveIterator(ref, iterable, time) {
  */
 function settle(node, value) {
     // 2. Clear the loading flag (and any previous error flags)
-    node._flag &= ~Flag._LOADING;
+    node._flag &= ~FLAG_LOADING;
 
     // 3. Settle value and trigger graph if changed (or if it's an error)
-    if (value !== node._value || (node._flag & Flag._ERROR)) {
+    if (value !== node._value || (node._flag & FLAG_ERROR)) {
         node._value = value;
         if (unbound(node)) {
             node._fn = node._args = null;
@@ -1081,28 +1010,28 @@ function settle(node, value) {
  * @returns {void}
  */
 function refresh(node, time) {
-    node._flag |= Flag._RUNNING;
+    node._flag |= FLAG_RUNNING;
     try {
         let dep = /** @type {Compute} */(node._dep1);
-        if (dep !== null && (dep.t === Type._COMPUTE) && (dep._flag & (Flag._STALE | Flag._PENDING))) {
-            if (dep._flag & Flag._STALE) {
+        if (dep !== null && (dep.t === TYPE_COMPUTE) && (dep._flag & (FLAG_STALE | FLAG_PENDING))) {
+            if (dep._flag & FLAG_STALE) {
                 runCompute(dep, time);
             } else if (dep._ptime === time) {
                 refresh(dep, time);
             }
-            if (node._flag & Flag._STALE) {
+            if (node._flag & FLAG_STALE) {
                 runCompute(node, time);
                 return;
             }
         }
         dep = /** @type {Compute} */(node._dep2);
-        if (dep !== null && (dep.t === Type._COMPUTE) && (dep._flag & (Flag._STALE | Flag._PENDING))) {
-            if (dep._flag & Flag._STALE) {
+        if (dep !== null && (dep.t === TYPE_COMPUTE) && (dep._flag & (FLAG_STALE | FLAG_PENDING))) {
+            if (dep._flag & FLAG_STALE) {
                 runCompute(dep, time);
             } else if (dep._ptime === time) {
                 refresh(dep, time);
             }
-            if (node._flag & Flag._STALE) {
+            if (node._flag & FLAG_STALE) {
                 runCompute(node, time);
                 return;
             }
@@ -1112,13 +1041,13 @@ function refresh(node, time) {
             let len = deps.length;
             for (let i = 0; i < len; i += 2) {
                 dep = /** @type {Compute} */(deps[i]);
-                if ((dep.t === Type._COMPUTE) && (dep._flag & (Flag._STALE | Flag._PENDING))) {
-                    if (dep._flag & Flag._STALE) {
+                if ((dep.t === TYPE_COMPUTE) && (dep._flag & (FLAG_STALE | FLAG_PENDING))) {
+                    if (dep._flag & FLAG_STALE) {
                         runCompute(dep, time);
                     } else if (dep._ptime === time) {
                         refresh(dep, time);
                     }
-                    if (node._flag & Flag._STALE) {
+                    if (node._flag & FLAG_STALE) {
                         runCompute(node, time);
                         return;
                     }
@@ -1126,7 +1055,7 @@ function refresh(node, time) {
             }
         }
     } finally {
-        node._flag &= ~(Flag._PENDING | Flag._RUNNING);
+        node._flag &= ~(FLAG_PENDING | FLAG_RUNNING);
     }
 }
 
@@ -1227,7 +1156,7 @@ function Effect(opts, fn, dep1, dep2, args) {
      * @type {number}
      */
     this._rslot = 0;
-    if (CLOCK._state & State._OWNER) {
+    if (CLOCK._state & STATE_OWNER) {
         this._owner = CLOCK._scope;
         addOwned(CLOCK._scope, this);
     }
@@ -1241,7 +1170,7 @@ function Effect(opts, fn, dep1, dep2, args) {
      * @const
      * @type {number}
      */
-    EffectProto.t = Type._EFFECT;
+    EffectProto.t = TYPE_EFFECT;
 
     /**
      * @public
@@ -1296,8 +1225,8 @@ function Effect(opts, fn, dep1, dep2, args) {
      */
     EffectProto._dispose = function () {
         let opts = this._flag;
-        if (!(opts & Flag._DISPOSED)) {
-            this._flag |= Flag._DISPOSED;
+        if (!(opts & FLAG_DISPOSED)) {
+            this._flag |= FLAG_DISPOSED;
             clearOwned(this);
             clearDeps(this);
             this._fn =
@@ -1317,8 +1246,8 @@ function Effect(opts, fn, dep1, dep2, args) {
      */
     EffectProto._setStale = function (time) {
         this._time = time;
-        this._flag |= Flag._STALE;
-        if (this._flag & Flag._SCOPE) {
+        this._flag |= FLAG_STALE;
+        if (this._flag & FLAG_SCOPE) {
             let level = this._level;
             let count = SCOPE_LEVELS[level];
             SCOPE_QUEUE[level][count] = this;
@@ -1371,9 +1300,9 @@ function startEffect(node) {
  */
 function runEffect(node) {
     let opts = node._flag;
-    if (opts & Flag._SETUP) {
-        node._flag &= ~Flag._SETUP;
-    } else if ((opts & Flag._SCOPE) || node._cslot > 0) {
+    if (opts & FLAG_SETUP) {
+        node._flag &= ~FLAG_SETUP;
+    } else if ((opts & FLAG_SCOPE) || node._cslot > 0) {
         clearOwned(node);
     }
     /** @type {(function(): void) | null | undefined} */
@@ -1382,43 +1311,43 @@ function runEffect(node) {
     let args = node._args;
     let state = CLOCK._state;
     let scope = CLOCK._scope;
-    node._flag = (node._flag | Flag._RUNNING) & ~(Flag._RDEP1 | Flag._RDEP2);
+    node._flag = (node._flag | FLAG_RUNNING) & ~(FLAG_RDEP1 | FLAG_RDEP2);
     CLOCK._state &= RESET;
-    if (opts & Flag._SCOPE) {
+    if (opts & FLAG_SCOPE) {
         CLOCK._scope = node;
-        CLOCK._state |= State._OWNER | State._SCOPE;
+        CLOCK._state |= STATE_OWNER | STATE_SCOPE;
     }
-    if (opts & Flag._BOUND) {
+    if (opts & FLAG_BOUND) {
         let dep1 = node._dep1;
         let dep2 = node._dep2;
         if (dep2 === null) {
-            value = fn(node, dep1.peek(), args);
+            value = fn(node, dep1.val(), args);
         } else {
-            value = fn(node, dep1.peek(), dep2.peek(), args);
+            value = fn(node, dep1.val(), dep2.val(), args);
         }
     } else {
-        if ((opts & (Flag._STABLE | Flag._SETUP)) === Flag._STABLE) {
+        if ((opts & (FLAG_STABLE | FLAG_SETUP)) === FLAG_STABLE) {
             value = fn(node, args);
         } else {
             node._version = ++CLOCK._version;
-            if (opts & Flag._SETUP) {
+            if (opts & FLAG_SETUP) {
                 value = fn(node, args);
             } else {
                 node._dephead = 0;
                 node._deptail = node._deps !== null ? node._deps.length / 2 : 0;
                 let innerState = (
-                    (node._dep1 !== null ? Flag._RDEP1 : 0) |
-                    (node._dep2 !== null ? Flag._RDEP2 : 0)
+                    (node._dep1 !== null ? FLAG_RDEP1 : 0) |
+                    (node._dep2 !== null ? FLAG_RDEP2 : 0)
                 );
                 value = fn(node, args);
                 let newtail = node._deps !== null ? node._deps.length / 2 : 0;
-                pruneDeps(node, node._dephead, node._deptail, newtail, innerState, (node._flag & (Flag._RDEP1 | Flag._RDEP2)));
+                pruneDeps(node, node._dephead, node._deptail, newtail, innerState, (node._flag & (FLAG_RDEP1 | FLAG_RDEP2)));
             }
         }
     }
     CLOCK._state = state;
     CLOCK._scope = scope;
-    node._flag &= ~(Flag._RUNNING | Flag._STALE);
+    node._flag &= ~(FLAG_RUNNING | FLAG_STALE);
     if (typeof value === 'function') {
         addCleanup(node, value);
     }
@@ -1474,7 +1403,7 @@ function addRecover(node, fn) {
             /** @type {Array<function(*): boolean>} */(node._recover)[count - 2] = fn;
             node._rslot = count + 1;
     }
-    node._flag |= Flag._RECOVER;
+    node._flag |= FLAG_RECOVER;
 }
 
 /**
@@ -1530,7 +1459,7 @@ function start(clock) {
     let error = null;
     /** @type {boolean} */
     let thrown = false;
-    clock._state = State._START;
+    clock._state = STATE_START;
     try {
         do {
             time = ++clock._time;
@@ -1553,14 +1482,14 @@ function start(clock) {
                     /** @type {*} */
                     let payload = signals[i * 2 + 1];
                     switch (ops[i]) {
-                        case Op.Value:
+                        case OP_VALUE:
                             signal._value = payload;
                             break;
-                        case Op.Callback:
+                        case OP_CALLBACK:
                             break;
                     }
-                    if (signal._flag & Flag._STALE) {
-                        signal._flag &= ~Flag._STALE;
+                    if (signal._flag & FLAG_STALE) {
+                        signal._flag &= ~FLAG_STALE;
                         notifyStale(signal, time);
                     }
                     signals[i * 2] =
@@ -1571,18 +1500,18 @@ function start(clock) {
             if (clock._computes > 0) {
                 let i = 0;
                 let computes = COMPUTE_QUEUE;
-                clock._state |= State._COMPUTE;
+                clock._state |= STATE_COMPUTE;
                 while (i < clock._computes) {
                     let count = clock._computes;
                     for (; i < count; i++) {
                         let node = computes[i];
-                        if (node._flag & Flag._STALE) {
+                        if (node._flag & FLAG_STALE) {
                             runCompute(node, time);
                         }
                         computes[i] = null;
                     }
                 }
-                clock._state &= ~State._COMPUTE;
+                clock._state &= ~STATE_COMPUTE;
                 clock._computes = 0;
             }
             if (clock._signals > 0 || clock._disposes > 0) {
@@ -1603,11 +1532,11 @@ function start(clock) {
                     let count = levels[i];
                     for (let j = 0; j < count; j++) {
                         let node = effects[j];
-                        if (node._flag & Flag._STALE) {
+                        if (node._flag & FLAG_STALE) {
                             try {
                                 runEffect(node);
                             } catch (err) {
-                                clock._state = State._START;
+                                clock._state = STATE_START;
                                 let recovered = tryRecover(node, err);
                                 node._dispose();
                                 if (!recovered && !thrown) {
@@ -1629,11 +1558,11 @@ function start(clock) {
                 let effects = EFFECT_QUEUE;
                 for (let i = 0; i < count; i++) {
                     let node = effects[i];
-                    if (node._flag & Flag._STALE) {
+                    if (node._flag & FLAG_STALE) {
                         try {
                             runEffect(node);
                         } catch (err) {
-                            clock._state = State._START;
+                            clock._state = STATE_START;
                             let recovered = tryRecover(node, err);
                             node._dispose();
                             if (!recovered && !thrown) {
@@ -1658,7 +1587,7 @@ function start(clock) {
             clock._disposes > 0
         );
     } finally {
-        clock._state = State._IDLE;
+        clock._state = STATE_IDLE;
         if (clock._scopes > 0) {
             let min = clock._minlevel;
             let max = clock._maxlevel;
@@ -1699,8 +1628,8 @@ function subscribe(send, receive, depslot) {
         subslot = (send._subs.length / 2) + 1;
         send._subs.push(receive, depslot);
     }
-    if (!(send._flag & Flag._TRACKED) && (receive.t === Type._COMPUTE)) {
-        send._flag |= Flag._TRACKED;
+    if (!(send._flag & FLAG_TRACKED) && (receive.t === TYPE_COMPUTE)) {
+        send._flag |= FLAG_TRACKED;
     }
     return subslot;
 }
@@ -1760,7 +1689,7 @@ function clearSender(receive, slot) {
         }
     }
     if (receive._dep1 === null && receive._dep2 === null && (receive._deps === null || receive._deps.length === 0)) {
-        if (receive.t === Type._EFFECT) {
+        if (receive.t === TYPE_EFFECT) {
             // todo
         } else {
             /** @type {Compute} */(receive)._fn = null;
@@ -1819,7 +1748,7 @@ function clearSubs(send) {
  * @returns {void} 
  */
 function clearOwned(owner) {
-    if (owner._flag & Flag._SCOPE) {
+    if (owner._flag & FLAG_SCOPE) {
         let owned = owner._owned;
         if (owned !== null) {
             let len = owner._oslot;
@@ -1859,7 +1788,7 @@ function clearOwned(owner) {
             }
             owner._rslot = 2;
         }
-        owner._flag &= ~Flag._RECOVER;
+        owner._flag &= ~FLAG_RECOVER;
     }
 }
 
@@ -1872,7 +1801,7 @@ function clearOwned(owner) {
 function tryRecover(node, error) {
     let owner = node._owner;
     while (owner !== null) {
-        if (owner._flag & Flag._RECOVER) {
+        if (owner._flag & FLAG_RECOVER) {
             let count = owner._rslot;
             if (count === 1) {
                 if (/** @type {function(*): boolean} */(owner._recover)(error) === true) {
@@ -1942,8 +1871,8 @@ function pruneDeps(node, head, tail, newtail, state, newstate) {
     }
 
     // dep1
-    if (state & Flag._RDEP1) {
-        if (!(newstate & Flag._RDEP1)) {
+    if (state & FLAG_RDEP1) {
+        if (!(newstate & FLAG_RDEP1)) {
             clearReceiver(node._dep1, node._dep1slot);
             node._dep1 = null;
         }
@@ -1951,8 +1880,8 @@ function pruneDeps(node, head, tail, newtail, state, newstate) {
     }
 
     // dep2
-    if (state & Flag._RDEP2) {
-        if (!(newstate & Flag._RDEP2)) {
+    if (state & FLAG_RDEP2) {
+        if (!(newstate & FLAG_RDEP2)) {
             clearReceiver(node._dep2, node._dep2slot);
             node._dep2 = null;
         }
@@ -2081,10 +2010,10 @@ function pruneDeps(node, head, tail, newtail, state, newstate) {
  */
 function notifyPending(send, time) {
     let sub = /** @type {Compute} */(send._sub1);
-    if (sub !== null && (sub.t === Type._COMPUTE) && sub._ptime < time) {
+    if (sub !== null && (sub.t === TYPE_COMPUTE) && sub._ptime < time) {
         sub._ptime = time;
-        sub._flag |= Flag._PENDING;
-        if (sub._flag & Flag._TRACKED) {
+        sub._flag |= FLAG_PENDING;
+        if (sub._flag & FLAG_TRACKED) {
             notifyPending(sub, time);
         }
     }
@@ -2093,10 +2022,10 @@ function notifyPending(send, time) {
         let len = subs.length;
         for (let i = 0; i < len; i += 2) {
             sub = /** @type {Compute} */(subs[i]);
-            if ((sub.t === Type._COMPUTE) && sub._ptime < time) {
+            if ((sub.t === TYPE_COMPUTE) && sub._ptime < time) {
                 sub._ptime = time;
-                sub._flag |= Flag._PENDING;
-                if (sub._flag & Flag._TRACKED) {
+                sub._flag |= FLAG_PENDING;
+                if (sub._flag & FLAG_TRACKED) {
                     notifyPending(sub, time);
                 }
             }
@@ -2156,7 +2085,7 @@ function signal(value) {
  * @returns {Compute<T,W>}
  */
 function compute(fn, seed, opts, args) {
-    let _flag = Flag._SETUP | ((0 | opts) & OPTIONS);
+    let _flag = FLAG_SETUP | ((0 | opts) & OPTIONS);
     let node = new Compute(_flag, fn, null, null, seed, args);
     startCompute(node);
     return node;
@@ -2170,7 +2099,7 @@ function compute(fn, seed, opts, args) {
  * @returns {Effect<null,null,W>}
  */
 function effect(fn, opts, args) {
-    let _flag = Flag._SETUP | ((0 | opts) & OPTIONS);
+    let _flag = FLAG_SETUP | ((0 | opts) & OPTIONS);
     let node = new Effect(_flag, fn, null, null, args);
     startEffect(node);
     return node;
@@ -2182,10 +2111,10 @@ function effect(fn, opts, args) {
  * @returns {Effect}
  */
 function scope(fn, opts) {
-    let _flag = Flag._SETUP | Flag._SCOPE | ((0 | opts) & OPTIONS);
+    let _flag = FLAG_SETUP | FLAG_SCOPE | ((0 | opts) & OPTIONS);
     let node = new Effect(_flag, fn, null, null);
     let state = CLOCK._state;
-    if (state & State._SCOPE) {
+    if (state & STATE_SCOPE) {
         setScope(node, CLOCK._scope);
     }
     startEffect(node);
@@ -2198,13 +2127,13 @@ function scope(fn, opts) {
  */
 function batch(fn) {
     let clock = CLOCK;
-    if (clock._state & State._IDLE) {
-        clock._state = State._START;
+    if (clock._state & STATE_IDLE) {
+        clock._state = STATE_START;
         try {
             fn();
             start(clock);
         } finally {
-            clock._state = State._IDLE;
+            clock._state = STATE_IDLE;
         }
     } else {
         fn();
@@ -2213,21 +2142,27 @@ function batch(fn) {
 
 export {
     CLOCK,
-    State,
-    Flag,
-    Op,
-    Mut,
-    AsyncType,
-    RESET,
-    OPTIONS,
+    STATE_START, STATE_IDLE, STATE_COMPUTE, STATE_OWNER, STATE_SCOPE,
+    FLAG_DEFER, FLAG_STABLE, FLAG_SETUP, FLAG_STALE, FLAG_PENDING,
+    FLAG_RUNNING, FLAG_DISPOSED, FLAG_LOADING, FLAG_ERROR, FLAG_RECOVER,
+    FLAG_BOUND, FLAG_TRACKED, FLAG_SCOPE, FLAG_EQUAL, FLAG_WEAK,
+    FLAG_LIST, FLAG_RDEP1, FLAG_RDEP2,
+    OP_VALUE, OP_CALLBACK, OP_COPY_WITHIN, OP_FILL, OP_FILL_RANGE,
+    OP_POP, OP_PUSH, OP_PUSH_ARRAY, OP_REVERSE, OP_SHIFT,
+    OP_SORT, OP_SPLICE, OP_UNSHIFT, OP_UNSHIFT_ARRAY,
+    MUT_COMPUTE, MUT_BITSUB, MUT_ADD, MUT_DEL, MUT_SORT,
+    MUT_OP_MASK, MUT_LEN_SHIFT, MUT_LEN_MASK, MUT_POS_SHIFT, MUT_POS_MASK,
+    ASYNC_NOT_ASYNC, ASYNC_PROMISE, ASYNC_ITERABLE,
+    OPT_DEFER, OPT_STABLE, OPT_SETUP, OPT_WEAK,
+    TYPE_ROOT, TYPE_SIGNAL, TYPE_COMPUTE, TYPE_EFFECT,
+    TYPEFLAG_MASK, TYPEFLAG_SEND, TYPEFLAG_RECEIVE, TYPEFLAG_OWNER,
+    RESET, OPTIONS,
     notify,
     scheduleSignal,
     subscribe,
 }
 
 export {
-    Opt,
-    Type,
     Root,
     Signal,
     Compute,

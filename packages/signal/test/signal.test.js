@@ -41,13 +41,13 @@ describe("signal", () => {
         expect(c1.val()).toBe(2); // "Compute count should increment"
     });
 
-    describe("peek", () => {
+    describe("val", () => {
         test("returns the value of a signal", () => {
             const s1 = signal(1);
-            expect(s1.peek()).toBe(1); // "Peek should return current value"
+            expect(s1.val()).toBe(1); // "val should return current value"
         });
 
-        test("avoids tracking a dependency", () => {
+        test("does not track a dependency", () => {
             const s1 = signal(1);
             const s2 = signal(2);
             const s3 = signal(3);
@@ -56,7 +56,7 @@ describe("signal", () => {
             const c1 = compute((c) => {
                 count++;
                 c.read(s1);
-                s2.peek(); // Should not track
+                s2.val(); // Should not track
                 c.read(s3);
             });
 

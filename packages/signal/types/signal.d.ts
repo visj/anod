@@ -63,7 +63,6 @@ export interface IReader extends IReceiver {
 export interface IReadonlySignal<T, TYPE extends number = number> extends IDispose<TYPE> {
     val(): T;
 
-    peek(): T;
 
     derive<U>(
         fn: (c: IReceiver, src: T, prev: Resolve<U>) => U,
@@ -177,7 +176,6 @@ export declare class Signal<T> implements ISignal<T> {
     readonly t: Type.SIGNAL;
     constructor(value: T, opts?: number);
     val(): T;
-    peek(): T;
     set(value: T): void;
     dispose(): void;
 }
@@ -193,7 +191,6 @@ export declare class Compute<T, U = any, V = any, W = any> implements ICompute<T
 
     read<R>(signal: IReadonlySignal<R, any>): R;
     val(): T;
-    peek(): T;
     dispose(): void;
     error(): boolean;
     loading(): boolean;

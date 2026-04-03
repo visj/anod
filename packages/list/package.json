@@ -1,11 +1,18 @@
 {
   "name": "@anod/list",
   "version": "0.5.0",
-  "main": "index.js",
   "type": "module",
+  "main": "./dist/index.mjs",
+  "exports": {
+    ".": {
+      "import": "./dist/index.mjs"
+    },
+    "./src": {
+      "import": "./src/list.js"
+    }
+  },
   "scripts": {
-    "bundle": "bun scripts/lib.js",
-    "bundle:test": "bun scripts/test.js",
+    "make": "bun scripts/build.js",
     "test": "bun test/index.js",
     "test:min": "bun dist/test.min.js"
   },
@@ -13,15 +20,15 @@
   "author": "Vilhelm Sjölund",
   "license": "MIT",
   "description": "",
+  "dependencies": {
+    "@anod/signal": "file:../signal"
+  },
   "devDependencies": {
     "@ampproject/remapping": "^2.3.0",
     "@preact/signals": "^2.8.1",
     "@preact/signals-core": "^1.13.0",
-    "@rollup/plugin-terser": "^1.0.0",
-    "google-closure-compiler": "^20260225.0.0",
-    "magic-string": "^0.30.21",
     "mitata": "^1.0.34",
-    "rollup": "^4.59.0",
+    "rolldown": "^1.0.0-rc.9",
     "terser": "^5.0.0"
   }
 }
