@@ -21,16 +21,21 @@ function register(fn) {
     return index | OP_CALLBACK;
 }
 
-/** @const {number} */ const MUT_COMPUTE = 1;
-/** @const {number} */ const MUT_BITSUB = 2;
-/** @const {number} */ const MUT_ADD = 4;
-/** @const {number} */ const MUT_DEL = 8;
-/** @const {number} */ const MUT_SORT = 16;
-/** @const {number} */ const MUT_OP_MASK = 15;
-/** @const {number} */ const MUT_LEN_SHIFT = 4;
-/** @const {number} */ const MUT_LEN_MASK = 0x7FF;
-/** @const {number} */ const MUT_POS_SHIFT = 14;
-/** @const {number} */ const MUT_POS_MASK = 0x1FFF;
+/**
+ * Mutation tracking bit layout (32-bit unsigned via >>> 0):
+ *
+ *   Bits  0– 2 : op type   (MUT_ADD=1, MUT_DEL=2, MUT_SORT=4)
+ *   Bits  3–14 : length    (12 bits, max 4095 — affected region extent)
+ *   Bits 15–31 : position  (17 bits, max 131071 — mutation start index)
+ */
+/** @const {number} */ const MUT_ADD = 1;
+/** @const {number} */ const MUT_DEL = 2;
+/** @const {number} */ const MUT_SORT = 4;
+/** @const {number} */ const MUT_OP_MASK = 7;
+/** @const {number} */ const MUT_LEN_SHIFT = 3;
+/** @const {number} */ const MUT_LEN_MASK = 0xFFF;
+/** @const {number} */ const MUT_POS_SHIFT = 15;
+/** @const {number} */ const MUT_POS_MASK = 0x1FFFF;
 
 /** @const {number} */ const ASYNC_NOT_ASYNC = 0;
 /** @const {number} */ const ASYNC_PROMISE = 1;
@@ -51,7 +56,6 @@ function register(fn) {
 /** @const {number} */ const FLAG_TRACKED = 4096;
 /** @const {number} */ const FLAG_SCOPE = 8192;
 /** @const {number} */ const FLAG_WEAK = 16384;
-/** @const {number} */ const FLAG_LIST = 32768;
 /** @const {number} */ const FLAG_RDEP1 = 0x10000;
 /** @const {number} */ const FLAG_RDEP2 = 0x20000;
 /**
@@ -69,6 +73,12 @@ function register(fn) {
  * force notification regardless of value change".
  */
 /** @const {number} */ const FLAG_NOTEQUAL = 0x80000;
+/**
+ * Set in Compute/Effect constructors, cleared after the first
+ * runCompute/runEffect.  Lets optimization code distinguish a
+ * never-executed node from one whose previous value is valid.
+ */
+/** @const {number} */ const FLAG_INIT = 0x100000;
 
 /** @const {number} */ const OPT_DEFER = FLAG_DEFER;
 /** @const {number} */ const OPT_STABLE = FLAG_STABLE;
@@ -342,12 +352,10 @@ function watch(fn, opts, args) {
  */
 function Root() {
     /**
-     * @protected
      * @type {number}
      */
     this._flag = FLAG_SCOPE;
     /**
-     * @protected
      * @type {(function(): void) | Array<(function(): void)> | null}
      */
     this._cleanup = null;
@@ -356,12 +364,10 @@ function Root() {
      */
     this._cslot = 0;
     /**
-     * @protected
      * @type {Array<Receiver> | null}
      */
     this._owned = null;
     /**
-     * @protected
      * @type {number}
      */
     this._oslot = 0;
@@ -412,7 +418,6 @@ RootProto.cleanup = function (fn) { addCleanup(this, fn); };
 RootProto.recover = function (fn) { addRecover(this, fn); };
 
 /**
- * @protected
  * @this {!Root}
  * @returns {void}
  */
@@ -457,37 +462,30 @@ function startRoot(root, fn) {
  */
 function Signal(value, opts) {
     /**
-     * @protected
      * @type {number}
      */
     this._flag = 0 | opts;
     /**
-     * @protected
      * @type {T}
      */
     this._value = value;
     /**
-     * @protected
      * @type {number}
      */
     this._version = 0;
     /**
-     * @protected
      * @type {Receiver}
      */
     this._sub1 = null;
     /**
-     * @protected
      * @type {number}
      */
     this._sub1slot = 0;
     /**
-     * @protected
      * @type {Array<Receiver | number> | null}
      */
     this._subs = null;
     /**
-     * @protected
      * @type {number}
      */
     this._mod = 0;
@@ -558,7 +556,6 @@ function Signal(value, opts) {
     SignalProto.watch = watch;
 
     /**
-     * @protected
      * @this {!Signal<T>}
      * @returns {void}
      */
@@ -583,22 +580,18 @@ function Signal(value, opts) {
  */
 function Compute(opts, fn, dep1, dep2, seed, args) {
     /**
-     * @protected
      * @type {number}
      */
-    this._flag = FLAG_STALE | opts;
+    this._flag = FLAG_STALE | FLAG_INIT | opts;
     /**
-     * @protected
      * @type {T}
      */
     this._value = seed;
     /**
-     * @protected
      * @type {number}
      */
     this._version = 0;
     /**
-     * @protected
      * @type {Receiver}
      */
     this._sub1 = null;
@@ -607,7 +600,6 @@ function Compute(opts, fn, dep1, dep2, seed, args) {
      */
     this._sub1slot = 0;
     /**
-     * @protected
      * @type {Array<Receiver | number> | null}
      */
     this._subs = null;
@@ -620,7 +612,6 @@ function Compute(opts, fn, dep1, dep2, seed, args) {
      */
     this._dep1 = dep1;
     /**
-     * @protected
      * @type {number}
      */
     this._dep1slot = 0;
@@ -629,7 +620,6 @@ function Compute(opts, fn, dep1, dep2, seed, args) {
      */
     this._dep2 = dep2;
     /**
-     * @protected
      * @type {number}
      */
     this._dep2slot = 0;
@@ -646,7 +636,6 @@ function Compute(opts, fn, dep1, dep2, seed, args) {
      */
     this._ptime = 0;
     /**
-     * @protected
      * @type {W | undefined}
      */
     this._args = args;
@@ -796,7 +785,6 @@ function Compute(opts, fn, dep1, dep2, seed, args) {
     ComputeProto.watch = watch;
 
     /**
-     * @protected
      * @this {!Compute<T,U,V,W>}
      * @returns {void}
      */
@@ -812,7 +800,6 @@ function Compute(opts, fn, dep1, dep2, seed, args) {
     };
 
     /**
-     * @protected
      * @this {!Compute<T,U,V,W>}
      * @param {number} time
      * @returns {void} 
@@ -863,7 +850,7 @@ function startCompute(node) {
 function runCompute(node, time) {
     let opts = node._flag;
     /** @type {T} */
-    let value;
+    let value = node._value;
     let state = CLOCK._state;
     node._flag = (opts | FLAG_RUNNING) & ~(FLAG_EQUAL | FLAG_NOTEQUAL | FLAG_RDEP1 | FLAG_RDEP2);
     CLOCK._state &= RESET;
@@ -915,7 +902,7 @@ function runCompute(node, time) {
     } finally {
         CLOCK._state = state;
         opts = node._flag;
-        node._flag &= ~(FLAG_RUNNING | FLAG_STALE);
+        node._flag &= ~(FLAG_RUNNING | FLAG_STALE | FLAG_INIT);
     }
     if (opts & FLAG_ERROR) {
         node._value = value;
@@ -1101,12 +1088,10 @@ function refresh(node, time) {
  */
 function Effect(opts, fn, dep1, dep2, args) {
     /**
-     * @protected
      * @type {number}
      */
-    this._flag = 0 | opts;
+    this._flag = FLAG_INIT | (0 | opts);
     /**
-     * @protected
      * @type {(function(W): (function(): void | void)) | (function(U,W): (function(): void | void)) | (function(U,V,W): (function(): void | void)) | null}
      */
     this._fn = fn;
@@ -1115,12 +1100,10 @@ function Effect(opts, fn, dep1, dep2, args) {
      */
     this._version = 0;
     /**
-     * @protected
      * @type {Sender<U> | null}
      */
     this._dep1 = dep1;
     /**
-     * @protected
      * @type {number}
      */
     this._dep1slot = 0;
@@ -1129,7 +1112,6 @@ function Effect(opts, fn, dep1, dep2, args) {
      */
     this._dep2 = dep2;
     /**
-     * @protected
      * @type {number}
      */
     this._dep2slot = 0;
@@ -1138,7 +1120,6 @@ function Effect(opts, fn, dep1, dep2, args) {
      */
     this._deps = null;
     /**
-     * @protected
      * @type {number}
      */
     this._time = 0;
@@ -1249,7 +1230,6 @@ function Effect(opts, fn, dep1, dep2, args) {
     EffectProto.recover = function (fn) { addRecover(this, fn); };
 
     /**
-     * @protected
      * @this {!Effect<U,V,W>}
      * @returns {void}
      */
@@ -1269,7 +1249,6 @@ function Effect(opts, fn, dep1, dep2, args) {
     };
 
     /**
-     * @protected
      * @this {!Effect<U,V,W>}
      * @param {number} time
      * @returns {void} 
@@ -1376,7 +1355,7 @@ function runEffect(node) {
     }
     CLOCK._state = state;
     CLOCK._scope = scope;
-    node._flag &= ~(FLAG_RUNNING | FLAG_STALE);
+    node._flag &= ~(FLAG_RUNNING | FLAG_STALE | FLAG_INIT);
     if (typeof value === 'function') {
         addCleanup(node, value);
     }
@@ -2188,10 +2167,10 @@ export {
     FLAG_DEFER, FLAG_STABLE, FLAG_SETUP, FLAG_STALE, FLAG_PENDING,
     FLAG_RUNNING, FLAG_DISPOSED, FLAG_LOADING, FLAG_ERROR, FLAG_RECOVER,
     FLAG_BOUND, FLAG_TRACKED, FLAG_SCOPE, FLAG_NOTIFY, FLAG_EQUAL, FLAG_WEAK,
-    FLAG_LIST, FLAG_RDEP1, FLAG_RDEP2,
+    FLAG_INIT, FLAG_RDEP1, FLAG_RDEP2,
     OP_VALUE, OP_CALLBACK,
     register,
-    MUT_COMPUTE, MUT_BITSUB, MUT_ADD, MUT_DEL, MUT_SORT,
+    MUT_ADD, MUT_DEL, MUT_SORT,
     MUT_OP_MASK, MUT_LEN_SHIFT, MUT_LEN_MASK, MUT_POS_SHIFT, MUT_POS_MASK,
     ASYNC_NOT_ASYNC, ASYNC_PROMISE, ASYNC_ITERABLE,
     OPT_DEFER, OPT_STABLE, OPT_SETUP, OPT_NOTIFY, OPT_WEAK,

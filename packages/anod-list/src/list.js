@@ -5,8 +5,10 @@ import {
 
 import {
     CLOCK, STATE_IDLE,
-    FLAG_LIST, FLAG_STALE,
+    FLAG_STALE, FLAG_INIT,
     register, notify, scheduleSignal,
+    MUT_ADD, MUT_DEL, MUT_SORT,
+    MUT_OP_MASK, MUT_LEN_SHIFT, MUT_LEN_MASK, MUT_POS_SHIFT, MUT_POS_MASK,
     isPrimitive, isFunction, isSignal
 } from 'anod/internal';
 
@@ -27,29 +29,104 @@ ComputeProto.mod = function() {
  * applies the in-place array mutation, then lets the transaction loop handle
  * the stale notification.
  */
-/** @const {number} */ var OP_COPY_WITHIN = register(function (node, args) { node._value.copyWithin(args[0], args[1], args[2]); });
-/** @const {number} */ var OP_FILL = register(function (node, value) { node._value.fill(value); });
-/** @const {number} */ var OP_FILL_RANGE = register(function (node, args) { node._value.fill(args[0], args[1], args[2]); });
-/** @const {number} */ var OP_POP = register(function (node) { node._value.pop(); });
-/** @const {number} */ var OP_PUSH = register(function (node, value) { node._value.push(value); });
-/** @const {number} */ var OP_PUSH_ARRAY = register(function (node, items) { node._value.push(...items); });
-/** @const {number} */ var OP_REVERSE = register(function (node) { node._value.reverse(); });
-/** @const {number} */ var OP_SHIFT = register(function (node) { node._value.shift(); });
-/** @const {number} */ var OP_SORT = register(function (node, compareFn) { node._value.sort(compareFn); });
+/**
+ * Encodes a mutation descriptor into _mod (32-bit unsigned).
+ * @param {number} op
+ * @param {number} pos
+ * @param {number} len
+ * @returns {number}
+ */
+function encodeMod(op, pos, len) {
+    return (op | (len << MUT_LEN_SHIFT) | (pos << MUT_POS_SHIFT)) >>> 0;
+}
+
+/**
+ * Sets _mod on a signal node inside a batched OP callback.
+ * If FLAG_STALE is set this is the first mutation this cycle
+ * and we can encode the mod.  Otherwise a second mutation
+ * already occurred and we fall back to 0 (full recompute).
+ * @param {Signal} node
+ * @param {number} mod
+ * @returns {void}
+ */
+function setMod(node, mod) {
+    if (node._flag & FLAG_STALE) {
+        node._mod = mod;
+    } else {
+        node._mod = 0;
+    }
+}
+
+/** @const {number} */ var OP_COPY_WITHIN = register(function (node, args) {
+    node._value.copyWithin(args[0], args[1], args[2]);
+    node._mod = 0;
+});
+/** @const {number} */ var OP_FILL = register(function (node, value) {
+    node._value.fill(value);
+    node._mod = 0;
+});
+/** @const {number} */ var OP_FILL_RANGE = register(function (node, args) {
+    node._value.fill(args[0], args[1], args[2]);
+    node._mod = 0;
+});
+/** @const {number} */ var OP_POP = register(function (node) {
+    node._value.pop();
+    setMod(node, encodeMod(MUT_DEL, node._value.length, 1));
+});
+/** @const {number} */ var OP_PUSH = register(function (node, value) {
+    let arr = node._value;
+    let pos = arr.length;
+    arr.push(value);
+    setMod(node, encodeMod(MUT_ADD, pos, 1));
+});
+/** @const {number} */ var OP_PUSH_ARRAY = register(function (node, items) {
+    let arr = node._value;
+    let pos = arr.length;
+    arr.push(...items);
+    setMod(node, encodeMod(MUT_ADD, pos, items.length));
+});
+/** @const {number} */ var OP_REVERSE = register(function (node) {
+    node._value.reverse();
+    setMod(node, encodeMod(MUT_SORT, 0, 0));
+});
+/** @const {number} */ var OP_SHIFT = register(function (node) {
+    node._value.shift();
+    setMod(node, encodeMod(MUT_DEL, 0, 1));
+});
+/** @const {number} */ var OP_SORT = register(function (node, compareFn) {
+    node._value.sort(compareFn);
+    setMod(node, encodeMod(MUT_SORT, 0, 0));
+});
 /** @const {number} */ var OP_SPLICE = register(function (node, args) {
+    let arr = node._value;
+    let start = args[0];
+    let delCount = args[1];
     let items = args[2];
+    /** Normalize negative start */
+    let pos = start < 0 ? Math.max(0, arr.length + start) : Math.min(start, arr.length);
     if (items.length === 0) {
-        if (args[1] === void 0) {
-            node._value.splice(args[0]);
+        if (delCount === void 0) {
+            delCount = arr.length - pos;
+            arr.splice(start);
         } else {
-            node._value.splice(args[0], args[1]);
+            arr.splice(start, delCount);
         }
     } else {
-        node._value.splice(args[0], args[1], ...items);
+        arr.splice(start, delCount, ...items);
     }
+    let addLen = items.length;
+    let op = (delCount > 0 ? MUT_DEL : 0) | (addLen > 0 ? MUT_ADD : 0);
+    let len = Math.max(delCount, addLen);
+    setMod(node, op > 0 ? encodeMod(op, pos, len) : 0);
 });
-/** @const {number} */ var OP_UNSHIFT = register(function (node, value) { node._value.unshift(value); });
-/** @const {number} */ var OP_UNSHIFT_ARRAY = register(function (node, items) { node._value.unshift(...items); });
+/** @const {number} */ var OP_UNSHIFT = register(function (node, value) {
+    node._value.unshift(value);
+    setMod(node, encodeMod(MUT_ADD, 0, 1));
+});
+/** @const {number} */ var OP_UNSHIFT_ARRAY = register(function (node, items) {
+    node._value.unshift(...items);
+    setMod(node, encodeMod(MUT_ADD, 0, items.length));
+});
 
 /**
  * @template T
@@ -167,7 +244,38 @@ SignalProto.entries = ComputeProto.entries = function () {
  * @param {function(T, number): boolean} cb
  * @returns {boolean}
  */
-function every(_node, source, seed, cb) {
+function every(_node, source, prev, cb) {
+    if (!(_node._flag & FLAG_INIT)) {
+        let mod = _node.mod();
+        if (mod > 0) {
+            let op = mod & MUT_OP_MASK;
+            if (prev === true) {
+                if (!(op & (MUT_ADD | MUT_SORT))) {
+                    /** Only DEL: removing from an all-true set stays all-true */
+                    return true;
+                }
+                if (!(op & MUT_SORT) && cb.length <= 1) {
+                    /**
+                     * ADD (possibly with DEL), callback ignores index.
+                     * Existing items still pass — only check modified region.
+                     */
+                    let pos = (mod >>> MUT_POS_SHIFT) & MUT_POS_MASK;
+                    let len = (mod >>> MUT_LEN_SHIFT) & MUT_LEN_MASK;
+                    let end = Math.min(pos + len, source.length);
+                    for (let i = pos; i < end; i++) {
+                        if (!cb(source[i])) {
+                            return false;
+                        }
+                    }
+                    return true;
+                }
+            }
+            if (prev === false && !(op & (MUT_DEL | MUT_SORT)) && cb.length <= 1) {
+                /** Only ADD + callback ignores index: failing item still present */
+                return false;
+            }
+        }
+    }
     return source.every(cb);
 }
 
@@ -212,12 +320,76 @@ SignalProto.filter = ComputeProto.filter = function (cb, opts) {
 function find(_node, source, seed, cb) { return source.find(cb); }
 
 /**
+ * @template T
+ * @param {Array<T>} source
+ * @param {T | undefined} seed
+ * @param {{ _val: function(T, number, Array<T>): boolean, _idx: number }} args
+ * @returns {T|undefined}
+ */
+function find_mut(_node, source, prev, args) {
+    if (!(_node._flag & FLAG_INIT)) {
+        let mod = _node.mod();
+        if (mod > 0) {
+            let op = mod & MUT_OP_MASK;
+            let pos = (mod >>> MUT_POS_SHIFT) & MUT_POS_MASK;
+            let len = (mod >>> MUT_LEN_SHIFT) & MUT_LEN_MASK;
+            let idx = args._idx;
+            if (op & MUT_SORT) {
+                /* noop — fall through */
+            } else if (idx >= 0) {
+                if (pos > idx) {
+                    return prev;
+                }
+                if (op === MUT_DEL && pos + len <= idx) {
+                    args._idx = idx - len;
+                    return source[idx - len];
+                }
+                if (op === MUT_ADD && args._val.length <= 1) {
+                    /** Check new region for earlier match */
+                    let end = Math.min(pos + len, source.length);
+                    for (let i = pos; i < end; i++) {
+                        if (args._val(source[i])) {
+                            args._idx = i;
+                            return source[i];
+                        }
+                    }
+                    args._idx = idx + len;
+                    return source[idx + len];
+                }
+            } else {
+                /** Previously not found (idx === -1) */
+                if (!(op & MUT_ADD)) {
+                    return void 0;
+                }
+                if (args._val.length <= 1) {
+                    let end = Math.min(pos + len, source.length);
+                    for (let i = pos; i < end; i++) {
+                        if (args._val(source[i])) {
+                            args._idx = i;
+                            return source[i];
+                        }
+                    }
+                    return void 0;
+                }
+            }
+        }
+    }
+    let idx = source.findIndex(args._val);
+    args._idx = idx;
+    return idx >= 0 ? source[idx] : void 0;
+}
+
+/**
  * @this {Compute<Array<T>> | Signal<Array<T>>}
- * @param {function(T, number): boolean} cb 
+ * @param {function(T, number): boolean} cb
  * @param {number=} opts
+ * @param {boolean=} mutation
  * @returns {Compute<T|undefined,Array<T>,null,(function(T, number): boolean)>}
  */
-SignalProto.find = ComputeProto.find = function (cb, opts) {
+SignalProto.find = ComputeProto.find = function (cb, opts, mutation) {
+    if (mutation) {
+        return computeArray(this, find_mut, { _val: cb, _idx: -1 }, opts);
+    }
     return computeArray(this, find, cb, opts);
 };
 
@@ -231,13 +403,68 @@ SignalProto.find = ComputeProto.find = function (cb, opts) {
 function findIndex(_node, source, seed, cb) { return source.findIndex(cb); }
 
 /**
+ * @template T
+ * @param {Array<T>} source
+ * @param {number} seed
+ * @param {function(T, number, Array<T>): boolean} cb
+ * @returns {number}
+ */
+function findIndex_mut(_node, source, prev, cb) {
+    if (!(_node._flag & FLAG_INIT)) {
+        let mod = _node.mod();
+        if (mod > 0) {
+            let op = mod & MUT_OP_MASK;
+            let pos = (mod >>> MUT_POS_SHIFT) & MUT_POS_MASK;
+            let len = (mod >>> MUT_LEN_SHIFT) & MUT_LEN_MASK;
+            if (op & MUT_SORT) {
+                /* noop — fall through */
+            } else if (prev >= 0) {
+                if (pos > prev) {
+                    return prev;
+                }
+                if (op === MUT_DEL) {
+                    if (pos + len <= prev) {
+                        return prev - len;
+                    }
+                } else if (op === MUT_ADD && cb.length <= 1) {
+                    /** Check new region for earlier match */
+                    let end = Math.min(pos + len, source.length);
+                    for (let i = pos; i < end; i++) {
+                        if (cb(source[i])) {
+                            return i;
+                        }
+                    }
+                    return prev + len;
+                }
+            } else if (prev === -1) {
+                if (!(op & MUT_ADD)) {
+                    return -1;
+                }
+                if (cb.length <= 1) {
+                    /** Check only new region */
+                    let end = Math.min(pos + len, source.length);
+                    for (let i = pos; i < end; i++) {
+                        if (cb(source[i])) {
+                            return i;
+                        }
+                    }
+                    return -1;
+                }
+            }
+        }
+    }
+    return source.findIndex(cb);
+}
+
+/**
  * @this {Compute<Array<T>> | Signal<Array<T>>}
- * @param {function(T, number): boolean} cb 
+ * @param {function(T, number): boolean} cb
  * @param {number=} opts
+ * @param {boolean=} mutation
  * @returns {Compute<number,Array<T>,null,(function(T, number): boolean)>}
  */
-SignalProto.findIndex = ComputeProto.findIndex = function (cb, opts) {
-    return computeArray(this, findIndex, cb, opts);
+SignalProto.findIndex = ComputeProto.findIndex = function (cb, opts, mutation) {
+    return computeArray(this, mutation ? findIndex_mut : findIndex, cb, opts);
 };
 
 /**
@@ -250,12 +477,82 @@ SignalProto.findIndex = ComputeProto.findIndex = function (cb, opts) {
 function findLast(_node, source, seed, cb) { return source.findLast(cb); }
 
 /**
+ * @template T
+ * @param {Array<T>} source
+ * @param {T | undefined} seed
+ * @param {{ _val: function(T, number, Array<T>): boolean, _idx: number }} args
+ * @returns {T | undefined}
+ */
+function findLast_mut(_node, source, prev, args) {
+    if (!(_node._flag & FLAG_INIT)) {
+        let mod = _node.mod();
+        if (mod > 0) {
+            let op = mod & MUT_OP_MASK;
+            let pos = (mod >>> MUT_POS_SHIFT) & MUT_POS_MASK;
+            let len = (mod >>> MUT_LEN_SHIFT) & MUT_LEN_MASK;
+            let idx = args._idx;
+            if (op & MUT_SORT) {
+                /* noop — fall through */
+            } else if (idx >= 0) {
+                if (op === MUT_DEL && pos > idx) {
+                    /** Deletion after last-found — unaffected */
+                    return prev;
+                }
+                if (op === MUT_ADD && args._val.length <= 1) {
+                    /**
+                     * Check new region for a later match. For findLast
+                     * we want the LAST match, so scan new region and
+                     * compare with shifted previous.
+                     */
+                    let end = Math.min(pos + len, source.length);
+                    let shiftedIdx = pos <= idx ? idx + len : idx;
+                    let lastFound = shiftedIdx;
+                    let lastVal = source[shiftedIdx];
+                    for (let i = pos; i < end; i++) {
+                        if (args._val(source[i]) && i > lastFound) {
+                            lastFound = i;
+                            lastVal = source[i];
+                        }
+                    }
+                    args._idx = lastFound;
+                    return lastVal;
+                }
+            } else {
+                if (!(op & MUT_ADD)) {
+                    return void 0;
+                }
+                if (args._val.length <= 1) {
+                    let end = Math.min(pos + len, source.length);
+                    let lastFound = -1;
+                    let lastVal = void 0;
+                    for (let i = pos; i < end; i++) {
+                        if (args._val(source[i])) {
+                            lastFound = i;
+                            lastVal = source[i];
+                        }
+                    }
+                    args._idx = lastFound;
+                    return lastVal;
+                }
+            }
+        }
+    }
+    let idx = source.findLastIndex(args._val);
+    args._idx = idx;
+    return idx >= 0 ? source[idx] : void 0;
+}
+
+/**
  * @this {Compute<Array<T>> | Signal<Array<T>>}
- * @param {function(T, number, Array<T>): boolean} cb 
+ * @param {function(T, number, Array<T>): boolean} cb
  * @param {number=} opts
+ * @param {boolean=} mutation
  * @returns {Compute<T|undefined,Array<T>,null,(function(T, number, Array<T>): boolean)>}
  */
-SignalProto.findLast = ComputeProto.findLast = function (cb, opts) {
+SignalProto.findLast = ComputeProto.findLast = function (cb, opts, mutation) {
+    if (mutation) {
+        return computeArray(this, findLast_mut, { _val: cb, _idx: -1 }, opts);
+    }
     return computeArray(this, findLast, cb, opts);
 };
 
@@ -269,13 +566,68 @@ SignalProto.findLast = ComputeProto.findLast = function (cb, opts) {
 function findLastIndex(_node, source, seed, cb) { return source.findLastIndex(cb); }
 
 /**
+ * @template T
+ * @param {Array<T>} source
+ * @param {number} seed
+ * @param {function(T, number, Array<T>): boolean} cb
+ * @returns {number}
+ */
+function findLastIndex_mut(_node, source, prev, cb) {
+    if (!(_node._flag & FLAG_INIT)) {
+        let mod = _node.mod();
+        if (mod > 0) {
+            let op = mod & MUT_OP_MASK;
+            let pos = (mod >>> MUT_POS_SHIFT) & MUT_POS_MASK;
+            let len = (mod >>> MUT_LEN_SHIFT) & MUT_LEN_MASK;
+            if (op & MUT_SORT) {
+                /* noop — fall through */
+            } else if (prev >= 0) {
+                if (op === MUT_DEL && pos > prev) {
+                    return prev;
+                }
+                if (op === MUT_DEL && pos + len <= prev) {
+                    return prev - len;
+                }
+                if (op === MUT_ADD && cb.length <= 1) {
+                    let end = Math.min(pos + len, source.length);
+                    let shiftedPrev = pos <= prev ? prev + len : prev;
+                    let lastFound = shiftedPrev;
+                    for (let i = pos; i < end; i++) {
+                        if (cb(source[i]) && i > lastFound) {
+                            lastFound = i;
+                        }
+                    }
+                    return lastFound;
+                }
+            } else if (prev === -1) {
+                if (!(op & MUT_ADD)) {
+                    return -1;
+                }
+                if (cb.length <= 1) {
+                    let end = Math.min(pos + len, source.length);
+                    let lastFound = -1;
+                    for (let i = pos; i < end; i++) {
+                        if (cb(source[i])) {
+                            lastFound = i;
+                        }
+                    }
+                    return lastFound;
+                }
+            }
+        }
+    }
+    return source.findLastIndex(cb);
+}
+
+/**
  * @this {Compute<Array<T>> | Signal<Array<T>>}
- * @param {function(T, number, Array<T>): boolean} cb 
+ * @param {function(T, number, Array<T>): boolean} cb
  * @param {number=} opts
+ * @param {boolean=} mutation
  * @returns {Compute<number,Array<T>,null,(function(T, number, Array<T>): boolean)>}
  */
-SignalProto.findLastIndex = ComputeProto.findLastIndex = function (cb, opts) {
-    return computeArray(this, findLastIndex, cb, opts);
+SignalProto.findLastIndex = ComputeProto.findLastIndex = function (cb, opts, mutation) {
+    return computeArray(this, mutation ? findLastIndex_mut : findLastIndex, cb, opts);
 };
 
 /**
@@ -354,6 +706,74 @@ function includes1(_node, source, seed, arg) {
 }
 
 /**
+ * Mutation-aware includes. Tracks the internal found-index in args._idx.
+ * @template T
+ * @param {Array<T>} source
+ * @param {boolean} seed
+ * @param {{ _val: *, _idx: number }} args
+ * @returns {boolean}
+ */
+function includes1_mut(_node, source, prev, args) {
+    if (!(_node._flag & FLAG_INIT)) {
+        let mod = _node.mod();
+        if (mod > 0) {
+            let op = mod & MUT_OP_MASK;
+            let pos = (mod >>> MUT_POS_SHIFT) & MUT_POS_MASK;
+            let len = (mod >>> MUT_LEN_SHIFT) & MUT_LEN_MASK;
+            let idx = args._idx;
+            if (op & MUT_SORT) {
+                /* noop — fall through */
+            } else if (idx >= 0) {
+                if (pos > idx) {
+                    /** Mutation after found position — unaffected */
+                    return true;
+                }
+                if (op === MUT_DEL) {
+                    if (pos + len <= idx) {
+                        /** Deletion before found — shift index, still included */
+                        args._idx = idx - len;
+                        return true;
+                    }
+                    /** Deletion overlaps — recompute */
+                } else if (op === MUT_ADD) {
+                    /** Check new region for target first */
+                    let target = getVal(args._val);
+                    let end = Math.min(pos + len, source.length);
+                    for (let i = pos; i < end; i++) {
+                        if (source[i] === target) {
+                            args._idx = i;
+                            return true;
+                        }
+                    }
+                    /** Still at shifted position */
+                    args._idx = idx + len;
+                    return true;
+                }
+            } else {
+                /** Previously not found (idx === -1) */
+                if (!(op & MUT_ADD)) {
+                    /** Only deletions — still not found */
+                    return false;
+                }
+                /** Check only new region */
+                let target = getVal(args._val);
+                let end = Math.min(pos + len, source.length);
+                for (let i = pos; i < end; i++) {
+                    if (source[i] === target) {
+                        args._idx = i;
+                        return true;
+                    }
+                }
+                return false;
+            }
+        }
+    }
+    let idx = source.indexOf(/** @type {T} */(getVal(args._val)));
+    args._idx = idx;
+    return idx >= 0;
+}
+
+/**
  * @template T
  * @param {Array<T>} source
  * @param {boolean} seed
@@ -371,11 +791,17 @@ function includes2(_node, source, seed, args) {
  * @param {number | ReadonlySignal<number> | (function(): number)=} fromIndex
  * @returns {Compute<boolean,Array<T>,null,*>}
  */
-SignalProto.includes = ComputeProto.includes = function (searchElement, fromIndex) {
-    if (arguments.length === 1) {
+SignalProto.includes = ComputeProto.includes = function (searchElement, fromIndex, mutation) {
+    if (typeof fromIndex === 'boolean') {
+        mutation = fromIndex;
+        fromIndex = void 0;
+    }
+    if (fromIndex === void 0) {
+        if (mutation) {
+            return computeArray(this, includes1_mut, { _val: searchElement, _idx: -1 }, 0);
+        }
         return computeArray(this, includes1, searchElement, isSignal(searchElement) ? OPT_SETUP : 0);
     }
-    let unstable = isSignal(searchElement) || isSignal(fromIndex);
     return computeArray(this, includes2, /** @type {*} */([searchElement, fromIndex]), 0);
 };
 
@@ -390,6 +816,67 @@ SignalProto.includes = ComputeProto.includes = function (searchElement, fromInde
  * @returns {number}
  */
 function indexOf1(_node, source, seed, arg) {
+    return source.indexOf(/** @type {T} */(getVal(arg)));
+}
+
+/**
+ * Mutation-aware indexOf. Skips full scan when the mutation
+ * is after the previously found index.
+ * @template T
+ * @param {Array<T>} source
+ * @param {number} seed
+ * @param {*} arg
+ * @returns {number}
+ */
+function indexOf1_mut(_node, source, prev, arg) {
+    if (!(_node._flag & FLAG_INIT)) {
+        let mod = _node.mod();
+        if (mod > 0) {
+            let op = mod & MUT_OP_MASK;
+            let pos = (mod >>> MUT_POS_SHIFT) & MUT_POS_MASK;
+            let len = (mod >>> MUT_LEN_SHIFT) & MUT_LEN_MASK;
+            if (op & MUT_SORT) {
+                /* noop — fall through to full recompute */
+            } else if (prev >= 0) {
+                if (pos > prev) {
+                    /** Mutation entirely after found index — unaffected */
+                    return prev;
+                }
+                if (op === MUT_DEL) {
+                    if (pos + len <= prev) {
+                        /** Deletion entirely before found — shift left */
+                        return prev - len;
+                    }
+                    /** Deletion overlaps found position — recompute */
+                } else if (op === MUT_ADD) {
+                    /** Check new items; if target is there return earlier index */
+                    let target = getVal(arg);
+                    let end = Math.min(pos + len, source.length);
+                    for (let i = pos; i < end; i++) {
+                        if (source[i] === target) {
+                            return i;
+                        }
+                    }
+                    /** Not in new region — original shifted right */
+                    return prev + len;
+                }
+            } else if (prev === -1) {
+                if (!(op & MUT_ADD)) {
+                    /** Only deletions — still not found */
+                    return -1;
+                }
+                /** Items added — check only the new region */
+                let target = getVal(arg);
+                let end = Math.min(pos + len, source.length);
+                for (let i = pos; i < end; i++) {
+                    if (source[i] === target) {
+                        return i;
+                    }
+                }
+                return -1;
+            }
+        }
+    }
     return source.indexOf(/** @type {T} */(getVal(arg)));
 }
 
@@ -411,11 +898,15 @@ function indexOf2(_node, source, seed, args) {
  * @param {number | ReadonlySignal<number> | (function(): number)=} fromIndex
  * @returns {Compute<number, Array<T>, null, *>}
  */
-SignalProto.indexOf = ComputeProto.indexOf = function (searchElement, fromIndex) {
-    if (arguments.length === 1) {
-        return computeArray(this, indexOf1, searchElement, isSignal(searchElement) ? OPT_SETUP : 0);
+SignalProto.indexOf = ComputeProto.indexOf = function (searchElement, fromIndex, mutation) {
+    if (typeof fromIndex === 'boolean') {
+        mutation = fromIndex;
+        fromIndex = void 0;
     }
-    let unstable = isSignal(searchElement) || isSignal(fromIndex);
+    if (fromIndex === void 0) {
+        let fn = mutation ? indexOf1_mut : indexOf1;
+        return computeArray(this, fn, searchElement, isSignal(searchElement) ? OPT_SETUP : 0);
+    }
     return computeArray(this, indexOf2, /** @type {*} */([searchElement, fromIndex]), 0);
 };
 
@@ -649,7 +1140,38 @@ SignalProto.slice = ComputeProto.slice = function (start, end) {
  * @param {function(T, number, Array<T>): boolean} cb
  * @returns {boolean}
  */
-function some(_node, source, seed, cb) {
+function some(_node, source, prev, cb) {
+    if (!(_node._flag & FLAG_INIT)) {
+        let mod = _node.mod();
+        if (mod > 0) {
+            let op = mod & MUT_OP_MASK;
+            if (prev === false) {
+                if (!(op & (MUT_ADD | MUT_SORT))) {
+                    /** Only DEL: removing items can't make some() true */
+                    return false;
+                }
+                if (!(op & MUT_SORT) && cb.length <= 1) {
+                    /**
+                     * ADD (possibly with DEL), callback ignores index.
+                     * Existing items still don't match — check modified region.
+                     */
+                    let pos = (mod >>> MUT_POS_SHIFT) & MUT_POS_MASK;
+                    let len = (mod >>> MUT_LEN_SHIFT) & MUT_LEN_MASK;
+                    let end = Math.min(pos + len, source.length);
+                    for (let i = pos; i < end; i++) {
+                        if (cb(source[i])) {
+                            return true;
+                        }
+                    }
+                    return false;
+                }
+            }
+            if (prev === true && !(op & (MUT_DEL | MUT_SORT)) && cb.length <= 1) {
+                /** Only ADD + callback ignores index: matching item still present */
+                return true;
+            }
+        }
+    }
     return source.some(cb);
 }
 
@@ -695,6 +1217,7 @@ SignalProto.values = ComputeProto.values = function () {
 SignalProto.copyWithin = function (target, start, end) {
     if (CLOCK._state & STATE_IDLE) {
         this._value.copyWithin(target, start, end);
+        this._mod = 0;
         notify(this);
     } else {
         this._flag |= FLAG_STALE;
@@ -713,6 +1236,7 @@ SignalProto.copyWithin = function (target, start, end) {
 SignalProto.fill = function (value, start, end) {
     if (CLOCK._state & STATE_IDLE) {
         this._value.fill(value, start, end);
+        this._mod = 0;
         notify(this);
     } else {
         this._flag |= FLAG_STALE;
@@ -732,6 +1256,7 @@ SignalProto.fill = function (value, start, end) {
 SignalProto.pop = function () {
     if (CLOCK._state & STATE_IDLE) {
         this._value.pop();
+        this._mod = encodeMod(MUT_DEL, this._value.length, 1);
         notify(this);
     } else {
         this._flag |= FLAG_STALE;
@@ -748,12 +1273,15 @@ SignalProto.pop = function () {
 SignalProto.push = function (...items) {
     let len = items.length;
     if (len > 0) {
+        let arr = this._value;
+        let pos = arr.length;
         if (CLOCK._state & STATE_IDLE) {
             if (len === 1) {
-                this._value.push(items[0]);
+                arr.push(items[0]);
             } else {
-                this._value.push(...items);
+                arr.push(...items);
             }
+            this._mod = encodeMod(MUT_ADD, pos, len);
             notify(this);
         } else {
             this._flag |= FLAG_STALE;
@@ -774,6 +1302,7 @@ SignalProto.push = function (...items) {
 SignalProto.reverse = function () {
     if (CLOCK._state & STATE_IDLE) {
         this._value.reverse();
+        this._mod = encodeMod(MUT_SORT, 0, 0);
         notify(this);
     } else {
         this._flag |= FLAG_STALE;
@@ -789,6 +1318,7 @@ SignalProto.reverse = function () {
 SignalProto.shift = function () {
     if (CLOCK._state & STATE_IDLE) {
         this._value.shift();
+        this._mod = encodeMod(MUT_DEL, 0, 1);
         notify(this);
     } else {
         this._flag |= FLAG_STALE;
@@ -805,6 +1335,7 @@ SignalProto.shift = function () {
 SignalProto.sort = function (compareFn) {
     if (CLOCK._state & STATE_IDLE) {
         this._value.sort(compareFn);
+        this._mod = encodeMod(MUT_SORT, 0, 0);
         notify(this);
     } else {
         this._flag |= FLAG_STALE;
@@ -822,16 +1353,21 @@ SignalProto.sort = function (compareFn) {
  */
 SignalProto.splice = function (start, deleteCount, ...items) {
     if (CLOCK._state & STATE_IDLE) {
-        let value = this._value;
+        let arr = this._value;
+        let pos = start < 0 ? Math.max(0, arr.length + start) : Math.min(start, arr.length);
         if (items.length === 0) {
             if (arguments.length === 1) {
-                value.splice(start);
+                deleteCount = arr.length - pos;
+                arr.splice(start);
             } else {
-                value.splice(start, deleteCount);
+                arr.splice(start, deleteCount);
             }
         } else {
-            value.splice(start, deleteCount, ...items);
+            arr.splice(start, deleteCount, ...items);
         }
+        let addLen = items.length;
+        let op = (deleteCount > 0 ? MUT_DEL : 0) | (addLen > 0 ? MUT_ADD : 0);
+        this._mod = op > 0 ? encodeMod(op, pos, Math.max(deleteCount, addLen)) : 0;
         notify(this);
     } else {
         this._flag |= FLAG_STALE;
@@ -854,6 +1390,7 @@ SignalProto.unshift = function (...items) {
             } else {
                 this._value.unshift(...items);
             }
+            this._mod = encodeMod(MUT_ADD, 0, len);
             notify(this);
         } else {
             this._flag |= FLAG_STALE;
@@ -872,7 +1409,7 @@ SignalProto.unshift = function (...items) {
  * @returns {Signal<!Array<T>>}
  */
 function list(value) {
-    return new Signal(value, FLAG_LIST);
+    return new Signal(value);
 }
 
 export { list }
