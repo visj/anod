@@ -5,10 +5,8 @@ import {
 
 import {
     CLOCK, STATE_IDLE,
-    FLAG_LIST,
-    OP_COPY_WITHIN, OP_FILL, OP_FILL_RANGE, OP_POP, OP_PUSH, OP_PUSH_ARRAY,
-    OP_REVERSE, OP_SHIFT, OP_SORT, OP_SPLICE, OP_UNSHIFT, OP_UNSHIFT_ARRAY,
-    notify, scheduleSignal,
+    FLAG_LIST, FLAG_STALE,
+    register, notify, scheduleSignal,
     isPrimitive, isFunction, isSignal
 } from '@anod/signal/internal';
 
@@ -16,6 +14,35 @@ import {
 var SignalProto = Signal.prototype;
 /** @const */
 var ComputeProto = Compute.prototype;
+
+/**
+ * Registered mutation callbacks. Each receives the signal node and a payload,
+ * applies the in-place array mutation, then lets the transaction loop handle
+ * the stale notification.
+ */
+/** @const {number} */ var OP_COPY_WITHIN = register(function (node, args) { node._value.copyWithin(args[0], args[1], args[2]); });
+/** @const {number} */ var OP_FILL = register(function (node, value) { node._value.fill(value); });
+/** @const {number} */ var OP_FILL_RANGE = register(function (node, args) { node._value.fill(args[0], args[1], args[2]); });
+/** @const {number} */ var OP_POP = register(function (node) { node._value.pop(); });
+/** @const {number} */ var OP_PUSH = register(function (node, value) { node._value.push(value); });
+/** @const {number} */ var OP_PUSH_ARRAY = register(function (node, items) { node._value.push(...items); });
+/** @const {number} */ var OP_REVERSE = register(function (node) { node._value.reverse(); });
+/** @const {number} */ var OP_SHIFT = register(function (node) { node._value.shift(); });
+/** @const {number} */ var OP_SORT = register(function (node, compareFn) { node._value.sort(compareFn); });
+/** @const {number} */ var OP_SPLICE = register(function (node, args) {
+    let items = args[2];
+    if (items.length === 0) {
+        if (args[1] === void 0) {
+            node._value.splice(args[0]);
+        } else {
+            node._value.splice(args[0], args[1]);
+        }
+    } else {
+        node._value.splice(args[0], args[1], ...items);
+    }
+});
+/** @const {number} */ var OP_UNSHIFT = register(function (node, value) { node._value.unshift(value); });
+/** @const {number} */ var OP_UNSHIFT_ARRAY = register(function (node, items) { node._value.unshift(...items); });
 
 /**
  * @template T
@@ -58,7 +85,7 @@ function computeArray(source, fn, args, opts) {
  * @param {number | ReadonlySignal<number> | (function(): number)} args
  * @returns {T | undefined}
  */
-function at(source, seed, args) {
+function at(_node, source, seed, args) {
     return source.at(typeof args === 'number' ? args : read(args));
 }
 
@@ -78,7 +105,7 @@ SignalProto.at = ComputeProto.at = function (index) {
  * @param {*} args
  * @returns {Array<T>}
  */
-function concat(source, seed, args) {
+function concat(_node, source, seed, args) {
     return source.concat(args);
 }
 
@@ -89,9 +116,8 @@ function concat(source, seed, args) {
  * @param {*} args
  * @returns {Array<T>}
  */
-function concatN(source, seed, args) {
-    // Cast args back to an array inside the runner to satisfy spread syntax
-    return source.concat(.../** @type {!Iterable} */(args)); 
+function concatN(_node, source, seed, args) {
+    return source.concat(.../** @type {!Iterable} */(args));
 }
 
 /**
@@ -115,7 +141,7 @@ SignalProto.concat = ComputeProto.concat = function (...items) {
  * @param {Array<T>} source
  * @returns {!IteratorIterable<!Array<number|T>>}
  */
-function entries(source) {
+function entries(_node, source) {
     return source.entries();
 }
 
@@ -134,7 +160,7 @@ SignalProto.entries = ComputeProto.entries = function () {
  * @param {function(T, number): boolean} cb
  * @returns {boolean}
  */
-function every(source, seed, cb) {
+function every(_node, source, seed, cb) {
     return source.every(cb);
 }
 
@@ -155,7 +181,7 @@ SignalProto.every = ComputeProto.every = function (cb, opts) {
  * @param {function(T, number, Array<T>): boolean} cb
  * @returns {Array<T>}
  */
-function filter(source, seed, cb) {
+function filter(_node, source, seed, cb) {
     return source.filter(cb);
 }
 
@@ -176,7 +202,7 @@ SignalProto.filter = ComputeProto.filter = function (cb, opts) {
  * @param {function(T, number, Array<T>): boolean} cb
  * @returns {T|undefined}
  */
-function find(source, seed, cb) { return source.find(cb); }
+function find(_node, source, seed, cb) { return source.find(cb); }
 
 /**
  * @this {Compute<Array<T>> | Signal<Array<T>>}
@@ -195,7 +221,7 @@ SignalProto.find = ComputeProto.find = function (cb, opts) {
  * @param {function(T, number, Array<T>): boolean} cb
  * @returns {number}
  */
-function findIndex(source, seed, cb) { return source.findIndex(cb); }
+function findIndex(_node, source, seed, cb) { return source.findIndex(cb); }
 
 /**
  * @this {Compute<Array<T>> | Signal<Array<T>>}
@@ -214,7 +240,7 @@ SignalProto.findIndex = ComputeProto.findIndex = function (cb, opts) {
  * @param {function(T, number, Array<T>): boolean} cb
  * @returns {T | undefined}
  */
-function findLast(source, seed, cb) { return source.findLast(cb); }
+function findLast(_node, source, seed, cb) { return source.findLast(cb); }
 
 /**
  * @this {Compute<Array<T>> | Signal<Array<T>>}
@@ -233,7 +259,7 @@ SignalProto.findLast = ComputeProto.findLast = function (cb, opts) {
  * @param {function(T, number, Array<T>): boolean} cb
  * @returns {number}
  */
-function findLastIndex(source, seed, cb) { return source.findLastIndex(cb); }
+function findLastIndex(_node, source, seed, cb) { return source.findLastIndex(cb); }
 
 /**
  * @this {Compute<Array<T>> | Signal<Array<T>>}
@@ -252,8 +278,8 @@ SignalProto.findLastIndex = ComputeProto.findLastIndex = function (cb, opts) {
  * @param {number | ReadonlySignal<number> | (function(): number)=} depth
  * @returns {!Array<T>}
  */
-function flat(source, seed, depth) { 
-    return source.flat(getVal(depth)); 
+function flat(_node, source, seed, depth) {
+    return source.flat(getVal(depth));
 }
 
 /**
@@ -272,7 +298,7 @@ SignalProto.flat = ComputeProto.flat = function (depth) {
  * @param {function(T, number, IArrayLike<T>): !ReadonlyArray<U>} cb
  * @returns {Array<U>}
  */
-function flatMap(source, seed, cb) {
+function flatMap(_node, source, seed, cb) {
     return source.flatMap(cb);
 }
 
@@ -293,8 +319,8 @@ SignalProto.flatMap = ComputeProto.flatMap = function (cb, opts) {
  * @param {(function(T, number): ((function(): void) | void))} cb
  * @returns {void}
  */
-function forEach(source, cb) { 
-    source.forEach(cb); 
+function forEach(_node, source, cb) {
+    source.forEach(cb);
 }
 
 /**
@@ -316,7 +342,7 @@ SignalProto.forEach = ComputeProto.forEach = function (cb, opts) {
  * @param {*} arg
  * @returns {boolean}
  */
-function includes1(source, seed, arg) {
+function includes1(_node, source, seed, arg) {
     return source.includes(/** @type {T} */(getVal(arg)));
 }
 
@@ -327,7 +353,7 @@ function includes1(source, seed, arg) {
  * @param {*} args
  * @returns {boolean}
  */
-function includes2(source, seed, args) {
+function includes2(_node, source, seed, args) {
     let arr = /** @type {!Array<*>} */(args);
     return source.includes(/** @type {T} */(getVal(arr[0])), /** @type {number} */(getVal(arr[1])));
 }
@@ -356,7 +382,7 @@ SignalProto.includes = ComputeProto.includes = function (searchElement, fromInde
  * @param {*} arg
  * @returns {number}
  */
-function indexOf1(source, seed, arg) {
+function indexOf1(_node, source, seed, arg) {
     return source.indexOf(/** @type {T} */(getVal(arg)));
 }
 
@@ -367,7 +393,7 @@ function indexOf1(source, seed, arg) {
  * @param {*} args
  * @returns {number}
  */
-function indexOf2(source, seed, args) {
+function indexOf2(_node, source, seed, args) {
     let arr = /** @type {!Array<*>} */(args);
     return source.indexOf(/** @type {T} */(getVal(arr[0])), /** @type {number} */(getVal(arr[1])));
 }
@@ -396,7 +422,7 @@ SignalProto.indexOf = ComputeProto.indexOf = function (searchElement, fromIndex)
  * @param {string | ReadonlySignal<string> | (function(): string)=} separator
  * @returns {string}
  */
-function join(source, seed, separator) {
+function join(_node, source, seed, separator) {
     return source.join(separator !== undefined ? /** @type {string} */(getVal(separator)) : undefined);
 }
 
@@ -419,7 +445,7 @@ SignalProto.join = ComputeProto.join = function (separator) {
  * @param {undefined=} args
  * @returns {!IteratorIterable<number>}
  */
-function keys(source, seed, args) {
+function keys(_node, source, seed, args) {
     return source.keys();
 }
 
@@ -441,7 +467,7 @@ SignalProto.keys = ComputeProto.keys = function () {
  * @param {function(T, number, Array<T>): U} cb
  * @returns {Array<U>}
  */
-function map(source, seed, cb) {
+function map(_node, source, seed, cb) {
     return source.map(cb);
 }
 
@@ -467,7 +493,7 @@ SignalProto.map = ComputeProto.map = function (cb, opts) {
  * @param {*} arg
  * @returns {U}
  */
-function reduce1(source, seed, arg) {
+function reduce1(_node, source, seed, arg) {
     let cb = /** @type {function(U, T, number, Array<T>): U} */(arg);
     return /** @type {U} */(source.reduce(cb));
 }
@@ -479,7 +505,7 @@ function reduce1(source, seed, arg) {
  * @param {*} args
  * @returns {U}
  */
-function reduce2(source, seed, args) {
+function reduce2(_node, source, seed, args) {
     let arr = /** @type {!Array<*>} */(args);
     let cb = /** @type {function(U, T, number, Array<T>): U} */(arr[0]);
     let initialValue = /** @type {U} */(getVal(arr[1]));
@@ -515,7 +541,7 @@ SignalProto.reduce = ComputeProto.reduce = function (cb, initialValue, opts) {
  * @param {*} arg
  * @returns {U}
  */
-function reduceRight1(source, seed, arg) {
+function reduceRight1(_node, source, seed, arg) {
     let cb = /** @type {function(U, T, number, Array<T>): U} */(arg);
     return /** @type {U} */(source.reduceRight(cb));
 }
@@ -527,7 +553,7 @@ function reduceRight1(source, seed, arg) {
  * @param {*} args
  * @returns {U}
  */
-function reduceRight2(source, seed, args) {
+function reduceRight2(_node, source, seed, args) {
     let arr = /** @type {!Array<*>} */(args);
     let cb = /** @type {function(U, T, number, Array<T>): U} */(arr[0]);
     let initialValue = /** @type {U} */(getVal(arr[1]));
@@ -562,7 +588,7 @@ SignalProto.reduceRight = ComputeProto.reduceRight = function (cb, initialValue,
  * @param {*} args
  * @returns {Array<T>}
  */
-function slice0(source, seed, args) {
+function slice0(_node, source, seed, args) {
     return source.slice();
 }
 
@@ -573,7 +599,7 @@ function slice0(source, seed, args) {
  * @param {*} arg
  * @returns {Array<T>}
  */
-function slice1(source, seed, arg) {
+function slice1(_node, source, seed, arg) {
     return source.slice(/** @type {number} */(getVal(arg)));
 }
 
@@ -584,7 +610,7 @@ function slice1(source, seed, arg) {
  * @param {*} args
  * @returns {Array<T>}
  */
-function slice2(source, seed, args) {
+function slice2(_node, source, seed, args) {
     let arr = /** @type {!Array<*>} */(args);
     return source.slice(/** @type {number} */(getVal(arr[0])), /** @type {number} */(getVal(arr[1])));
 }
@@ -616,7 +642,7 @@ SignalProto.slice = ComputeProto.slice = function (start, end) {
  * @param {function(T, number, Array<T>): boolean} cb
  * @returns {boolean}
  */
-function some(source, seed, cb) {
+function some(_node, source, seed, cb) {
     return source.some(cb);
 }
 
@@ -640,7 +666,7 @@ SignalProto.some = ComputeProto.some = function (cb, opts) {
  * @param {undefined=} args
  * @returns {!IteratorIterable<T>}
  */
-function values(source, seed, args) {
+function values(_node, source, seed, args) {
     return source.values();
 }
 
@@ -661,9 +687,10 @@ SignalProto.values = ComputeProto.values = function () {
  */
 SignalProto.copyWithin = function (target, start, end) {
     if (CLOCK._state & STATE_IDLE) {
-        this._value.copyWithin(target, start, end)
+        this._value.copyWithin(target, start, end);
         notify(this);
     } else {
+        this._flag |= FLAG_STALE;
         scheduleSignal(this, OP_COPY_WITHIN, [target, start, end]);
     }
 };
@@ -681,6 +708,7 @@ SignalProto.fill = function (value, start, end) {
         this._value.fill(value, start, end);
         notify(this);
     } else {
+        this._flag |= FLAG_STALE;
         if (arguments.length === 1) {
             scheduleSignal(this, OP_FILL, value);
         } else {
@@ -699,6 +727,7 @@ SignalProto.pop = function () {
         this._value.pop();
         notify(this);
     } else {
+        this._flag |= FLAG_STALE;
         scheduleSignal(this, OP_POP, null);
     }
 };
@@ -707,7 +736,7 @@ SignalProto.pop = function () {
  * @template T
  * @this {Signal<Array<T>>}
  * @param  {...T} items
- * @returns {void} 
+ * @returns {void}
  */
 SignalProto.push = function (...items) {
     let len = items.length;
@@ -720,6 +749,7 @@ SignalProto.push = function (...items) {
             }
             notify(this);
         } else {
+            this._flag |= FLAG_STALE;
             if (len === 1) {
                 scheduleSignal(this, OP_PUSH, items[0]);
             } else {
@@ -739,6 +769,7 @@ SignalProto.reverse = function () {
         this._value.reverse();
         notify(this);
     } else {
+        this._flag |= FLAG_STALE;
         scheduleSignal(this, OP_REVERSE, null);
     }
 };
@@ -753,6 +784,7 @@ SignalProto.shift = function () {
         this._value.shift();
         notify(this);
     } else {
+        this._flag |= FLAG_STALE;
         scheduleSignal(this, OP_SHIFT, null);
     }
 };
@@ -768,6 +800,7 @@ SignalProto.sort = function (compareFn) {
         this._value.sort(compareFn);
         notify(this);
     } else {
+        this._flag |= FLAG_STALE;
         scheduleSignal(this, OP_SORT, compareFn);
     }
 };
@@ -794,6 +827,7 @@ SignalProto.splice = function (start, deleteCount, ...items) {
         }
         notify(this);
     } else {
+        this._flag |= FLAG_STALE;
         scheduleSignal(this, OP_SPLICE, [start, deleteCount, items]);
     }
 };
@@ -815,6 +849,7 @@ SignalProto.unshift = function (...items) {
             }
             notify(this);
         } else {
+            this._flag |= FLAG_STALE;
             if (len === 1) {
                 scheduleSignal(this, OP_UNSHIFT, items[0]);
             } else {

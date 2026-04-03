@@ -1,20 +1,25 @@
 import { Anod } from "./api.js";
 import { Disposer, Owner, Sender, Receiver, Clock, ISignal, ICompute, IEffect } from "./types.js";
 
-/** @const {number} */ const OP_VALUE = 1;
-/** @const {number} */ const OP_CALLBACK = 2;
-/** @const {number} */ const OP_COPY_WITHIN = 3;
-/** @const {number} */ const OP_FILL = 4;
-/** @const {number} */ const OP_FILL_RANGE = 5;
-/** @const {number} */ const OP_POP = 6;
-/** @const {number} */ const OP_PUSH = 7;
-/** @const {number} */ const OP_PUSH_ARRAY = 8;
-/** @const {number} */ const OP_REVERSE = 9;
-/** @const {number} */ const OP_SHIFT = 10;
-/** @const {number} */ const OP_SORT = 11;
-/** @const {number} */ const OP_SPLICE = 12;
-/** @const {number} */ const OP_UNSHIFT = 13;
-/** @const {number} */ const OP_UNSHIFT_ARRAY = 14;
+/** @const {number} */ const OP_VALUE = 1 << 30;
+/** @const {number} */ const OP_CALLBACK = 1 << 29;
+
+/** @const {Array<function(Signal, *): void>} */
+var CALLBACKS = [];
+
+/**
+ * Registers a callback for deferred signal operations.
+ * Returns an op value (callback index | OP_CALLBACK flag) that can be
+ * passed to scheduleSignal. When the transaction loop processes the
+ * entry, it calls CALLBACKS[op & ~OP_CALLBACK](signal, payload).
+ * @param {function(Signal, *): void} fn
+ * @returns {number}
+ */
+function register(fn) {
+    let index = CALLBACKS.length;
+    CALLBACKS[index] = fn;
+    return index | OP_CALLBACK;
+}
 
 /** @const {number} */ const MUT_COMPUTE = 1;
 /** @const {number} */ const MUT_BITSUB = 2;
@@ -1481,12 +1486,11 @@ function start(clock) {
                     let signal = signals[i * 2];
                     /** @type {*} */
                     let payload = signals[i * 2 + 1];
-                    switch (ops[i]) {
-                        case OP_VALUE:
-                            signal._value = payload;
-                            break;
-                        case OP_CALLBACK:
-                            break;
+                    let op = ops[i];
+                    if (op & OP_VALUE) {
+                        signal._value = payload;
+                    } else if (op & OP_CALLBACK) {
+                        CALLBACKS[op & ~OP_CALLBACK](signal, payload);
                     }
                     if (signal._flag & FLAG_STALE) {
                         signal._flag &= ~FLAG_STALE;
@@ -2147,9 +2151,8 @@ export {
     FLAG_RUNNING, FLAG_DISPOSED, FLAG_LOADING, FLAG_ERROR, FLAG_RECOVER,
     FLAG_BOUND, FLAG_TRACKED, FLAG_SCOPE, FLAG_EQUAL, FLAG_WEAK,
     FLAG_LIST, FLAG_RDEP1, FLAG_RDEP2,
-    OP_VALUE, OP_CALLBACK, OP_COPY_WITHIN, OP_FILL, OP_FILL_RANGE,
-    OP_POP, OP_PUSH, OP_PUSH_ARRAY, OP_REVERSE, OP_SHIFT,
-    OP_SORT, OP_SPLICE, OP_UNSHIFT, OP_UNSHIFT_ARRAY,
+    OP_VALUE, OP_CALLBACK,
+    register,
     MUT_COMPUTE, MUT_BITSUB, MUT_ADD, MUT_DEL, MUT_SORT,
     MUT_OP_MASK, MUT_LEN_SHIFT, MUT_LEN_MASK, MUT_POS_SHIFT, MUT_POS_MASK,
     ASYNC_NOT_ASYNC, ASYNC_PROMISE, ASYNC_ITERABLE,

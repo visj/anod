@@ -13,7 +13,7 @@
   },
   "scripts": {
     "make": "bun scripts/build.js",
-    "test": "bun test/index.js",
+    "test": "bun test",
     "test:min": "bun dist/test.min.js"
   },
   "keywords": [],
