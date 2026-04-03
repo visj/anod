@@ -1,61 +1,25 @@
 {
   "name": "anod",
-  "version": "0.2.0",
+  "workspace": [
+    "packages/signal",
+    "packages/list"
+  ],
+  "version": "1.0.0",
   "description": "",
-  "type": "module",
-  "types": "dist/index.d.ts",
-  "main": "./dist/index.js",
-  "module": "./dist/index.js",
-  "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js",
-      "module": "./dist/index.js"
-    },
-    "./array": {
-      "types": "./dist/array.d.ts",
-      "import": "./dist/array.js",
-      "module": "./dist/array.js"
-    }
-  },
-  "files": [
-    "dist"
-  ],
-  "publishConfig": {
-    "access": "public"
-  },
+  "main": "index.js",
   "scripts": {
-    "test": "node --expose-gc test/index.js",
-    "test-min": "node --expose-gc test/index.min.js"
+    "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "keywords": [
-    "reactive",
-    "javascript",
-    "synchronous",
-    "signal"
-  ],
   "repository": {
     "type": "git",
     "url": "git+https://github.com/visj/anod.git"
   },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
   "bugs": {
     "url": "https://github.com/visj/anod/issues"
   },
-  "author": "visj",
-  "license": "MIT",
-  "devDependencies": {
-    "@maverick-js/signals": "^6.0.0",
-    "@preact/signals": "^2.2.1",
-    "@preact/signals-core": "^1.11.0",
-    "@reactively/core": "^0.0.8",
-    "cellx": "^2.0.1",
-    "cli-table": "^0.3.11",
-    "esbuild": "^0.25.8",
-    "kleur": "^4.1.5",
-    "s-js": "^0.4.9",
-    "signal-polyfill": "^0.2.2",
-    "solid-js": "^1.9.7",
-    "typescript": "^5.8.3",
-    "usignal": "^0.10.0"
-  }
+  "homepage": "https://github.com/visj/anod#readme"
 }

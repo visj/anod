@@ -1,0 +1,41 @@
+import {
+    OPT_DEFER,
+    OPT_STABLE,
+    OPT_SETUP,
+    OPT_WEAK,
+    TYPE_ROOT,
+    TYPE_SIGNAL,
+    TYPE_COMPUTE,
+    TYPE_EFFECT,
+    Root,
+    Signal,
+    Compute,
+    Effect,
+    root,
+    signal,
+    compute,
+    effect,
+    scope,
+    batch
+} from "./core/signal.js";
+
+export {
+    OPT_DEFER,
+    OPT_STABLE,
+    OPT_SETUP,
+    OPT_WEAK,
+    TYPE_ROOT,
+    TYPE_SIGNAL,
+    TYPE_COMPUTE,
+    TYPE_EFFECT,
+    Root,
+    Signal,
+    Compute,
+    Effect,
+    root,
+    signal,
+    compute,
+    effect,
+    scope,
+    batch
+}
