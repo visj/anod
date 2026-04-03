@@ -16,6 +16,13 @@ var SignalProto = Signal.prototype;
 var ComputeProto = Compute.prototype;
 
 /**
+ * @returns {number}
+ */
+ComputeProto.mod = function() {
+    return this._dep1._mod;
+};
+
+/**
  * Registered mutation callbacks. Each receives the signal node and a payload,
  * applies the in-place array mutation, then lets the transaction loop handle
  * the stale notification.

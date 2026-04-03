@@ -882,9 +882,7 @@ function runCompute(node, time) {
                     dep2._version = version;
                 }
             }
-            if (opts & FLAG_LIST) {
-                value = fn(node, dep1.val(), value, args, opts, dep1._mod);
-            } else if (dep2 === null) {
+            if (dep2 === null) {
                 value = fn(node, dep1.val(), value, args);
             } else {
                 value = fn(node, dep1.val(), dep2.val(), value, args);
@@ -925,25 +923,13 @@ function runCompute(node, time) {
     } else {
         let asyncType = isAsync(value);
         if (asyncType === ASYNC_NOT_ASYNC) {
-            if (opts & (FLAG_NOTIFY | FLAG_EQUAL)) {
+            if (value !== node._value) {
                 node._value = value;
-            } else if (opts & FLAG_NOTEQUAL) {
-                /**
-                 * The user called equal(false) during this run, meaning
-                 * "I am not equal — force notification" regardless of
-                 * whether the value reference changed.
-                 */
-                node._value = value;
-                notifyStale(node, time);
-            } else {
-                /**
-                 * Default: only notify downstream when the value
-                 * actually changed (strict inequality).
-                 */
-                if (value !== node._value) {
-                    node._value = value;
+                if ((opts & (FLAG_NOTIFY | FLAG_EQUAL)) === 0) {
                     notifyStale(node, time);
                 }
+            } else if (opts & FLAG_NOTEQUAL) {
+                notifyStale(node, time);
             }
         } else {
             node._flag |= FLAG_LOADING;
