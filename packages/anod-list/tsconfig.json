@@ -1,0 +1,14 @@
+{
+  "compilerOptions": {
+    "composite": true,
+    /* Target ES2015 to support Map and Typed Arrays */
+    "target": "ES2020",
+    "lib": ["ES2020", "DOM"],
+    "strict": true,
+  },
+  "include": [
+    "src/**.js",
+    "tests/*.js",
+    "types/*.d.ts"
+  ]
+}

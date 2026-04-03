@@ -1,12 +1,17 @@
 {
   "compilerOptions": {
-    "target": "es2015",
-    "module": "commonjs",
-    "allowJs": true,
-    "declaration": true,
-    "outDir": "./dist",
-    "baseUrl": ".",
-    "strict": true
+    "composite": true,         // Required for project references
+    "noEmit": true,
+    "declaration": true,       // Generates .d.ts files for other packages
+    "declarationMap": true,    // Maps types back to source files for IDE support
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "paths": {
+      "anod/*": ["./packages/anod/src"] // Optional: facilitates IDE auto-imports
+    }
   },
-  "include": ["src/**/*", "*.ts", "*.json", "derp.js", "derp.js"]
+  "references": [
+    { "path": "./packages/anod" },
+    { "path": "./packages/anod-list" }
+  ]
 }

@@ -39,8 +39,8 @@ Anod is a fine-grained reactive signal library for JavaScript. It belongs to the
 
 The monorepo contains two packages:
 
-- **`@anod/signal`** — the core reactive engine (production-ready)
-- **`@anod/list`** — reactive array methods built on top of the signal primitives (work in progress)
+- **`anod`** — the core reactive engine (production-ready)
+- **`anod-list`** — reactive array methods built on top of the signal primitives (work in progress)
 
 ### Core primitives
 
