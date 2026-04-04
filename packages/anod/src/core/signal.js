@@ -53,7 +53,6 @@ function register(fn) {
 /** @const {number} */ const FLAG_SETUP = 4;
 /** @const {number} */ const FLAG_STALE = 8;
 /** @const {number} */ const FLAG_NOTIFY = 16;
-/** @const {number} */ const FLAG_PENDING = 32;
 /** @const {number} */ const FLAG_RUNNING = 64;
 /** @const {number} */ const FLAG_DISPOSED = 128;
 /** @const {number} */ const FLAG_LOADING = 256;
@@ -96,7 +95,6 @@ const OPTIONS = OPT_DEFER | OPT_STABLE | OPT_SETUP | OPT_NOTIFY | OPT_WEAK;
 
 /** @const {number} */ const STATE_START = 0;
 /** @const {number} */ const STATE_IDLE = 1;
-/** @const {number} */ const STATE_COMPUTE = 2;
 /** @const {number} */ const STATE_OWNER = 8;
 /** @const {number} */ const STATE_SCOPE = 16;
 
@@ -126,7 +124,6 @@ function clock() {
         _maxlevel: 0,
         _disposes: 0,
         _signals: 0,
-        _computes: 0,
         _scopes: 0,
         _effects: 0,
         _scope: null
@@ -156,9 +153,6 @@ var DISPOSE_QUEUE = new Array(QUEUE_SIZE);
 var SIGNAL_OPS = new Array(QUEUE_SIZE);
 /** @const @type {Array} */
 var SIGNAL_QUEUE = new Array(QUEUE_SIZE * 2);
-
-/** @const @type {Array<Compute>} */
-var COMPUTE_QUEUE = new Array(QUEUE_SIZE);
 
 /** @const @type {Array<number>} */
 var SCOPE_LEVELS = [0, 0, 0, 0];
@@ -218,13 +212,6 @@ function scheduleSignal(node, op, value) {
     SIGNAL_OPS[index] = op;
     SIGNAL_QUEUE[index * 2] = node;
     SIGNAL_QUEUE[index * 2 + 1] = value;
-}
-
-/**
- * * @param {Compute} node 
- */
-function scheduleCompute(node) {
-    COMPUTE_QUEUE[CLOCK._computes++] = node;
 }
 
 /**
@@ -745,6 +732,12 @@ function Signal(value, opts) {
      * @type {number}
      */
     this._mod = 0;
+    /**
+     * Change time: stamped when this signal's value changes.
+     * Used by pullCompute to detect if a dep actually changed.
+     * @type {number}
+     */
+    this._ctime = 0;
 }
 
 {
@@ -879,9 +872,10 @@ function Compute(opts, fn, dep1, seed, args) {
      */
     this._time = 0;
     /**
+     * Change time: stamped when this compute's value changes.
      * @type {number}
      */
-    this._ptime = 0;
+    this._ctime = 0;
     /**
      * @type {W | undefined}
      */
@@ -937,18 +931,14 @@ function Compute(opts, fn, dep1, seed, args) {
     ComputeProto.val = function () {
         let clock = CLOCK;
         let time = clock._time;
-        let state = clock._state;
         let opts = this._flag;
-        if (opts & FLAG_ERROR) {
-            throw this._value;
-        }
         if (opts & FLAG_RUNNING) {
             throw new Error('Circular dependency');
         }
         if (opts & FLAG_STALE) {
-            if (state & STATE_IDLE) {
+            if (clock._state & STATE_IDLE) {
                 try {
-                    runCompute(this, time);
+                    pullCompute(this, time);
                     if (clock._signals > 0 || clock._disposes > 0) {
                         start(clock);
                     }
@@ -956,14 +946,13 @@ function Compute(opts, fn, dep1, seed, args) {
                     clock._state = STATE_IDLE;
                 }
             } else {
-                runCompute(this, time);
+                pullCompute(this, time);
             }
-        } else if (
-            (opts & FLAG_PENDING) &&
-            (state & STATE_COMPUTE) &&
-            this._ptime === time
-        ) {
-            refresh(this, time);
+            if (this._flag & FLAG_ERROR) {
+                throw this._value;
+            }
+        } else if (opts & FLAG_ERROR) {
+            throw this._value;
         }
         return this._value;
     };
@@ -1009,23 +998,14 @@ function Compute(opts, fn, dep1, seed, args) {
      * @param {number} time
      * @returns {void} 
      */
+    /**
+     * Pull-based: just mark STALE and propagate to subscribers.
+     * No COMPUTE_QUEUE — computes only run when pulled via .val().
+     */
     ComputeProto._setStale = function (time) {
-        this._time = time;
-        COMPUTE_QUEUE[CLOCK._computes++] = this;
-        if (this._ptime < time) {
-            this._ptime = time;
-            /** Have not been marked as PENDING this cycle */
-            let flag = this._flag |= FLAG_STALE;
-            if (flag & FLAG_NOTIFY) {
-                notifyStale(this, time);
-            } else if (flag & FLAG_DERIVED) {
-                notifyPending(this, time);
-            }
-        } else {
-            this._flag = (this._flag | FLAG_STALE) & ~FLAG_PENDING;
-            if (this._flag & FLAG_NOTIFY) {
-                notifyStale(this, time);
-            }
+        if (!(this._flag & FLAG_STALE)) {
+            this._flag |= FLAG_STALE;
+            notifyStale(this, time);
         }
     };
 }
@@ -1050,10 +1030,91 @@ function startCompute(node) {
 }
 
 /**
+ * Checks if any dep of a receiver actually changed since it
+ * last ran. Pulls stale compute deps to ensure they're current.
+ * @param {Receiver} node
+ * @param {number} time
+ * @returns {boolean}
+ */
+function needsUpdate(node, time) {
+    let lastRun = node._time;
+    let dep = node._dep1;
+    if (dep !== null) {
+        if ((dep.t === TYPE_COMPUTE) && (dep._flag & FLAG_STALE)) {
+            pullCompute(/** @type {Compute} */(dep), time);
+        }
+        if (dep._ctime > lastRun) {
+            return true;
+        }
+    }
+    let deps = node._deps;
+    if (deps !== null) {
+        let len = deps.length;
+        for (let i = 0; i < len; i += 2) {
+            dep = /** @type {Sender} */(deps[i]);
+            if ((dep.t === TYPE_COMPUTE) && (dep._flag & FLAG_STALE)) {
+                pullCompute(/** @type {Compute} */(dep), time);
+            }
+            if (dep._ctime > lastRun) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+/**
+ * Pull-based evaluation. Recursively pulls deps, then only
+ * runs this compute if a dep's value actually changed (_ctime).
+ * @param {Compute} node
+ * @param {number} time
+ * @returns {void}
+ */
+function pullCompute(node, time) {
+    if (!(node._flag & FLAG_STALE)) {
+        return;
+    }
+    /**
+     * Recursively ensure all deps are current. If any dep's
+     * value actually changed (_ctime), we must re-execute.
+     */
+    let lastRun = node._time;
+    let dep = node._dep1;
+    if (dep !== null) {
+        if ((dep.t === TYPE_COMPUTE) && (dep._flag & FLAG_STALE)) {
+            pullCompute(/** @type {Compute} */(dep), time);
+        }
+        if (dep._ctime > lastRun) {
+            runCompute(node, time);
+            node._time = time;
+            return;
+        }
+    }
+    let deps = node._deps;
+    if (deps !== null) {
+        let len = deps.length;
+        for (let i = 0; i < len; i += 2) {
+            dep = /** @type {Sender} */(deps[i]);
+            if ((dep.t === TYPE_COMPUTE) && (dep._flag & FLAG_STALE)) {
+                pullCompute(/** @type {Compute} */(dep), time);
+            }
+            if (dep._ctime > lastRun) {
+                runCompute(node, time);
+                node._time = time;
+                return;
+            }
+        }
+    }
+    /** No dep changed — clear stale without re-executing */
+    node._flag &= ~FLAG_STALE;
+    node._time = time;
+}
+
+/**
  * @template T,U,V,W
  * @param {Compute<T,U,V,W>} node
  * @param {number} time
- * @returns {void} 
+ * @returns {void}
  */
 function runCompute(node, time) {
     let opts = node._flag;
@@ -1174,7 +1235,7 @@ function runCompute(node, time) {
     }
     if (opts & FLAG_ERROR) {
         node._value = value;
-        notifyStale(node, time);
+        node._ctime = time;
     } else if (ctxState & CTX_ASYNC) {
         /**
          * Async: the subscriber escapes — replace the pool slot
@@ -1191,11 +1252,17 @@ function runCompute(node, time) {
         }
     } else if (value !== node._value) {
         node._value = value;
-        if (!(opts & FLAG_NOTIFY) && !(ctxState & CTX_EQUAL)) {
-            notifyStale(node, time);
+        if (!(ctxState & CTX_EQUAL)) {
+            node._ctime = time;
         }
     } else if (ctxState & CTX_NOTEQUAL) {
-        notifyStale(node, time);
+        node._ctime = time;
+    } else if (opts & FLAG_NOTIFY) {
+        /**
+         * FLAG_NOTIFY: always signal change to downstream
+         * even when value is identical. Overrides equal(true).
+         */
+        node._ctime = time;
     }
 }
 
@@ -1283,54 +1350,13 @@ function settle(node, value) {
     // 3. Settle value and trigger graph if changed (or if it's an error)
     if (value !== node._value || (node._flag & FLAG_ERROR)) {
         node._value = value;
+        let time = CLOCK._time + 1;
+        node._ctime = time;
         if (unbound(node)) {
             node._fn = node._args = null;
         }
-        notifyStale(node, CLOCK._time + 1);
+        notifyStale(node, time);
         start(CLOCK);
-    }
-}
-
-/**
- * @param {Compute} node
- * @param {number} time
- * @returns {void}
- */
-function refresh(node, time) {
-    node._flag |= FLAG_RUNNING;
-    try {
-        let dep = /** @type {Compute} */(node._dep1);
-        if (dep !== null && (dep.t === TYPE_COMPUTE) && (dep._flag & (FLAG_STALE | FLAG_PENDING))) {
-            if (dep._flag & FLAG_STALE) {
-                runCompute(dep, time);
-            } else if (dep._ptime === time) {
-                refresh(dep, time);
-            }
-            if (node._flag & FLAG_STALE) {
-                runCompute(node, time);
-                return;
-            }
-        }
-        let deps = node._deps;
-        if (deps !== null) {
-            let len = deps.length;
-            for (let i = 0; i < len; i += 2) {
-                dep = /** @type {Compute} */(deps[i]);
-                if ((dep.t === TYPE_COMPUTE) && (dep._flag & (FLAG_STALE | FLAG_PENDING))) {
-                    if (dep._flag & FLAG_STALE) {
-                        runCompute(dep, time);
-                    } else if (dep._ptime === time) {
-                        refresh(dep, time);
-                    }
-                    if (node._flag & FLAG_STALE) {
-                        runCompute(node, time);
-                        return;
-                    }
-                }
-            }
-        }
-    } finally {
-        node._flag &= ~(FLAG_PENDING | FLAG_RUNNING);
     }
 }
 
@@ -1466,7 +1492,9 @@ function Effect(opts, fn, dep1, args) {
      * @returns {void} 
      */
     EffectProto._setStale = function (time) {
-        this._time = time;
+        if (this._flag & FLAG_STALE) {
+            return;
+        }
         this._flag |= FLAG_STALE;
         if (this._flag & FLAG_SCOPE) {
             let level = this._level;
@@ -1500,6 +1528,7 @@ function startEffect(node) {
     let state = CLOCK._state;
     try {
         runEffect(node);
+        node._time = CLOCK._time;
         if (CLOCK._signals > 0 || CLOCK._disposes > 0) {
             start(CLOCK);
         }
@@ -1714,7 +1743,9 @@ function setScope(node, owner) {
  * @param {Signal} node
  */
 function notify(node) {
-    notifyStale(node, CLOCK._time + 1);
+    let time = CLOCK._time + 1;
+    node._ctime = time;
+    notifyStale(node, time);
     start(CLOCK);
 }
 
@@ -1761,29 +1792,13 @@ function start(clock) {
                     }
                     if (signal._flag & FLAG_STALE) {
                         signal._flag &= ~FLAG_STALE;
+                        signal._ctime = time;
                         notifyStale(signal, time);
                     }
                     signals[i * 2] =
                         signals[i * 2 + 1] = null;
                 }
                 clock._signals = 0;
-            }
-            if (clock._computes > 0) {
-                let i = 0;
-                let computes = COMPUTE_QUEUE;
-                clock._state |= STATE_COMPUTE;
-                while (i < clock._computes) {
-                    let count = clock._computes;
-                    for (; i < count; i++) {
-                        let node = computes[i];
-                        if (node._flag & FLAG_STALE) {
-                            runCompute(node, time);
-                        }
-                        computes[i] = null;
-                    }
-                }
-                clock._state &= ~STATE_COMPUTE;
-                clock._computes = 0;
             }
             if (clock._signals > 0 || clock._disposes > 0) {
                 if (cycle++ === 1e5) {
@@ -1803,7 +1818,7 @@ function start(clock) {
                     let count = levels[i];
                     for (let j = 0; j < count; j++) {
                         let node = effects[j];
-                        if (node._flag & FLAG_STALE) {
+                        if ((node._flag & FLAG_STALE) && needsUpdate(node, time)) {
                             try {
                                 runEffect(node);
                             } catch (err) {
@@ -1815,7 +1830,10 @@ function start(clock) {
                                     thrown = true;
                                 }
                             }
+                        } else {
+                            node._flag &= ~FLAG_STALE;
                         }
+                        node._time = time;
                         effects[j] = null;
                     }
                     levels[i] = 0;
@@ -1829,7 +1847,7 @@ function start(clock) {
                 let effects = EFFECT_QUEUE;
                 for (let i = 0; i < count; i++) {
                     let node = effects[i];
-                    if (node._flag & FLAG_STALE) {
+                    if ((node._flag & FLAG_STALE) && needsUpdate(node, time)) {
                         try {
                             runEffect(node);
                         } catch (err) {
@@ -1841,7 +1859,10 @@ function start(clock) {
                                 thrown = true;
                             }
                         }
+                    } else {
+                        node._flag &= ~FLAG_STALE;
                     }
+                    node._time = time;
                     effects[i] = null;
                 }
                 clock._effects = 0;
@@ -1853,9 +1874,8 @@ function start(clock) {
             }
         } while (
             !thrown &&
-            clock._signals > 0 ||
-            clock._computes > 0 ||
-            clock._disposes > 0
+            (clock._signals > 0 ||
+            clock._disposes > 0)
         );
     } finally {
         clock._state = STATE_IDLE;
@@ -1868,7 +1888,6 @@ function start(clock) {
         }
         clock._disposes =
             clock._signals =
-            clock._computes =
             clock._effects =
             clock._scopes =
             clock._minlevel =
@@ -2249,35 +2268,7 @@ function pruneDeps(node, sub) {
     }
 }
 
-/**
- * @param {Compute} send 
- * @param {number} time
- * @returns {void}
- */
-function notifyPending(send, time) {
-    let sub = /** @type {Compute} */(send._sub1);
-    if (sub !== null && (sub.t === TYPE_COMPUTE) && sub._ptime < time) {
-        sub._ptime = time;
-        sub._flag |= FLAG_PENDING;
-        if (sub._flag & FLAG_DERIVED) {
-            notifyPending(sub, time);
-        }
-    }
-    let subs = send._subs;
-    if (subs !== null) {
-        let len = subs.length;
-        for (let i = 0; i < len; i += 2) {
-            sub = /** @type {Compute} */(subs[i]);
-            if ((sub.t === TYPE_COMPUTE) && sub._ptime < time) {
-                sub._ptime = time;
-                sub._flag |= FLAG_PENDING;
-                if (sub._flag & FLAG_DERIVED) {
-                    notifyPending(sub, time);
-                }
-            }
-        }
-    }
-}
+
 
 /**
  * @param {Sender} send
@@ -2390,8 +2381,8 @@ function batch(fn) {
 
 export {
     CLOCK,
-    STATE_START, STATE_IDLE, STATE_COMPUTE, STATE_OWNER, STATE_SCOPE,
-    FLAG_DEFER, FLAG_STABLE, FLAG_SETUP, FLAG_STALE, FLAG_PENDING,
+    STATE_START, STATE_IDLE, STATE_OWNER, STATE_SCOPE,
+    FLAG_DEFER, FLAG_STABLE, FLAG_SETUP, FLAG_STALE,
     FLAG_RUNNING, FLAG_DISPOSED, FLAG_LOADING, FLAG_ERROR, FLAG_RECOVER,
     FLAG_BOUND, FLAG_DERIVED, FLAG_SCOPE, FLAG_NOTIFY, FLAG_EQUAL, FLAG_WEAK,
     FLAG_INIT,

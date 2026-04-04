@@ -47,8 +47,10 @@ Sender.prototype._sub1slot;
 Sender.prototype._subs;
 /** @package @type {number} */
 Sender.prototype._mod;
+/** @package @type {number} */
+Sender.prototype._ctime;
 
-/** 
+/**
  * @interface
  * @extends {Disposer}
  */
@@ -80,8 +82,6 @@ Clock.prototype._maxlevel;
 Clock.prototype._disposes;
 /** @type {number} */
 Clock.prototype._signals;
-/** @type {number} */
-Clock.prototype._computes;
 /** @type {number} */
 Clock.prototype._scopes;
 /** @type {number} */

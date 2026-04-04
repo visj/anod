@@ -72,6 +72,7 @@ describe("async", () => {
             expect(c1.error()).toBe(true);
 
             s1.set(false);
+            c1.val(); // Pull to trigger re-evaluation
             await tick();
 
             expect(c1.error()).toBe(false);
@@ -102,6 +103,7 @@ describe("async", () => {
 
             // Trigger a second promise by updating the signal
             s1.set(1);
+            c1.val(); // Pull to trigger re-evaluation with new signal value
 
             // Resolve the stale (first) promise — should be ignored
             resolvers[0](100);
@@ -227,6 +229,7 @@ describe("async", () => {
 
             // Signal update — c1 re-runs, picks up the new generator; staleIter is now stale
             s1.set(false);
+            c1.val(); // Pull to trigger re-evaluation
             // Async generators need 2 microtask steps to resolve a yield in JSC/Bun
             await tick();
             await tick();

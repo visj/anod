@@ -53,7 +53,7 @@ describe("signal", () => {
             const s3 = signal(3);
             let count = 0;
 
-            compute((c) => {
+            const c1 = compute((c) => {
                 count++;
                 c.read(s1);
                 s2.val(); // Should not track
@@ -63,12 +63,15 @@ describe("signal", () => {
             expect(count).toBe(1, "initial"); // "Initial execution"
 
             s1.set(5);
+            c1.val(); // Pull to trigger re-evaluation
             expect(count).toBe(2, "s1"); // "Propagates on s1 change"
 
             s2.set(4);
+            c1.val();
             expect(count).toBe(2, "s2"); // "Does not propagate on s2 (peek) change"
 
             s3.set(6);
+            c1.val();
             expect(count).toBe(3, "s3"); // "Propagates on s3 change"
         });
     });

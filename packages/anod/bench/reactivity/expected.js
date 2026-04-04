@@ -37,10 +37,6 @@ export const EXPECTED = {
  * when conditional reads skip a branch (unstable, molWire).
  */
 export const OVERRIDES_ANOD = {
-    unstable: 4,
-    molWire: 14,
-    dynUpdateSimple: 14,
-    dynUpdateDynamic: 86,
 };
 
 /**
