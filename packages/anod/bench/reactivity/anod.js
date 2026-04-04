@@ -5,8 +5,9 @@ import {
     effect,
     compute,
     signal,
+    OPT_NOTIFY,
     OPT_DEFER,
-} from '../../src/index.js';
+} from '../../dist/index.mjs';
 
 let sink = 0;
 let counter = 0;

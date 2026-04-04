@@ -323,10 +323,6 @@ function Subscriber() {
     /** @type {number} */
     this._version = 0;
     /** @type {number} */
-    this._dephead = 0;
-    /** @type {number} */
-    this._deptail = 0;
-    /** @type {number} */
     this._reused = 0;
     /** @type {Sender | null} */
     this._dep1 = null;
@@ -334,8 +330,6 @@ function Subscriber() {
     this._deps = null;
     /** @type {number} */
     this._count = 0;
-    /** @type {boolean} */
-    this._dep1head = false;
 }
 
 /** @const */
@@ -386,54 +380,25 @@ SubscriberProto.read = function (sender) {
         return value;
     }
     /**
-     * Re-execution: sweep existing deps with version tagging.
-     * version     = belongs to us AND re-read this cycle
-     * version - 1 = belongs to us but NOT yet confirmed
+     * Re-execution path. All existing deps were pre-stamped with
+     * version - 1 before fn() was called (linear scan in runCompute/
+     * runEffect). We just need to confirm or collect new deps here.
+     *
+     * version     = confirmed (re-read this cycle)
+     * version - 1 = existing but not yet confirmed
+     * anything else = new dep
      */
     if (sender._version === version) {
         /** Already read this cycle (dedup) */
         return value;
     }
     if (sender._version === version - 1) {
-        /** Swept past earlier but now re-read. Confirm it. */
+        /** Existing dep, confirm it */
         sender._version = version;
         this._reused++;
         return value;
     }
-    /** Check dep1 if not yet swept */
-    if (this._dep1head) {
-        if (sender === node._dep1) {
-            sender._version = version;
-            this._dep1head = false;
-            this._reused++;
-            return value;
-        }
-        /** dep1 is not our sender — mark it as ours-but-unconfirmed */
-        node._dep1._version = version - 1;
-        this._dep1head = false;
-    }
-    /** Sweep forward through the _deps array */
-    let deps = node._deps;
-    let tail = this._deptail;
-    let head = this._dephead;
-    while (head < tail) {
-        let dep = /** @type {Sender} */(deps[head * 2]);
-        head++;
-        if (dep === sender) {
-            sender._version = version;
-            this._dephead = head;
-            this._reused++;
-            return value;
-        }
-        /** Not our target — tag as ours-but-unconfirmed */
-        dep._version = version - 1;
-    }
-    this._dephead = head;
-    /**
-     * Not found in existing deps — it's a new dep.
-     * Tag it and collect in subscriber overflow.
-     * subscribe() is deferred to pruneDeps.
-     */
+    /** New dep — tag and collect in subscriber overflow */
     sender._version = version;
     let count = this._count;
     if (count === 0) {
@@ -1088,13 +1053,28 @@ function runCompute(node, time) {
                     value = fn(ctx, value, args);
                     node._flag &= ~FLAG_SETUP;
                 } else {
-                    ctx._dep1head = node._dep1 !== null;
-                    ctx._dephead = 0;
-                    ctx._deptail = node._deps !== null ? node._deps.length / 2 : 0;
+                    /**
+                     * Pre-stamp all existing deps with version - 1
+                     * so read() can confirm them with a single check.
+                     */
+                    let existingCount = 0;
+                    let dep1 = node._dep1;
+                    if (dep1 !== null) {
+                        dep1._version = version - 1;
+                        existingCount = 1;
+                    }
+                    let deps = node._deps;
+                    if (deps !== null) {
+                        let len = deps.length;
+                        for (let j = 0; j < len; j += 2) {
+                            /** @type {Sender} */(deps[j])._version = version - 1;
+                        }
+                        existingCount += len / 2;
+                    }
                     ctx._reused = 0;
                     ctx._dep1 = null;
+                    ctx._deps = null;
                     ctx._count = 0;
-                    let existingCount = (ctx._dep1head ? 1 : 0) + ctx._deptail;
                     value = fn(ctx, value, args);
                     if (ctx._reused !== existingCount || ctx._count !== 0) {
                         pruneDeps(node, ctx);
@@ -1525,14 +1505,28 @@ function runEffect(node) {
                     value = fn(ctx, args);
                     node._flag &= ~FLAG_SETUP;
                 } else {
-                    ctx._dep1head = node._dep1 !== null;
-                    ctx._dephead = 0;
-                    ctx._deptail = node._deps !== null ? node._deps.length / 2 : 0;
+                    /**
+                     * Pre-stamp all existing deps with version - 1
+                     * so read() can confirm them with a single check.
+                     */
+                    let existingCount = 0;
+                    let dep1 = node._dep1;
+                    if (dep1 !== null) {
+                        dep1._version = version - 1;
+                        existingCount = 1;
+                    }
+                    let deps = node._deps;
+                    if (deps !== null) {
+                        let len = deps.length;
+                        for (let j = 0; j < len; j += 2) {
+                            /** @type {Sender} */(deps[j])._version = version - 1;
+                        }
+                        existingCount += len / 2;
+                    }
                     ctx._reused = 0;
                     ctx._dep1 = null;
                     ctx._deps = null;
                     ctx._count = 0;
-                    let existingCount = (ctx._dep1head ? 1 : 0) + ctx._deptail;
                     value = fn(ctx, args);
                     if (ctx._reused !== existingCount || ctx._count !== 0) {
                         pruneDeps(node, ctx);
