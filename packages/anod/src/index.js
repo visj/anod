@@ -17,8 +17,8 @@ import {
     root,
     signal,
     compute,
-    derive,
-    watch,
+    memo,
+    reaction,
     effect,
     scope,
     batch
@@ -43,8 +43,8 @@ export {
     root,
     signal,
     compute,
-    derive,
-    watch,
+    memo,
+    reaction,
     effect,
     scope,
     batch

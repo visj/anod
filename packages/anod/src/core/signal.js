@@ -287,67 +287,32 @@ function watchOne(fn, opts, args) {
 }
 
 /**
- * Binds a compute to an array of senders. The fn receives
- * (ctx, prevValue, args) and uses ctx.read() to get values.
- * All senders are pre-subscribed; after first execution the
- * node runs stable (no tracking overhead on ctx.read).
+ * Stable compute. Tracks deps on first run, then never
+ * re-tracks. Like compute() with implicit OPT_STABLE.
  * @template T,W
- * @param {!Array<!Sender>} senders
  * @param {function(T,W): T} fn
  * @param {T=} seed
- * @param {number=} opts
  * @param {W=} args
  * @returns {!Compute<T,null,null,W>}
  */
-function derive(senders, fn, seed, opts, args) {
-    let _flag = FLAG_BOUND | FLAG_STABLE | ((0 | opts) & OPTIONS);
-    let node = new Compute(_flag, fn, null, seed, args);
-    let len = senders.length;
-    /** @type {Array<Sender | number>} */
-    let deps = new Array(len * 2);
-    for (let i = 0; i < len; i++) {
-        let sender = senders[i];
-        /** depslot starts at 1 since dep1 is null */
-        let depslot = i + 1;
-        let subslot = subscribe(sender, node, depslot);
-        deps[i * 2] = sender;
-        deps[i * 2 + 1] = subslot;
-    }
-    node._deps = deps;
-    if (!(_flag & FLAG_DEFER)) {
-        startCompute(node);
-    }
+function memo(fn, seed, args) {
+    let flag = FLAG_STABLE | FLAG_SETUP;
+    let node = new Compute(flag, fn, null, seed, args);
+    startCompute(node);
     return node;
 }
 
 /**
- * Binds an effect to an array of senders. The fn receives
- * (ctx, args) and uses ctx.read() to get values.
+ * Stable effect. Tracks deps on first run, then never
+ * re-tracks. Like effect() with implicit OPT_STABLE.
  * @template W
- * @param {!Array<!Sender>} senders
  * @param {function(W): (function(): void | void)} fn
- * @param {number=} opts
  * @param {W=} args
  * @returns {!Effect<null,null,W>}
  */
-function watch(senders, fn, opts, args) {
-    let _flag = FLAG_BOUND | FLAG_STABLE | ((0 | opts) & OPTIONS);
-    let node = new Effect(_flag, fn, null, args);
-    let len = senders.length;
-    /** @type {Array<Sender | number>} */
-    let deps = new Array(len * 2);
-    for (let i = 0; i < len; i++) {
-        let sender = senders[i];
-        /** depslot starts at 1 since dep1 is null */
-        let depslot = i + 1;
-        let subslot = subscribe(sender, node, depslot);
-        deps[i * 2] = sender;
-        deps[i * 2 + 1] = subslot;
-    }
-    node._deps = deps;
-    if (!(_flag & FLAG_DEFER)) {
-        startEffect(node);
-    }
+function reaction(fn, args) {
+    let node = new Effect(FLAG_STABLE | FLAG_SETUP, fn, null, args);
+    startEffect(node);
     return node;
 }
 
@@ -603,17 +568,9 @@ function Root() {
      */
     this._cleanup = null;
     /**
-     * @type {number}
-     */
-    this._cslot = 0;
-    /**
      * @type {Array<Receiver> | null}
      */
     this._owned = null;
-    /**
-     * @type {number}
-     */
-    this._oslot = 0;
     /**
      * @type {Owner | null}
      */
@@ -622,10 +579,6 @@ function Root() {
      * @type {(function(*): boolean) | Array<(function(*): boolean)> | null}
      */
     this._recover = null;
-    /**
-     * @type {number}
-     */
-    this._rslot = 0;
 }
 
 /** @const */
@@ -1075,6 +1028,15 @@ function pullCompute(node, time) {
         return;
     }
     /**
+     * FLAG_WEAK with null value: value was released by clearReceiver.
+     * Must recompute regardless of dep changes.
+     */
+    if ((node._flag & FLAG_WEAK) && node._value === null) {
+        runCompute(node, time);
+        node._time = time;
+        return;
+    }
+    /**
      * Recursively ensure all deps are current. If any dep's
      * value actually changed (_ctime), we must re-execute.
      */
@@ -1399,17 +1361,9 @@ function Effect(opts, fn, dep1, args) {
      */
     this._cleanup = null;
     /**
-     * @type {number}
-     */
-    this._cslot = 0;
-    /**
      * @type {Array<Receiver> | null}
      */
     this._owned = null;
-    /**
-     * @type {number}
-     */
-    this._oslot = 0;
     /**
      * @type {number}
      */
@@ -1426,10 +1380,6 @@ function Effect(opts, fn, dep1, args) {
      * @type {(function(*): boolean) | Array<(function(*): boolean)> | null}
      */
     this._recover = null;
-    /**
-     * @type {number}
-     */
-    this._rslot = 0;
     if (CLOCK._state & STATE_OWNER) {
         this._owner = CLOCK._scope;
         addOwned(CLOCK._scope, this);
@@ -1550,7 +1500,7 @@ function startEffect(node) {
  */
 function runEffect(node) {
     let opts = node._flag;
-    if (!(opts & FLAG_SETUP) && ((opts & FLAG_SCOPE) || node._cslot > 0)) {
+    if (!(opts & FLAG_SETUP) && ((opts & FLAG_SCOPE) || node._cleanup !== null)) {
         clearOwned(node);
     }
     /** @type {(function(): void) | null | undefined} */
@@ -1660,23 +1610,13 @@ function runEffect(node) {
  * @returns {void} 
  */
 function addCleanup(node, fn) {
-    let count = node._cslot;
-    switch (count) {
-        case 0:
-            node._cleanup = fn;
-            node._cslot = 1;
-            break;
-        case 1:
-            node._cleanup = [/** @type {function(): void} */(node._cleanup), fn];
-            node._cslot = 4;
-            break;
-        case 2:
-            node._cleanup[0] = fn;
-            node._cslot = 3;
-            break;
-        default:
-            node._cleanup[count - 2] = fn;
-            node._cslot = count + 1;
+    let cur = node._cleanup;
+    if (cur === null) {
+        node._cleanup = fn;
+    } else if (typeof cur === 'function') {
+        node._cleanup = [cur, fn];
+    } else {
+        cur.push(fn);
     }
 }
 
@@ -1686,23 +1626,13 @@ function addCleanup(node, fn) {
  * @returns {void}
  */
 function addRecover(node, fn) {
-    let count = node._rslot;
-    switch (count) {
-        case 0:
-            node._recover = fn;
-            node._rslot = 1;
-            break;
-        case 1:
-            node._recover = [/** @type {function(*): boolean} */(node._recover), fn];
-            node._rslot = 4;
-            break;
-        case 2:
-            /** @type {Array<function(*): boolean>} */(node._recover)[0] = fn;
-            node._rslot = 3;
-            break;
-        default:
-            /** @type {Array<function(*): boolean>} */(node._recover)[count - 2] = fn;
-            node._rslot = count + 1;
+    let cur = node._recover;
+    if (cur === null) {
+        node._recover = fn;
+    } else if (typeof cur === 'function') {
+        node._recover = [cur, fn];
+    } else {
+        cur.push(fn);
     }
     node._flag |= FLAG_RECOVER;
 }
@@ -1718,7 +1648,6 @@ function addOwned(node, child) {
     } else {
         node._owned.push(child);
     }
-    node._oslot++;
 }
 
 /**
@@ -2046,43 +1975,27 @@ function clearOwned(owner) {
     if (owner._flag & FLAG_SCOPE) {
         let owned = owner._owned;
         if (owned !== null) {
-            let len = owner._oslot;
+            let len = owned.length;
             for (let i = 0; i < len; i++) {
                 owned[i]._dispose();
-                owned[i] = null;
             }
-            owner._oslot = 0;
+            owner._owned = null;
         }
     }
-    let cslot = owner._cslot;
-    if (cslot > 0) {
-        let cleanup = owner._cleanup;
-        if (cslot === 1) {
-            owner._cleanup = null;
-            owner._cslot = 0;
-                /** @type {function(): void} */(cleanup)();
+    let cleanup = owner._cleanup;
+    if (cleanup !== null) {
+        owner._cleanup = null;
+        if (typeof cleanup === 'function') {
+            cleanup();
         } else {
-            let len = cslot - 2;
+            let len = cleanup.length;
             for (let i = 0; i < len; i++) {
-                    /** @type {Array<function(): void>} */(cleanup)[i]();
-                cleanup[i] = null;
+                cleanup[i]();
             }
-            owner._cslot = 2;
         }
     }
-    let rslot = owner._rslot;
-    if (rslot > 0) {
-        if (rslot === 1) {
-            owner._recover = null;
-            owner._rslot = 0;
-        } else {
-            let len = rslot - 2;
-            let recover = /** @type {Array<function(*): boolean>} */(owner._recover);
-            for (let i = 0; i < len; i++) {
-                recover[i] = null;
-            }
-            owner._rslot = 2;
-        }
+    if (owner._recover !== null) {
+        owner._recover = null;
         owner._flag &= ~FLAG_RECOVER;
     }
 }
@@ -2097,16 +2010,15 @@ function tryRecover(node, error) {
     let owner = node._owner;
     while (owner !== null) {
         if (owner._flag & FLAG_RECOVER) {
-            let count = owner._rslot;
-            if (count === 1) {
-                if (/** @type {function(*): boolean} */(owner._recover)(error) === true) {
+            let recover = owner._recover;
+            if (typeof recover === 'function') {
+                if (recover(error) === true) {
                     return true;
                 }
-            } else if (count !== 0) {
-                let fns = /** @type {Array<function(*): boolean>} */(owner._recover);
-                let len = count - 2;
+            } else if (recover !== null) {
+                let len = recover.length;
                 for (let i = 0; i < len; i++) {
-                    if (fns[i](error) === true) {
+                    if (recover[i](error) === true) {
                         return true;
                     }
                 }
@@ -2410,8 +2322,8 @@ export {
     root,
     signal,
     compute,
-    derive,
-    watch,
+    memo,
+    reaction,
     effect,
     scope,
     batch

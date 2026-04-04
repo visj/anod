@@ -1,173 +1,173 @@
-clk: ~3.16 GHz
-cpu: Apple M1 Pro
-runtime: node 25.8.2 (arm64-darwin)
+clk: ~5.13 GHz
+cpu: Intel(R) Core(TM) i7-14700
+runtime: node 25.8.2 (x64-linux)
 
 benchmark                   avg (min … max) p75 / p99    (min … top 1%)
 ------------------------------------------- -------------------------------
 • Kairo: deep propagation
 ------------------------------------------- -------------------------------
-preact-signals                 1.89 µs/iter   1.90 µs    █                 
-                        (1.87 µs … 1.96 µs)   1.95 µs ▇ ▆█▂                
-                    ( 95.16  b … 622.20  b) 262.34  b █████▂▆▄▄▂▃▄█▂▂▂▁▂▁▂▂
-                  5.30 ipc (  0.05% stalls)  99.89% L1 data cache
-          6.07k cycles  32.15k instructions  40.87% retired LD/ST ( 13.14k)
+preact-signals                 1.27 µs/iter   1.27 µs   █
+                        (1.24 µs … 1.43 µs)   1.43 µs   █▂
+                    (  2.38  b … 586.15  b) 260.27  b ▃███▃▁▃▁▁▁▂▁▁▁▁▁▁▁▁▁▂
+                   5.04 ipc ( 48.28% cache)    3.60 branch misses
+          6.66k cycles  33.56k instructions    4.73 c-refs    2.45 c-misses
 
 • Kairo: broad propagation
 ------------------------------------------- -------------------------------
-preact-signals                 4.65 µs/iter   4.67 µs    █                 
-                        (4.62 µs … 4.69 µs)   4.68 µs  ▃ █ ▃           ▃ ▃▃
-                    (  1.02 kb …   1.02 kb)   1.02 kb ▄█▄███▄▄▄▁▁▁█▄▁▁▄█▁██
-                  6.36 ipc (  0.20% stalls)  99.90% L1 data cache
-         14.75k cycles  93.73k instructions  40.65% retired LD/ST ( 38.10k)
+preact-signals                 3.53 µs/iter   3.61 µs  █      ▅
+                        (3.41 µs … 3.76 µs)   3.72 µs ▆█▆▆    █     ▃
+                    (  1.01 kb …   1.02 kb)   1.02 kb ████▄█▄▁█▁██▁███▄▄▁▄▄
+                   5.38 ipc ( 68.09% cache)    2.10 branch misses
+         18.25k cycles  98.21k instructions   17.68 c-refs    5.64 c-misses
 
 • Kairo: diamond
 ------------------------------------------- -------------------------------
-preact-signals               289.37 ns/iter 290.08 ns  ▄█                  
-                    (281.88 ns … 366.92 ns) 340.34 ns ▃███                 
-                    ( 86.21  b … 719.25  b) 314.48  b ████▆▃▂▁▁▁▁▁▁▁▁▁▁▁▁▁▁
-                  6.13 ipc (  1.02% stalls)  99.77% L1 data cache
-         926.01 cycles   5.68k instructions  40.97% retired LD/ST (  2.33k)
+preact-signals               222.14 ns/iter 222.06 ns   ▆█
+                    (214.93 ns … 287.35 ns) 249.33 ns   ██▃
+                    ( 85.22  b … 655.13  b) 312.66  b ▂████▆▂▃▂▂▁▂▂▁▁▂▂▂▁▁▁
+                   5.04 ipc ( 53.98% cache)    0.02 branch misses
+          1.16k cycles   5.86k instructions    5.12 c-refs    2.35 c-misses
 
 • Kairo: triangle
 ------------------------------------------- -------------------------------
-preact-signals               490.30 ns/iter 491.92 ns  ▆ █                 
-                    (479.55 ns … 578.78 ns) 564.92 ns ▇█▄█                 
-                    (  2.27  b … 730.19  b) 313.32  b ████▆▄▂▁▁▂▁▁▁▁▁▁▁▁▁▁▁
-                  6.42 ipc (  0.60% stalls)  99.86% L1 data cache
-          1.57k cycles  10.07k instructions  41.21% retired LD/ST (  4.15k)
+preact-signals               400.41 ns/iter 403.65 ns   █▃
+                    (382.76 ns … 459.08 ns) 451.39 ns   ██
+                    ( 72.64  b … 640.89  b) 312.91  b ▂████▄▃▃▃▄▁▂▂▂▂▃▃▁▂▂▂
+                   5.00 ipc ( 68.01% cache)    2.01 branch misses
+          2.07k cycles  10.38k instructions    5.12 c-refs    1.64 c-misses
 
 • Kairo: mux
 ------------------------------------------- -------------------------------
-preact-signals                 5.91 µs/iter   5.87 µs ▄█                   
-                        (5.85 µs … 6.28 µs)   6.25 µs ██                   
-                    (  1.17 kb …   1.18 kb)   1.18 kb ██▁▇▁▁▁▁▁▁▁▁▃▁▁▁▁▁▁▁▃
-                  6.42 ipc (  0.37% stalls)  99.68% L1 data cache
-         19.13k cycles 122.82k instructions  40.42% retired LD/ST ( 49.65k)
+preact-signals                 4.33 µs/iter   4.37 µs  █
+                        (4.21 µs … 4.68 µs)   4.68 µs ██ ▃
+                    (  1.17 kb …   1.18 kb)   1.18 kb ██▆█▄▄█▄▄▁▆▁▁▁▄▁▄▁▁▆▄
+                   5.56 ipc ( 37.90% cache)    7.86 branch misses
+         22.57k cycles 125.45k instructions   21.72 c-refs   13.49 c-misses
 
 • Kairo: unstable
 ------------------------------------------- -------------------------------
-preact-signals               343.43 ns/iter 343.86 ns   ▃█                 
-                    (334.06 ns … 427.70 ns) 389.29 ns   ██▄                
-                    (106.61  b … 780.58  b) 347.80  b ▆▇███▃▂▂▂▁▁▂▁▁▁▁▁▁▁▁▁
-                  6.36 ipc (  1.17% stalls)  99.68% L1 data cache
-          1.09k cycles   6.96k instructions  40.39% retired LD/ST (  2.81k)
+preact-signals               291.06 ns/iter 291.49 ns  ▆█
+                    (281.90 ns … 340.91 ns) 323.85 ns  ██
+                    (128.72  b … 754.25  b) 345.95  b ▄███▆▄▃▃▂▂▂▂▂▂▂▃▃▂▂▁▂
+                   4.75 ipc ( 41.01% cache)    1.14 branch misses
+          1.51k cycles   7.18k instructions    5.73 c-refs    3.38 c-misses
 
 • Kairo: avoidable propagation
 ------------------------------------------- -------------------------------
-preact-signals               113.50 ns/iter 113.52 ns ▆▆█                  
-                    (110.43 ns … 164.87 ns) 145.22 ns ███                  
-                    ( 20.16  b … 479.17  b) 240.51  b ███▄▃▂▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
-                  6.39 ipc (  0.80% stalls)  99.87% L1 data cache
-         363.51 cycles   2.32k instructions  41.35% retired LD/ST ( 960.24)
+preact-signals                83.39 ns/iter  84.21 ns   ██▄
+                     (78.18 ns … 127.23 ns) 105.52 ns   ███▄
+                    ( 28.44  b … 440.21  b) 240.33  b ▂█████▅▃▂▂▂▁▁▁▁▁▁▁▁▁▁
+                   5.52 ipc ( 40.93% cache)    0.00 branch misses
+         436.05 cycles   2.41k instructions    3.95 c-refs    2.33 c-misses
 
 • Kairo: repeated observers
 ------------------------------------------- -------------------------------
-preact-signals               173.93 ns/iter 173.88 ns   █                  
-                    (169.22 ns … 247.05 ns) 218.26 ns ▅██                  
-                    ( 49.70  b … 623.17  b) 256.43  b ███▅▂▂▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
-                  6.82 ipc (  1.27% stalls)  99.72% L1 data cache
-         555.23 cycles   3.78k instructions  37.34% retired LD/ST (  1.41k)
+preact-signals               140.80 ns/iter 141.02 ns  ▄█
+                    (135.70 ns … 186.51 ns) 164.42 ns  ██▇
+                    ( 50.09  b … 567.05  b) 256.37  b ▃████▅▃▂▂▂▂▂▂▂▂▁▁▂▁▁▁
+                   5.35 ipc ( 34.44% cache)    1.00 branch misses
+         736.70 cycles   3.94k instructions    4.21 c-refs    2.76 c-misses
 
 • CellX 10 layers
 ------------------------------------------- -------------------------------
-preact-signals                 4.89 µs/iter   4.90 µs              █       
-                        (4.83 µs … 4.95 µs)   4.94 µs            ▂▂█▂      
-                    (  1.84 kb …   1.88 kb)   1.84 kb ▇▄▁▄▁▁▄▇▇▁▁████▄▄▄▄▁▄
-                  6.03 ipc (  0.32% stalls)  99.93% L1 data cache
-         15.57k cycles  93.91k instructions  40.96% retired LD/ST ( 38.47k)
+preact-signals                 3.80 µs/iter   3.79 µs  █
+                        (3.72 µs … 4.22 µs)   4.09 µs ██▅
+                    (  1.81 kb …   1.84 kb)   1.84 kb ████▅▁▃█▃▁▁▁▁▁▁▁▃▁▁▃▃
+                   4.95 ipc ( 39.97% cache)    5.73 branch misses
+         19.78k cycles  97.92k instructions   32.20 c-refs   19.33 c-misses
 
 • $mol_wire
 ------------------------------------------- -------------------------------
-preact-signals                47.65 µs/iter  47.75 µs  █                   
-                     (46.25 µs … 152.17 µs)  57.88 µs  █▃▄                 
-                    (  1.46 kb … 226.09 kb)   2.84 kb ▂███▂▂▂▂▁▁▁▁▁▁▁▁▁▁▁▁▁
-                  5.35 ipc (  0.02% stalls)  99.98% L1 data cache
-        155.44k cycles 831.43k instructions  35.58% retired LD/ST (295.80k)
+preact-signals                30.80 µs/iter  30.85 µs ███
+                      (30.25 µs … 32.27 µs)  32.17 µs ███▅▅ ▅ ▅           ▅
+                    (  1.45 kb …   1.67 kb)   1.47 kb █████▁█▁█▁▁▁▁▁▁▁▁▁▁▁█
+                   5.33 ipc ( 39.61% cache)    5.27 branch misses
+        159.32k cycles 849.28k instructions   26.97 c-refs   16.29 c-misses
 
 • Create 1k signals
 ------------------------------------------- -------------------------------
-preact-signals                 6.08 µs/iter   5.61 µs   █                  
-                       (5.52 µs … 15.58 µs)   6.16 µs  ▂█                  
-                    (  2.17 kb …   2.18 kb)   2.17 kb ▃██▆▆▁▃▁▁▁▁▁▁▁▁▁▁▁▁▁▃
-                  4.53 ipc ( 18.61% stalls)  90.79% L1 data cache
-         21.68k cycles  98.19k instructions  41.58% retired LD/ST ( 40.83k)
+preact-signals                 9.24 µs/iter   9.32 µs ███
+                       (8.76 µs … 12.04 µs)   9.58 µs ███▅▅▅  ▅     ▅ ▅ ▅ ▅
+                    (  2.17 kb …   2.18 kb)   2.17 kb ██████▁▁█▁▁▁▁▁█▁█▁█▁█
+                   2.06 ipc ( 22.25% cache)   18.10 branch misses
+         49.84k cycles 102.86k instructions   1.90k c-refs   1.48k c-misses
 
 • Create 1k computations
 ------------------------------------------- -------------------------------
-preact-signals               100.45 µs/iter  97.79 µs  █                   
-                     (93.88 µs … 403.71 µs) 171.33 µs  █                   
-                    ( 22.56 kb …   1.16 mb) 587.61 kb ▃█▃▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
-                  5.86 ipc (  3.06% stalls)  99.36% L1 data cache
-        322.52k cycles   1.89M instructions  45.76% retired LD/ST (865.43k)
+preact-signals                82.79 µs/iter  85.20 µs     █
+                     (63.75 µs … 346.75 µs) 154.70 µs     █
+                    ( 17.73 kb …   1.09 mb) 587.39 kb ▄█▂▂██▆▂▁▁▁▁▁▁▁▁▁▁▁▁▁
+                   4.62 ipc ( 37.63% cache)    8.82 branch misses
+        429.12k cycles   1.98M instructions   9.90k c-refs   6.18k c-misses
 
 • Dynamic build: simple component
 ------------------------------------------- -------------------------------
-preact-signals                 3.28 µs/iter   3.30 µs           █          
-                        (3.23 µs … 3.32 µs)   3.32 µs       ▅  ▅████  ▅█▅  
-                    (  4.62 kb …   4.85 kb)   4.76 kb █▅▁▁▅▅████████▅████▅▅
-                  5.65 ipc (  5.77% stalls)  98.07% L1 data cache
-         10.42k cycles  58.82k instructions  42.12% retired LD/ST ( 24.77k)
+preact-signals                 2.67 µs/iter   2.69 µs    █
+                        (2.60 µs … 2.89 µs)   2.89 µs  ▅███
+                    (  4.58 kb …   4.79 kb)   4.76 kb ▆█████▆█▃▁▆▁▁▁▃▁▃▁▃▁▃
+                   4.48 ipc ( 33.45% cache)    1.45 branch misses
+         13.97k cycles  62.62k instructions  348.62 c-refs  232.01 c-misses
 
 • Dynamic build: large web app
 ------------------------------------------- -------------------------------
-preact-signals                 1.45 ms/iter   1.37 ms █                    
-                        (1.30 ms … 2.52 ms)   2.41 ms █▅                   
-                    (  6.63 mb …   7.64 mb)   7.32 mb ██▃▂▁▁▁▁▁▁▁▁▁▁▁▁▁▂▃▂▁
-                  5.01 ipc (  4.14% stalls)  97.00% L1 data cache
-          4.64M cycles  23.28M instructions  40.73% retired LD/ST (  9.48M)
+preact-signals                 1.27 ms/iter   1.24 ms     █
+                      (965.49 µs … 2.15 ms)   2.06 ms     █
+                    (  6.73 mb …   7.45 mb)   7.32 mb ▄▆▃▂██▄▂▁▁▁▁▁▁▁▁▂▂▃▂▂
+                   3.74 ipc ( 50.74% cache)  15.11k branch misses
+          6.51M cycles  24.36M instructions 191.87k c-refs  94.51k c-misses
 
 • Dynamic build: wide dense
 ------------------------------------------- -------------------------------
-preact-signals                 1.83 ms/iter   1.81 ms  █                   
-                        (1.71 ms … 2.36 ms)   2.31 ms  ██▄                 
-                    ( 10.40 mb …  10.40 mb)  10.40 mb ████▃▄▃▁▁▁▁▅▂▁▁▁▂▂▄▂▁
-                  5.45 ipc (  3.55% stalls)  98.78% L1 data cache
-          5.88M cycles  32.07M instructions  38.93% retired LD/ST ( 12.49M)
+preact-signals                 1.63 ms/iter   1.67 ms       ▂█
+                        (1.30 ms … 2.18 ms)   2.11 ms       ██
+                    ( 10.07 mb …  10.71 mb)  10.40 mb ▂▇▃▂▂▁██▇▄▅▁▂▂▂▃▃▃▃▄▂
+                   3.95 ipc ( 41.66% cache)  17.69k branch misses
+          8.41M cycles  33.21M instructions 214.62k c-refs 125.21k c-misses
 
 • Dynamic update: simple component
 ------------------------------------------- -------------------------------
-preact-signals               473.74 ns/iter 477.07 ns  ▃█                  
-                    (462.22 ns … 540.74 ns) 512.68 ns  ██▅▂█▇              
-                    ( 49.02  b … 615.16  b) 280.91  b ▄███████▃▄▂▃▃▂▂▁▁▁▁▁▁
-                  5.91 ipc (  0.71% stalls)  99.77% L1 data cache
-          1.52k cycles   8.96k instructions  38.06% retired LD/ST (  3.41k)
+preact-signals               360.76 ns/iter 370.24 ns   █
+                    (342.56 ns … 409.48 ns) 406.46 ns  ▆█▆▃
+                    ( 75.98  b … 607.08  b) 280.76  b ▃████▆▆▇▅█▅▄▄▄▄▃▂▂▂▁▁
+                   4.96 ipc ( 47.80% cache)    1.97 branch misses
+          1.87k cycles   9.30k instructions    4.73 c-refs    2.47 c-misses
 
 • Dynamic update: dynamic component
 ------------------------------------------- -------------------------------
-preact-signals                10.95 µs/iter  10.95 µs         ██           
-                      (10.87 µs … 11.02 µs)  11.01 µs ▅     ▅▅██▅ ▅   ▅   ▅
-                    (513.05  b …   1.05 kb) 894.24  b █▁▁▁▁▁█████▁█▁▁▁█▁▁▁█
-                  5.07 ipc (  0.18% stalls)  99.74% L1 data cache
-         34.62k cycles 175.41k instructions  38.19% retired LD/ST ( 66.99k)
+preact-signals                 7.23 µs/iter   7.24 µs      █ ▂ █
+                        (7.11 µs … 7.49 µs)   7.40 µs ▅  ▅ █ █ █
+                    (513.05  b …   1.10 kb) 956.62  b █▁▇█▁█▁█▇█▁▁▁▁▁▁▁▁▁▇▇
+                   4.73 ipc ( 56.08% cache)   55.63 branch misses
+         37.82k cycles 178.83k instructions   17.64 c-refs    7.75 c-misses
 
 • Dynamic update: large web app
 ------------------------------------------- -------------------------------
-preact-signals               294.29 µs/iter 295.88 µs       █▃             
-                    (282.58 µs … 582.29 µs) 319.29 µs     ▄▇██▃            
-                    (728.00  b … 545.55 kb)   2.75 kb ▁▄▄██████▅▂▂▂▂▂▁▁▁▁▁▁
-                  4.97 ipc (  5.25% stalls)  94.79% L1 data cache
-        954.56k cycles   4.75M instructions  34.27% retired LD/ST (  1.63M)
+preact-signals               274.50 µs/iter 287.54 µs   ▂ ▂▄█▄
+                    (252.81 µs … 321.98 µs) 301.93 µs  ▂██████     ▅▃▅▆
+                    (728.00  b … 352.33 kb)   2.50 kb ▂████████▅▃▃███████▇▄
+                   3.51 ipc ( 99.88% cache)  168.88 branch misses
+          1.44M cycles   5.06M instructions 123.18k c-refs  148.16 c-misses
 
 • Dynamic update: wide dense
 ------------------------------------------- -------------------------------
-preact-signals               554.55 µs/iter 556.29 µs       ▅█▃            
-                    (543.17 µs … 595.29 µs) 573.58 µs     ▃▇███▇           
-                    (728.00  b … 760.00  b) 728.09  b ▁▂▃▆██████▆▅▄▃▃▂▂▂▂▁▁
-                  5.69 ipc (  6.10% stalls)  98.20% L1 data cache
-          1.77M cycles  10.05M instructions  33.80% retired LD/ST (  3.40M)
+preact-signals               384.04 µs/iter 382.69 µs  ▅█
+                    (372.12 µs … 496.31 µs) 439.50 µs  ██▆
+                    (728.00  b … 320.79 kb)   1.21 kb ▄███▅▃▂▂▂▁▁▂▁▂▂▂▁▁▂▂▁
+                   5.36 ipc ( 99.88% cache)   4.68k branch misses
+          2.00M cycles  10.72M instructions 174.20k c-refs  201.68 c-misses
 
 • Dynamic update: deep
 ------------------------------------------- -------------------------------
-preact-signals               202.24 µs/iter 205.25 µs     ▂█               
-                    (195.00 µs … 264.17 µs) 217.04 µs  ▇  ██ ▃   ▃         
-                    ( 10.68 kb … 454.38 kb)  39.79 kb ▂█▅▃██▇██▃██▂▃▆▂▂▂▁▁▁
-                  4.98 ipc (  3.03% stalls)  98.45% L1 data cache
-        648.89k cycles   3.23M instructions  39.49% retired LD/ST (  1.28M)
+preact-signals               127.52 µs/iter 129.77 µs   ▅██▅▄
+                    (118.41 µs … 339.69 µs) 148.38 µs  ▅██████▃
+                    ( 26.05 kb … 386.49 kb)  39.14 kb ▂████████▇▆▅▅▄▃▄▃▃▂▂▁
+                   5.03 ipc ( 90.05% cache)  802.20 branch misses
+        660.23k cycles   3.32M instructions   6.84k c-refs  681.16 c-misses
 
 • Dynamic update: very dynamic
 ------------------------------------------- -------------------------------
-preact-signals               132.28 µs/iter 133.88 µs         ▄█           
-                    (124.25 µs … 168.04 µs) 144.96 µs     ▅   ██▃          
-                    ( 11.20 kb … 309.62 kb)  18.15 kb ▁▁▂███▆▆███▆▃▂▁▁▂▁▁▁▁
-                  4.52 ipc (  3.74% stalls)  96.13% L1 data cache
-        424.06k cycles   1.91M instructions  36.85% retired LD/ST (705.64k)
+preact-signals                83.52 µs/iter  85.39 µs   █ █▅
+                     (75.84 µs … 169.47 µs) 110.07 µs  █████▅
+                    (  7.85 kb … 301.02 kb)  18.25 kb ▂███████▆▄▂▂▂▂▂▁▁▁▁▁▁
+                   4.44 ipc ( 95.75% cache)  852.82 branch misses
+        433.12k cycles   1.92M instructions   7.98k c-refs  339.26 c-misses

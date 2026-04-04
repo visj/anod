@@ -14,20 +14,14 @@ Disposer.prototype._dispose = function () { };
 function Owner() { }
 /** @package @type {(function(): void) | Array<(function(): void)> | null} */
 Owner.prototype._cleanup;
-/** @package @type {number} */
-Owner.prototype._cslot;
 /** @package @type {Array<Receiver> | null} */
 Owner.prototype._owned;
-/** @package @type {number} */
-Owner.prototype._oslot;
 /** @package @type {number | undefined} */
 Owner.prototype._level;
 /** @package @type {Owner | null} */
 Owner.prototype._owner;
 /** @package @type {(function(*): boolean) | Array<(function(*): boolean)> | null} */
 Owner.prototype._recover;
-/** @package @type {number} */
-Owner.prototype._rslot;
 
 /**
  * @interface 

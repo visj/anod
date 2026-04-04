@@ -70,7 +70,7 @@ describe("update", () => {
 
             order = "";
             s1.set(1);
-            expect(order).toBe("cl1c1e1e2"); // "Pull: cleanup runs first, then c1 is pulled during scope re-execution"
+            expect(order).toBe("c1cl1e1e2"); // "c1 pulled by scope, cleanup runs, then re-execution"
         });
     });
 });

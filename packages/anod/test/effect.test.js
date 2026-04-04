@@ -91,7 +91,7 @@ describe("effect", () => {
 
         seq = "";
         s1.set(1);
-        expect(seq).toBe("e2s2{0}c1e1e3s2{1}c2e2s2{1}"); // "Pull: effects run and pull computes lazily"
+        expect(seq).toBe("c1e2s2{0}e1e3s2{1}c2e2s2{1}"); // "Pull: effects pull computes lazily"
     });
 
     describe("cleanup", () => {
