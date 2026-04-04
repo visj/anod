@@ -37,9 +37,16 @@ function register(fn) {
 /** @const {number} */ const MUT_POS_SHIFT = 15;
 /** @const {number} */ const MUT_POS_MASK = 0x1FFFF;
 
-/** @const {number} */ const ASYNC_NOT_ASYNC = 0;
-/** @const {number} */ const ASYNC_PROMISE = 1;
-/** @const {number} */ const ASYNC_ITERABLE = 2;
+/**
+ * Context state bits, stored on Subscriber._state.
+ * Encodes per-execution state that the user can set
+ * via the IReader API during a compute/effect fn.
+ */
+/** @const {number} */ const CTX_EQUAL = 1;
+/** @const {number} */ const CTX_NOTEQUAL = 2;
+/** @const {number} */ const CTX_PROMISE = 4;
+/** @const {number} */ const CTX_ITERABLE = 8;
+/** @const {number} */ const CTX_ASYNC = CTX_PROMISE | CTX_ITERABLE;
 
 /** @const {number} */ const FLAG_DEFER = 1;
 /** @const {number} */ const FLAG_STABLE = 2;
@@ -160,16 +167,6 @@ var SCOPE_QUEUE = [[], [], [], []];
 /** @const @type {Array<Effect>} */
 var EFFECT_QUEUE = new Array(QUEUE_SIZE);
 
-/**
- * @param {*} value 
- * @returns {number} 0: None, 1: Promise, 2: Async Iterator
- */
-function isAsync(value) {
-    return (value != null && (typeof value === 'object' || typeof value === 'function'))
-        ? (typeof value[Symbol.asyncIterator] === 'function' ? ASYNC_ITERABLE
-            : (typeof value.then === 'function' ? ASYNC_PROMISE : ASYNC_NOT_ASYNC))
-        : ASYNC_NOT_ASYNC;
-}
 
 /**
  *
@@ -208,7 +205,7 @@ function isFunction(value) {
     return typeof value === 'function';
 }
 
-export { isPrimitive, isNumber, isFunction, isSignal, isAsync }
+export { isPrimitive, isNumber, isFunction, isSignal }
 
 /**
  * @param {Signal} node 
@@ -262,6 +259,8 @@ function loading() {
 
 
 /**
+ * Binds a compute to a single sender. The fn receives
+ * (ctx, senderValue, prevValue, args).
  * @template T,V,W
  * @this {!Sender<T>}
  * @param {function(T,V,W): V} fn
@@ -270,7 +269,7 @@ function loading() {
  * @param {W=} args
  * @returns {!Compute<V,T,null,W>}
  */
-function derive(fn, seed, opts, args) {
+function deriveOne(fn, seed, opts, args) {
     let _flag = FLAG_BOUND | FLAG_STABLE | ((0 | opts) & OPTIONS);
     let node = new Compute(_flag, fn, this, seed, args);
     node._dep1slot = subscribe(this, node, 0);
@@ -281,6 +280,8 @@ function derive(fn, seed, opts, args) {
 }
 
 /**
+ * Binds an effect to a single sender. The fn receives
+ * (ctx, senderValue, args).
  * @template T,W
  * @this {!Sender<T>}
  * @param {function(T,W): (function(): void | void)} fn
@@ -288,10 +289,75 @@ function derive(fn, seed, opts, args) {
  * @param {W=} args
  * @returns {!Effect<T,null,W>}
  */
-function watch(fn, opts, args) {
+function watchOne(fn, opts, args) {
     let _flag = FLAG_BOUND | FLAG_STABLE | ((0 | opts) & OPTIONS);
     let node = new Effect(_flag, fn, this, args);
     node._dep1slot = subscribe(this, node, 0);
+    if (!(_flag & FLAG_DEFER)) {
+        startEffect(node);
+    }
+    return node;
+}
+
+/**
+ * Binds a compute to an array of senders. The fn receives
+ * (ctx, prevValue, args) and uses ctx.read() to get values.
+ * All senders are pre-subscribed; after first execution the
+ * node runs stable (no tracking overhead on ctx.read).
+ * @template T,W
+ * @param {!Array<!Sender>} senders
+ * @param {function(T,W): T} fn
+ * @param {T=} seed
+ * @param {number=} opts
+ * @param {W=} args
+ * @returns {!Compute<T,null,null,W>}
+ */
+function derive(senders, fn, seed, opts, args) {
+    let _flag = FLAG_BOUND | FLAG_STABLE | ((0 | opts) & OPTIONS);
+    let node = new Compute(_flag, fn, null, seed, args);
+    let len = senders.length;
+    /** @type {Array<Sender | number>} */
+    let deps = new Array(len * 2);
+    for (let i = 0; i < len; i++) {
+        let sender = senders[i];
+        /** depslot starts at 1 since dep1 is null */
+        let depslot = i + 1;
+        let subslot = subscribe(sender, node, depslot);
+        deps[i * 2] = sender;
+        deps[i * 2 + 1] = subslot;
+    }
+    node._deps = deps;
+    if (!(_flag & FLAG_DEFER)) {
+        startCompute(node);
+    }
+    return node;
+}
+
+/**
+ * Binds an effect to an array of senders. The fn receives
+ * (ctx, args) and uses ctx.read() to get values.
+ * @template W
+ * @param {!Array<!Sender>} senders
+ * @param {function(W): (function(): void | void)} fn
+ * @param {number=} opts
+ * @param {W=} args
+ * @returns {!Effect<null,null,W>}
+ */
+function watch(senders, fn, opts, args) {
+    let _flag = FLAG_BOUND | FLAG_STABLE | ((0 | opts) & OPTIONS);
+    let node = new Effect(_flag, fn, null, args);
+    let len = senders.length;
+    /** @type {Array<Sender | number>} */
+    let deps = new Array(len * 2);
+    for (let i = 0; i < len; i++) {
+        let sender = senders[i];
+        /** depslot starts at 1 since dep1 is null */
+        let depslot = i + 1;
+        let subslot = subscribe(sender, node, depslot);
+        deps[i * 2] = sender;
+        deps[i * 2 + 1] = subslot;
+    }
+    node._deps = deps;
     if (!(_flag & FLAG_DEFER)) {
         startEffect(node);
     }
@@ -303,26 +369,67 @@ function watch(fn, opts, args) {
  * read() just returns sender.val() without tracking deps.
  * @constructor
  */
+/**
+ * Execution context used for stable, bound, and SETUP paths.
+ * Singleton — safe to share because it only reads val() or
+ * writes deps directly to the node (no per-execution state
+ * beyond _node/_version which are saved/restored by callers).
+ * @constructor
+ */
 function Reader() {
     /** @type {Receiver | null} */
     this._node = null;
+    /** @type {number} */
+    this._state = 0;
+    /** @type {number} */
+    this._version = 0;
 }
 
 /** @const */
 var ReaderProto = Reader.prototype;
 
 /**
+ * In stable/bound mode: just returns sender.val().
+ * In SETUP mode (FLAG_SETUP set on node): subscribes
+ * the dep directly on the node.
  * @template T
  * @param {!Sender<T>} sender
  * @returns {T}
  */
 ReaderProto.read = function (sender) {
-    return sender.val();
+    let node = this._node;
+    let value = sender.val();
+    if (!(node._flag & FLAG_SETUP)) {
+        return value;
+    }
+    let version = this._version;
+    /** Dedup: already subscribed this cycle */
+    if (sender._version === version) {
+        return value;
+    }
+    sender._version = version;
+    /** @type {number} */
+    let depslot = 0;
+    if (node._dep1 === null) {
+        node._dep1 = sender;
+    } else if (node._deps === null) {
+        depslot = 1;
+    } else {
+        depslot = (node._deps.length / 2) + 1;
+    }
+    let subslot = subscribe(sender, node, depslot);
+    switch (depslot) {
+        case 0: node._dep1slot = subslot; break;
+        case 1: node._deps = [sender, subslot]; break;
+        default: node._deps.push(sender, subslot);
+    }
+    return value;
 };
 
 /**
- * Full execution context for dynamic/setup nodes.
- * read() tracks dependencies via subscribe().
+ * Execution context for re-execution with dynamic deps.
+ * Holds per-execution reconciliation state (_reused, _dep1,
+ * _deps, _count) that cannot be shared. Must be pooled.
  * @constructor
  */
 function Subscriber() {
@@ -330,6 +437,12 @@ function Subscriber() {
     this._node = null;
     /** @type {number} */
     this._version = 0;
+    /**
+     * Per-execution state bits (CTX_EQUAL, CTX_NOTEQUAL,
+     * CTX_PROMISE, CTX_ITERABLE). Reset each execution.
+     * @type {number}
+     */
+    this._state = 0;
     /** @type {number} */
     this._reused = 0;
     /** @type {Sender | null} */
@@ -344,58 +457,16 @@ function Subscriber() {
 var SubscriberProto = Subscriber.prototype;
 
 /**
- * Tracks a dependency and subscribes the node to the sender.
- * Adapted from the old read() that lived on Compute/Effect.
+ * Re-execution path only. All existing deps were pre-stamped
+ * with version - 1 before fn() was called. Confirms reused
+ * deps or collects new ones.
  * @template T
  * @param {!Sender<T>} sender
  * @returns {T}
  */
 SubscriberProto.read = function (sender) {
-    let node = this._node;
-    let flag = node._flag;
     let value = sender.val();
-    if (!(flag & FLAG_RUNNING)) {
-        return value;
-    }
-    if ((flag & FLAG_BOUND) || ((flag & FLAG_STABLE) && !(flag & FLAG_SETUP))) {
-        return value;
-    }
     let version = this._version;
-    /**
-     * FLAG_SETUP: first execution, no existing deps.
-     * Subscribe immediately on the node.
-     */
-    if (flag & FLAG_SETUP) {
-        if (sender._version === version) {
-            return value;
-        }
-        sender._version = version;
-        /** @type {number} */
-        let depslot = 0;
-        if (node._dep1 === null) {
-            node._dep1 = sender;
-        } else if (node._deps === null) {
-            depslot = 1;
-        } else {
-            depslot = (node._deps.length / 2) + 1;
-        }
-        let subslot = subscribe(sender, node, depslot);
-        switch (depslot) {
-            case 0: node._dep1slot = subslot; break;
-            case 1: node._deps = [sender, subslot]; break;
-            default: node._deps.push(sender, subslot);
-        }
-        return value;
-    }
-    /**
-     * Re-execution path. All existing deps were pre-stamped with
-     * version - 1 before fn() was called (linear scan in runCompute/
-     * runEffect). We just need to confirm or collect new deps here.
-     *
-     * version     = confirmed (re-read this cycle)
-     * version - 1 = existing but not yet confirmed
-     * anything else = new dep
-     */
     if (sender._version === version) {
         /** Already read this cycle (dedup) */
         return value;
@@ -428,10 +499,20 @@ SubscriberProto.read = function (sender) {
  */
 function _equal(eq) {
     if (eq === false) {
-        this._node._flag = (this._node._flag | FLAG_NOTEQUAL) & ~FLAG_EQUAL;
+        this._state = (this._state | CTX_NOTEQUAL) & ~CTX_EQUAL;
     } else {
-        this._node._flag = (this._node._flag | FLAG_EQUAL) & ~FLAG_NOTEQUAL;
+        this._state = (this._state | CTX_EQUAL) & ~CTX_NOTEQUAL;
     }
+}
+
+/**
+ * Marks the current compute as returning a Promise or
+ * AsyncIterable. Replaces the old isAsync() runtime check.
+ * @param {number} type - CTX_PROMISE (4) or CTX_ITERABLE (8)
+ * @returns {void}
+ */
+function _async(type) {
+    this._state |= type;
 }
 
 /**
@@ -489,6 +570,7 @@ function _getMod() {
 }
 
 ReaderProto.equal = SubscriberProto.equal = _equal;
+ReaderProto.async = SubscriberProto.async = _async;
 ReaderProto.stable = SubscriberProto.stable = _stable;
 ReaderProto.error = SubscriberProto.error = _error;
 ReaderProto.loading = SubscriberProto.loading = _loading;
@@ -497,72 +579,27 @@ ReaderProto.recover = SubscriberProto.recover = _recover;
 ReaderProto._getMod = SubscriberProto._getMod = _getMod;
 
 /**
- * Object pool for Reader contexts.
- * Pre-allocated to avoid allocations on the hot path when
- * nested compute evaluations need their own context.
+ * Reader is a singleton: it only writes deps to the node (not
+ * to itself), so nested runCompute calls just save/restore
+ * _node and _version on the stack. Safe for any nesting depth.
+ * @type {Reader}
+ */
+var READER = new Reader();
+
+/**
+ * Subscriber pool for the re-execution path. Each Subscriber
+ * holds per-execution reconciliation state (_reused, _dep1,
+ * _count) that must not be shared. Claiming increments the
+ * index; releasing decrements it.
  * @const {number}
  */
 var POOL_SIZE = 10;
-
-/** @type {Array<Reader>} */
-var READER_POOL = new Array(POOL_SIZE);
-/** @type {number} */
-var READER_INDEX = POOL_SIZE;
-
 /** @type {Array<Subscriber>} */
 var SUBSCRIBER_POOL = new Array(POOL_SIZE);
 /** @type {number} */
-var SUBSCRIBER_INDEX = POOL_SIZE;
-
+var SUBSCRIBER_IDX = 0;
 for (var _i = 0; _i < POOL_SIZE; _i++) {
-    READER_POOL[_i] = new Reader();
     SUBSCRIBER_POOL[_i] = new Subscriber();
-}
-
-/**
- * Acquires a Reader from the pool. Allocates a new one if the pool is empty.
- * @returns {Reader}
- */
-function acquireReader() {
-    if (READER_INDEX > 0) {
-        return READER_POOL[--READER_INDEX];
-    }
-    return new Reader();
-}
-
-/**
- * Releases a Reader back into the pool.
- * @param {Reader} reader
- * @returns {void}
- */
-function releaseReader(reader) {
-    reader._node = null;
-    if (READER_INDEX < READER_POOL.length) {
-        READER_POOL[READER_INDEX++] = reader;
-    }
-}
-
-/**
- * Acquires a Subscriber from the pool. Allocates a new one if the pool is empty.
- * @returns {Subscriber}
- */
-function acquireSubscriber() {
-    if (SUBSCRIBER_INDEX > 0) {
-        return SUBSCRIBER_POOL[--SUBSCRIBER_INDEX];
-    }
-    return new Subscriber();
-}
-
-/**
- * Releases a Subscriber back into the pool.
- * @param {Subscriber} subscriber
- * @returns {void}
- */
-function releaseSubscriber(subscriber) {
-    subscriber._node = null;
-    if (SUBSCRIBER_INDEX < SUBSCRIBER_POOL.length) {
-        SUBSCRIBER_POOL[SUBSCRIBER_INDEX++] = subscriber;
-    }
 }
 
 /**
@@ -762,7 +799,7 @@ function Signal(value, opts) {
      * @param {W=} args
      * @returns {!Compute<V,T,null,W>}
      */
-    SignalProto.derive = derive;
+    SignalProto.derive = deriveOne;
 
     /**
      * @template T,W
@@ -772,7 +809,7 @@ function Signal(value, opts) {
      * @param {W=} args
      * @returns {Effect<T,null,W>}
      */
-    SignalProto.watch = watch;
+    SignalProto.watch = watchOne;
 
     /**
      * @this {!Signal<T>}
@@ -940,7 +977,7 @@ function Compute(opts, fn, dep1, seed, args) {
      * @param {W=} args
      * @returns {!Compute<V,T,null,W>}
      */
-    ComputeProto.derive = derive;
+    ComputeProto.derive = deriveOne;
 
     /**
      * @template T,W
@@ -950,7 +987,7 @@ function Compute(opts, fn, dep1, seed, args) {
      * @param {W=} args
      * @returns {!Effect<T,null,W>}
      */
-    ComputeProto.watch = watch;
+    ComputeProto.watch = watchOne;
 
     /**
      * @this {!Compute<T,U,V,W>}
@@ -1023,119 +1060,142 @@ function runCompute(node, time) {
     /** @type {T} */
     let value = node._value;
     let state = CLOCK._state;
-    node._flag = (opts | FLAG_RUNNING) & ~(FLAG_EQUAL | FLAG_NOTEQUAL);
+    node._flag = (opts & ~(FLAG_STALE | FLAG_INIT)) | FLAG_RUNNING;
     CLOCK._state &= RESET;
-    /** @type {Reader | Subscriber} */
-    let ctx;
-    /** @type {boolean} */
-    let isSubscriber = false;
+    /** @type {number} */
+    let ctxState = 0;
+    /** @type {number} */
+    let poolIdx = -1;
     try {
-        let fn = node._fn;
-        let args = node._args;
         if (opts & FLAG_BOUND) {
             let dep1 = node._dep1;
+            /** @type {Reader} */
+            let ctx = READER;
+            let prevNode = ctx._node;
             if (opts & FLAG_SETUP) {
                 node._flag &= ~FLAG_SETUP;
                 let version = CLOCK._version += 2;
-                isSubscriber = true;
-                ctx = acquireSubscriber();
-                ctx._version =
-                    dep1._version = version;
-            } else {
-                ctx = acquireReader();
-            }
-            ctx._node = node;
-            value = fn(ctx, dep1.val(), value, args);
-        } else {
-            if ((opts & (FLAG_STABLE | FLAG_SETUP)) === FLAG_STABLE) {
-                ctx = acquireReader();
-                ctx._node = node;
-                value = fn(ctx, value, args);
-            } else {
-                let version = CLOCK._version += 2;
-                ctx = acquireSubscriber();
-                isSubscriber = true;
+                ctx._state = 0;
                 ctx._node = node;
                 ctx._version = version;
-                if (opts & FLAG_SETUP) {
-                    value = fn(ctx, value, args);
-                    node._flag &= ~FLAG_SETUP;
-                } else {
-                    /**
-                     * Pre-stamp all existing deps with version - 1
-                     * so read() can confirm them with a single check.
-                     */
-                    let existingCount = 0;
-                    let dep1 = node._dep1;
-                    if (dep1 !== null) {
-                        dep1._version = version - 1;
-                        existingCount = 1;
-                    }
-                    let deps = node._deps;
-                    if (deps !== null) {
-                        let len = deps.length;
-                        for (let j = 0; j < len; j += 2) {
-                            /** @type {Sender} */(deps[j])._version = version - 1;
-                        }
-                        existingCount += len / 2;
-                    }
-                    ctx._reused = 0;
-                    ctx._dep1 = null;
-                    ctx._deps = null;
-                    ctx._count = 0;
-                    value = fn(ctx, value, args);
-                    if (ctx._reused !== existingCount || ctx._count !== 0) {
-                        pruneDeps(node, ctx);
+                if (dep1 !== null) {
+                    dep1._version = version;
+                }
+                let deps = node._deps;
+                if (deps !== null) {
+                    let len = deps.length;
+                    for (let j = 0; j < len; j += 2) {
+                        /** @type {Sender} */(deps[j])._version = version;
                     }
                 }
+            } else {
+                ctx._state = 0;
+                ctx._node = node;
             }
+            if (dep1 !== null) {
+                value = node._fn(ctx, dep1.val(), value, node._args);
+            } else {
+                value = node._fn(ctx, value, node._args);
+            }
+            ctxState = ctx._state;
+            ctx._node = prevNode;
+        } else if ((opts & (FLAG_STABLE | FLAG_SETUP)) === FLAG_STABLE) {
+            /** @type {Reader} */
+            let ctx = READER;
+            let prevNode = ctx._node;
+            ctx._state = 0;
+            ctx._node = node;
+            value = node._fn(ctx, value, node._args);
+            ctxState = ctx._state;
+            ctx._node = prevNode;
+        } else if (opts & FLAG_SETUP) {
+            /** @type {Reader} */
+            let ctx = READER;
+            let prevNode = ctx._node;
+            let version = CLOCK._version += 2;
+            ctx._state = 0;
+            ctx._node = node;
+            ctx._version = version;
+            value = node._fn(ctx, value, node._args);
+            ctxState = ctx._state;
+            ctx._node = prevNode;
+            node._flag &= ~FLAG_SETUP;
+        } else {
+            /**
+             * Re-execution with dynamic deps — needs Subscriber from pool.
+             */
+            poolIdx = SUBSCRIBER_IDX;
+            /** @type {Subscriber} */
+            let ctx = poolIdx < POOL_SIZE ? SUBSCRIBER_POOL[SUBSCRIBER_IDX++] : new Subscriber();
+            let version = CLOCK._version += 2;
+            ctx._state = 0;
+            ctx._node = node;
+            ctx._version = version;
+            /**
+             * Pre-stamp all existing deps with version - 1
+             * so read() can confirm them with a single check.
+             */
+            let existingCount = 0;
+            let dep1 = node._dep1;
+            if (dep1 !== null) {
+                dep1._version = version - 1;
+                existingCount = 1;
+            }
+            let deps = node._deps;
+            if (deps !== null) {
+                let len = deps.length;
+                for (let j = 0; j < len; j += 2) {
+                    /** @type {Sender} */(deps[j])._version = version - 1;
+                }
+                existingCount += len / 2;
+            }
+            ctx._reused = 0;
+            ctx._dep1 = null;
+            ctx._count = 0;
+            value = node._fn(ctx, value, node._args);
+            if (ctx._reused !== existingCount || ctx._count !== 0) {
+                pruneDeps(node, ctx);
+            }
+            ctxState = ctx._state;
+            ctx._node = null;
+            SUBSCRIBER_IDX = poolIdx;
         }
         node._flag &= ~FLAG_ERROR;
     } catch (err) {
         value = err;
         node._flag |= FLAG_ERROR;
+        if (poolIdx >= 0) {
+            SUBSCRIBER_IDX = poolIdx;
+        }
     } finally {
         CLOCK._state = state;
         opts = node._flag;
         node._flag &= ~(FLAG_RUNNING | FLAG_STALE | FLAG_INIT);
     }
     if (opts & FLAG_ERROR) {
-        if (isSubscriber) {
-            releaseSubscriber(ctx);
-        } else {
-            releaseReader(ctx);
-        }
         node._value = value;
         notifyStale(node, time);
-    } else {
-        let asyncType = isAsync(value);
-        if (asyncType === ASYNC_NOT_ASYNC) {
-            if (isSubscriber) {
-                releaseSubscriber(ctx);
-            } else {
-                releaseReader(ctx);
-            }
-            if (value !== node._value) {
-                node._value = value;
-                if ((opts & (FLAG_NOTIFY | FLAG_EQUAL)) === 0) {
-                    notifyStale(node, time);
-                }
-            } else if (opts & FLAG_NOTEQUAL) {
-                notifyStale(node, time);
-            }
-        } else {
-            /**
-             * Async: the context must not be returned to the pool
-             * since the async continuation may still reference it.
-             * It will be garbage collected when the async settles.
-             */
-            node._flag |= FLAG_LOADING;
-            if (asyncType === ASYNC_PROMISE) {
-                resolvePromise(new WeakRef(node), /** @type {IThenable<T>} */(value), time);
-            } else {
-                resolveIterator(new WeakRef(node), /** @type {AsyncIterator<T> | AsyncIterable<T>} */(value), time);
-            }
+    } else if (ctxState & CTX_ASYNC) {
+        /**
+         * Async: the subscriber escapes — replace the pool slot
+         * so the pool stays consistent for future use.
+         */
+        if (poolIdx >= 0 && poolIdx < POOL_SIZE) {
+            SUBSCRIBER_POOL[poolIdx] = new Subscriber();
         }
+        node._flag |= FLAG_LOADING;
+        if (ctxState & CTX_PROMISE) {
+            resolvePromise(new WeakRef(node), /** @type {IThenable<T>} */(value), time);
+        } else {
+            resolveIterator(new WeakRef(node), /** @type {AsyncIterator<T> | AsyncIterable<T>} */(value), time);
+        }
+    } else if (value !== node._value) {
+        node._value = value;
+        if (!(opts & FLAG_NOTIFY) && !(ctxState & CTX_EQUAL)) {
+            notifyStale(node, time);
+        }
+    } else if (ctxState & CTX_NOTEQUAL) {
+        notifyStale(node, time);
     }
 }
 
@@ -1476,82 +1536,90 @@ function runEffect(node) {
         CLOCK._scope = node;
         CLOCK._state |= STATE_OWNER | STATE_SCOPE;
     }
-    /** @type {Reader | Subscriber} */
-    let ctx;
-    /** @type {boolean} */
-    let isSubscriber = false;
-    try {
-        if (opts & FLAG_BOUND) {
-            let dep1 = node._dep1;
-            /**
-             * Bound effects: use Reader for stable (no setup),
-             * Subscriber for setup phase (needs to register deps).
-             */
-            if (opts & FLAG_SETUP) {
-                let version = CLOCK._version += 2;
-                ctx = acquireSubscriber();
-                isSubscriber = true;
-                ctx._node = node;
-                ctx._version = version;
-            } else {
-                ctx = acquireReader();
-                ctx._node = node;
+    if (opts & FLAG_BOUND) {
+        let dep1 = node._dep1;
+        /** @type {Reader} */
+        let ctx = READER;
+        let prevNode = ctx._node;
+        if (opts & FLAG_SETUP) {
+            let version = CLOCK._version += 2;
+            ctx._state = 0;
+            ctx._node = node;
+            ctx._version = version;
+            if (dep1 !== null) {
+                dep1._version = version;
             }
-            value = fn(ctx, dep1.val(), args);
-        } else {
-            if ((opts & (FLAG_STABLE | FLAG_SETUP)) === FLAG_STABLE) {
-                ctx = acquireReader();
-                ctx._node = node;
-                value = fn(ctx, args);
-            } else {
-                let version = CLOCK._version += 2;
-                ctx = acquireSubscriber();
-                isSubscriber = true;
-                ctx._node = node;
-                ctx._version = version;
-                if (opts & FLAG_SETUP) {
-                    value = fn(ctx, args);
-                    node._flag &= ~FLAG_SETUP;
-                } else {
-                    /**
-                     * Pre-stamp all existing deps with version - 1
-                     * so read() can confirm them with a single check.
-                     */
-                    let existingCount = 0;
-                    let dep1 = node._dep1;
-                    if (dep1 !== null) {
-                        dep1._version = version - 1;
-                        existingCount = 1;
-                    }
-                    let deps = node._deps;
-                    if (deps !== null) {
-                        let len = deps.length;
-                        for (let j = 0; j < len; j += 2) {
-                            /** @type {Sender} */(deps[j])._version = version - 1;
-                        }
-                        existingCount += len / 2;
-                    }
-                    ctx._reused = 0;
-                    ctx._dep1 = null;
-                    ctx._deps = null;
-                    ctx._count = 0;
-                    value = fn(ctx, args);
-                    if (ctx._reused !== existingCount || ctx._count !== 0) {
-                        pruneDeps(node, ctx);
-                    }
+            let deps = node._deps;
+            if (deps !== null) {
+                let len = deps.length;
+                for (let j = 0; j < len; j += 2) {
+                    /** @type {Sender} */(deps[j])._version = version;
                 }
             }
-        }
-    } finally {
-        if (isSubscriber) {
-            releaseSubscriber(ctx);
         } else {
-            releaseReader(ctx);
+            ctx._state = 0;
+            ctx._node = node;
         }
-        CLOCK._state = state;
-        CLOCK._scope = scope;
-        node._flag &= ~(FLAG_RUNNING | FLAG_STALE | FLAG_INIT);
+        if (dep1 !== null) {
+            value = fn(ctx, dep1.val(), args);
+        } else {
+            value = fn(ctx, args);
+        }
+        ctx._node = prevNode;
+    } else if ((opts & (FLAG_STABLE | FLAG_SETUP)) === FLAG_STABLE) {
+        /** @type {Reader} */
+        let ctx = READER;
+        let prevNode = ctx._node;
+        ctx._state = 0;
+        ctx._node = node;
+        value = fn(ctx, args);
+        ctx._node = prevNode;
+    } else if (opts & FLAG_SETUP) {
+        /** @type {Reader} */
+        let ctx = READER;
+        let prevNode = ctx._node;
+        let version = CLOCK._version += 2;
+        ctx._state = 0;
+        ctx._node = node;
+        ctx._version = version;
+        value = fn(ctx, args);
+        ctx._node = prevNode;
+        node._flag &= ~FLAG_SETUP;
+    } else {
+        let poolIdx = SUBSCRIBER_IDX;
+        /** @type {Subscriber} */
+        let ctx = poolIdx < POOL_SIZE ? SUBSCRIBER_POOL[SUBSCRIBER_IDX++] : new Subscriber();
+        let version = CLOCK._version += 2;
+        ctx._state = 0;
+        ctx._node = node;
+        ctx._version = version;
+        let existingCount = 0;
+        let dep1 = node._dep1;
+        if (dep1 !== null) {
+            dep1._version = version - 1;
+            existingCount = 1;
+        }
+        let deps = node._deps;
+        if (deps !== null) {
+            let len = deps.length;
+            for (let j = 0; j < len; j += 2) {
+                /** @type {Sender} */(deps[j])._version = version - 1;
+            }
+            existingCount += len / 2;
+        }
+        ctx._reused = 0;
+        ctx._dep1 = null;
+        ctx._count = 0;
+        value = fn(ctx, args);
+        if (ctx._reused !== existingCount || ctx._count !== 0) {
+            pruneDeps(node, ctx);
+        }
+        ctx._node = null;
+        SUBSCRIBER_IDX = poolIdx;
     }
+    CLOCK._state = state;
+    CLOCK._scope = scope;
+    node._flag &= ~(FLAG_RUNNING | FLAG_STALE | FLAG_INIT);
     if (typeof value === 'function') {
         addCleanup(node, value);
     }
@@ -2065,18 +2133,8 @@ function pruneDeps(node, sub) {
     let version = sub._version;
     let newCount = sub._count;
     let newIdx = 0;
-
-    /**
-     * Returns the next new dep from subscriber overflow.
-     * @returns {Sender}
-     */
-    function nextNew() {
-        let i = newIdx++;
-        if (i === 0) {
-            return sub._dep1;
-        }
-        return /** @type {Sender} */(sub._deps[i - 1]);
-    }
+    let newDep1 = sub._dep1;
+    let newDeps = sub._deps;
 
     /** --- dep1 --- */
     let dep1 = node._dep1;
@@ -2087,8 +2145,8 @@ function pruneDeps(node, sub) {
             /** Stale: unsubscribe */
             clearReceiver(dep1, node._dep1slot);
             if (newIdx < newCount) {
-                /** Replace with a new dep */
-                let newDep = nextNew();
+                let newDep = newIdx === 0 ? newDep1 : /** @type {Sender} */(newDeps[newIdx - 1]);
+                newIdx++;
                 let subslot = subscribe(newDep, node, 0);
                 node._dep1 = newDep;
                 node._dep1slot = subslot;
@@ -2127,8 +2185,8 @@ function pruneDeps(node, sub) {
                 /** Stale: unsubscribe */
                 clearReceiver(dep, /** @type {number} */(deps[idx + 1]));
                 if (newIdx < newCount) {
-                    /** Insert new dep at write position */
-                    let newDep = nextNew();
+                    let newDep = newIdx === 0 ? newDep1 : /** @type {Sender} */(newDeps[newIdx - 1]);
+                    newIdx++;
                     let depslot = write + 1;
                     let subslot = subscribe(newDep, node, depslot);
                     let writeIdx = write * 2;
@@ -2142,7 +2200,8 @@ function pruneDeps(node, sub) {
 
         /** Append any remaining new deps beyond existing array */
         while (newIdx < newCount) {
-            let newDep = nextNew();
+            let newDep = newIdx === 0 ? newDep1 : /** @type {Sender} */(newDeps[newIdx - 1]);
+            newIdx++;
             let depslot = write + 1;
             let subslot = subscribe(newDep, node, depslot);
             let writeIdx = write * 2;
@@ -2168,7 +2227,8 @@ function pruneDeps(node, sub) {
          * dep1 might have been filled above; remaining go to _deps.
          */
         if (node._dep1 === null && newIdx < newCount) {
-            let newDep = nextNew();
+            let newDep = newIdx === 0 ? newDep1 : /** @type {Sender} */(newDeps[newIdx - 1]);
+            newIdx++;
             let subslot = subscribe(newDep, node, 0);
             node._dep1 = newDep;
             node._dep1slot = subslot;
@@ -2177,7 +2237,8 @@ function pruneDeps(node, sub) {
         if (newIdx < newCount) {
             let arr = [];
             while (newIdx < newCount) {
-                let newDep = nextNew();
+                let newDep = newIdx === 0 ? newDep1 : /** @type {Sender} */(newDeps[newIdx - 1]);
+                newIdx++;
                 let depslot = (arr.length / 2) + 1;
                 let subslot = subscribe(newDep, node, depslot);
                 arr.push(newDep, subslot);
@@ -2338,7 +2399,7 @@ export {
     register,
     MUT_ADD, MUT_DEL, MUT_SORT,
     MUT_OP_MASK, MUT_LEN_SHIFT, MUT_LEN_MASK, MUT_POS_SHIFT, MUT_POS_MASK,
-    ASYNC_NOT_ASYNC, ASYNC_PROMISE, ASYNC_ITERABLE,
+    CTX_EQUAL, CTX_NOTEQUAL, CTX_PROMISE, CTX_ITERABLE, CTX_ASYNC,
     OPT_DEFER, OPT_STABLE, OPT_SETUP, OPT_NOTIFY, OPT_WEAK,
     TYPE_ROOT, TYPE_SIGNAL, TYPE_COMPUTE, TYPE_EFFECT,
     TYPEFLAG_MASK, TYPEFLAG_SEND, TYPEFLAG_RECEIVE, TYPEFLAG_OWNER,
@@ -2358,6 +2419,8 @@ export {
     root,
     signal,
     compute,
+    derive,
+    watch,
     effect,
     scope,
     batch

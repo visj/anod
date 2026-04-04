@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { signal, compute, effect } from "../";
+import { signal, compute, effect, CTX_PROMISE, CTX_ITERABLE } from "../";
 
 const tick = () => Promise.resolve();
 
@@ -7,7 +7,7 @@ describe("async", () => {
     describe("promise", () => {
         test("is loading while the promise is pending", async () => {
             let resolve;
-            const c1 = compute(() => new Promise(r => { resolve = r; }));
+            const c1 = compute((c) => { c.async(CTX_PROMISE); return new Promise(r => { resolve = r; }); });
 
             expect(c1.loading()).toBe(true);
 
@@ -19,7 +19,7 @@ describe("async", () => {
 
         test("returns seed value while loading", async () => {
             let resolve;
-            const c1 = compute(() => new Promise(r => { resolve = r; }), 0);
+            const c1 = compute((c) => { c.async(CTX_PROMISE); return new Promise(r => { resolve = r; }); }, 0);
 
             expect(c1.val()).toBe(0);
             expect(c1.loading()).toBe(true);
@@ -32,7 +32,7 @@ describe("async", () => {
         });
 
         test("settles to the resolved value", async () => {
-            const c1 = compute(() => Promise.resolve(42));
+            const c1 = compute((c) => { c.async(CTX_PROMISE); return Promise.resolve(42); });
 
             expect(c1.loading()).toBe(true);
             await tick();
@@ -43,7 +43,7 @@ describe("async", () => {
         });
 
         test("sets error flag on rejection", async () => {
-            const c1 = compute(() => Promise.reject(new Error("async error")));
+            const c1 = compute((c) => { c.async(CTX_PROMISE); return Promise.reject(new Error("async error")); });
 
             await tick();
 
@@ -52,7 +52,7 @@ describe("async", () => {
         });
 
         test("rethrows the error when read after rejection", async () => {
-            const c1 = compute(() => Promise.reject(new Error("async error")));
+            const c1 = compute((c) => { c.async(CTX_PROMISE); return Promise.reject(new Error("async error")); });
 
             await tick();
 
@@ -62,6 +62,7 @@ describe("async", () => {
         test("clears error on subsequent successful resolution", async () => {
             const s1 = signal(true);
             const c1 = compute((c) => {
+                c.async(CTX_PROMISE);
                 return c.read(s1)
                     ? Promise.reject(new Error("fail"))
                     : Promise.resolve(42);
@@ -78,7 +79,7 @@ describe("async", () => {
         });
 
         test("notifies downstream effect when promise settles", async () => {
-            const c1 = compute(() => Promise.resolve(42));
+            const c1 = compute((c) => { c.async(CTX_PROMISE); return Promise.resolve(42); });
             let received = void 0;
 
             effect((e) => { received = e.read(c1); });
@@ -94,6 +95,7 @@ describe("async", () => {
             const s1 = signal(0);
 
             const c1 = compute((c) => {
+                c.async(CTX_PROMISE);
                 const v = c.read(s1);
                 return new Promise(r => { resolvers[v] = r; });
             });
@@ -124,7 +126,7 @@ describe("async", () => {
                 next() { return new Promise(r => { resolver = r; }); }
             };
 
-            const c1 = compute(() => iter);
+            const c1 = compute((c) => { c.async(CTX_ITERABLE); return iter; });
 
             expect(c1.loading()).toBe(true);
             expect(c1.val()).toBeUndefined();
@@ -141,14 +143,16 @@ describe("async", () => {
                 return() { return Promise.resolve({ done: true }); }
             };
 
-            const c1 = compute(() => iter);
+            const c1 = compute((c) => { c.async(CTX_ITERABLE); return iter; });
             const values = [];
 
             // Always call c1.val() so the effect subscribes to c1 as a dependency;
             // without this, c1 is never tracked and the effect won't re-run on settle.
             effect((e) => {
                 const v = e.read(c1);
-                if (!c1.loading()) values.push(v);
+                if (!c1.loading()) {
+                    values.push(v);
+                }
             });
 
             // Each resolver[n] is created by the previous onNext calling iterator.next()
@@ -173,7 +177,7 @@ describe("async", () => {
                 return() { return Promise.resolve({ done: true }); }
             };
 
-            const c1 = compute(() => iter);
+            const c1 = compute((c) => { c.async(CTX_ITERABLE); return iter; });
 
             expect(c1.loading()).toBe(true);
 
@@ -189,7 +193,7 @@ describe("async", () => {
                 throw new Error("iterator error");
             }
 
-            const c1 = compute(() => failing());
+            const c1 = compute((c) => { c.async(CTX_ITERABLE); return failing(); });
 
             await tick();
 
@@ -213,7 +217,11 @@ describe("async", () => {
 
             const s1 = signal(true);
             const c1 = compute((c) => {
-                if (c.read(s1)) return staleIter;
+                if (c.read(s1)) {
+                    c.async(CTX_ITERABLE);
+                    return staleIter;
+                }
+                c.async(CTX_ITERABLE);
                 return (async function*() { yield 99; })();
             });
 

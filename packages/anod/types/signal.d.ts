@@ -55,6 +55,7 @@ export interface IReceiver { }
 export interface IReader extends IReceiver {
     read<R>(signal: IReadonlySignal<R, Type.COMPUTE | Type.SIGNAL>): R;
     equal(equal?: boolean): void;
+    async(type: number): void;
     stable(): void;
     error(): boolean;
     loading(): boolean;
@@ -149,6 +150,34 @@ export declare function scope<W>(
     fn: (c: IReader, args: W) => void | (() => void),
     opts?: number,
     args?: W
+): IEffect;
+
+export declare function derive<U>(
+    senders: IReadonlySignal<any>[],
+    fn: (c: IReader, prev: Resolve<U>) => U,
+    seed?: Resolve<U>,
+    opts?: number,
+): ICompute<Resolve<U>>;
+
+export declare function derive<U, W>(
+    senders: IReadonlySignal<any>[],
+    fn: (c: IReader, prev: Resolve<U>, args: W) => U,
+    seed?: Resolve<U>,
+    opts?: number,
+    args?: W,
+): ICompute<Resolve<U>>;
+
+export declare function watch(
+    senders: IReadonlySignal<any>[],
+    fn: (c: IReader) => void | (() => void),
+    opts?: number,
+): IEffect;
+
+export declare function watch<W>(
+    senders: IReadonlySignal<any>[],
+    fn: (c: IReader, args: W) => void | (() => void),
+    opts?: number,
+    args?: W,
 ): IEffect;
 
 export declare function batch(fn: () => void): void;
