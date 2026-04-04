@@ -57,6 +57,13 @@ async function build() {
                     passes: 2,
                     unsafe: true,
                     dead_code: true,
+                    /**
+                     * Prevent Terser from inlining single-use functions
+                     * as IIFEs. V8 allocates a new JSFunction for each
+                     * IIFE call in the interpreter, causing heap churn
+                     * and cache misses on hot paths.
+                     */
+                    reduce_funcs: false,
                 },
                 mangle: {
                     properties: {

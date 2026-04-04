@@ -134,23 +134,31 @@ function clock() {
  */
 var CLOCK = clock();
 
+/**
+ * Pre-allocated queues. Fixed initial capacity avoids
+ * V8 backing store growth/shrink churn when arrays are
+ * filled and then nulled out every transaction cycle.
+ * @const {number}
+ */
+var QUEUE_SIZE = 64;
+
 /** @const @type {Array<Disposer>} */
-var DISPOSE_QUEUE = [];
+var DISPOSE_QUEUE = new Array(QUEUE_SIZE);
 
 /** @const @type {Array<number>} */
-var SIGNAL_OPS = [];
+var SIGNAL_OPS = new Array(QUEUE_SIZE);
 /** @const @type {Array} */
-var SIGNAL_QUEUE = [];
+var SIGNAL_QUEUE = new Array(QUEUE_SIZE * 2);
 
 /** @const @type {Array<Compute>} */
-var COMPUTE_QUEUE = [];
+var COMPUTE_QUEUE = new Array(QUEUE_SIZE);
 
 /** @const @type {Array<number>} */
 var SCOPE_LEVELS = [0, 0, 0, 0];
 /** @const @type {Array<Array<Effect>>} */
 var SCOPE_QUEUE = [[], [], [], []];
 /** @const @type {Array<Effect>} */
-var EFFECT_QUEUE = [];
+var EFFECT_QUEUE = new Array(QUEUE_SIZE);
 
 /**
  * @param {*} value 
