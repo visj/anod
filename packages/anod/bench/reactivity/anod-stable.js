@@ -6,7 +6,8 @@ import {
     signal,
     Signal,
     OPT_STABLE,
-    OPT_NOTIFY
+    OPT_NOTIFY,
+    OPT_DEFER
 } from '../../dist/index.mjs';
 
 let sink = 0;
@@ -364,20 +365,15 @@ function makeDynGraph(width, totalLayers, staticFraction, nSources) {
                 mySources[s] = prevRow[(myDex + s) % width];
             }
             if (random() < staticFraction) {
-                if (nSources === 1) {
-                    /** Single dep: use bound .derive() for maximum efficiency. */
-                    row[myDex] = mySources[0].derive((_, val) => { counter++; return val; }, 0, OPT_NOTIFY);
-                } else {
-                    /** Multiple fixed deps: OPT_STABLE freezes after first run. */
-                    row[myDex] = compute(c => {
-                        counter++;
-                        let sum = 0;
-                        for (let s = 0; s < mySources.length; s++) {
-                            sum += c.read(mySources[s]);
-                        }
-                        return sum;
-                    }, 0, OPT_STABLE | OPT_NOTIFY);
-                }
+                /** Multiple fixed deps: OPT_STABLE freezes after first run. */
+                row[myDex] = compute(c => {
+                    counter++;
+                    let sum = 0;
+                    for (let s = 0; s < mySources.length; s++) {
+                        sum += c.read(mySources[s]);
+                    }
+                    return sum;
+                }, 0, OPT_STABLE | OPT_DEFER);
             } else {
                 /** Dynamic node: deps vary on value, cannot use OPT_STABLE. */
                 const first = mySources[0];
@@ -394,7 +390,7 @@ function makeDynGraph(width, totalLayers, staticFraction, nSources) {
                         sum += c.read(tail[i]);
                     }
                     return sum;
-                });
+                }, 0, OPT_DEFER);
             }
         }
         layers.push(row);

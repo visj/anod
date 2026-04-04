@@ -61,11 +61,11 @@ describe("async", () => {
 
         test("clears error on subsequent successful resolution", async () => {
             const s1 = signal(true);
-            const c1 = compute((c) =>
-                c.read(s1)
+            const c1 = compute((c) => {
+                return c.read(s1)
                     ? Promise.reject(new Error("fail"))
-                    : Promise.resolve(42)
-            );
+                    : Promise.resolve(42);
+            });
 
             await tick();
             expect(c1.error()).toBe(true);
@@ -214,7 +214,7 @@ describe("async", () => {
             const s1 = signal(true);
             const c1 = compute((c) => {
                 if (c.read(s1)) return staleIter;
-                return (async function* () { yield 99; })();
+                return (async function*() { yield 99; })();
             });
 
             // Signal update — c1 re-runs, picks up the new generator; staleIter is now stale

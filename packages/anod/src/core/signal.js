@@ -53,7 +53,7 @@ function register(fn) {
 /** @const {number} */ const FLAG_ERROR = 512;
 /** @const {number} */ const FLAG_RECOVER = 1024;
 /** @const {number} */ const FLAG_BOUND = 2048;
-/** @const {number} */ const FLAG_TRACKED = 4096;
+/** @const {number} */ const FLAG_DERIVED = 4096;
 /** @const {number} */ const FLAG_SCOPE = 8192;
 /** @const {number} */ const FLAG_WEAK = 16384;
 /** @const {number} */ const FLAG_RDEP1 = 0x10000;
@@ -813,7 +813,7 @@ function Compute(opts, fn, dep1, dep2, seed, args) {
             let flag = this._flag |= FLAG_STALE;
             if (flag & FLAG_NOTIFY) {
                 notifyStale(this, time);
-            } else if (flag & FLAG_TRACKED) {
+            } else if (flag & FLAG_DERIVED) {
                 notifyPending(this, time);
             }
         } else {
@@ -1638,8 +1638,8 @@ function subscribe(send, receive, depslot) {
         subslot = (send._subs.length / 2) + 1;
         send._subs.push(receive, depslot);
     }
-    if (!(send._flag & FLAG_TRACKED) && (receive.t === TYPE_COMPUTE)) {
-        send._flag |= FLAG_TRACKED;
+    if (!(send._flag & FLAG_DERIVED) && (receive.t === TYPE_COMPUTE)) {
+        send._flag |= FLAG_DERIVED;
     }
     return subslot;
 }
@@ -2037,7 +2037,7 @@ function notifyPending(send, time) {
     if (sub !== null && (sub.t === TYPE_COMPUTE) && sub._ptime < time) {
         sub._ptime = time;
         sub._flag |= FLAG_PENDING;
-        if (sub._flag & FLAG_TRACKED) {
+        if (sub._flag & FLAG_DERIVED) {
             notifyPending(sub, time);
         }
     }
@@ -2049,7 +2049,7 @@ function notifyPending(send, time) {
             if ((sub.t === TYPE_COMPUTE) && sub._ptime < time) {
                 sub._ptime = time;
                 sub._flag |= FLAG_PENDING;
-                if (sub._flag & FLAG_TRACKED) {
+                if (sub._flag & FLAG_DERIVED) {
                     notifyPending(sub, time);
                 }
             }
@@ -2058,7 +2058,7 @@ function notifyPending(send, time) {
 }
 
 /**
- * * @param {Sender} send 
+ * @param {Sender} send
  * @param {number} time
  * @returns {void} 
  */
@@ -2111,7 +2111,9 @@ function signal(value) {
 function compute(fn, seed, opts, args) {
     let flag = FLAG_SETUP | ((0 | opts) & OPTIONS);
     let node = new Compute(flag, fn, null, null, seed, args);
-    startCompute(node);
+    if (!(flag & FLAG_DEFER)) {
+        startCompute(node);
+    }
     return node;
 }
 
@@ -2169,7 +2171,7 @@ export {
     STATE_START, STATE_IDLE, STATE_COMPUTE, STATE_OWNER, STATE_SCOPE,
     FLAG_DEFER, FLAG_STABLE, FLAG_SETUP, FLAG_STALE, FLAG_PENDING,
     FLAG_RUNNING, FLAG_DISPOSED, FLAG_LOADING, FLAG_ERROR, FLAG_RECOVER,
-    FLAG_BOUND, FLAG_TRACKED, FLAG_SCOPE, FLAG_NOTIFY, FLAG_EQUAL, FLAG_WEAK,
+    FLAG_BOUND, FLAG_DERIVED, FLAG_SCOPE, FLAG_NOTIFY, FLAG_EQUAL, FLAG_WEAK,
     FLAG_INIT, FLAG_RDEP1, FLAG_RDEP2,
     OP_VALUE, OP_CALLBACK,
     register,

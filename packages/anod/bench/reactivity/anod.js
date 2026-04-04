@@ -5,6 +5,7 @@ import {
     effect,
     compute,
     signal,
+    OPT_DEFER,
 } from '../../dist/index.mjs';
 
 let sink = 0;
@@ -35,7 +36,7 @@ function setupDeep() {
     return () => {
         batch(() => { head.set(++i); });
     };
-}
+}78
 
 function setupBroad() {
     const head = signal(0);
@@ -114,17 +115,19 @@ function setupMux() {
 
 function setupUnstable() {
     const head = signal(0);
-    const double = compute(c => { counter++; return c.read(head) * 2; });
-    const inverse = compute(c => { counter++; return -c.read(head); });
+    const double = compute(c => { console.log("double"); counter++; return c.read(head) * 2; }, 0, OPT_DEFER);
+    const inverse = compute(c => { console.log("inverse"); counter++; return -c.read(head); }, 0, OPT_DEFER);
     const current = compute(c => {
         counter++;
+        console.log("current");
         let result = 0;
         for (let i = 0; i < 20; i++) {
             result += c.read(head) % 2 ? c.read(double) : c.read(inverse);
         }
         return result;
-    });
+    }, 0, OPT_DEFER);
     effect(c => {
+        console.log("effect");
         counter++;
         sink += c.read(current);
     });
@@ -352,7 +355,7 @@ function makeDynGraph(width, totalLayers, staticFraction, nSources) {
                         sum += c.read(mySources[s]);
                     }
                     return sum;
-                });
+                }, 0, OPT_DEFER);
             } else {
                 const first = mySources[0];
                 const tail = mySources.slice(1);
@@ -368,7 +371,7 @@ function makeDynGraph(width, totalLayers, staticFraction, nSources) {
                         sum += c.read(tail[i]);
                     }
                     return sum;
-                });
+                }, 0, OPT_DEFER);
             }
         }
         layers.push(row);
@@ -466,6 +469,8 @@ validate('dynUpdateLargeWebApp', () => setupDynUpdate(1000, 12, 0.95, 4, 1));
 validate('dynUpdateWideDense', () => setupDynUpdate(1000, 5, 1, 25, 1));
 validate('dynUpdateDeep', () => setupDynUpdate(5, 500, 1, 3, 1));
 validate('dynUpdateVeryDynamic', () => setupDynUpdate(100, 15, 0.5, 6, 1));
+
+process.exit();
 
 /* === Run === */
 
