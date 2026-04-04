@@ -53,16 +53,10 @@ Sender.prototype._mod;
  * @extends {Disposer}
  */
 function Receiver() { }
-/** @package @type {number} */
-Receiver.prototype._version;
 /** @package @type {Sender | null} */
 Receiver.prototype._dep1;
 /** @package @type {number} */
 Receiver.prototype._dep1slot;
-/** @package @type {Sender | null} */
-Receiver.prototype._dep2;
-/** @package @type {number} */
-Receiver.prototype._dep2slot;
 /** @package @type {Array<Sender | number> | null} */
 Receiver.prototype._deps;
 /** @package @type {number} */

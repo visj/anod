@@ -56,8 +56,6 @@ function register(fn) {
 /** @const {number} */ const FLAG_DERIVED = 4096;
 /** @const {number} */ const FLAG_SCOPE = 8192;
 /** @const {number} */ const FLAG_WEAK = 16384;
-/** @const {number} */ const FLAG_RDEP1 = 0x10000;
-/** @const {number} */ const FLAG_RDEP2 = 0x20000;
 /**
  * Runtime bit set/cleared by the equal() method during a compute
  * execution.  Separate from FLAG_NOTIFY (the opt) so both features
@@ -266,7 +264,7 @@ function loading() {
  */
 function derive(fn, seed, opts, args) {
     let _flag = FLAG_BOUND | FLAG_STABLE | ((0 | opts) & OPTIONS);
-    let node = new Compute(_flag, fn, this, null, seed, args);
+    let node = new Compute(_flag, fn, this, seed, args);
     node._dep1slot = subscribe(this, node, 0);
     if (!(_flag & FLAG_DEFER)) {
         startCompute(node);
@@ -277,14 +275,14 @@ function derive(fn, seed, opts, args) {
 /**
  * @template T,W
  * @this {!Sender<T>}
- * @param {function(T,W): (function(): void | void)} fn 
+ * @param {function(T,W): (function(): void | void)} fn
  * @param {number=} opts
  * @param {W=} args
  * @returns {!Effect<T,null,W>}
  */
 function watch(fn, opts, args) {
     let _flag = FLAG_BOUND | FLAG_STABLE | ((0 | opts) & OPTIONS);
-    let node = new Effect(_flag, fn, this, null, args);
+    let node = new Effect(_flag, fn, this, args);
     node._dep1slot = subscribe(this, node, 0);
     if (!(_flag & FLAG_DEFER)) {
         startEffect(node);
@@ -323,9 +321,21 @@ function Subscriber() {
     /** @type {Receiver | null} */
     this._node = null;
     /** @type {number} */
+    this._version = 0;
+    /** @type {number} */
     this._dephead = 0;
     /** @type {number} */
     this._deptail = 0;
+    /** @type {number} */
+    this._reused = 0;
+    /** @type {Sender | null} */
+    this._dep1 = null;
+    /** @type {Array<Sender> | null} */
+    this._deps = null;
+    /** @type {number} */
+    this._count = 0;
+    /** @type {boolean} */
+    this._dep1head = false;
 }
 
 /** @const */
@@ -348,43 +358,92 @@ SubscriberProto.read = function (sender) {
     if ((flag & FLAG_BOUND) || ((flag & FLAG_STABLE) && !(flag & FLAG_SETUP))) {
         return value;
     }
-    if (sender._version === node._version) {
+    let version = this._version;
+    /**
+     * FLAG_SETUP: first execution, no existing deps.
+     * Subscribe immediately on the node.
+     */
+    if (flag & FLAG_SETUP) {
+        if (sender._version === version) {
+            return value;
+        }
+        sender._version = version;
+        /** @type {number} */
+        let depslot = 0;
+        if (node._dep1 === null) {
+            node._dep1 = sender;
+        } else if (node._deps === null) {
+            depslot = 1;
+        } else {
+            depslot = (node._deps.length / 2) + 1;
+        }
+        let subslot = subscribe(sender, node, depslot);
+        switch (depslot) {
+            case 0: node._dep1slot = subslot; break;
+            case 1: node._deps = [sender, subslot]; break;
+            default: node._deps.push(sender, subslot);
+        }
         return value;
     }
-    sender._version = node._version;
-    if (!(flag & FLAG_SETUP)) {
-        if (!(flag & FLAG_RDEP1) && sender === node._dep1) {
-            node._flag |= FLAG_RDEP1;
-            return value;
-        }
-        if (!(flag & FLAG_RDEP2) && sender === node._dep2) {
-            node._flag |= FLAG_RDEP2;
-            return value;
-        }
-        if (node._deps !== null && this._dephead < this._deptail && sender === node._deps[this._dephead * 2]) {
-            this._dephead++;
-            return value;
-        }
+    /**
+     * Re-execution: sweep existing deps with version tagging.
+     * version     = belongs to us AND re-read this cycle
+     * version - 1 = belongs to us but NOT yet confirmed
+     */
+    if (sender._version === version) {
+        /** Already read this cycle (dedup) */
+        return value;
     }
-    /** @type {number} */
-    let depslot = 0;
-    if (node._dep1 === null) {
-        node._dep1 = sender;
-    } else if (node._dep2 === null) {
-        depslot = 1;
-        node._dep2 = sender;
-    } else if (node._deps === null) {
-        depslot = 2;
+    if (sender._version === version - 1) {
+        /** Swept past earlier but now re-read. Confirm it. */
+        sender._version = version;
+        this._reused++;
+        return value;
+    }
+    /** Check dep1 if not yet swept */
+    if (this._dep1head) {
+        if (sender === node._dep1) {
+            sender._version = version;
+            this._dep1head = false;
+            this._reused++;
+            return value;
+        }
+        /** dep1 is not our sender — mark it as ours-but-unconfirmed */
+        node._dep1._version = version - 1;
+        this._dep1head = false;
+    }
+    /** Sweep forward through the _deps array */
+    let deps = node._deps;
+    let tail = this._deptail;
+    let head = this._dephead;
+    while (head < tail) {
+        let dep = /** @type {Sender} */(deps[head * 2]);
+        head++;
+        if (dep === sender) {
+            sender._version = version;
+            this._dephead = head;
+            this._reused++;
+            return value;
+        }
+        /** Not our target — tag as ours-but-unconfirmed */
+        dep._version = version - 1;
+    }
+    this._dephead = head;
+    /**
+     * Not found in existing deps — it's a new dep.
+     * Tag it and collect in subscriber overflow.
+     * subscribe() is deferred to pruneDeps.
+     */
+    sender._version = version;
+    let count = this._count;
+    if (count === 0) {
+        this._dep1 = sender;
+    } else if (count === 1) {
+        this._deps = [sender];
     } else {
-        depslot = (node._deps.length / 2) + 2;
+        this._deps.push(sender);
     }
-    let subslot = subscribe(sender, node, depslot);
-    switch (depslot) {
-        case 0: node._dep1slot = subslot; break;
-        case 1: node._dep2slot = subslot; break;
-        case 2: node._deps = [sender, subslot]; break;
-        default: node._deps.push(sender, subslot);
-    }
+    this._count = count + 1;
     return value;
 };
 
@@ -464,10 +523,74 @@ ReaderProto.cleanup = SubscriberProto.cleanup = _cleanup;
 ReaderProto.recover = SubscriberProto.recover = _recover;
 ReaderProto._getMod = SubscriberProto._getMod = _getMod;
 
-/** @type {Reader} */
-var READER = new Reader();
-/** @type {Subscriber} */
-var SUBSCRIBER = new Subscriber();
+/**
+ * Object pool for Reader contexts.
+ * Pre-allocated to avoid allocations on the hot path when
+ * nested compute evaluations need their own context.
+ * @const {number}
+ */
+var POOL_SIZE = 10;
+
+/** @type {Array<Reader>} */
+var READER_POOL = new Array(POOL_SIZE);
+/** @type {number} */
+var READER_INDEX = POOL_SIZE;
+
+/** @type {Array<Subscriber>} */
+var SUBSCRIBER_POOL = new Array(POOL_SIZE);
+/** @type {number} */
+var SUBSCRIBER_INDEX = POOL_SIZE;
+
+for (var _i = 0; _i < POOL_SIZE; _i++) {
+    READER_POOL[_i] = new Reader();
+    SUBSCRIBER_POOL[_i] = new Subscriber();
+}
+
+/**
+ * Acquires a Reader from the pool. Allocates a new one if the pool is empty.
+ * @returns {Reader}
+ */
+function acquireReader() {
+    if (READER_INDEX > 0) {
+        return READER_POOL[--READER_INDEX];
+    }
+    return new Reader();
+}
+
+/**
+ * Releases a Reader back into the pool.
+ * @param {Reader} reader
+ * @returns {void}
+ */
+function releaseReader(reader) {
+    reader._node = null;
+    if (READER_INDEX < READER_POOL.length) {
+        READER_POOL[READER_INDEX++] = reader;
+    }
+}
+
+/**
+ * Acquires a Subscriber from the pool. Allocates a new one if the pool is empty.
+ * @returns {Subscriber}
+ */
+function acquireSubscriber() {
+    if (SUBSCRIBER_INDEX > 0) {
+        return SUBSCRIBER_POOL[--SUBSCRIBER_INDEX];
+    }
+    return new Subscriber();
+}
+
+/**
+ * Releases a Subscriber back into the pool.
+ * @param {Subscriber} subscriber
+ * @returns {void}
+ */
+function releaseSubscriber(subscriber) {
+    subscriber._node = null;
+    if (SUBSCRIBER_INDEX < SUBSCRIBER_POOL.length) {
+        SUBSCRIBER_POOL[SUBSCRIBER_INDEX++] = subscriber;
+    }
+}
 
 /**
  * @constructor
@@ -692,16 +815,15 @@ function Signal(value, opts) {
 
 /**
  * @constructor
- * @template T,U,V,W
+ * @template T,U,W
  * @param {number} opts
- * @param {(function(T,W): T) | (function(U,T,W,number): T) | (function(U,V,T,W,number): T)} fn 
- * @param {Sender<U> | null} dep1 
- * @param {Sender<V> | null} dep2
+ * @param {(function(T,W): T) | (function(U,T,W,number): T)} fn
+ * @param {Sender<U> | null} dep1
  * @param {T=} seed
  * @param {W=} args
  * @implements {ICompute<T>}
  */
-function Compute(opts, fn, dep1, dep2, seed, args) {
+function Compute(opts, fn, dep1, seed, args) {
     /**
      * @type {number}
      */
@@ -738,14 +860,6 @@ function Compute(opts, fn, dep1, dep2, seed, args) {
      * @type {number}
      */
     this._dep1slot = 0;
-    /**
-     * @type {Sender<V>}
-     */
-    this._dep2 = dep2;
-    /**
-     * @type {number}
-     */
-    this._dep2slot = 0;
     /**
      * @type {Array<Sender | number> | null}
      */
@@ -936,57 +1050,55 @@ function runCompute(node, time) {
     /** @type {T} */
     let value = node._value;
     let state = CLOCK._state;
-    node._flag = (opts | FLAG_RUNNING) & ~(FLAG_EQUAL | FLAG_NOTEQUAL | FLAG_RDEP1 | FLAG_RDEP2);
+    node._flag = (opts | FLAG_RUNNING) & ~(FLAG_EQUAL | FLAG_NOTEQUAL);
     CLOCK._state &= RESET;
     /** @type {Reader | Subscriber} */
     let ctx;
+    /** @type {boolean} */
+    let isSubscriber = false;
     try {
         let fn = node._fn;
         let args = node._args;
         if (opts & FLAG_BOUND) {
             let dep1 = node._dep1;
-            let dep2 = node._dep2;
             if (opts & FLAG_SETUP) {
                 node._flag &= ~FLAG_SETUP;
-                let version = ++CLOCK._version;
-                node._version = version;
-                dep1._version = version;
-                if (dep2 !== null) {
-                    dep2._version = version;
-                }
-                ctx = SUBSCRIBER;
-                ctx._node = node;
+                let version = CLOCK._version += 2;
+                isSubscriber = true;
+                ctx = acquireSubscriber();
+                ctx._version =
+                    dep1._version = version;
             } else {
-                ctx = READER;
-                ctx._node = node;
+                ctx = acquireReader();
             }
-            if (dep2 === null) {
-                value = fn(ctx, dep1.val(), value, args);
-            } else {
-                value = fn(ctx, dep1.val(), dep2.val(), value, args);
-            }
+            ctx._node = node;
+            value = fn(ctx, dep1.val(), value, args);
         } else {
             if ((opts & (FLAG_STABLE | FLAG_SETUP)) === FLAG_STABLE) {
-                ctx = READER;
+                ctx = acquireReader();
                 ctx._node = node;
                 value = fn(ctx, value, args);
             } else {
-                node._version = ++CLOCK._version;
-                ctx = SUBSCRIBER;
+                let version = CLOCK._version += 2;
+                ctx = acquireSubscriber();
+                isSubscriber = true;
                 ctx._node = node;
+                ctx._version = version;
                 if (opts & FLAG_SETUP) {
                     value = fn(ctx, value, args);
                     node._flag &= ~FLAG_SETUP;
                 } else {
+                    ctx._dep1head = node._dep1 !== null;
                     ctx._dephead = 0;
                     ctx._deptail = node._deps !== null ? node._deps.length / 2 : 0;
-                    let innerState = (
-                        (node._dep1 !== null ? FLAG_RDEP1 : 0) |
-                        (node._dep2 !== null ? FLAG_RDEP2 : 0)
-                    );
+                    ctx._reused = 0;
+                    ctx._dep1 = null;
+                    ctx._count = 0;
+                    let existingCount = (ctx._dep1head ? 1 : 0) + ctx._deptail;
                     value = fn(ctx, value, args);
-                    let newlen = node._deps !== null ? node._deps.length / 2 : 0;
-                    pruneDeps(node, ctx._dephead, ctx._deptail, newlen, innerState, (node._flag & (FLAG_RDEP1 | FLAG_RDEP2)));
+                    if (ctx._reused !== existingCount || ctx._count !== 0) {
+                        pruneDeps(node, ctx);
+                    }
                 }
             }
         }
@@ -1000,12 +1112,21 @@ function runCompute(node, time) {
         node._flag &= ~(FLAG_RUNNING | FLAG_STALE | FLAG_INIT);
     }
     if (opts & FLAG_ERROR) {
+        if (isSubscriber) {
+            releaseSubscriber(ctx);
+        } else {
+            releaseReader(ctx);
+        }
         node._value = value;
         notifyStale(node, time);
     } else {
         let asyncType = isAsync(value);
         if (asyncType === ASYNC_NOT_ASYNC) {
-            ctx._node = null;
+            if (isSubscriber) {
+                releaseSubscriber(ctx);
+            } else {
+                releaseReader(ctx);
+            }
             if (value !== node._value) {
                 node._value = value;
                 if ((opts & (FLAG_NOTIFY | FLAG_EQUAL)) === 0) {
@@ -1016,15 +1137,10 @@ function runCompute(node, time) {
             }
         } else {
             /**
-             * Async: the context must not be reused since the
-             * async continuation may still reference it.
-             * Allocate a fresh replacement for the global pool.
+             * Async: the context must not be returned to the pool
+             * since the async continuation may still reference it.
+             * It will be garbage collected when the async settles.
              */
-            if (ctx === SUBSCRIBER) {
-                SUBSCRIBER = new Subscriber();
-            } else {
-                READER = new Reader();
-            }
             node._flag |= FLAG_LOADING;
             if (asyncType === ASYNC_PROMISE) {
                 resolvePromise(new WeakRef(node), /** @type {IThenable<T>} */(value), time);
@@ -1147,18 +1263,6 @@ function refresh(node, time) {
                 return;
             }
         }
-        dep = /** @type {Compute} */(node._dep2);
-        if (dep !== null && (dep.t === TYPE_COMPUTE) && (dep._flag & (FLAG_STALE | FLAG_PENDING))) {
-            if (dep._flag & FLAG_STALE) {
-                runCompute(dep, time);
-            } else if (dep._ptime === time) {
-                refresh(dep, time);
-            }
-            if (node._flag & FLAG_STALE) {
-                runCompute(node, time);
-                return;
-            }
-        }
         let deps = node._deps;
         if (deps !== null) {
             let len = deps.length;
@@ -1184,15 +1288,14 @@ function refresh(node, time) {
 
 /**
  * @constructor
- * @template U,V,W
+ * @template U,W
  * @param {number} opts
- * @param {(function(W): (function(): void | void)) | (function(U,W): (function(): void | void)) | (function(U,V,W): (function(): void | void))} fn 
- * @param {Sender<U> | null} dep1 
- * @param {Sender<V> | null} dep2
+ * @param {(function(W): (function(): void | void)) | (function(U,W): (function(): void | void))} fn
+ * @param {Sender<U> | null} dep1
  * @param {W=} args
  * @implements {IEffect}
  */
-function Effect(opts, fn, dep1, dep2, args) {
+function Effect(opts, fn, dep1, args) {
     /**
      * @type {number}
      */
@@ -1202,10 +1305,6 @@ function Effect(opts, fn, dep1, dep2, args) {
      */
     this._fn = fn;
     /**
-     * @type {number}
-     */
-    this._version = 0;
-    /**
      * @type {Sender<U> | null}
      */
     this._dep1 = dep1;
@@ -1213,14 +1312,6 @@ function Effect(opts, fn, dep1, dep2, args) {
      * @type {number}
      */
     this._dep1slot = 0;
-    /**
-     * @type {Sender<V> | null}
-     */
-    this._dep2 = dep2;
-    /**
-     * @type {number}
-     */
-    this._dep2slot = 0;
     /**
      * @type {Array<Sender | number> | null}
      */
@@ -1391,7 +1482,7 @@ function runEffect(node) {
     let args = node._args;
     let state = CLOCK._state;
     let scope = CLOCK._scope;
-    node._flag = (node._flag | FLAG_RUNNING) & ~(FLAG_RDEP1 | FLAG_RDEP2);
+    node._flag |= FLAG_RUNNING;
     CLOCK._state &= RESET;
     if (opts & FLAG_SCOPE) {
         CLOCK._scope = node;
@@ -1399,54 +1490,66 @@ function runEffect(node) {
     }
     /** @type {Reader | Subscriber} */
     let ctx;
-    if (opts & FLAG_BOUND) {
-        let dep1 = node._dep1;
-        let dep2 = node._dep2;
-        /**
-         * Bound effects: use Reader for stable (no setup),
-         * Subscriber for setup phase (needs to register deps).
-         */
-        if (opts & FLAG_SETUP) {
-            ctx = (opts & FLAG_SCOPE) ? new Subscriber() : SUBSCRIBER;
-            ctx._node = node;
-        } else {
-            ctx = (opts & FLAG_SCOPE) ? new Reader() : READER;
-            ctx._node = node;
-        }
-        if (dep2 === null) {
+    /** @type {boolean} */
+    let isSubscriber = false;
+    try {
+        if (opts & FLAG_BOUND) {
+            let dep1 = node._dep1;
+            /**
+             * Bound effects: use Reader for stable (no setup),
+             * Subscriber for setup phase (needs to register deps).
+             */
+            if (opts & FLAG_SETUP) {
+                let version = CLOCK._version += 2;
+                ctx = acquireSubscriber();
+                isSubscriber = true;
+                ctx._node = node;
+                ctx._version = version;
+            } else {
+                ctx = acquireReader();
+                ctx._node = node;
+            }
             value = fn(ctx, dep1.val(), args);
         } else {
-            value = fn(ctx, dep1.val(), dep2.val(), args);
-        }
-    } else {
-        if ((opts & (FLAG_STABLE | FLAG_SETUP)) === FLAG_STABLE) {
-            ctx = (opts & FLAG_SCOPE) ? new Reader() : READER;
-            ctx._node = node;
-            value = fn(ctx, args);
-        } else {
-            node._version = ++CLOCK._version;
-            ctx = (opts & FLAG_SCOPE) ? new Subscriber() : SUBSCRIBER;
-            ctx._node = node;
-            if (opts & FLAG_SETUP) {
+            if ((opts & (FLAG_STABLE | FLAG_SETUP)) === FLAG_STABLE) {
+                ctx = acquireReader();
+                ctx._node = node;
                 value = fn(ctx, args);
-                node._flag &= ~FLAG_SETUP;
             } else {
-                ctx._dephead = 0;
-                ctx._deptail = node._deps !== null ? node._deps.length / 2 : 0;
-                let innerState = (
-                    (node._dep1 !== null ? FLAG_RDEP1 : 0) |
-                    (node._dep2 !== null ? FLAG_RDEP2 : 0)
-                );
-                value = fn(ctx, args);
-                let newtail = node._deps !== null ? node._deps.length / 2 : 0;
-                pruneDeps(node, ctx._dephead, ctx._deptail, newtail, innerState, (node._flag & (FLAG_RDEP1 | FLAG_RDEP2)));
+                let version = CLOCK._version += 2;
+                ctx = acquireSubscriber();
+                isSubscriber = true;
+                ctx._node = node;
+                ctx._version = version;
+                if (opts & FLAG_SETUP) {
+                    value = fn(ctx, args);
+                    node._flag &= ~FLAG_SETUP;
+                } else {
+                    ctx._dep1head = node._dep1 !== null;
+                    ctx._dephead = 0;
+                    ctx._deptail = node._deps !== null ? node._deps.length / 2 : 0;
+                    ctx._reused = 0;
+                    ctx._dep1 = null;
+                    ctx._deps = null;
+                    ctx._count = 0;
+                    let existingCount = (ctx._dep1head ? 1 : 0) + ctx._deptail;
+                    value = fn(ctx, args);
+                    if (ctx._reused !== existingCount || ctx._count !== 0) {
+                        pruneDeps(node, ctx);
+                    }
+                }
             }
         }
+    } finally {
+        if (isSubscriber) {
+            releaseSubscriber(ctx);
+        } else {
+            releaseReader(ctx);
+        }
+        CLOCK._state = state;
+        CLOCK._scope = scope;
+        node._flag &= ~(FLAG_RUNNING | FLAG_STALE | FLAG_INIT);
     }
-    ctx._node = null;
-    CLOCK._state = state;
-    CLOCK._scope = scope;
-    node._flag &= ~(FLAG_RUNNING | FLAG_STALE | FLAG_INIT);
     if (typeof value === 'function') {
         addCleanup(node, value);
     }
@@ -1750,10 +1853,8 @@ function clearReceiver(send, slot) {
             subs[realIndex + 1] = lastSlot;
             if (lastSlot === 0) {
                 lastNode._dep1slot = slot;
-            } else if (lastSlot === 1) {
-                lastNode._dep2slot = slot;
             } else {
-                lastNode._deps[(lastSlot - 2) * 2 + 1] = slot;
+                lastNode._deps[(lastSlot - 1) * 2 + 1] = slot;
             }
         }
     }
@@ -1783,13 +1884,11 @@ function clearReceiver(send, slot) {
 function clearSender(receive, slot) {
     if (slot === 0) {
         receive._dep1 = null;
-    } else if (slot === 1) {
-        receive._dep2 = null;
     } else {
         let deps = receive._deps;
         let lastSlot = /** @type {number} */(deps.pop());
         let lastNode = /** @type {Sender} */(deps.pop());
-        let realIndex = (slot - 2) * 2;
+        let realIndex = (slot - 1) * 2;
         if (realIndex !== deps.length) {
             deps[realIndex] = lastNode;
             deps[realIndex + 1] = lastSlot;
@@ -1800,7 +1899,7 @@ function clearSender(receive, slot) {
             }
         }
     }
-    if (receive._dep1 === null && receive._dep2 === null && (receive._deps === null || receive._deps.length === 0)) {
+    if (receive._dep1 === null && (receive._deps === null || receive._deps.length === 0)) {
         if (receive.t === TYPE_EFFECT) {
             // todo
         } else {
@@ -1819,11 +1918,6 @@ function clearDeps(receive) {
     if (dep !== null) {
         clearReceiver(dep, receive._dep1slot);
         receive._dep1 = null;
-    }
-    dep = receive._dep2;
-    if (dep !== null) {
-        clearReceiver(dep, receive._dep2slot);
-        receive._dep2 = null;
     }
     let deps = receive._deps;
     if (deps !== null) {
@@ -1941,7 +2035,6 @@ function tryRecover(node, error) {
 function unbound(node) {
     return (
         node._dep1 === null &&
-        node._dep2 === null &&
         (
             node._deps === null ||
             node._deps.length === 0
@@ -1954,67 +2047,70 @@ function unbound(node) {
 /**
  * After a dynamic fn re-execution, reconciles dep subscriptions.
  *
- * dep1/dep2 are resolved via the oldstate/newstate DEP1/DEP2 bits:
- * oldstate & DEP1  → dep1 existed before the run
- * newstate & DEP1  → dep1 was reused (recycled in-order)
+ * Uses version tagging set during the sweep in Subscriber.read():
+ *   version     = dep was re-read this cycle (confirmed reuse)
+ *   version - 1 = dep belongs to us but was NOT re-read (stale)
  *
- * Array deps (_deps[]) have three regions by index:
- * [0 .. recycled)    — reused in-order (already subscribed, no action)
- * [recycled .. oldlen) — stale (unsubscribe, unless also in new range)
- * [oldlen .. newlen)   — newly added (subscribeSlot, then compact down)
- *
- * To detect a dep that appears in both stale and new ranges (missed during
- * in-order recycling but re-accessed this run), we tag new deps with VERSION
- * before the stale pass. Stale deps carrying the tag are moved to the write
- * position instead of being unsubscribed. In the new-range pass, those deps
- * are ejected (their duplicate new subscription is removed) via fast remove.
+ * New deps (not found in existing set) are collected in the
+ * subscriber's overflow (_dep1, _deps, _count) without subscribing.
+ * This function subscribes them into the final positions.
  *
  * @param {Receiver} node
- * @param {number} head
- * @param {number} tail
- * @param {number} newtail
- * @param {number} state
- * @param {number} newstate
+ * @param {Subscriber} sub
  * @returns {void}
  */
-function pruneDeps(node, head, tail, newtail, state, newstate) {
-    if (head === tail && tail === newtail && state === newstate) {
-        return;
-    }
+function pruneDeps(node, sub) {
+    let version = sub._version;
+    let newCount = sub._count;
+    let newIdx = 0;
 
-    // dep1
-    if (state & FLAG_RDEP1) {
-        if (!(newstate & FLAG_RDEP1)) {
-            clearReceiver(node._dep1, node._dep1slot);
-            node._dep1 = null;
+    /**
+     * Returns the next new dep from subscriber overflow.
+     * @returns {Sender}
+     */
+    function nextNew() {
+        let i = newIdx++;
+        if (i === 0) {
+            return sub._dep1;
         }
-        // else: reused, nothing to do
+        return /** @type {Sender} */(sub._deps[i - 1]);
     }
 
-    // dep2
-    if (state & FLAG_RDEP2) {
-        if (!(newstate & FLAG_RDEP2)) {
-            clearReceiver(node._dep2, node._dep2slot);
-            node._dep2 = null;
+    /** --- dep1 --- */
+    let dep1 = node._dep1;
+    if (dep1 !== null) {
+        if (dep1._version === version) {
+            dep1._version = 0;
+        } else {
+            /** Stale: unsubscribe */
+            clearReceiver(dep1, node._dep1slot);
+            if (newIdx < newCount) {
+                /** Replace with a new dep */
+                let newDep = nextNew();
+                let subslot = subscribe(newDep, node, 0);
+                node._dep1 = newDep;
+                node._dep1slot = subslot;
+                newDep._version = 0;
+            } else {
+                node._dep1 = null;
+            }
         }
-        // else: reused, nothing to do
     }
 
-    if (newtail > 0) {
-        let deps = node._deps;
-        let version = node._version;
-
-        // Phase 2: stale range [recycled..oldlen)
-        // Deps also tagged (VERSION) were re-accessed this run: reuse at write position.
-        // Truly stale deps (no tag): unsubscribe.
-        let write = head;
-        for (let i = head; i < tail; i++) {
+    /** --- _deps array --- */
+    let deps = node._deps;
+    if (deps !== null) {
+        let len = deps.length / 2;
+        let write = 0;
+        for (let i = 0; i < len; i++) {
             let idx = i * 2;
             let dep = /** @type {Sender} */(deps[idx]);
             if (dep._version === version) {
+                /** Reused: clear tag, compact to write position */
+                dep._version = 0;
                 if (write !== i) {
                     let subslot = /** @type {number} */(deps[idx + 1]);
-                    let depslot = write + 2;
+                    let depslot = write + 1;
                     let writeIdx = write * 2;
                     deps[writeIdx] = dep;
                     deps[writeIdx + 1] = subslot;
@@ -2024,93 +2120,68 @@ function pruneDeps(node, head, tail, newtail, state, newstate) {
                         dep._subs[(subslot - 1) * 2 + 1] = depslot;
                     }
                 }
-                dep._version = 0;
                 write++;
             } else {
+                /** Stale: unsubscribe */
                 clearReceiver(dep, /** @type {number} */(deps[idx + 1]));
+                if (newIdx < newCount) {
+                    /** Insert new dep at write position */
+                    let newDep = nextNew();
+                    let depslot = write + 1;
+                    let subslot = subscribe(newDep, node, depslot);
+                    let writeIdx = write * 2;
+                    deps[writeIdx] = newDep;
+                    deps[writeIdx + 1] = subslot;
+                    newDep._version = 0;
+                    write++;
+                }
             }
         }
 
-        // Phase 3: new range [oldlen..newlen)
-        // Deps cleared to 0 (handled in phase 2): eject with fast remove, removing
-        // the duplicate new subscription. Genuinely new deps: compact and subscribe.
-        let end = newtail;
-
-        // Step 1: Fill any structural holes left by Phase 2 [write .. oldlen)
-        // We pop from `end` downwards, placing valid new deps into the holes.
-        while (write < tail && end > tail) {
-            end--;
-            let endIdx = end * 2;
-            let dep = /** @type {Sender} */(deps[endIdx]);
-            let subslot = /** @type {number} */(deps[endIdx + 1]);
-            if (dep._version === 0) {
-                // It's a duplicate at the end. Unsubscribe it and throw it away.
-                clearReceiver(dep, subslot);
-            } else {
-                // It's a valid new dep. Move it to the first available hole.
-                let writeIdx = write * 2;
-                deps[writeIdx] = dep;
+        /** Append any remaining new deps beyond existing array */
+        while (newIdx < newCount) {
+            let newDep = nextNew();
+            let depslot = write + 1;
+            let subslot = subscribe(newDep, node, depslot);
+            let writeIdx = write * 2;
+            if (writeIdx < deps.length) {
+                deps[writeIdx] = newDep;
                 deps[writeIdx + 1] = subslot;
-                let depslot = write + 2;
-                if (subslot === 0) {
-                    dep._sub1slot = depslot;
-                } else {
-                    dep._subs[(subslot - 1) * 2 + 1] = depslot;
-                }
-                dep._version = 0; // Clear the tag
-                write++;
+            } else {
+                deps.push(newDep, subslot);
             }
+            newDep._version = 0;
+            write++;
         }
 
-        // Step 2: Handle any remaining new deps
-        if (write < tail) {
-            // We ran out of new deps to fill the Phase 2 holes. 
-            // The array ends exactly at `write`.
-            end = write;
-        } else if (tail < end) {
-            // All Phase 2 holes are filled. Now we scan the remaining new deps in-place.
-            let read = tail;
-            while (read < end) {
-                let readIdx = read * 2;
-                let dep = /** @type {Sender} */(deps[readIdx]);
-
-                if (dep._version === 0) {
-                    // It's a duplicate. Unsubscribe it.
-                    clearReceiver(dep, /** @type {number} */(deps[readIdx + 1]));
-                    end--;
-                    while (read < end) {
-                        let endIdx = end * 2;
-                        dep = /** @type {Sender} */(deps[endIdx]);
-                        let subslot = /** @type {number} */(deps[endIdx + 1]);
-                        if (dep._version === 0) {
-                            clearReceiver(dep, subslot);
-                            end--;
-                        } else {
-                            // Swap the last item into the current read position
-                            deps[readIdx] = dep;
-                            deps[readIdx + 1] = subslot;
-                            let depslot = write + 2;
-                            if (subslot === 0) {
-                                dep._sub1slot = depslot;
-                            } else {
-                                dep._subs[(subslot - 1) * 2 + 1] = depslot;
-                            }
-                            break;
-                        }
-                    }
-                } else {
-                    // Valid new dep, already in its final position.
-                    dep._version = 0; // Clear the tag
-                    read++;
-                }
-            }
-        }
-        // Finalize write pointer
-        write = end;
+        /** Trim or null out */
         if (write === 0) {
             node._deps = null;
         } else {
             deps.length = write * 2;
+        }
+    } else if (newIdx < newCount) {
+        /**
+         * No existing _deps array but we have new deps to add.
+         * dep1 might have been filled above; remaining go to _deps.
+         */
+        if (node._dep1 === null && newIdx < newCount) {
+            let newDep = nextNew();
+            let subslot = subscribe(newDep, node, 0);
+            node._dep1 = newDep;
+            node._dep1slot = subslot;
+            newDep._version = 0;
+        }
+        if (newIdx < newCount) {
+            let arr = [];
+            while (newIdx < newCount) {
+                let newDep = nextNew();
+                let depslot = (arr.length / 2) + 1;
+                let subslot = subscribe(newDep, node, depslot);
+                arr.push(newDep, subslot);
+                newDep._version = 0;
+            }
+            node._deps = arr;
         }
     }
 }
@@ -2198,7 +2269,7 @@ function signal(value) {
  */
 function compute(fn, seed, opts, args) {
     let flag = FLAG_SETUP | ((0 | opts) & OPTIONS);
-    let node = new Compute(flag, fn, null, null, seed, args);
+    let node = new Compute(flag, fn, null, seed, args);
     if (!(flag & FLAG_DEFER)) {
         startCompute(node);
     }
@@ -2214,7 +2285,7 @@ function compute(fn, seed, opts, args) {
  */
 function effect(fn, opts, args) {
     let flag = FLAG_SETUP | ((0 | opts) & OPTIONS);
-    let node = new Effect(flag, fn, null, null, args);
+    let node = new Effect(flag, fn, null, args);
     startEffect(node);
     return node;
 }
@@ -2226,7 +2297,7 @@ function effect(fn, opts, args) {
  */
 function scope(fn, opts) {
     let flag = FLAG_SETUP | FLAG_SCOPE | ((0 | opts) & OPTIONS);
-    let node = new Effect(flag, fn, null, null);
+    let node = new Effect(flag, fn, null);
     let state = CLOCK._state;
     if (state & STATE_SCOPE) {
         setScope(node, CLOCK._scope);
@@ -2260,7 +2331,7 @@ export {
     FLAG_DEFER, FLAG_STABLE, FLAG_SETUP, FLAG_STALE, FLAG_PENDING,
     FLAG_RUNNING, FLAG_DISPOSED, FLAG_LOADING, FLAG_ERROR, FLAG_RECOVER,
     FLAG_BOUND, FLAG_DERIVED, FLAG_SCOPE, FLAG_NOTIFY, FLAG_EQUAL, FLAG_WEAK,
-    FLAG_INIT, FLAG_RDEP1, FLAG_RDEP2,
+    FLAG_INIT,
     OP_VALUE, OP_CALLBACK,
     register,
     MUT_ADD, MUT_DEL, MUT_SORT,

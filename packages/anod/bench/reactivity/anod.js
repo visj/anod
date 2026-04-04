@@ -6,7 +6,7 @@ import {
     compute,
     signal,
     OPT_DEFER,
-} from '../../dist/index.mjs';
+} from '../../src/index.js';
 
 let sink = 0;
 let counter = 0;
@@ -36,7 +36,7 @@ function setupDeep() {
     return () => {
         batch(() => { head.set(++i); });
     };
-}78
+}
 
 function setupBroad() {
     const head = signal(0);
@@ -83,7 +83,10 @@ function setupTriangle() {
         current = compute(c => { counter++; return c.read(prev) + 1; });
     }
     list.push(current);
-    const sum = compute(c => { counter++; return list.reduce((a, b) => a + c.read(b), 0); });
+    const sum = compute(c => {
+        counter++;
+        return list.reduce((a, b) => a + c.read(b), 0);
+    });
     effect(c => {
         counter++;
         sink += c.read(sum);
@@ -115,11 +118,10 @@ function setupMux() {
 
 function setupUnstable() {
     const head = signal(0);
-    const double = compute(c => { console.log("double"); counter++; return c.read(head) * 2; }, 0, OPT_DEFER);
-    const inverse = compute(c => { console.log("inverse"); counter++; return -c.read(head); }, 0, OPT_DEFER);
+    const double = compute(c => { counter++; return c.read(head) * 2; }, 0, OPT_DEFER);
+    const inverse = compute(c => { counter++; return -c.read(head); }, 0, OPT_DEFER);
     const current = compute(c => {
         counter++;
-        console.log("current");
         let result = 0;
         for (let i = 0; i < 20; i++) {
             result += c.read(head) % 2 ? c.read(double) : c.read(inverse);
@@ -127,7 +129,6 @@ function setupUnstable() {
         return result;
     }, 0, OPT_DEFER);
     effect(c => {
-        console.log("effect");
         counter++;
         sink += c.read(current);
     });
@@ -469,8 +470,6 @@ validate('dynUpdateLargeWebApp', () => setupDynUpdate(1000, 12, 0.95, 4, 1));
 validate('dynUpdateWideDense', () => setupDynUpdate(1000, 5, 1, 25, 1));
 validate('dynUpdateDeep', () => setupDynUpdate(5, 500, 1, 3, 1));
 validate('dynUpdateVeryDynamic', () => setupDynUpdate(100, 15, 0.5, 6, 1));
-
-process.exit();
 
 /* === Run === */
 

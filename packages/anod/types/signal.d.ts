@@ -193,13 +193,12 @@ export declare class Signal<T> implements ISignal<T> {
     dispose(): void;
 }
 
-export declare class Compute<T, U = any, V = any, W = any> implements ICompute<T> {
+export declare class Compute<T, U = any, W = any> implements ICompute<T> {
     readonly [ANOD]: never;
     readonly t: Type.COMPUTE;
 
-    constructor(opts: number, fn: (c: IReader, prev: T, args: W) => any, dep1: null, dep2: null, seed?: T, args?: W);
-    constructor(opts: number, fn: (c: IReader, u: U, prev: T, args: W, mod: number) => any, dep1: IReadonlySignal<U>, dep2: null, seed?: T, args?: W);
-    constructor(opts: number, fn: (c: IReader, u: U, v: V, prev: T, args: W, mod: number) => any, dep1: IReadonlySignal<U>, dep2: IReadonlySignal<V>, seed?: T, args?: W);
+    constructor(opts: number, fn: (c: IReader, prev: T, args: W) => any, dep1: null, seed?: T, args?: W);
+    constructor(opts: number, fn: (c: IReader, u: U, prev: T, args: W, mod: number) => any, dep1: IReadonlySignal<U>, seed?: T, args?: W);
 
     val(): T;
     derive<U>(
@@ -225,13 +224,12 @@ export declare class Compute<T, U = any, V = any, W = any> implements ICompute<T
     loading(): boolean;
 }
 
-export declare class Effect<U = any, V = any, W = any> implements IEffect {
+export declare class Effect<U = any, W = any> implements IEffect {
     readonly [ANOD]: never;
     readonly t: Type.EFFECT;
 
-    constructor(opts: number, fn: (c: IReader, args: W) => void | (() => void), dep1: null, dep2: null, args?: W);
-    constructor(opts: number, fn: (c: IReader, u: U, args: W) => void | (() => void), dep1: IReadonlySignal<U>, dep2: null, args?: W);
-    constructor(opts: number, fn: (c: IReader, u: U, v: V, args: W) => void | (() => void), dep1: IReadonlySignal<U>, dep2: IReadonlySignal<V>, args?: W);
+    constructor(opts: number, fn: (c: IReader, args: W) => void | (() => void), dep1: null, args?: W);
+    constructor(opts: number, fn: (c: IReader, u: U, args: W) => void | (() => void), dep1: IReadonlySignal<U>, args?: W);
 
     dispose(): void;
     error(): boolean;
