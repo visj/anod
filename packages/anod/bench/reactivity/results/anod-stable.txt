@@ -1,0 +1,173 @@
+clk: ~3.11 GHz
+cpu: Apple M1 Pro
+runtime: node 25.8.2 (arm64-darwin)
+
+benchmark                   avg (min … max) p75 / p99    (min … top 1%)
+------------------------------------------- -------------------------------
+• Kairo: deep propagation
+------------------------------------------- -------------------------------
+anod stable                    1.37 µs/iter   1.38 µs █▂                   
+                        (1.35 µs … 1.43 µs)   1.42 µs ███ ▄ ▃ ▃            
+                    ( 72.16  b … 377.17  b)  74.91  b ███▇██████▅▅▆▅▇▃▂▁▅▁▂
+                  5.46 ipc (  0.01% stalls)  99.95% L1 data cache
+          4.40k cycles  24.03k instructions  43.92% retired LD/ST ( 10.55k)
+
+• Kairo: broad propagation
+------------------------------------------- -------------------------------
+anod stable                    3.29 µs/iter   3.29 µs      █               
+                        (3.26 µs … 3.35 µs)   3.35 µs  ▆  ▃█▆▆▆            
+                    (856.17  b … 860.55  b) 856.41  b ██▁██████▄▆▁▄▄▁▁▄▄▁▁▆
+                  6.65 ipc (  0.16% stalls)  99.92% L1 data cache
+         10.57k cycles  70.30k instructions  43.20% retired LD/ST ( 30.37k)
+
+• Kairo: diamond
+------------------------------------------- -------------------------------
+anod stable                  186.16 ns/iter 186.64 ns    █                 
+                    (178.24 ns … 262.25 ns) 224.80 ns    █                 
+                    (  1.20  b … 559.22  b) 170.10  b █▆▃█▆▄▃▂▂▁▁▁▁▁▁▁▁▁▁▁▁
+                  6.84 ipc (  0.33% stalls)  99.74% L1 data cache
+         599.15 cycles   4.10k instructions  41.91% retired LD/ST (  1.72k)
+
+• Kairo: triangle
+------------------------------------------- -------------------------------
+anod stable                  313.68 ns/iter 314.92 ns █                    
+                    (308.16 ns … 400.29 ns) 362.37 ns █▆                   
+                    ( 75.56  b … 581.80  b) 169.93  b ███▄▅▄▂▂▂▁▁▁▁▁▁▁▁▁▁▁▁
+                  6.73 ipc (  0.39% stalls)  99.78% L1 data cache
+          1.01k cycles   6.79k instructions  41.99% retired LD/ST (  2.85k)
+
+• Kairo: mux
+------------------------------------------- -------------------------------
+anod stable                    2.82 µs/iter   2.82 µs    █                 
+                        (2.76 µs … 3.22 µs)   3.18 µs ▄▄ █                 
+                    (  1.03 kb …   2.27 kb)   1.05 kb ██▆█▁▄▂▁▁▁▁▁▁▁▁▁▁▁▁▁▃
+                  6.64 ipc (  0.49% stalls)  99.77% L1 data cache
+          9.07k cycles  60.24k instructions  42.90% retired LD/ST ( 25.85k)
+
+• Kairo: unstable
+------------------------------------------- -------------------------------
+anod stable                  306.81 ns/iter 304.43 ns  █                   
+                    (296.30 ns … 440.90 ns) 393.32 ns ▃█                   
+                    (102.50  b … 320.12  b) 105.98  b ██▇▃▂▂▁▁▂▁▂▁▁▁▁▁▁▁▁▁▁
+                  6.45 ipc (  0.19% stalls)  99.68% L1 data cache
+         991.62 cycles   6.40k instructions  38.62% retired LD/ST (  2.47k)
+
+• Kairo: avoidable propagation
+------------------------------------------- -------------------------------
+anod stable                   70.82 ns/iter  70.38 ns █                    
+                     (69.49 ns … 154.76 ns)  81.06 ns █▃                   
+                    (  3.14  b … 264.13  b)  56.61  b ██▄▂▂▂▂▂▂▂▁▁▁▁▁▁▁▁▁▁▁
+                  6.90 ipc (  0.72% stalls)  99.87% L1 data cache
+         228.98 cycles   1.58k instructions  42.93% retired LD/ST ( 678.15)
+
+• Kairo: repeated observers
+------------------------------------------- -------------------------------
+anod stable                   81.08 ns/iter  81.02 ns █                    
+                     (79.23 ns … 141.66 ns)  94.66 ns █▆                   
+                    ( 18.12  b … 287.15  b)  72.74  b ██▄▄▃▂▂▂▂▂▁▁▁▁▁▁▁▁▁▁▁
+                  6.48 ipc (  0.69% stalls)  99.85% L1 data cache
+         261.26 cycles   1.69k instructions  37.97% retired LD/ST ( 643.31)
+
+• CellX 10 layers
+------------------------------------------- -------------------------------
+anod stable                    3.23 µs/iter   3.24 µs            █         
+                        (3.18 µs … 3.30 µs)   3.29 µs     █ ▅    █         
+                    (  1.26 kb …   1.31 kb)   1.30 kb ▆▃▁█████▆▆▆██▁▃▁▃▁▆▃▃
+                  6.48 ipc (  0.25% stalls)  99.89% L1 data cache
+         10.35k cycles  67.01k instructions  41.62% retired LD/ST ( 27.89k)
+
+• $mol_wire
+------------------------------------------- -------------------------------
+anod stable                   56.57 µs/iter  56.80 µs  ██                  
+                      (56.22 µs … 57.12 µs)  56.90 µs ▅██      ▅   ▅ ▅ ▅ ▅▅
+                    (864.16  b …   1.12 kb) 889.68  b ███▁▁▁▁▁▁█▁▁▁█▁█▁█▁██
+                  5.38 ipc (  0.01% stalls)  99.99% L1 data cache
+        181.11k cycles 973.59k instructions  36.08% retired LD/ST (351.32k)
+
+• Create 1k signals
+------------------------------------------- -------------------------------
+anod stable                    5.52 µs/iter   5.45 µs    ▂  █▂ ▂           
+                        (5.25 µs … 8.78 µs)   5.67 µs ▅ ▅█  ██ █ ▅▅        
+                    ( 10.69 kb …  10.74 kb)  10.73 kb █▇██▇▁██▇█▇██▁▁▁▁▁▁▁▇
+                  4.41 ipc ( 22.22% stalls)  87.66% L1 data cache
+         18.34k cycles  80.84k instructions  39.16% retired LD/ST ( 31.66k)
+
+• Create 1k computations
+------------------------------------------- -------------------------------
+anod stable                   58.83 µs/iter  57.71 µs  █                   
+                     (55.13 µs … 324.25 µs)  91.71 µs  █                   
+                    ( 12.68 kb … 711.56 kb) 511.97 kb ▃█▅▃▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+                  5.79 ipc (  5.78% stalls)  98.43% L1 data cache
+        192.29k cycles   1.11M instructions  45.83% retired LD/ST (510.17k)
+
+• Dynamic build: simple component
+------------------------------------------- -------------------------------
+anod stable                    6.40 µs/iter   7.10 µs             █        
+                        (4.25 µs … 8.09 µs)   7.67 µs ▂           █ ▂▂  ▇  
+                    ( 15.43 kb …  17.96 kb)  15.72 kb █▆▁▁▁▁▁▆▆▁▁▆█▆██▁▆█▆▆
+                  4.05 ipc (  3.17% stalls)  97.91% L1 data cache
+         20.02k cycles  81.08k instructions  37.46% retired LD/ST ( 30.37k)
+
+• Dynamic build: large web app
+------------------------------------------- -------------------------------
+anod stable                    3.48 ms/iter   3.86 ms █                    
+                       (1.26 ms … 19.30 ms)  17.83 ms █                    
+                    (  6.53 mb …   9.55 mb)   9.05 mb █▂▁▂▂▁▁▂▁▁▄▃▁▁▁▁▁▁▁▁▁
+                  3.62 ipc (  2.62% stalls)  97.13% L1 data cache
+         11.26M cycles  40.79M instructions  36.12% retired LD/ST ( 14.73M)
+
+• Dynamic build: wide dense
+------------------------------------------- -------------------------------
+anod stable                    3.00 ms/iter   2.12 ms █                    
+                        (1.52 ms … 9.79 ms)   9.73 ms █                    
+                    (656.13 kb …   7.41 mb)   7.04 mb █▃▂▁▁▁▁▁▁▁▁▁▁▁▁▁▁▂▃▂▁
+                  4.59 ipc (  3.29% stalls)  97.27% L1 data cache
+          9.58M cycles  43.99M instructions  33.13% retired LD/ST ( 14.57M)
+
+• Dynamic update: simple component
+------------------------------------------- -------------------------------
+anod stable                  476.25 ns/iter 479.39 ns   █ ▃▆               
+                    (463.82 ns … 525.47 ns) 514.77 ns ▂██▇██▅              
+                    ( 96.12  b … 302.36  b)  97.73  b █████████▆▃▂▃▂▄▂▁▂▁▁▂
+                  6.13 ipc (  0.36% stalls)  99.92% L1 data cache
+          1.52k cycles   9.32k instructions  40.68% retired LD/ST (  3.79k)
+
+• Dynamic update: dynamic component
+------------------------------------------- -------------------------------
+anod stable                    7.88 µs/iter   7.92 µs            █         
+                        (7.72 µs … 7.99 µs)   7.99 µs            ███ █     
+                    (517.18  b …   1.10 kb) 964.00  b █▁▁▁▁█▁▁██████▁███▁▁█
+                  5.60 ipc (  0.24% stalls)  99.43% L1 data cache
+         25.06k cycles 140.37k instructions  36.38% retired LD/ST ( 51.07k)
+
+• Dynamic update: large web app
+------------------------------------------- -------------------------------
+anod stable                   19.33 µs/iter  19.56 µs █   █                
+                      (18.89 µs … 19.98 µs)  19.92 µs █ ▅▅█ ▅    ▅ ▅     ▅▅
+                    (964.33  b …   2.14 kb)   1.72 kb █▁███▁█▁▁▁▁█▁█▁▁▁▁▁██
+                  4.25 ipc (  3.07% stalls)  90.61% L1 data cache
+         62.19k cycles 264.58k instructions  37.56% retired LD/ST ( 99.37k)
+
+• Dynamic update: wide dense
+------------------------------------------- -------------------------------
+anod stable                   41.32 µs/iter  41.63 µs        █   █         
+                      (40.80 µs … 41.73 µs)  41.72 µs ▅   ▅ ▅█   █▅     ▅▅▅
+                    ( 96.11  b …   1.61 kb)   1.42 kb █▁▁▁█▁██▁▁▁██▁▁▁▁▁███
+                  5.57 ipc (  3.91% stalls)  95.09% L1 data cache
+        131.97k cycles 734.99k instructions  36.29% retired LD/ST (266.72k)
+
+• Dynamic update: deep
+------------------------------------------- -------------------------------
+anod stable                  129.83 µs/iter 131.25 µs  █                   
+                    (126.25 µs … 366.21 µs) 143.00 µs  █▅   ▅              
+                    ( 38.11 kb … 326.58 kb)  39.05 kb ▄███▄▇█▆▃▂▃▂▂▁▁▁▁▁▁▁▁
+                  5.00 ipc (  7.10% stalls)  93.82% L1 data cache
+        421.01k cycles   2.10M instructions  40.48% retired LD/ST (851.74k)
+
+• Dynamic update: very dynamic
+------------------------------------------- -------------------------------
+anod stable                  101.60 µs/iter 102.67 µs    ▅█▆               
+                     (94.42 µs … 315.67 µs) 123.71 µs   ▂███▆              
+                    (  3.08 kb … 545.31 kb)  18.77 kb ▂▆██████▃▂▂▂▁▁▁▁▁▁▁▁▁
+                  3.88 ipc (  2.30% stalls)  94.89% L1 data cache
+        331.06k cycles   1.28M instructions  34.67% retired LD/ST (445.48k)

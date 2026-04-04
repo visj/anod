@@ -1,4 +1,5 @@
 import { bench, group, run } from 'mitata';
+import { EXPECTED, OVERRIDES_ANOD } from './expected.js';
 import {
     batch,
     effect,
@@ -23,13 +24,12 @@ function setupDeep() {
     let current = head;
     for (let i = 0; i < len; i++) {
         const prev = current;
-        current = compute(c => c.read(prev) + 1);
+        current = compute(c => { counter++; return c.read(prev) + 1; });
     }
     const tail = current;
     effect(c => {
-        const v = c.read(tail);
-        counter += v;
-        sink += counter;
+        counter++;
+        sink += c.read(tail);
     });
     let i = 0;
     return () => {
@@ -40,12 +40,11 @@ function setupDeep() {
 function setupBroad() {
     const head = signal(0);
     for (let i = 0; i < 50; i++) {
-        const current = compute(c => c.read(head) + i);
-        const current2 = compute(c => c.read(current) + 1);
+        const current = compute(c => { counter++; return c.read(head) + i; });
+        const current2 = compute(c => { counter++; return c.read(current) + 1; });
         effect(c => {
-            const v = c.read(current2);
-            counter += v;
-            sink += counter;
+            counter++;
+            sink += c.read(current2);
         });
     }
     let i = 0;
@@ -59,13 +58,12 @@ function setupDiamond() {
     const head = signal(0);
     const branches = [];
     for (let i = 0; i < width; i++) {
-        branches.push(compute(c => c.read(head) + 1));
+        branches.push(compute(c => { counter++; return c.read(head) + 1; }));
     }
-    const sum = compute(c => branches.reduce((a, b) => a + c.read(b), 0));
+    const sum = compute(c => { counter++; return branches.reduce((a, b) => a + c.read(b), 0); });
     effect(c => {
-        const v = c.read(sum);
-        counter += v;
-        sink += counter;
+        counter++;
+        sink += c.read(sum);
     });
     let i = 0;
     return () => {
@@ -78,16 +76,16 @@ function setupTriangle() {
     const head = signal(0);
     let current = head;
     const list = [];
-    for (let i = 0; i < width; i++) {
+    for (let i = 0; i < width - 1; i++) {
         const prev = current;
         list.push(current);
-        current = compute(c => c.read(prev) + 1);
+        current = compute(c => { counter++; return c.read(prev) + 1; });
     }
-    const sum = compute(c => list.reduce((a, b) => a + c.read(b), 0));
+    list.push(current);
+    const sum = compute(c => { counter++; return list.reduce((a, b) => a + c.read(b), 0); });
     effect(c => {
-        const v = c.read(sum);
-        counter += v;
-        sink += counter;
+        counter++;
+        sink += c.read(sum);
     });
     let i = 0;
     return () => {
@@ -97,15 +95,14 @@ function setupTriangle() {
 
 function setupMux() {
     const heads = new Array(100).fill(null).map(() => signal(0));
-    const mux = compute(c => heads.map(h => c.read(h)));
+    const mux = compute(c => { counter++; return heads.map(h => c.read(h)); });
     const split = heads
-        .map((_, index) => compute(c => c.read(mux)[index]))
-        .map(x => compute(c => c.read(x) + 1));
+        .map((_, index) => compute(c => { counter++; return c.read(mux)[index]; }))
+        .map(x => compute(c => { counter++; return c.read(x) + 1; }));
     for (const x of split) {
         effect(c => {
-            const v = c.read(x);
-            counter += v;
-            sink += counter;
+            counter++;
+            sink += c.read(x);
         });
     }
     let i = 0;
@@ -117,9 +114,10 @@ function setupMux() {
 
 function setupUnstable() {
     const head = signal(0);
-    const double = compute(c => c.read(head) * 2);
-    const inverse = compute(c => -c.read(head));
+    const double = compute(c => { counter++; return c.read(head) * 2; });
+    const inverse = compute(c => { counter++; return -c.read(head); });
     const current = compute(c => {
+        counter++;
         let result = 0;
         for (let i = 0; i < 20; i++) {
             result += c.read(head) % 2 ? c.read(double) : c.read(inverse);
@@ -127,9 +125,8 @@ function setupUnstable() {
         return result;
     });
     effect(c => {
-        const v = c.read(current);
-        counter += v;
-        sink += counter;
+        counter++;
+        sink += c.read(current);
     });
     let i = 0;
     return () => {
@@ -139,15 +136,14 @@ function setupUnstable() {
 
 function setupAvoidable() {
     const head = signal(0);
-    const computed1 = compute(c => c.read(head));
-    const computed2 = compute(c => { c.read(computed1); return 0; });
-    const computed3 = compute(c => c.read(computed2) + 1);
-    const computed4 = compute(c => c.read(computed3) + 2);
-    const computed5 = compute(c => c.read(computed4) + 3);
+    const computed1 = compute(c => { counter++; return c.read(head); });
+    const computed2 = compute(c => { counter++; c.read(computed1); return 0; });
+    const computed3 = compute(c => { counter++; return c.read(computed2) + 1; });
+    const computed4 = compute(c => { counter++; return c.read(computed3) + 2; });
+    const computed5 = compute(c => { counter++; return c.read(computed4) + 3; });
     effect(c => {
-        const v = c.read(computed5);
-        counter += v;
-        sink += counter;
+        counter++;
+        sink += c.read(computed5);
     });
     let i = 0;
     return () => {
@@ -159,6 +155,7 @@ function setupRepeatedObservers() {
     const size = 30;
     const head = signal(0);
     const current = compute(c => {
+        counter++;
         let result = 0;
         for (let i = 0; i < size; i++) {
             result += c.read(head);
@@ -166,9 +163,8 @@ function setupRepeatedObservers() {
         return result;
     });
     effect(c => {
-        const v = c.read(current);
-        counter += v;
-        sink += counter;
+        counter++;
+        sink += c.read(current);
     });
     let i = 0;
     return () => {
@@ -189,19 +185,19 @@ function setupCellx(layers) {
     for (let i = layers; i > 0; i--) {
         const m = layer;
         const s = {
-            prop1: compute(c => c.read(m.prop2)),
-            prop2: compute(c => c.read(m.prop1) - c.read(m.prop3)),
-            prop3: compute(c => c.read(m.prop2) + c.read(m.prop4)),
-            prop4: compute(c => c.read(m.prop3)),
+            prop1: compute(c => { counter++; return c.read(m.prop2); }),
+            prop2: compute(c => { counter++; return c.read(m.prop1) - c.read(m.prop3); }),
+            prop3: compute(c => { counter++; return c.read(m.prop2) + c.read(m.prop4); }),
+            prop4: compute(c => { counter++; return c.read(m.prop3); }),
         };
-        effect(c => { const v = c.read(s.prop1); counter += v; sink += counter; });
-        effect(c => { const v = c.read(s.prop2); counter += v; sink += counter; });
-        effect(c => { const v = c.read(s.prop3); counter += v; sink += counter; });
-        effect(c => { const v = c.read(s.prop4); counter += v; sink += counter; });
-        effect(c => { const v = c.read(s.prop1); counter += v; sink += counter; });
-        effect(c => { const v = c.read(s.prop2); counter += v; sink += counter; });
-        effect(c => { const v = c.read(s.prop3); counter += v; sink += counter; });
-        effect(c => { const v = c.read(s.prop4); counter += v; sink += counter; });
+        effect(c => { counter++; sink += c.read(s.prop1); });
+        effect(c => { counter++; sink += c.read(s.prop2); });
+        effect(c => { counter++; sink += c.read(s.prop3); });
+        effect(c => { counter++; sink += c.read(s.prop4); });
+        effect(c => { counter++; sink += c.read(s.prop1); });
+        effect(c => { counter++; sink += c.read(s.prop2); });
+        effect(c => { counter++; sink += c.read(s.prop3); });
+        effect(c => { counter++; sink += c.read(s.prop4); });
         layer = s;
     }
     const end = layer;
@@ -227,18 +223,20 @@ function setupMolWire() {
     const numbers = Array.from({ length: 5 }, (_, i) => i);
     const A = signal(0);
     const B = signal(0);
-    const C = compute(c => (c.read(A) % 2) + (c.read(B) % 2));
-    const D = compute(c =>
-        numbers.map(i => ({ x: i + (c.read(A) % 2) - (c.read(B) % 2) })),
-    );
-    const E = compute(c => hard(c.read(C) + c.read(A) + c.read(D)[0].x, 'E'));
-    const F = compute(c => hard(c.read(D)[2].x || c.read(B), 'F'));
-    const G = compute(c =>
-        c.read(C) + (c.read(C) || c.read(E) % 2) + c.read(D)[4].x + c.read(F),
-    );
-    effect(c => { const v = hard(c.read(G), 'H'); counter += v; sink += counter; });
-    effect(c => { const v = c.read(G);             counter += v; sink += counter; });
-    effect(c => { const v = hard(c.read(F), 'J'); counter += v; sink += counter; });
+    const C = compute(c => { counter++; return (c.read(A) % 2) + (c.read(B) % 2); });
+    const D = compute(c => {
+        counter++;
+        return numbers.map(i => ({ x: i + (c.read(A) % 2) - (c.read(B) % 2) }));
+    });
+    const E = compute(c => { counter++; return hard(c.read(C) + c.read(A) + c.read(D)[0].x, 'E'); });
+    const F = compute(c => { counter++; return hard(c.read(D)[2].x || c.read(B), 'F'); });
+    const G = compute(c => {
+        counter++;
+        return c.read(C) + (c.read(C) || c.read(E) % 2) + c.read(D)[4].x + c.read(F);
+    });
+    effect(c => { counter++; sink += hard(c.read(G), 'H'); });
+    effect(c => { counter++; sink += c.read(G); });
+    effect(c => { counter++; sink += hard(c.read(F), 'J'); });
     let i = 0;
     return () => {
         i++;
@@ -263,30 +261,236 @@ function benchCreateComputations(count) {
     return () => {
         const src = signal(0);
         for (let i = 0; i < count; i++) {
-            const comp = compute(c => c.read(src));
+            const comp = compute(c => { counter++; return c.read(src); });
             effect(c => {
-                const v = c.read(comp);
-                counter += v;
-                sink += counter;
+                counter++;
+                sink += c.read(comp);
             });
         }
     };
 }
 
+/* === Dynamic Graph Benchmarks === */
+
+/**
+ * Seeded PRNG using xmur3a hash + sfc32.
+ * Adapted from https://github.com/bryc/code/blob/master/jshash/PRNGs.md (Public Domain)
+ * @param {string} seed
+ * @returns {() => number} returns values in [0, 1)
+ */
+function pseudoRandom(seed) {
+    let h = 2166136261 >>> 0;
+    for (let k, i = 0; i < seed.length; i++) {
+        k = Math.imul(seed.charCodeAt(i), 3432918353);
+        k = (k << 15) | (k >>> 17);
+        h ^= Math.imul(k, 461845907);
+        h = (h << 13) | (h >>> 19);
+        h = (Math.imul(h, 5) + 3864292196) | 0;
+    }
+    h ^= seed.length;
+    function nextHash() {
+        h ^= h >>> 16;
+        h = Math.imul(h, 2246822507);
+        h ^= h >>> 13;
+        h = Math.imul(h, 3266489909);
+        h ^= h >>> 16;
+        return h >>> 0;
+    }
+    let a = nextHash(), b = nextHash(), c = nextHash(), d = nextHash();
+    return function () {
+        a >>>= 0; b >>>= 0; c >>>= 0; d >>>= 0;
+        let t = (a + b) | 0;
+        a = b ^ (b >>> 9);
+        b = (c + (c << 3)) | 0;
+        c = (c << 21) | (c >>> 11);
+        d = (d + 1) | 0;
+        t = (t + d) | 0;
+        c = (c + t) | 0;
+        return (t >>> 0) / 4294967296;
+    };
+}
+
+/** @param {any[]} src @param {number} rmCount @param {() => number} rand */
+function removeElems(src, rmCount, rand) {
+    const copy = src.slice();
+    for (let i = 0; i < rmCount; i++) {
+        const rmDex = Math.floor(rand() * copy.length);
+        copy.splice(rmDex, 1);
+    }
+    return copy;
+}
+
+/**
+ * Build a rectangular reactive dependency graph using native anod API.
+ * Each layer has `width` computed nodes, each reading `nSources` from the previous layer.
+ * Static nodes always read the same deps; dynamic nodes conditionally drop one dep.
+ * @param {number} width
+ * @param {number} totalLayers
+ * @param {number} staticFraction - fraction of static nodes [0, 1]
+ * @param {number} nSources
+ */
+function makeDynGraph(width, totalLayers, staticFraction, nSources) {
+    const sources = new Array(width);
+    for (let i = 0; i < width; i++) {
+        sources[i] = signal(i);
+    }
+    const random = pseudoRandom('seed');
+    let prevRow = sources;
+    const layers = [];
+    for (let l = 0; l < totalLayers - 1; l++) {
+        const row = new Array(width);
+        for (let myDex = 0; myDex < width; myDex++) {
+            const mySources = new Array(nSources);
+            for (let s = 0; s < nSources; s++) {
+                mySources[s] = prevRow[(myDex + s) % width];
+            }
+            if (random() < staticFraction) {
+                row[myDex] = compute(c => {
+                    counter++;
+                    let sum = 0;
+                    for (let s = 0; s < mySources.length; s++) {
+                        sum += c.read(mySources[s]);
+                    }
+                    return sum;
+                });
+            } else {
+                const first = mySources[0];
+                const tail = mySources.slice(1);
+                row[myDex] = compute(c => {
+                    counter++;
+                    let sum = c.read(first);
+                    const shouldDrop = sum & 0x1;
+                    const dropDex = sum % tail.length;
+                    for (let i = 0; i < tail.length; i++) {
+                        if (shouldDrop && i === dropDex) {
+                            continue;
+                        }
+                        sum += c.read(tail[i]);
+                    }
+                    return sum;
+                });
+            }
+        }
+        layers.push(row);
+        prevRow = row;
+    }
+    return { sources, layers };
+}
+
+/**
+ * Benchmark graph construction: each mitata call builds a fresh graph and
+ * reads all leaves to force materialization (so lazy frameworks do the same
+ * work as push frameworks).
+ */
+function setupDynBuild(width, totalLayers, staticFraction, nSources) {
+    return () => {
+        const { sources, layers } = makeDynGraph(width, totalLayers, staticFraction, nSources);
+        const leaves = layers[layers.length - 1];
+        let sum = 0;
+        for (let r = 0; r < leaves.length; r++) {
+            sum += leaves[r].val();
+        }
+        sink += sum;
+    };
+}
+
+/**
+ * Benchmark graph propagation: setup builds the graph and force-reads all
+ * leaves (materializing for lazy frameworks). The runner then writes one
+ * source and reads selected leaves — measuring pure propagation cost.
+ */
+function setupDynUpdate(width, totalLayers, staticFraction, nSources, readFraction) {
+    const { sources, layers } = makeDynGraph(width, totalLayers, staticFraction, nSources);
+    const leaves = layers[layers.length - 1];
+    /** Force-read ALL leaves so lazy frameworks fully materialize the graph. */
+    for (let r = 0; r < leaves.length; r++) {
+        leaves[r].val();
+    }
+    const rand = pseudoRandom('seed');
+    const skipCount = Math.round(leaves.length * (1 - readFraction));
+    const readLeaves = removeElems(leaves, skipCount, rand);
+    const readLen = readLeaves.length;
+    const srcLen = sources.length;
+    /** Persistent counter across mitata calls so each write triggers propagation. */
+    let iter = 0;
+    return () => {
+        iter++;
+        const sourceDex = iter % srcLen;
+        batch(() => {
+            sources[sourceDex].set(iter + sourceDex);
+        });
+        for (let r = 0; r < readLen; r++) {
+            readLeaves[r].val();
+        }
+        let sum = 0;
+        for (let r = 0; r < readLen; r++) {
+            sum += readLeaves[r].val();
+        }
+        sink += sum;
+    };
+}
+
+/* === Validation === */
+
+/**
+ * Run each benchmark once and verify the counter matches the expected value.
+ * Uses OVERRIDES_ANOD for push-model differences (unstable, molWire).
+ */
+function validate(name, setupFn) {
+    const expected = OVERRIDES_ANOD[name] ?? EXPECTED[name];
+    const run = setupFn();
+    counter = 0;
+    run();
+    if (counter !== expected) {
+        throw new Error(`"${name}": expected counter=${expected}, got ${counter}`);
+    }
+    counter = 0;
+}
+
+validate('deep', setupDeep);
+validate('broad', setupBroad);
+validate('diamond', setupDiamond);
+validate('triangle', setupTriangle);
+validate('mux', setupMux);
+validate('unstable', setupUnstable);
+validate('avoidable', setupAvoidable);
+validate('repeatedObservers', setupRepeatedObservers);
+validate('cellx10', () => setupCellx(10));
+validate('molWire', setupMolWire);
+validate('createComputations1k', () => benchCreateComputations(1000));
+validate('dynBuildSimple', () => setupDynBuild(10, 5, 1, 2));
+validate('dynBuildLargeWebApp', () => setupDynBuild(1000, 12, 0.95, 4));
+validate('dynUpdateSimple', () => setupDynUpdate(10, 5, 1, 2, 0.2));
+validate('dynUpdateDynamic', () => setupDynUpdate(10, 10, 0.75, 6, 0.2));
+validate('dynUpdateLargeWebApp', () => setupDynUpdate(1000, 12, 0.95, 4, 1));
+validate('dynUpdateWideDense', () => setupDynUpdate(1000, 5, 1, 25, 1));
+validate('dynUpdateDeep', () => setupDynUpdate(5, 500, 1, 3, 1));
+validate('dynUpdateVeryDynamic', () => setupDynUpdate(100, 15, 0.5, 6, 1));
+
 /* === Run === */
 
-group('Kairo: deep propagation',    () => { bench('anod', setupDeep()); });
-group('Kairo: broad propagation',   () => { bench('anod', setupBroad()); });
-group('Kairo: diamond',             () => { bench('anod', setupDiamond()); });
-group('Kairo: triangle',            () => { bench('anod', setupTriangle()); });
-group('Kairo: mux',                 () => { bench('anod', setupMux()); });
-group('Kairo: unstable',            () => { bench('anod', setupUnstable()); });
+group('Kairo: deep propagation', () => { bench('anod', setupDeep()); });
+group('Kairo: broad propagation', () => { bench('anod', setupBroad()); });
+group('Kairo: diamond', () => { bench('anod', setupDiamond()); });
+group('Kairo: triangle', () => { bench('anod', setupTriangle()); });
+group('Kairo: mux', () => { bench('anod', setupMux()); });
+group('Kairo: unstable', () => { bench('anod', setupUnstable()); });
 group('Kairo: avoidable propagation', () => { bench('anod', setupAvoidable()); });
-group('Kairo: repeated observers',  () => { bench('anod', setupRepeatedObservers()); });
-group('CellX 10 layers',            () => { bench('anod', setupCellx(10)); });
-group('$mol_wire',                  () => { bench('anod', setupMolWire()); });
-group('Create 1k signals',          () => { bench('anod', benchCreateSignals(1_000)); });
-group('Create 1k computations',     () => { bench('anod', benchCreateComputations(1_000)); });
+group('Kairo: repeated observers', () => { bench('anod', setupRepeatedObservers()); });
+group('CellX 10 layers', () => { bench('anod', setupCellx(10)); });
+group('$mol_wire', () => { bench('anod', setupMolWire()); });
+group('Create 1k signals', () => { bench('anod', benchCreateSignals(1_000)); });
+group('Create 1k computations', () => { bench('anod', benchCreateComputations(1_000)); });
+
+group('Dynamic build: simple component',  () => { bench('anod', setupDynBuild(10, 5, 1, 2)); });
+group('Dynamic build: large web app',    () => { bench('anod', setupDynBuild(1000, 12, 0.95, 4)); });
+group('Dynamic build: wide dense',       () => { bench('anod', setupDynBuild(1000, 5, 1, 25)); });
+group('Dynamic update: simple component', () => { bench('anod', setupDynUpdate(10, 5, 1, 2, 0.2)); });
+group('Dynamic update: dynamic component', () => { bench('anod', setupDynUpdate(10, 10, 0.75, 6, 0.2)); });
+group('Dynamic update: large web app',   () => { bench('anod', setupDynUpdate(1000, 12, 0.95, 4, 1)); });
+group('Dynamic update: wide dense',      () => { bench('anod', setupDynUpdate(1000, 5, 1, 25, 1)); });
+group('Dynamic update: deep',            () => { bench('anod', setupDynUpdate(5, 500, 1, 3, 1)); });
+group('Dynamic update: very dynamic',    () => { bench('anod', setupDynUpdate(100, 15, 0.5, 6, 1)); });
 
 await run();
 

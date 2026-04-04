@@ -3,7 +3,7 @@ import { IReadonlySignal, ICompute, IEffect, ISignal, Type } from "anod";
 
 export type ListParam<T> = T | IReadonlySignal<T> | (() => T);
 
-export interface ICollection<T, TYPE extends number = Type.COMPUTE> extends IReadonlySignal<T[], TYPE>{
+export interface ICollection<T, TYPE extends number = Type.COMPUTE> extends IReadonlySignal<readonly T[], TYPE>{
     at(index: ListParam<number>): ICollection<T | undefined>;
     concat(...items: ListParam<any>[]): ICollection<T[]>;
     entries(): ICompute<IterableIterator<[number, T]>>;
@@ -28,7 +28,7 @@ export interface ICollection<T, TYPE extends number = Type.COMPUTE> extends IRea
     values(): ICompute<IterableIterator<T>>;
 }
 
-export interface IList<T> extends ICollection<T, Type.SIGNAL>, ISignal<T[]> {
+export interface IList<T> extends ICollection<T, Type.SIGNAL>, ISignal<readonly T[]> {
     push(...items: T[]): void;
     pop(): void;
     shift(): void;

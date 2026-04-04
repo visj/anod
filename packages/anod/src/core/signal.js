@@ -818,6 +818,9 @@ function Compute(opts, fn, dep1, dep2, seed, args) {
             }
         } else {
             this._flag = (this._flag | FLAG_STALE) & ~FLAG_PENDING;
+            if (this._flag & FLAG_NOTIFY) {
+                notifyStale(this, time);
+            }
         }
     };
 }
@@ -876,7 +879,7 @@ function runCompute(node, time) {
             }
         } else {
             if ((opts & (FLAG_STABLE | FLAG_SETUP)) === FLAG_STABLE) {
-                value = fn(node, value);
+                value = fn(node, value, args);
             } else {
                 node._version = ++CLOCK._version;
                 if (opts & FLAG_SETUP) {
@@ -1780,15 +1783,15 @@ function clearOwned(owner) {
             owner._oslot = 0;
         }
     }
-    let clpcount = owner._cslot;
-    if (clpcount > 0) {
+    let cslot = owner._cslot;
+    if (cslot > 0) {
         let cleanup = owner._cleanup;
-        if (clpcount === 1) {
+        if (cslot === 1) {
             owner._cleanup = null;
             owner._cslot = 0;
                 /** @type {function(): void} */(cleanup)();
         } else {
-            let len = clpcount - 2;
+            let len = cslot - 2;
             for (let i = 0; i < len; i++) {
                     /** @type {Array<function(): void>} */(cleanup)[i]();
                 cleanup[i] = null;
@@ -1796,13 +1799,13 @@ function clearOwned(owner) {
             owner._cslot = 2;
         }
     }
-    let rcvcount = owner._rslot;
-    if (rcvcount > 0) {
-        if (rcvcount === 1) {
+    let rslot = owner._rslot;
+    if (rslot > 0) {
+        if (rslot === 1) {
             owner._recover = null;
             owner._rslot = 0;
         } else {
-            let len = rcvcount - 2;
+            let len = rslot - 2;
             let recover = /** @type {Array<function(*): boolean>} */(owner._recover);
             for (let i = 0; i < len; i++) {
                 recover[i] = null;

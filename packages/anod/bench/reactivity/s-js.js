@@ -247,7 +247,7 @@ function setupMolWire() {
         const F = S(() => hard(D()[2].x || B(), 'F'));
         const G = S(() => C() + (C() || E() % 2) + D()[4].x + F());
         S(() => { const v = hard(G(), 'H'); counter += v; sink += counter; });
-        S(() => { const v = G();             counter += v; sink += counter; });
+        S(() => { const v = G(); counter += v; sink += counter; });
         S(() => { const v = hard(F(), 'J'); counter += v; sink += counter; });
         let i = 0;
         return () => {
@@ -288,20 +288,193 @@ function benchCreateComputations(count) {
     };
 }
 
+/* === Dynamic Graph Benchmarks === */
+
+/**
+ * Seeded PRNG using xmur3a hash + sfc32.
+ * Adapted from https://github.com/bryc/code/blob/master/jshash/PRNGs.md (Public Domain)
+ * @param {string} seed
+ * @returns {() => number} returns values in [0, 1)
+ */
+function pseudoRandom(seed) {
+    let h = 2166136261 >>> 0;
+    for (let k, i = 0; i < seed.length; i++) {
+        k = Math.imul(seed.charCodeAt(i), 3432918353);
+        k = (k << 15) | (k >>> 17);
+        h ^= Math.imul(k, 461845907);
+        h = (h << 13) | (h >>> 19);
+        h = (Math.imul(h, 5) + 3864292196) | 0;
+    }
+    h ^= seed.length;
+    function nextHash() {
+        h ^= h >>> 16;
+        h = Math.imul(h, 2246822507);
+        h ^= h >>> 13;
+        h = Math.imul(h, 3266489909);
+        h ^= h >>> 16;
+        return h >>> 0;
+    }
+    let a = nextHash(), b = nextHash(), c = nextHash(), d = nextHash();
+    return function () {
+        a >>>= 0; b >>>= 0; c >>>= 0; d >>>= 0;
+        let t = (a + b) | 0;
+        a = b ^ (b >>> 9);
+        b = (c + (c << 3)) | 0;
+        c = (c << 21) | (c >>> 11);
+        d = (d + 1) | 0;
+        t = (t + d) | 0;
+        c = (c + t) | 0;
+        return (t >>> 0) / 4294967296;
+    };
+}
+
+/** @param {any[]} src @param {number} rmCount @param {() => number} rand */
+function removeElems(src, rmCount, rand) {
+    const copy = src.slice();
+    for (let i = 0; i < rmCount; i++) {
+        const rmDex = Math.floor(rand() * copy.length);
+        copy.splice(rmDex, 1);
+    }
+    return copy;
+}
+
+/**
+ * Build a rectangular reactive dependency graph using native S.js API.
+ * Must be called inside an S.root() context.
+ * @param {number} width
+ * @param {number} totalLayers
+ * @param {number} staticFraction
+ * @param {number} nSources
+ */
+function makeDynGraph(width, totalLayers, staticFraction, nSources) {
+    const sources = new Array(width);
+    for (let i = 0; i < width; i++) {
+        sources[i] = S.data(i);
+    }
+    const random = pseudoRandom('seed');
+    let prevRow = sources;
+    const layers = [];
+    for (let l = 0; l < totalLayers - 1; l++) {
+        const row = new Array(width);
+        for (let myDex = 0; myDex < width; myDex++) {
+            const mySources = new Array(nSources);
+            for (let s = 0; s < nSources; s++) {
+                mySources[s] = prevRow[(myDex + s) % width];
+            }
+            if (random() < staticFraction) {
+                row[myDex] = S(() => {
+                    let sum = 0;
+                    for (let s = 0; s < mySources.length; s++) {
+                        sum += mySources[s]();
+                    }
+                    return sum;
+                });
+            } else {
+                const first = mySources[0];
+                const tail = mySources.slice(1);
+                row[myDex] = S(() => {
+                    let sum = first();
+                    const shouldDrop = sum & 0x1;
+                    const dropDex = sum % tail.length;
+                    for (let i = 0; i < tail.length; i++) {
+                        if (shouldDrop && i === dropDex) {
+                            continue;
+                        }
+                        sum += tail[i]();
+                    }
+                    return sum;
+                });
+            }
+        }
+        layers.push(row);
+        prevRow = row;
+    }
+    return { sources, layers };
+}
+
+/**
+ * Build a fresh graph inside S.root() and return a function that reads all
+ * leaves to force materialization. Measures graph construction + initial evaluation cost.
+ * @param {number} width
+ * @param {number} totalLayers
+ * @param {number} staticFraction
+ * @param {number} nSources
+ */
+function setupDynBuild(width, totalLayers, staticFraction, nSources) {
+    return () => {
+        S.root(() => {
+            const { layers } = makeDynGraph(width, totalLayers, staticFraction, nSources);
+            const leaves = layers[layers.length - 1];
+            const len = leaves.length;
+            for (let r = 0; r < len; r++) {
+                sink += leaves[r]();
+            }
+        });
+    };
+}
+
+/**
+ * Build the graph once inside S.root(), force-read all leaves to materialize,
+ * then return a function that writes one source and reads selected leaves per call.
+ * @param {number} width
+ * @param {number} totalLayers
+ * @param {number} staticFraction
+ * @param {number} nSources
+ * @param {number} readFraction
+ */
+function setupDynUpdate(width, totalLayers, staticFraction, nSources, readFraction) {
+    return S.root(() => {
+        const { sources, layers } = makeDynGraph(width, totalLayers, staticFraction, nSources);
+        const leaves = layers[layers.length - 1];
+        const allLen = leaves.length;
+        /** Force-read all leaves so lazy frameworks fully materialize the graph. */
+        for (let r = 0; r < allLen; r++) {
+            sink += leaves[r]();
+        }
+        const rand = pseudoRandom('seed');
+        const skipCount = Math.round(allLen * (1 - readFraction));
+        const readLeaves = removeElems(leaves, skipCount, rand);
+        const readLen = readLeaves.length;
+        const srcLen = sources.length;
+        /** Persistent counter across mitata calls so each write triggers propagation. */
+        let iter = 0;
+        return () => {
+            iter++;
+            const sourceDex = iter % srcLen;
+            S.freeze(() => {
+                sources[sourceDex](iter + sourceDex);
+            });
+            for (let r = 0; r < readLen; r++) {
+                readLeaves[r]();
+            }
+        };
+    });
+}
+
 /* === Run === */
 
-group('Kairo: deep propagation',    () => { bench('S.js', setupDeep()); });
-group('Kairo: broad propagation',   () => { bench('S.js', setupBroad()); });
-group('Kairo: diamond',             () => { bench('S.js', setupDiamond()); });
-group('Kairo: triangle',            () => { bench('S.js', setupTriangle()); });
-group('Kairo: mux',                 () => { bench('S.js', setupMux()); });
-group('Kairo: unstable',            () => { bench('S.js', setupUnstable()); });
+group('Kairo: deep propagation', () => { bench('S.js', setupDeep()); });
+group('Kairo: broad propagation', () => { bench('S.js', setupBroad()); });
+group('Kairo: diamond', () => { bench('S.js', setupDiamond()); });
+group('Kairo: triangle', () => { bench('S.js', setupTriangle()); });
+group('Kairo: mux', () => { bench('S.js', setupMux()); });
+group('Kairo: unstable', () => { bench('S.js', setupUnstable()); });
 group('Kairo: avoidable propagation', () => { bench('S.js', setupAvoidable()); });
-group('Kairo: repeated observers',  () => { bench('S.js', setupRepeatedObservers()); });
-group('CellX 10 layers',            () => { bench('S.js', setupCellx(10)); });
-group('$mol_wire',                  () => { bench('S.js', setupMolWire()); });
-group('Create 1k signals',          () => { bench('S.js', benchCreateSignals(1_000)); });
-group('Create 1k computations',     () => { bench('S.js', benchCreateComputations(1_000)); });
+group('Kairo: repeated observers', () => { bench('S.js', setupRepeatedObservers()); });
+group('CellX 10 layers', () => { bench('S.js', setupCellx(10)); });
+group('$mol_wire', () => { bench('S.js', setupMolWire()); });
+group('Create 1k signals', () => { bench('S.js', benchCreateSignals(1_000)); });
+group('Create 1k computations', () => { bench('S.js', benchCreateComputations(1_000)); });
+
+group('Dynamic build: simple component', () => { bench('S.js', setupDynBuild(10, 5, 1, 2)); });
+group('Dynamic build: large web app', () => { bench('S.js', setupDynBuild(1000, 12, 0.95, 4)); });
+group('Dynamic build: wide dense', () => { bench('S.js', setupDynBuild(1000, 5, 1, 25)); });
+group('Dynamic update: simple component', () => { bench('S.js', setupDynUpdate(10, 5, 1, 2, 0.2)); });
+group('Dynamic update: dynamic component', () => { bench('S.js', setupDynUpdate(10, 10, 0.75, 6, 0.2)); });
+group('Dynamic update: large web app', () => { bench('S.js', setupDynUpdate(1000, 12, 0.95, 4, 1)); });
+group('Dynamic update: wide dense', () => { bench('S.js', setupDynUpdate(1000, 5, 1, 25, 1)); });
+group('Dynamic update: deep', () => { bench('S.js', setupDynUpdate(5, 500, 1, 3, 1)); });
+group('Dynamic update: very dynamic', () => { bench('S.js', setupDynUpdate(100, 15, 0.5, 6, 1)); });
 
 await run();
 
