@@ -254,60 +254,6 @@ function loading() {
     return (this._flag & FLAG_LOADING) !== 0;
 }
 
-/**
- * @template T
- * @this {!Receiver}
- * @param {!Sender<T>} sender
- * @returns {T}
- */
-function read(sender) {
-    let flag = this._flag;
-    let value = sender.val();
-    if (!(flag & FLAG_RUNNING)) {
-        return value;
-    }
-    if ((flag & FLAG_BOUND) || ((flag & FLAG_STABLE) && !(flag & FLAG_SETUP))) {
-        return value;
-    }
-    if (sender._version === this._version) {
-        return value;
-    }
-    sender._version = this._version;
-    if (!(flag & FLAG_SETUP)) {
-        if (!(flag & FLAG_RDEP1) && sender === this._dep1) {
-            this._flag |= FLAG_RDEP1;
-            return value;
-        }
-        if (!(flag & FLAG_RDEP2) && sender === this._dep2) {
-            this._flag |= FLAG_RDEP2;
-            return value;
-        }
-        if (this._deps !== null && this._dephead < this._deptail && sender === this._deps[this._dephead * 2]) {
-            this._dephead++;
-            return value;
-        }
-    }
-    /** @type {number} */
-    let depslot = 0;
-    if (this._dep1 === null) {
-        this._dep1 = sender;
-    } else if (this._dep2 === null) {
-        depslot = 1;
-        this._dep2 = sender;
-    } else if (this._deps === null) {
-        depslot = 2;
-    } else {
-        depslot = (this._deps.length / 2) + 2;
-    }
-    let subslot = subscribe(sender, this, depslot);
-    switch (depslot) {
-        case 0: this._dep1slot = subslot; break;
-        case 1: this._dep2slot = subslot; break;
-        case 2: this._deps = [sender, subslot]; break;
-        default: this._deps.push(sender, subslot);
-    }
-    return value;
-}
 
 /**
  * @template T,V,W
@@ -345,6 +291,183 @@ function watch(fn, opts, args) {
     }
     return node;
 }
+
+/**
+ * Lightweight execution context for stable/bound nodes.
+ * read() just returns sender.val() without tracking deps.
+ * @constructor
+ */
+function Reader() {
+    /** @type {Receiver | null} */
+    this._node = null;
+}
+
+/** @const */
+var ReaderProto = Reader.prototype;
+
+/**
+ * @template T
+ * @param {!Sender<T>} sender
+ * @returns {T}
+ */
+ReaderProto.read = function (sender) {
+    return sender.val();
+};
+
+/**
+ * Full execution context for dynamic/setup nodes.
+ * read() tracks dependencies via subscribe().
+ * @constructor
+ */
+function Subscriber() {
+    /** @type {Receiver | null} */
+    this._node = null;
+    /** @type {number} */
+    this._dephead = 0;
+    /** @type {number} */
+    this._deptail = 0;
+}
+
+/** @const */
+var SubscriberProto = Subscriber.prototype;
+
+/**
+ * Tracks a dependency and subscribes the node to the sender.
+ * Adapted from the old read() that lived on Compute/Effect.
+ * @template T
+ * @param {!Sender<T>} sender
+ * @returns {T}
+ */
+SubscriberProto.read = function (sender) {
+    let node = this._node;
+    let flag = node._flag;
+    let value = sender.val();
+    if (!(flag & FLAG_RUNNING)) {
+        return value;
+    }
+    if ((flag & FLAG_BOUND) || ((flag & FLAG_STABLE) && !(flag & FLAG_SETUP))) {
+        return value;
+    }
+    if (sender._version === node._version) {
+        return value;
+    }
+    sender._version = node._version;
+    if (!(flag & FLAG_SETUP)) {
+        if (!(flag & FLAG_RDEP1) && sender === node._dep1) {
+            node._flag |= FLAG_RDEP1;
+            return value;
+        }
+        if (!(flag & FLAG_RDEP2) && sender === node._dep2) {
+            node._flag |= FLAG_RDEP2;
+            return value;
+        }
+        if (node._deps !== null && this._dephead < this._deptail && sender === node._deps[this._dephead * 2]) {
+            this._dephead++;
+            return value;
+        }
+    }
+    /** @type {number} */
+    let depslot = 0;
+    if (node._dep1 === null) {
+        node._dep1 = sender;
+    } else if (node._dep2 === null) {
+        depslot = 1;
+        node._dep2 = sender;
+    } else if (node._deps === null) {
+        depslot = 2;
+    } else {
+        depslot = (node._deps.length / 2) + 2;
+    }
+    let subslot = subscribe(sender, node, depslot);
+    switch (depslot) {
+        case 0: node._dep1slot = subslot; break;
+        case 1: node._dep2slot = subslot; break;
+        case 2: node._deps = [sender, subslot]; break;
+        default: node._deps.push(sender, subslot);
+    }
+    return value;
+};
+
+/**
+ * Shared method: declares that this compute's output is
+ * semantically equal to its previous value.
+ * @param {boolean=} eq
+ * @returns {void}
+ */
+function _equal(eq) {
+    if (eq === false) {
+        this._node._flag = (this._node._flag | FLAG_NOTEQUAL) & ~FLAG_EQUAL;
+    } else {
+        this._node._flag = (this._node._flag | FLAG_EQUAL) & ~FLAG_NOTEQUAL;
+    }
+}
+
+/**
+ * Shared method: marks the current node as stable (no more
+ * dynamic dep tracking on subsequent runs).
+ * @returns {void}
+ */
+function _stable() {
+    this._node._flag |= FLAG_STABLE;
+}
+
+/**
+ * Shared method: returns whether the current node is in error state.
+ * @returns {boolean}
+ */
+function _error() {
+    return (this._node._flag & FLAG_ERROR) !== 0;
+}
+
+/**
+ * Shared method: returns whether the current node is loading (async pending).
+ * @returns {boolean}
+ */
+function _loading() {
+    return (this._node._flag & FLAG_LOADING) !== 0;
+}
+
+/**
+ * Shared method: registers a cleanup function on the current node.
+ * Only valid when the node is an Owner (Effect/Scope).
+ * @param {function(): void} fn
+ * @returns {void}
+ */
+function _cleanup(fn) {
+    addCleanup(this._node, fn);
+}
+
+/**
+ * Shared method: registers a recover handler on the current node.
+ * Only valid when the node is an Owner (Effect/Scope).
+ * @param {function(*): boolean} fn
+ * @returns {void}
+ */
+function _recover(fn) {
+    addRecover(this._node, fn);
+}
+
+/**
+ * Returns the mutation descriptor from the first dependency.
+ * Used by anod-list to optimize array operations.
+ * @returns {number}
+ */
+function _getMod() {
+    return this._node._dep1._mod;
+}
+
+ReaderProto.equal = SubscriberProto.equal = _equal;
+ReaderProto.stable = SubscriberProto.stable = _stable;
+ReaderProto.error = SubscriberProto.error = _error;
+ReaderProto.loading = SubscriberProto.loading = _loading;
+ReaderProto.cleanup = SubscriberProto.cleanup = _cleanup;
+ReaderProto.recover = SubscriberProto.recover = _recover;
+ReaderProto._getMod = SubscriberProto._getMod = _getMod;
+
+/** @type {Reader} */
+var READER = new Reader();
+/** @type {Subscriber} */
+var SUBSCRIBER = new Subscriber();
 
 /**
  * @constructor
@@ -639,14 +762,6 @@ function Compute(opts, fn, dep1, dep2, seed, args) {
      * @type {W | undefined}
      */
     this._args = args;
-    /**
-     * @type {number}
-     */
-    this._dephead = 0;
-    /**
-     * @type {number}
-     */
-    this._deptail = 0;
     if (CLOCK._state & STATE_OWNER) {
         addOwned(CLOCK._scope, this);
     }
@@ -727,40 +842,6 @@ function Compute(opts, fn, dep1, dep2, seed, args) {
             refresh(this, time);
         }
         return this._value;
-    };
-
-    /**
-     * @public
-     * @template T
-     * @this {!Compute}
-     * @param {!Sender<T>} sender
-     * @returns {T}
-     */
-    ComputeProto.read = read;
-
-    /**
-     * @public
-     * @this {!Compute}
-     * @returns {void}
-     */
-    ComputeProto.stable = function () { this._flag |= FLAG_STABLE; };
-
-    /**
-     * Declares whether the compute's output is semantically equal to
-     * its previous value.  Calling equal(true) suppresses downstream
-     * notification even when the reference changes.  Calling equal(false)
-     * forces notification even when the reference stays the same.
-     * @public
-     * @this {!Compute}
-     * @param {boolean=} equal
-     * @returns {void}
-     */
-    ComputeProto.equal = function (equal) {
-        if (equal === false) {
-            this._flag = (this._flag | FLAG_NOTEQUAL) & ~FLAG_EQUAL;
-        } else {
-            this._flag = (this._flag | FLAG_EQUAL) & ~FLAG_NOTEQUAL;
-        }
     };
 
     /**
@@ -857,6 +938,8 @@ function runCompute(node, time) {
     let state = CLOCK._state;
     node._flag = (opts | FLAG_RUNNING) & ~(FLAG_EQUAL | FLAG_NOTEQUAL | FLAG_RDEP1 | FLAG_RDEP2);
     CLOCK._state &= RESET;
+    /** @type {Reader | Subscriber} */
+    let ctx;
     try {
         let fn = node._fn;
         let args = node._args;
@@ -871,30 +954,39 @@ function runCompute(node, time) {
                 if (dep2 !== null) {
                     dep2._version = version;
                 }
+                ctx = SUBSCRIBER;
+                ctx._node = node;
+            } else {
+                ctx = READER;
+                ctx._node = node;
             }
             if (dep2 === null) {
-                value = fn(node, dep1.val(), value, args);
+                value = fn(ctx, dep1.val(), value, args);
             } else {
-                value = fn(node, dep1.val(), dep2.val(), value, args);
+                value = fn(ctx, dep1.val(), dep2.val(), value, args);
             }
         } else {
             if ((opts & (FLAG_STABLE | FLAG_SETUP)) === FLAG_STABLE) {
-                value = fn(node, value, args);
+                ctx = READER;
+                ctx._node = node;
+                value = fn(ctx, value, args);
             } else {
                 node._version = ++CLOCK._version;
+                ctx = SUBSCRIBER;
+                ctx._node = node;
                 if (opts & FLAG_SETUP) {
-                    value = fn(node, value, args);
+                    value = fn(ctx, value, args);
                     node._flag &= ~FLAG_SETUP;
                 } else {
-                    node._dephead = 0;
-                    node._deptail = node._deps !== null ? node._deps.length / 2 : 0;
+                    ctx._dephead = 0;
+                    ctx._deptail = node._deps !== null ? node._deps.length / 2 : 0;
                     let innerState = (
                         (node._dep1 !== null ? FLAG_RDEP1 : 0) |
                         (node._dep2 !== null ? FLAG_RDEP2 : 0)
                     );
-                    value = fn(node, value, args);
+                    value = fn(ctx, value, args);
                     let newlen = node._deps !== null ? node._deps.length / 2 : 0;
-                    pruneDeps(node, node._dephead, node._deptail, newlen, innerState, (node._flag & (FLAG_RDEP1 | FLAG_RDEP2)));
+                    pruneDeps(node, ctx._dephead, ctx._deptail, newlen, innerState, (node._flag & (FLAG_RDEP1 | FLAG_RDEP2)));
                 }
             }
         }
@@ -913,6 +1005,7 @@ function runCompute(node, time) {
     } else {
         let asyncType = isAsync(value);
         if (asyncType === ASYNC_NOT_ASYNC) {
+            ctx._node = null;
             if (value !== node._value) {
                 node._value = value;
                 if ((opts & (FLAG_NOTIFY | FLAG_EQUAL)) === 0) {
@@ -922,6 +1015,16 @@ function runCompute(node, time) {
                 notifyStale(node, time);
             }
         } else {
+            /**
+             * Async: the context must not be reused since the
+             * async continuation may still reference it.
+             * Allocate a fresh replacement for the global pool.
+             */
+            if (ctx === SUBSCRIBER) {
+                SUBSCRIBER = new Subscriber();
+            } else {
+                READER = new Reader();
+            }
             node._flag |= FLAG_LOADING;
             if (asyncType === ASYNC_PROMISE) {
                 resolvePromise(new WeakRef(node), /** @type {IThenable<T>} */(value), time);
@@ -1151,14 +1254,6 @@ function Effect(opts, fn, dep1, dep2, args) {
      */
     this._args = args;
     /**
-     * @type {number}
-     */
-    this._dephead = 0;
-    /**
-     * @type {number}
-     */
-    this._deptail = 0;
-    /**
      * @type {Owner | null}
      */
     this._owner = null;
@@ -1206,31 +1301,6 @@ function Effect(opts, fn, dep1, dep2, args) {
      * @returns {boolean}
      */
     EffectProto.loading = loading;
-
-    /**
-     * @public
-     * @template T
-     * @this {!Effect}
-     * @param {!Sender<T>} sender
-     * @returns {T}
-     */
-    EffectProto.read = read;
-
-    /**
-     * @public
-     * @this {!Effect}
-     * @param {function(): void} fn
-     * @returns {void}
-     */
-    EffectProto.cleanup = function (fn) { addCleanup(this, fn); };
-
-    /**
-     * @public
-     * @this {!Effect}
-     * @param {function(*): boolean} fn
-     * @returns {void}
-     */
-    EffectProto.recover = function (fn) { addRecover(this, fn); };
 
     /**
      * @this {!Effect<U,V,W>}
@@ -1327,35 +1397,53 @@ function runEffect(node) {
         CLOCK._scope = node;
         CLOCK._state |= STATE_OWNER | STATE_SCOPE;
     }
+    /** @type {Reader | Subscriber} */
+    let ctx;
     if (opts & FLAG_BOUND) {
         let dep1 = node._dep1;
         let dep2 = node._dep2;
-        if (dep2 === null) {
-            value = fn(node, dep1.val(), args);
+        /**
+         * Bound effects: use Reader for stable (no setup),
+         * Subscriber for setup phase (needs to register deps).
+         */
+        if (opts & FLAG_SETUP) {
+            ctx = (opts & FLAG_SCOPE) ? new Subscriber() : SUBSCRIBER;
+            ctx._node = node;
         } else {
-            value = fn(node, dep1.val(), dep2.val(), args);
+            ctx = (opts & FLAG_SCOPE) ? new Reader() : READER;
+            ctx._node = node;
+        }
+        if (dep2 === null) {
+            value = fn(ctx, dep1.val(), args);
+        } else {
+            value = fn(ctx, dep1.val(), dep2.val(), args);
         }
     } else {
         if ((opts & (FLAG_STABLE | FLAG_SETUP)) === FLAG_STABLE) {
-            value = fn(node, args);
+            ctx = (opts & FLAG_SCOPE) ? new Reader() : READER;
+            ctx._node = node;
+            value = fn(ctx, args);
         } else {
             node._version = ++CLOCK._version;
+            ctx = (opts & FLAG_SCOPE) ? new Subscriber() : SUBSCRIBER;
+            ctx._node = node;
             if (opts & FLAG_SETUP) {
-                value = fn(node, args);
+                value = fn(ctx, args);
                 node._flag &= ~FLAG_SETUP;
             } else {
-                node._dephead = 0;
-                node._deptail = node._deps !== null ? node._deps.length / 2 : 0;
+                ctx._dephead = 0;
+                ctx._deptail = node._deps !== null ? node._deps.length / 2 : 0;
                 let innerState = (
                     (node._dep1 !== null ? FLAG_RDEP1 : 0) |
                     (node._dep2 !== null ? FLAG_RDEP2 : 0)
                 );
-                value = fn(node, args);
+                value = fn(ctx, args);
                 let newtail = node._deps !== null ? node._deps.length / 2 : 0;
-                pruneDeps(node, node._dephead, node._deptail, newtail, innerState, (node._flag & (FLAG_RDEP1 | FLAG_RDEP2)));
+                pruneDeps(node, ctx._dephead, ctx._deptail, newtail, innerState, (node._flag & (FLAG_RDEP1 | FLAG_RDEP2)));
             }
         }
     }
+    ctx._node = null;
     CLOCK._state = state;
     CLOCK._scope = scope;
     node._flag &= ~(FLAG_RUNNING | FLAG_STALE | FLAG_INIT);
@@ -2192,6 +2280,8 @@ export {
     Signal,
     Compute,
     Effect,
+    Reader,
+    Subscriber,
     root,
     signal,
     compute,

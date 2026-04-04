@@ -17,12 +17,6 @@ var SignalProto = Signal.prototype;
 /** @const */
 var ComputeProto = Compute.prototype;
 
-/**
- * @returns {number}
- */
-ComputeProto.mod = function() {
-    return this._dep1._mod;
-};
 
 /**
  * Registered mutation callbacks. Each receives the signal node and a payload,
@@ -245,8 +239,8 @@ SignalProto.entries = ComputeProto.entries = function () {
  * @returns {boolean}
  */
 function every(_node, source, prev, cb) {
-    if (!(_node._flag & FLAG_INIT)) {
-        let mod = _node.mod();
+    if (!(_node._node._flag & FLAG_INIT)) {
+        let mod = _node._getMod();
         if (mod > 0) {
             let op = mod & MUT_OP_MASK;
             if (prev === true) {
@@ -327,8 +321,8 @@ function find(_node, source, seed, cb) { return source.find(cb); }
  * @returns {T|undefined}
  */
 function find_mut(_node, source, prev, args) {
-    if (!(_node._flag & FLAG_INIT)) {
-        let mod = _node.mod();
+    if (!(_node._node._flag & FLAG_INIT)) {
+        let mod = _node._getMod();
         if (mod > 0) {
             let op = mod & MUT_OP_MASK;
             let pos = (mod >>> MUT_POS_SHIFT) & MUT_POS_MASK;
@@ -410,8 +404,8 @@ function findIndex(_node, source, seed, cb) { return source.findIndex(cb); }
  * @returns {number}
  */
 function findIndex_mut(_node, source, prev, cb) {
-    if (!(_node._flag & FLAG_INIT)) {
-        let mod = _node.mod();
+    if (!(_node._node._flag & FLAG_INIT)) {
+        let mod = _node._getMod();
         if (mod > 0) {
             let op = mod & MUT_OP_MASK;
             let pos = (mod >>> MUT_POS_SHIFT) & MUT_POS_MASK;
@@ -484,8 +478,8 @@ function findLast(_node, source, seed, cb) { return source.findLast(cb); }
  * @returns {T | undefined}
  */
 function findLast_mut(_node, source, prev, args) {
-    if (!(_node._flag & FLAG_INIT)) {
-        let mod = _node.mod();
+    if (!(_node._node._flag & FLAG_INIT)) {
+        let mod = _node._getMod();
         if (mod > 0) {
             let op = mod & MUT_OP_MASK;
             let pos = (mod >>> MUT_POS_SHIFT) & MUT_POS_MASK;
@@ -573,8 +567,8 @@ function findLastIndex(_node, source, seed, cb) { return source.findLastIndex(cb
  * @returns {number}
  */
 function findLastIndex_mut(_node, source, prev, cb) {
-    if (!(_node._flag & FLAG_INIT)) {
-        let mod = _node.mod();
+    if (!(_node._node._flag & FLAG_INIT)) {
+        let mod = _node._getMod();
         if (mod > 0) {
             let op = mod & MUT_OP_MASK;
             let pos = (mod >>> MUT_POS_SHIFT) & MUT_POS_MASK;
@@ -714,8 +708,8 @@ function includes1(_node, source, seed, arg) {
  * @returns {boolean}
  */
 function includes1_mut(_node, source, prev, args) {
-    if (!(_node._flag & FLAG_INIT)) {
-        let mod = _node.mod();
+    if (!(_node._node._flag & FLAG_INIT)) {
+        let mod = _node._getMod();
         if (mod > 0) {
             let op = mod & MUT_OP_MASK;
             let pos = (mod >>> MUT_POS_SHIFT) & MUT_POS_MASK;
@@ -829,8 +823,8 @@ function indexOf1(_node, source, seed, arg) {
  * @returns {number}
  */
 function indexOf1_mut(_node, source, prev, arg) {
-    if (!(_node._flag & FLAG_INIT)) {
-        let mod = _node.mod();
+    if (!(_node._node._flag & FLAG_INIT)) {
+        let mod = _node._getMod();
         if (mod > 0) {
             let op = mod & MUT_OP_MASK;
             let pos = (mod >>> MUT_POS_SHIFT) & MUT_POS_MASK;
@@ -1141,8 +1135,8 @@ SignalProto.slice = ComputeProto.slice = function (start, end) {
  * @returns {boolean}
  */
 function some(_node, source, prev, cb) {
-    if (!(_node._flag & FLAG_INIT)) {
-        let mod = _node.mod();
+    if (!(_node._node._flag & FLAG_INIT)) {
+        let mod = _node._getMod();
         if (mod > 0) {
             let op = mod & MUT_OP_MASK;
             if (prev === false) {

@@ -54,6 +54,12 @@ export interface IReceiver { }
 
 export interface IReader extends IReceiver {
     read<R>(signal: IReadonlySignal<R, Type.COMPUTE | Type.SIGNAL>): R;
+    equal(equal?: boolean): void;
+    stable(): void;
+    error(): boolean;
+    loading(): boolean;
+    cleanup(fn: () => void): void;
+    recover(fn: (error: any) => boolean): void;
 }
 
 export interface IReadonlySignal<T, TYPE extends number = number> extends IDispose<TYPE> {
@@ -92,11 +98,9 @@ export interface ISignal<T> extends IReadonlySignal<T, Type.SIGNAL> {
     set(value: T): void;
 }
 
-export interface ICompute<T> extends IReadonlySignal<T, Type.COMPUTE>, IAwaitable, IReader { }
+export interface ICompute<T> extends IReadonlySignal<T, Type.COMPUTE>, IAwaitable { }
 
-export interface IEffect extends IDispose<Type.EFFECT>, IReader {
-    recover(fn: (error: any) => boolean): void;
-}
+export interface IEffect extends IDispose<Type.EFFECT> { }
 
 export declare function root(fn: () => void): IRoot;
 
@@ -197,7 +201,6 @@ export declare class Compute<T, U = any, V = any, W = any> implements ICompute<T
     constructor(opts: number, fn: (c: IReader, u: U, prev: T, args: W, mod: number) => any, dep1: IReadonlySignal<U>, dep2: null, seed?: T, args?: W);
     constructor(opts: number, fn: (c: IReader, u: U, v: V, prev: T, args: W, mod: number) => any, dep1: IReadonlySignal<U>, dep2: IReadonlySignal<V>, seed?: T, args?: W);
 
-    read<R>(signal: IReadonlySignal<R, any>): R;
     val(): T;
     derive<U>(
         fn: (c: IReader, src: T, prev: Resolve<U>) => U,
@@ -230,9 +233,7 @@ export declare class Effect<U = any, V = any, W = any> implements IEffect {
     constructor(opts: number, fn: (c: IReader, u: U, args: W) => void | (() => void), dep1: IReadonlySignal<U>, dep2: null, args?: W);
     constructor(opts: number, fn: (c: IReader, u: U, v: V, args: W) => void | (() => void), dep1: IReadonlySignal<U>, dep2: IReadonlySignal<V>, args?: W);
 
-    read<R>(signal: IReadonlySignal<R, any>): R;
     dispose(): void;
     error(): boolean;
     loading(): boolean;
-    recover(fn: (error: any) => boolean): void;
 }

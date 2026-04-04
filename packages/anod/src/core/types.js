@@ -66,10 +66,6 @@ Receiver.prototype._dep2slot;
 /** @package @type {Array<Sender | number> | null} */
 Receiver.prototype._deps;
 /** @package @type {number} */
-Receiver.prototype._dephead;
-/** @package @type {number} */
-Receiver.prototype._deptail;
-/** @package @type {number} */
 Receiver.prototype._time;
 /** @package @param {number} time @returns {void} */
 Receiver.prototype._setStale = function (time) { };
