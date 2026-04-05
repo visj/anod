@@ -572,10 +572,6 @@ function Root() {
      */
     this._owned = null;
     /**
-     * @type {Owner | null}
-     */
-    this._owner = null;
-    /**
      * @type {(function(*): boolean) | Array<(function(*): boolean)> | null}
      */
     this._recover = null;
@@ -583,6 +579,11 @@ function Root() {
 
 /** @const */
 var RootProto = Root.prototype;
+
+/**
+ * @type {Owner | null}
+ */
+RootProto._owner = null;
 
 /**
  * @const
