@@ -53,6 +53,7 @@ function register(fn) {
 /** @const {number} */ const FLAG_SETUP = 4;
 /** @const {number} */ const FLAG_STALE = 8;
 /** @const {number} */ const FLAG_NOTIFY = 16;
+/** @const {number} */ const FLAG_PENDING = 32;
 /** @const {number} */ const FLAG_RUNNING = 64;
 /** @const {number} */ const FLAG_DISPOSED = 128;
 /** @const {number} */ const FLAG_LOADING = 256;
@@ -83,15 +84,23 @@ function register(fn) {
  * never-executed node from one whose previous value is valid.
  */
 /** @const {number} */ const FLAG_INIT = 0x100000;
+/** @const {number} */ const FLAG_ASYNC = 0x200000;
+/** @const {number} */ const FLAG_STREAM = 0x400000;
 
 /** @const {number} */ const OPT_DEFER = FLAG_DEFER;
 /** @const {number} */ const OPT_STABLE = FLAG_STABLE;
 /** @const {number} */ const OPT_SETUP = FLAG_SETUP;
 /** @const {number} */ const OPT_NOTIFY = FLAG_NOTIFY;
 /** @const {number} */ const OPT_WEAK = FLAG_WEAK;
+/**
+ * Opt-in to dynamic dependency tracking. Only consumed at
+ * construction time by task/spawn/scope to suppress the default
+ * FLAG_STABLE. Not stored in node._flag — not in OPTIONS mask.
+ */
+/** @const {number} */ const OPT_DYNAMIC = 0x800000;
 
 /** @const {number} */
-const OPTIONS = OPT_DEFER | OPT_STABLE | OPT_SETUP | OPT_NOTIFY | OPT_WEAK;
+const OPTIONS = OPT_DEFER | OPT_STABLE | OPT_SETUP | OPT_NOTIFY | OPT_WEAK | FLAG_ASYNC | FLAG_STREAM;
 
 /** @const {number} */ const STATE_START = 0;
 /** @const {number} */ const STATE_IDLE = 1;
@@ -295,9 +304,8 @@ function watchOne(fn, opts, args) {
  * @param {W=} args
  * @returns {!Compute<T,null,null,W>}
  */
-function memo(fn, seed, args) {
-    let flag = FLAG_STABLE | FLAG_SETUP;
-    let node = new Compute(flag, fn, null, seed, args);
+function derive(fn, seed, args) {
+    let node = new Compute(FLAG_STABLE | FLAG_SETUP, fn, null, seed, args);
     startCompute(node);
     return node;
 }
@@ -310,9 +318,24 @@ function memo(fn, seed, args) {
  * @param {W=} args
  * @returns {!Effect<null,null,W>}
  */
-function reaction(fn, args) {
+function watch(fn, args) {
     let node = new Effect(FLAG_STABLE | FLAG_SETUP, fn, null, args);
     startEffect(node);
+    return node;
+}
+
+/**
+ * Stable compute with OPT_NOTIFY. Always propagates STALE
+ * downstream regardless of value equality.
+ * @template T,W
+ * @param {function(T,W): T} fn
+ * @param {T=} seed
+ * @param {W=} args
+ * @returns {!Compute<T,null,null,W>}
+ */
+function transmit(fn, seed, args) {
+    let node = new Compute(FLAG_STABLE | FLAG_SETUP | FLAG_NOTIFY, fn, null, seed, args);
+    startCompute(node);
     return node;
 }
 
@@ -458,16 +481,6 @@ function _equal(eq) {
 }
 
 /**
- * Marks the current compute as returning a Promise or
- * AsyncIterable. Replaces the old isAsync() runtime check.
- * @param {number} type - CTX_PROMISE (4) or CTX_ITERABLE (8)
- * @returns {void}
- */
-function _async(type) {
-    this._state |= type;
-}
-
-/**
  * Shared method: marks the current node as stable (no more
  * dynamic dep tracking on subsequent runs).
  * @returns {void}
@@ -522,7 +535,6 @@ function _getMod() {
 }
 
 ReaderProto.equal = SubscriberProto.equal = _equal;
-ReaderProto.async = SubscriberProto.async = _async;
 ReaderProto.stable = SubscriberProto.stable = _stable;
 ReaderProto.error = SubscriberProto.error = _error;
 ReaderProto.loading = SubscriberProto.loading = _loading;
@@ -831,6 +843,14 @@ function Compute(opts, fn, dep1, seed, args) {
      */
     this._ctime = 0;
     /**
+     * Pending notification time: stamped when this compute is
+     * first notified (stale or pending) in a round. Acts as a
+     * diamond guard — prevents exponential re-notification in
+     * deep graphs where nodes share multiple upstream paths.
+     * @type {number}
+     */
+    this._ptime = 0;
+    /**
      * @type {W | undefined}
      */
     this._args = args;
@@ -890,6 +910,34 @@ function Compute(opts, fn, dep1, seed, args) {
             throw new Error('Circular dependency');
         }
         if (opts & FLAG_STALE) {
+            /**
+             * Guaranteed change: at least one dep definitely changed
+             * (Signal or OPT_NOTIFY compute). Skip pullCompute and
+             * run directly — runCompute calls dep.val() which pulls
+             * upstream deps current.
+             */
+            if (clock._state & STATE_IDLE) {
+                try {
+                    runCompute(this, time);
+                    this._time = time;
+                    if (clock._signals > 0 || clock._disposes > 0) {
+                        start(clock);
+                    }
+                } finally {
+                    clock._state = STATE_IDLE;
+                }
+            } else {
+                runCompute(this, time);
+                this._time = time;
+            }
+            if (this._flag & FLAG_ERROR) {
+                throw this._value;
+            }
+        } else if (opts & FLAG_PENDING) {
+            /**
+             * Maybe changed: upstream compute hasn't confirmed change
+             * yet. Pull to check if any dep's value actually changed.
+             */
             if (clock._state & STATE_IDLE) {
                 try {
                     pullCompute(this, time);
@@ -953,13 +1001,40 @@ function Compute(opts, fn, dep1, seed, args) {
      * @returns {void} 
      */
     /**
-     * Pull-based: just mark STALE and propagate to subscribers.
-     * No COMPUTE_QUEUE — computes only run when pulled via .val().
+     * Called when a guaranteed-change source (Signal or OPT_NOTIFY
+     * compute) notifies this node. Uses _ptime as a diamond guard
+     * to prevent exponential re-notification in deep graphs.
+     *
+     * If _ptime >= time, we've already been notified this round
+     * (diamond case). Upgrade PENDING → STALE but don't re-propagate.
+     * If _ptime < time, this is a new round — notify downstream.
      */
     ComputeProto._setStale = function (time) {
-        if (!(this._flag & FLAG_STALE)) {
+        if (this._ptime < time) {
+            this._ptime = time;
             this._flag |= FLAG_STALE;
-            notifyStale(this, time);
+            if (this._flag & FLAG_NOTIFY) {
+                notifyStale(this, time);
+            } else {
+                notifyPending(this, time);
+            }
+        } else if (!(this._flag & FLAG_STALE)) {
+            /** Already notified this round but only PENDING — upgrade */
+            this._flag |= FLAG_STALE;
+        }
+    };
+
+    /**
+     * Called when a maybe-change source (regular compute without
+     * OPT_NOTIFY) notifies this node. Uses _ptime as a diamond
+     * guard — if already notified this round, skip. If new round,
+     * re-notify even if flags are leftover from a previous round.
+     */
+    ComputeProto._setPending = function (time) {
+        if (this._ptime < time) {
+            this._ptime = time;
+            this._flag |= FLAG_PENDING;
+            notifyPending(this, time);
         }
     };
 }
@@ -994,7 +1069,7 @@ function needsUpdate(node, time) {
     let lastRun = node._time;
     let dep = node._dep1;
     if (dep !== null) {
-        if ((dep.t === TYPE_COMPUTE) && (dep._flag & FLAG_STALE)) {
+        if ((dep.t === TYPE_COMPUTE) && (dep._flag & (FLAG_STALE | FLAG_PENDING))) {
             pullCompute(/** @type {Compute} */(dep), time);
         }
         if (dep._ctime > lastRun) {
@@ -1006,7 +1081,7 @@ function needsUpdate(node, time) {
         let len = deps.length;
         for (let i = 0; i < len; i += 2) {
             dep = /** @type {Sender} */(deps[i]);
-            if ((dep.t === TYPE_COMPUTE) && (dep._flag & FLAG_STALE)) {
+            if ((dep.t === TYPE_COMPUTE) && (dep._flag & (FLAG_STALE | FLAG_PENDING))) {
                 pullCompute(/** @type {Compute} */(dep), time);
             }
             if (dep._ctime > lastRun) {
@@ -1025,7 +1100,7 @@ function needsUpdate(node, time) {
  * @returns {void}
  */
 function pullCompute(node, time) {
-    if (!(node._flag & FLAG_STALE)) {
+    if (!(node._flag & (FLAG_STALE | FLAG_PENDING))) {
         return;
     }
     /**
@@ -1044,7 +1119,7 @@ function pullCompute(node, time) {
     let lastRun = node._time;
     let dep = node._dep1;
     if (dep !== null) {
-        if ((dep.t === TYPE_COMPUTE) && (dep._flag & FLAG_STALE)) {
+        if ((dep.t === TYPE_COMPUTE) && (dep._flag & (FLAG_STALE | FLAG_PENDING))) {
             pullCompute(/** @type {Compute} */(dep), time);
         }
         if (dep._ctime > lastRun) {
@@ -1058,7 +1133,7 @@ function pullCompute(node, time) {
         let len = deps.length;
         for (let i = 0; i < len; i += 2) {
             dep = /** @type {Sender} */(deps[i]);
-            if ((dep.t === TYPE_COMPUTE) && (dep._flag & FLAG_STALE)) {
+            if ((dep.t === TYPE_COMPUTE) && (dep._flag & (FLAG_STALE | FLAG_PENDING))) {
                 pullCompute(/** @type {Compute} */(dep), time);
             }
             if (dep._ctime > lastRun) {
@@ -1068,8 +1143,8 @@ function pullCompute(node, time) {
             }
         }
     }
-    /** No dep changed — clear stale without re-executing */
-    node._flag &= ~FLAG_STALE;
+    /** No dep changed — clear flags without re-executing */
+    node._flag &= ~(FLAG_STALE | FLAG_PENDING);
     node._time = time;
 }
 
@@ -1084,7 +1159,7 @@ function runCompute(node, time) {
     /** @type {T} */
     let value = node._value;
     let state = CLOCK._state;
-    node._flag = (opts & ~(FLAG_STALE | FLAG_INIT)) | FLAG_RUNNING;
+    node._flag = (opts & ~(FLAG_STALE | FLAG_PENDING | FLAG_INIT)) | FLAG_RUNNING;
     CLOCK._state &= RESET;
     /** @type {number} */
     let ctxState = 0;
@@ -1194,12 +1269,12 @@ function runCompute(node, time) {
     } finally {
         CLOCK._state = state;
         opts = node._flag;
-        node._flag &= ~(FLAG_RUNNING | FLAG_STALE | FLAG_INIT);
+        node._flag &= ~(FLAG_RUNNING | FLAG_STALE | FLAG_PENDING | FLAG_INIT);
     }
     if (opts & FLAG_ERROR) {
         node._value = value;
         node._ctime = time;
-    } else if (ctxState & CTX_ASYNC) {
+    } else if (opts & (FLAG_ASYNC | FLAG_STREAM)) {
         /**
          * Async: the subscriber escapes — replace the pool slot
          * so the pool stays consistent for future use.
@@ -1208,10 +1283,10 @@ function runCompute(node, time) {
             SUBSCRIBER_POOL[poolIdx] = new Subscriber();
         }
         node._flag |= FLAG_LOADING;
-        if (ctxState & CTX_PROMISE) {
-            resolvePromise(new WeakRef(node), /** @type {IThenable<T>} */(value), time);
-        } else {
+        if (opts & FLAG_STREAM) {
             resolveIterator(new WeakRef(node), /** @type {AsyncIterator<T> | AsyncIterable<T>} */(value), time);
+        } else {
+            resolvePromise(new WeakRef(node), /** @type {IThenable<T>} */(value), time);
         }
     } else if (value !== node._value) {
         node._value = value;
@@ -1442,11 +1517,50 @@ function Effect(opts, fn, dep1, args) {
      * @param {number} time
      * @returns {void} 
      */
+    /**
+     * Called when a guaranteed-change source notifies this effect.
+     * If already PENDING (enqueued), upgrades to STALE without
+     * re-enqueuing. If already STALE, no-op.
+     */
     EffectProto._setStale = function (time) {
         if (this._flag & FLAG_STALE) {
             return;
         }
+        let wasPending = this._flag & FLAG_PENDING;
         this._flag |= FLAG_STALE;
+        if (!wasPending) {
+            if (this._flag & FLAG_SCOPE) {
+                let level = this._level;
+                let count = SCOPE_LEVELS[level];
+                SCOPE_QUEUE[level][count] = this;
+                SCOPE_LEVELS[level] = count + 1;
+                if (CLOCK._scopes++ === 0) {
+                    CLOCK._minlevel =
+                        CLOCK._maxlevel = level;
+                } else {
+                    if (level < CLOCK._minlevel) {
+                        CLOCK._minlevel = level;
+                    }
+                    if (level > CLOCK._maxlevel) {
+                        CLOCK._maxlevel = level;
+                    }
+                }
+            } else {
+                EFFECT_QUEUE[CLOCK._effects++] = this;
+            }
+        }
+    };
+
+    /**
+     * Called when a maybe-change source (regular compute) notifies
+     * this effect. Marks PENDING and enqueues for later evaluation.
+     * No-op if already STALE or PENDING.
+     */
+    EffectProto._setPending = function (time) {
+        if (this._flag & (FLAG_STALE | FLAG_PENDING)) {
+            return;
+        }
+        this._flag |= FLAG_PENDING;
         if (this._flag & FLAG_SCOPE) {
             let level = this._level;
             let count = SCOPE_LEVELS[level];
@@ -1476,21 +1590,34 @@ function Effect(opts, fn, dep1, args) {
  * @returns {void}
  */
 function startEffect(node) {
-    let state = CLOCK._state;
+    let clock = CLOCK;
+    let state = clock._state;
+    /** @type {Reader} */
+    let ctx = READER;
+    let prevNode = ctx._node;
+    let poolIdx = SUBSCRIBER_IDX;
     try {
         runEffect(node);
-        node._time = CLOCK._time;
-        if (CLOCK._signals > 0 || CLOCK._disposes > 0) {
-            start(CLOCK);
+        node._time = clock._time;
+        if (clock._signals > 0 || clock._disposes > 0) {
+            start(clock);
         }
     } catch (err) {
+        /**
+         * If fn() threw, runEffect may have left the shared
+         * ctx._node and SUBSCRIBER_IDX corrupted. Restore them
+         * so the outer compute/effect that created this node
+         * can continue safely.
+         */
+        ctx._node = prevNode;
+        SUBSCRIBER_IDX = poolIdx;
         let recovered = tryRecover(node, err);
         node._dispose();
         if (!recovered) {
             throw err;
         }
     } finally {
-        CLOCK._state = state;
+        clock._state = state;
     }
 }
 
@@ -1599,16 +1726,93 @@ function runEffect(node) {
     }
     CLOCK._state = state;
     CLOCK._scope = scope;
-    node._flag &= ~(FLAG_RUNNING | FLAG_STALE | FLAG_INIT);
-    if (typeof value === 'function') {
+    node._flag &= ~(FLAG_RUNNING | FLAG_STALE | FLAG_PENDING | FLAG_INIT);
+    if (opts & (FLAG_ASYNC | FLAG_STREAM)) {
+        node._flag |= FLAG_LOADING;
+        if (opts & FLAG_STREAM) {
+            resolveEffectIterator(new WeakRef(node), value);
+        } else {
+            resolveEffectPromise(new WeakRef(node), value);
+        }
+    } else if (typeof value === 'function') {
         addCleanup(node, value);
     }
 }
 
 /**
- * @param {Owner} node 
+ * Resolves a promise returned by an async effect. If the
+ * resolved value is a function, registers it as cleanup.
+ * @param {WeakRef<!Effect>} ref
+ * @param {!Promise} promise
+ * @returns {void}
+ */
+function resolveEffectPromise(ref, promise) {
+    promise.then((val) => {
+        let node = ref.deref();
+        if (node !== void 0 && !(node._flag & FLAG_DISPOSED)) {
+            node._flag &= ~FLAG_LOADING;
+            if (typeof val === 'function') {
+                addCleanup(node, val);
+            }
+        }
+    }, (err) => {
+        let node = ref.deref();
+        if (node !== void 0 && !(node._flag & FLAG_DISPOSED)) {
+            node._flag &= ~FLAG_LOADING;
+            let recovered = tryRecover(node, err);
+            if (!recovered) {
+                node._dispose();
+            }
+        }
+    });
+}
+
+/**
+ * Resolves an async iterable returned by a streaming effect.
+ * Each yielded function is registered as cleanup.
+ * @param {WeakRef<!Effect>} ref
+ * @param {AsyncIterable | AsyncIterator} iterable
+ * @returns {void}
+ */
+function resolveEffectIterator(ref, iterable) {
+    let iterator = typeof iterable[Symbol.asyncIterator] === 'function'
+        ? iterable[Symbol.asyncIterator]()
+        : iterable;
+    let onNext = (result) => {
+        let node = ref.deref();
+        if (node === void 0 || (node._flag & FLAG_DISPOSED)) {
+            if (typeof iterator.return === 'function') {
+                iterator.return();
+            }
+            return;
+        }
+        if (result.done) {
+            node._flag &= ~FLAG_LOADING;
+            return;
+        }
+        iterator.next().then(onNext, onError);
+        node._flag &= ~FLAG_LOADING;
+        if (typeof result.value === 'function') {
+            addCleanup(node, result.value);
+        }
+    };
+    let onError = (err) => {
+        let node = ref.deref();
+        if (node !== void 0 && !(node._flag & FLAG_DISPOSED)) {
+            node._flag &= ~FLAG_LOADING;
+            let recovered = tryRecover(node, err);
+            if (!recovered) {
+                node._dispose();
+            }
+        }
+    };
+    iterator.next().then(onNext, onError);
+}
+
+/**
+ * @param {Owner} node
  * @param {function(): void} fn
- * @returns {void} 
+ * @returns {void}
  */
 function addCleanup(node, fn) {
     let cur = node._cleanup;
@@ -1748,7 +1952,7 @@ function start(clock) {
                     let count = levels[i];
                     for (let j = 0; j < count; j++) {
                         let node = effects[j];
-                        if ((node._flag & FLAG_STALE) && needsUpdate(node, time)) {
+                        if ((node._flag & FLAG_STALE) || ((node._flag & FLAG_PENDING) && needsUpdate(node, time))) {
                             try {
                                 runEffect(node);
                             } catch (err) {
@@ -1761,7 +1965,7 @@ function start(clock) {
                                 }
                             }
                         } else {
-                            node._flag &= ~FLAG_STALE;
+                            node._flag &= ~(FLAG_STALE | FLAG_PENDING);
                         }
                         node._time = time;
                         effects[j] = null;
@@ -1777,7 +1981,7 @@ function start(clock) {
                 let effects = EFFECT_QUEUE;
                 for (let i = 0; i < count; i++) {
                     let node = effects[i];
-                    if ((node._flag & FLAG_STALE) && needsUpdate(node, time)) {
+                    if ((node._flag & FLAG_STALE) || ((node._flag & FLAG_PENDING) && needsUpdate(node, time))) {
                         try {
                             runEffect(node);
                         } catch (err) {
@@ -1790,7 +1994,7 @@ function start(clock) {
                             }
                         }
                     } else {
-                        node._flag &= ~FLAG_STALE;
+                        node._flag &= ~(FLAG_STALE | FLAG_PENDING);
                     }
                     node._time = time;
                     effects[i] = null;
@@ -2208,6 +2412,34 @@ function notifyStale(send, time) {
 }
 
 /**
+ * Propagates PENDING to all subscribers of a sender.
+ * Called when a compute without OPT_NOTIFY is marked stale —
+ * its subscribers may or may not need to update depending on
+ * whether this compute's value actually changes after re-eval.
+ * @param {Sender} send
+ * @param {number} time
+ * @returns {void}
+ */
+function notifyPending(send, time) {
+    /** @type {Receiver} */
+    let sub = send._sub1;
+    if (sub !== null && sub._time < time) {
+        sub._setPending(time);
+    }
+    /** @type {Array<Receiver | number> | null} */
+    let subs = send._subs;
+    if (subs !== null) {
+        let len = subs.length;
+        for (let i = 0; i < len; i += 2) {
+            sub = /** @type {Receiver} */(subs[i]);
+            if (sub._time < time) {
+                sub._setPending(time);
+            }
+        }
+    }
+}
+
+/**
  * @param {function(): ((function(): void) | void)} fn
  * @returns {Root}
  */
@@ -2263,12 +2495,61 @@ function effect(fn, opts, args) {
  * @returns {Effect}
  */
 function scope(fn, opts) {
-    let flag = FLAG_SETUP | FLAG_SCOPE | ((0 | opts) & OPTIONS);
+    opts = 0 | opts;
+    let flag = FLAG_SETUP | FLAG_SCOPE | (opts & OPTIONS);
+    if (!(opts & OPT_DYNAMIC)) {
+        flag |= FLAG_STABLE;
+    }
     let node = new Effect(flag, fn, null);
     let state = CLOCK._state;
     if (state & STATE_SCOPE) {
         setScope(node, CLOCK._scope);
     }
+    startEffect(node);
+    return node;
+}
+
+/**
+ * Async compute. Returns a promise whose resolved value becomes
+ * the node's settled value. Stable by default; pass OPT_DYNAMIC
+ * for dynamic dependency tracking.
+ * @template T,W
+ * @param {function(T,W): Promise<T>} fn
+ * @param {T=} seed
+ * @param {number=} opts
+ * @param {W=} args
+ * @returns {!Compute<T,null,null,W>}
+ */
+function task(fn, seed, opts, args) {
+    opts = 0 | opts;
+    let flag = FLAG_ASYNC | FLAG_SETUP | (opts & OPTIONS);
+    if (!(opts & OPT_DYNAMIC)) {
+        flag |= FLAG_STABLE;
+    }
+    let node = new Compute(flag, fn, null, seed, args);
+    if (!(flag & FLAG_DEFER)) {
+        startCompute(node);
+    }
+    return node;
+}
+
+/**
+ * Async effect. Returns a promise whose resolved value, if a
+ * function, is registered as cleanup. Stable by default; pass
+ * OPT_DYNAMIC for dynamic dependency tracking.
+ * @template W
+ * @param {function(W): Promise<(function(): void) | void>} fn
+ * @param {number=} opts
+ * @param {W=} args
+ * @returns {!Effect<null,null,W>}
+ */
+function spawn(fn, opts, args) {
+    opts = 0 | opts;
+    let flag = FLAG_ASYNC | FLAG_SETUP | (opts & OPTIONS);
+    if (!(opts & OPT_DYNAMIC)) {
+        flag |= FLAG_STABLE;
+    }
+    let node = new Effect(flag, fn, null, args);
     startEffect(node);
     return node;
 }
@@ -2295,7 +2576,7 @@ function batch(fn) {
 export {
     CLOCK,
     STATE_START, STATE_IDLE, STATE_OWNER, STATE_SCOPE,
-    FLAG_DEFER, FLAG_STABLE, FLAG_SETUP, FLAG_STALE,
+    FLAG_DEFER, FLAG_STABLE, FLAG_SETUP, FLAG_STALE, FLAG_PENDING,
     FLAG_RUNNING, FLAG_DISPOSED, FLAG_LOADING, FLAG_ERROR, FLAG_RECOVER,
     FLAG_BOUND, FLAG_DERIVED, FLAG_SCOPE, FLAG_NOTIFY, FLAG_EQUAL, FLAG_WEAK,
     FLAG_INIT,
@@ -2304,7 +2585,8 @@ export {
     MUT_ADD, MUT_DEL, MUT_SORT,
     MUT_OP_MASK, MUT_LEN_SHIFT, MUT_LEN_MASK, MUT_POS_SHIFT, MUT_POS_MASK,
     CTX_EQUAL, CTX_NOTEQUAL, CTX_PROMISE, CTX_ITERABLE, CTX_ASYNC,
-    OPT_DEFER, OPT_STABLE, OPT_SETUP, OPT_NOTIFY, OPT_WEAK,
+    FLAG_ASYNC, FLAG_STREAM,
+    OPT_DEFER, OPT_STABLE, OPT_SETUP, OPT_NOTIFY, OPT_WEAK, OPT_DYNAMIC,
     TYPE_ROOT, TYPE_SIGNAL, TYPE_COMPUTE, TYPE_EFFECT,
     TYPEFLAG_MASK, TYPEFLAG_SEND, TYPEFLAG_RECEIVE, TYPEFLAG_OWNER,
     RESET, OPTIONS,
@@ -2323,9 +2605,12 @@ export {
     root,
     signal,
     compute,
-    memo,
-    reaction,
+    derive,
+    transmit,
+    task,
     effect,
+    watch,
+    spawn,
     scope,
     batch
 }
