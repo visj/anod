@@ -5,8 +5,9 @@ import {
 
 import {
     CLOCK, STATE_IDLE,
-    FLAG_STALE, FLAG_INIT,
-    register, notify, scheduleSignal,
+    FLAG_STALE, FLAG_INIT, FLAG_BOUND,
+    register, notify, scheduleSignal, subscribe, startEffect,
+    Reader, Subscriber,
     MUT_ADD, MUT_DEL, MUT_SORT,
     MUT_OP_MASK, MUT_LEN_SHIFT, MUT_LEN_MASK, MUT_POS_SHIFT, MUT_POS_MASK,
     isPrimitive, isFunction, isSignal
@@ -16,6 +17,28 @@ import {
 var SignalProto = Signal.prototype;
 /** @const */
 var ComputeProto = Compute.prototype;
+/** @const */
+var ReaderProto = Reader.prototype;
+/** @const */
+var SubscriberProto = Subscriber.prototype;
+
+/**
+ * Returns the bound source value (dep1.val()).
+ * Used by array methods to access the underlying array.
+ * @returns {*}
+ */
+ReaderProto._source = SubscriberProto._source = function () {
+    return this._node._dep1.val();
+};
+
+/**
+ * Returns the mutation descriptor from the first dependency.
+ * Used by array methods to optimize incremental updates.
+ * @returns {number}
+ */
+ReaderProto._getMod = SubscriberProto._getMod = function () {
+    return this._node._dep1._mod;
+};
 
 
 /**
@@ -145,15 +168,21 @@ function read(source) {
 }
 
 /**
+ * Creates a bound compute that tracks source as a permanent
+ * first dependency. The fn does NOT receive the source value
+ * as a parameter — it must call ctx._source() to get it.
  * @template T,U,W
- * @param {Send<Array<U>>} source 
- * @param {function(Array<U>,T,W): T} fn 
+ * @param {Send<Array<U>>} source
+ * @param {function(T,W): T} fn
  * @param {W} args
  * @param {number=} opts
  * @returns {Compute<T,Array<U>,null,W>}
  */
 function computeArray(source, fn, args, opts) {
-    return source.derive(fn, void 0, 0 | opts, args);
+    let flag = FLAG_BOUND | OPT_STABLE | OPT_SETUP | (0 | opts);
+    let node = new Compute(flag, fn, source, void 0, args);
+    node._dep1slot = subscribe(source, node, 0);
+    return node;
 }
 
 /**
@@ -163,7 +192,8 @@ function computeArray(source, fn, args, opts) {
  * @param {number | ReadonlySignal<number> | (function(): number)} args
  * @returns {T | undefined}
  */
-function at(_node, source, seed, args) {
+function at(_node, seed, args) {
+    let source = _node._source();
     return source.at(typeof args === 'number' ? args : read(args));
 }
 
@@ -183,8 +213,8 @@ SignalProto.at = ComputeProto.at = function (index) {
  * @param {*} args
  * @returns {Array<T>}
  */
-function concat(_node, source, seed, args) {
-    return source.concat(args);
+function concat(_node, seed, args) {
+    return _node._source().concat(args);
 }
 
 /**
@@ -194,8 +224,8 @@ function concat(_node, source, seed, args) {
  * @param {*} args
  * @returns {Array<T>}
  */
-function concatN(_node, source, seed, args) {
-    return source.concat(.../** @type {!Iterable} */(args));
+function concatN(_node, seed, args) {
+    return _node._source().concat(.../** @type {!Iterable} */(args));
 }
 
 /**
@@ -219,8 +249,8 @@ SignalProto.concat = ComputeProto.concat = function (...items) {
  * @param {Array<T>} source
  * @returns {!IteratorIterable<!Array<number|T>>}
  */
-function entries(_node, source) {
-    return source.entries();
+function entries(_node) {
+    return _node._source().entries();
 }
 
 /**
@@ -238,7 +268,8 @@ SignalProto.entries = ComputeProto.entries = function () {
  * @param {function(T, number): boolean} cb
  * @returns {boolean}
  */
-function every(_node, source, prev, cb) {
+function every(_node, prev, cb) {
+    let source = _node._source();
     if (!(_node._node._flag & FLAG_INIT)) {
         let mod = _node._getMod();
         if (mod > 0) {
@@ -290,7 +321,8 @@ SignalProto.every = ComputeProto.every = function (cb, opts) {
  * @param {function(T, number, Array<T>): boolean} cb
  * @returns {Array<T>}
  */
-function filter(_node, source, seed, cb) {
+function filter(_node, seed, cb) {
+    let source = _node._source();
     return source.filter(cb);
 }
 
@@ -311,7 +343,7 @@ SignalProto.filter = ComputeProto.filter = function (cb, opts) {
  * @param {function(T, number, Array<T>): boolean} cb
  * @returns {T|undefined}
  */
-function find(_node, source, seed, cb) { return source.find(cb); }
+function find(_node, seed, cb) { return _node._source().find(cb); }
 
 /**
  * @template T
@@ -320,7 +352,8 @@ function find(_node, source, seed, cb) { return source.find(cb); }
  * @param {{ _val: function(T, number, Array<T>): boolean, _idx: number }} args
  * @returns {T|undefined}
  */
-function find_mut(_node, source, prev, args) {
+function find_mut(_node, prev, args) {
+    let source = _node._source();
     if (!(_node._node._flag & FLAG_INIT)) {
         let mod = _node._getMod();
         if (mod > 0) {
@@ -394,7 +427,7 @@ SignalProto.find = ComputeProto.find = function (cb, opts, mutation) {
  * @param {function(T, number, Array<T>): boolean} cb
  * @returns {number}
  */
-function findIndex(_node, source, seed, cb) { return source.findIndex(cb); }
+function findIndex(_node, seed, cb) { return _node._source().findIndex(cb); }
 
 /**
  * @template T
@@ -403,7 +436,8 @@ function findIndex(_node, source, seed, cb) { return source.findIndex(cb); }
  * @param {function(T, number, Array<T>): boolean} cb
  * @returns {number}
  */
-function findIndex_mut(_node, source, prev, cb) {
+function findIndex_mut(_node, prev, cb) {
+    let source = _node._source();
     if (!(_node._node._flag & FLAG_INIT)) {
         let mod = _node._getMod();
         if (mod > 0) {
@@ -468,7 +502,7 @@ SignalProto.findIndex = ComputeProto.findIndex = function (cb, opts, mutation) {
  * @param {function(T, number, Array<T>): boolean} cb
  * @returns {T | undefined}
  */
-function findLast(_node, source, seed, cb) { return source.findLast(cb); }
+function findLast(_node, seed, cb) { return _node._source().findLast(cb); }
 
 /**
  * @template T
@@ -477,7 +511,8 @@ function findLast(_node, source, seed, cb) { return source.findLast(cb); }
  * @param {{ _val: function(T, number, Array<T>): boolean, _idx: number }} args
  * @returns {T | undefined}
  */
-function findLast_mut(_node, source, prev, args) {
+function findLast_mut(_node, prev, args) {
+    let source = _node._source();
     if (!(_node._node._flag & FLAG_INIT)) {
         let mod = _node._getMod();
         if (mod > 0) {
@@ -557,7 +592,7 @@ SignalProto.findLast = ComputeProto.findLast = function (cb, opts, mutation) {
  * @param {function(T, number, Array<T>): boolean} cb
  * @returns {number}
  */
-function findLastIndex(_node, source, seed, cb) { return source.findLastIndex(cb); }
+function findLastIndex(_node, seed, cb) { return _node._source().findLastIndex(cb); }
 
 /**
  * @template T
@@ -566,7 +601,8 @@ function findLastIndex(_node, source, seed, cb) { return source.findLastIndex(cb
  * @param {function(T, number, Array<T>): boolean} cb
  * @returns {number}
  */
-function findLastIndex_mut(_node, source, prev, cb) {
+function findLastIndex_mut(_node, prev, cb) {
+    let source = _node._source();
     if (!(_node._node._flag & FLAG_INIT)) {
         let mod = _node._getMod();
         if (mod > 0) {
@@ -631,8 +667,8 @@ SignalProto.findLastIndex = ComputeProto.findLastIndex = function (cb, opts, mut
  * @param {number | ReadonlySignal<number> | (function(): number)=} depth
  * @returns {!Array<T>}
  */
-function flat(_node, source, seed, depth) {
-    return source.flat(getVal(depth));
+function flat(_node, seed, depth) {
+    return _node._source().flat(getVal(depth));
 }
 
 /**
@@ -651,7 +687,8 @@ SignalProto.flat = ComputeProto.flat = function (depth) {
  * @param {function(T, number, IArrayLike<T>): !ReadonlyArray<U>} cb
  * @returns {Array<U>}
  */
-function flatMap(_node, source, seed, cb) {
+function flatMap(_node, seed, cb) {
+    let source = _node._source();
     return source.flatMap(cb);
 }
 
@@ -672,8 +709,8 @@ SignalProto.flatMap = ComputeProto.flatMap = function (cb, opts) {
  * @param {(function(T, number): ((function(): void) | void))} cb
  * @returns {void}
  */
-function forEach(_node, source, cb) {
-    source.forEach(cb);
+function forEach(_node, cb) {
+    _node._source().forEach(cb);
 }
 
 /**
@@ -683,7 +720,11 @@ function forEach(_node, source, cb) {
  * @returns {Effect<Array<T>,null, ((function(T, number): ((function(): void) | void)))>}
  */
 SignalProto.forEach = ComputeProto.forEach = function (cb, opts) {
-    return this.watch(forEach, opts, cb);
+    let flag = FLAG_BOUND | OPT_STABLE | OPT_SETUP | (0 | opts);
+    let node = new Effect(flag, forEach, this, cb);
+    node._dep1slot = subscribe(this, node, 0);
+    startEffect(node);
+    return node;
 };
 
 // --- includes ---
@@ -695,7 +736,8 @@ SignalProto.forEach = ComputeProto.forEach = function (cb, opts) {
  * @param {*} arg
  * @returns {boolean}
  */
-function includes1(_node, source, seed, arg) {
+function includes1(_node, seed, arg) {
+    let source = _node._source();
     return source.includes(/** @type {T} */(getVal(arg)));
 }
 
@@ -707,7 +749,8 @@ function includes1(_node, source, seed, arg) {
  * @param {{ _val: *, _idx: number }} args
  * @returns {boolean}
  */
-function includes1_mut(_node, source, prev, args) {
+function includes1_mut(_node, prev, args) {
+    let source = _node._source();
     if (!(_node._node._flag & FLAG_INIT)) {
         let mod = _node._getMod();
         if (mod > 0) {
@@ -774,7 +817,8 @@ function includes1_mut(_node, source, prev, args) {
  * @param {*} args
  * @returns {boolean}
  */
-function includes2(_node, source, seed, args) {
+function includes2(_node, seed, args) {
+    let source = _node._source();
     let arr = /** @type {!Array<*>} */(args);
     return source.includes(/** @type {T} */(getVal(arr[0])), /** @type {number} */(getVal(arr[1])));
 }
@@ -809,7 +853,8 @@ SignalProto.includes = ComputeProto.includes = function (searchElement, fromInde
  * @param {*} arg
  * @returns {number}
  */
-function indexOf1(_node, source, seed, arg) {
+function indexOf1(_node, seed, arg) {
+    let source = _node._source();
     return source.indexOf(/** @type {T} */(getVal(arg)));
 }
 
@@ -822,7 +867,8 @@ function indexOf1(_node, source, seed, arg) {
  * @param {*} arg
  * @returns {number}
  */
-function indexOf1_mut(_node, source, prev, arg) {
+function indexOf1_mut(_node, prev, arg) {
+    let source = _node._source();
     if (!(_node._node._flag & FLAG_INIT)) {
         let mod = _node._getMod();
         if (mod > 0) {
@@ -881,7 +927,8 @@ function indexOf1_mut(_node, source, prev, arg) {
  * @param {*} args
  * @returns {number}
  */
-function indexOf2(_node, source, seed, args) {
+function indexOf2(_node, seed, args) {
+    let source = _node._source();
     let arr = /** @type {!Array<*>} */(args);
     return source.indexOf(/** @type {T} */(getVal(arr[0])), /** @type {number} */(getVal(arr[1])));
 }
@@ -914,8 +961,8 @@ SignalProto.indexOf = ComputeProto.indexOf = function (searchElement, fromIndex,
  * @param {string | ReadonlySignal<string> | (function(): string)=} separator
  * @returns {string}
  */
-function join(_node, source, seed, separator) {
-    return source.join(separator !== undefined ? /** @type {string} */(getVal(separator)) : undefined);
+function join(_node, seed, separator) {
+    return _node._source().join(separator !== undefined ? /** @type {string} */(getVal(separator)) : undefined);
 }
 
 /**
@@ -937,7 +984,8 @@ SignalProto.join = ComputeProto.join = function (separator) {
  * @param {undefined=} args
  * @returns {!IteratorIterable<number>}
  */
-function keys(_node, source, seed, args) {
+function keys(_node, seed, args) {
+    let source = _node._source();
     return source.keys();
 }
 
@@ -959,7 +1007,8 @@ SignalProto.keys = ComputeProto.keys = function () {
  * @param {function(T, number, Array<T>): U} cb
  * @returns {Array<U>}
  */
-function map(_node, source, seed, cb) {
+function map(_node, seed, cb) {
+    let source = _node._source();
     return source.map(cb);
 }
 
@@ -985,7 +1034,8 @@ SignalProto.map = ComputeProto.map = function (cb, opts) {
  * @param {*} arg
  * @returns {U}
  */
-function reduce1(_node, source, seed, arg) {
+function reduce1(_node, seed, arg) {
+    let source = _node._source();
     let cb = /** @type {function(U, T, number, Array<T>): U} */(arg);
     return /** @type {U} */(source.reduce(cb));
 }
@@ -997,7 +1047,8 @@ function reduce1(_node, source, seed, arg) {
  * @param {*} args
  * @returns {U}
  */
-function reduce2(_node, source, seed, args) {
+function reduce2(_node, seed, args) {
+    let source = _node._source();
     let arr = /** @type {!Array<*>} */(args);
     let cb = /** @type {function(U, T, number, Array<T>): U} */(arr[0]);
     let initialValue = /** @type {U} */(getVal(arr[1]));
@@ -1033,7 +1084,8 @@ SignalProto.reduce = ComputeProto.reduce = function (cb, initialValue, opts) {
  * @param {*} arg
  * @returns {U}
  */
-function reduceRight1(_node, source, seed, arg) {
+function reduceRight1(_node, seed, arg) {
+    let source = _node._source();
     let cb = /** @type {function(U, T, number, Array<T>): U} */(arg);
     return /** @type {U} */(source.reduceRight(cb));
 }
@@ -1045,7 +1097,8 @@ function reduceRight1(_node, source, seed, arg) {
  * @param {*} args
  * @returns {U}
  */
-function reduceRight2(_node, source, seed, args) {
+function reduceRight2(_node, seed, args) {
+    let source = _node._source();
     let arr = /** @type {!Array<*>} */(args);
     let cb = /** @type {function(U, T, number, Array<T>): U} */(arr[0]);
     let initialValue = /** @type {U} */(getVal(arr[1]));
@@ -1080,7 +1133,8 @@ SignalProto.reduceRight = ComputeProto.reduceRight = function (cb, initialValue,
  * @param {*} args
  * @returns {Array<T>}
  */
-function slice0(_node, source, seed, args) {
+function slice0(_node, seed, args) {
+    let source = _node._source();
     return source.slice();
 }
 
@@ -1091,7 +1145,8 @@ function slice0(_node, source, seed, args) {
  * @param {*} arg
  * @returns {Array<T>}
  */
-function slice1(_node, source, seed, arg) {
+function slice1(_node, seed, arg) {
+    let source = _node._source();
     return source.slice(/** @type {number} */(getVal(arg)));
 }
 
@@ -1102,7 +1157,8 @@ function slice1(_node, source, seed, arg) {
  * @param {*} args
  * @returns {Array<T>}
  */
-function slice2(_node, source, seed, args) {
+function slice2(_node, seed, args) {
+    let source = _node._source();
     let arr = /** @type {!Array<*>} */(args);
     return source.slice(/** @type {number} */(getVal(arr[0])), /** @type {number} */(getVal(arr[1])));
 }
@@ -1134,7 +1190,8 @@ SignalProto.slice = ComputeProto.slice = function (start, end) {
  * @param {function(T, number, Array<T>): boolean} cb
  * @returns {boolean}
  */
-function some(_node, source, prev, cb) {
+function some(_node, prev, cb) {
+    let source = _node._source();
     if (!(_node._node._flag & FLAG_INIT)) {
         let mod = _node._getMod();
         if (mod > 0) {
@@ -1189,7 +1246,8 @@ SignalProto.some = ComputeProto.some = function (cb, opts) {
  * @param {undefined=} args
  * @returns {!IteratorIterable<T>}
  */
-function values(_node, source, seed, args) {
+function values(_node, seed, args) {
+    let source = _node._source();
     return source.values();
 }
 

@@ -243,10 +243,11 @@ describe("OPT_NOTIFY", () => {
         expect(runs).toBe(1);
     });
 
-    test("OPT_NOTIFY works with derive()", () => {
+    test("OPT_NOTIFY works with compute()", () => {
         const s1 = signal(1);
         let runs = 0;
-        const c1 = s1.derive((val) => {
+        const c1 = compute((c) => {
+            c.read(s1);
             return 42;
         }, undefined, OPT_NOTIFY);
         const c2 = compute((c) => {

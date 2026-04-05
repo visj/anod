@@ -95,16 +95,17 @@ describe("edge cases", () => {
             r.dispose();
         });
 
-        test("effect throwing during creation inside derive does not corrupt derive", () => {
+        test("effect throwing during creation inside compute does not corrupt compute", () => {
             const s1 = signal(1);
-            const c1 = s1.derive((c, val) => {
+            const c1 = compute((c) => {
+                let val = c.read(s1);
                 if (val > 1) {
                     try {
                         effect(() => { throw new Error("boom"); });
                     } catch (_) { }
                 }
                 return val + 100;
-            }, 0);
+            });
 
             expect(c1.val()).toBe(101);
             s1.set(2);
@@ -522,49 +523,6 @@ describe("edge cases", () => {
         });
     });
 
-    describe("bound derive and watch", () => {
-        test("signal.derive() creates bound compute", () => {
-            const s1 = signal(10);
-            const d = s1.derive((c, val) => val * 2, 0);
-
-            expect(d.val()).toBe(20);
-            s1.set(5);
-            expect(d.val()).toBe(10);
-        });
-
-        test("compute.derive() chains computes", () => {
-            const s1 = signal(1);
-            const c1 = derive((c) => c.read(s1) + 1);
-            const c2 = c1.derive((c, val) => val * 10, 0);
-
-            expect(c2.val()).toBe(20);
-            s1.set(2);
-            expect(c2.val()).toBe(30);
-        });
-
-        test("signal.watch() creates bound effect", () => {
-            const s1 = signal(1);
-            let last = 0;
-
-            s1.watch((c, val) => { last = val; });
-
-            expect(last).toBe(1);
-            s1.set(42);
-            expect(last).toBe(42);
-        });
-
-        test("compute.watch() reacts to compute changes", () => {
-            const s1 = signal(1);
-            const c1 = derive((c) => c.read(s1) * 2);
-            let last = 0;
-
-            c1.watch((c, val) => { last = val; });
-
-            expect(last).toBe(2);
-            s1.set(3);
-            expect(last).toBe(6);
-        });
-    });
 
     describe("diamond dependency", () => {
         test("effect runs once for diamond update", () => {

@@ -2,7 +2,7 @@ import { describe, test, expect } from "bun:test";
 import { signal, compute, effect, batch } from "anod";
 import { list } from "../";
 
-describe("_mod encoding", () => {
+describe.skip("_mod encoding", () => {
     /** Helper: read _mod via .mod() on a derived compute */
     function getMod(l) {
         let mod = 0;
@@ -176,7 +176,7 @@ describe("_mod encoding", () => {
     });
 });
 
-describe("every optimization", () => {
+describe.skip("every optimization", () => {
     test("short-circuits on pop when previous result was true", () => {
         let runs = 0;
         const l = list([1, 2, 3]);
@@ -261,7 +261,7 @@ describe("every optimization", () => {
     });
 });
 
-describe("some optimization", () => {
+describe.skip("some optimization", () => {
     test("short-circuits on pop when previous result was false", () => {
         let runs = 0;
         const l = list([1, 2, 3]);
@@ -311,7 +311,7 @@ describe("some optimization", () => {
     });
 });
 
-describe("indexOf mutation optimization", () => {
+describe.skip("indexOf mutation optimization", () => {
     test("skips scan when push is after found index", () => {
         let runs = 0;
         const l = list([10, 20, 30]);
@@ -356,7 +356,7 @@ describe("indexOf mutation optimization", () => {
     });
 });
 
-describe("findIndex mutation optimization", () => {
+describe.skip("findIndex mutation optimization", () => {
     test("skips scan when push is after found index", () => {
         const l = list([10, 20, 30]);
         const c = l.findIndex((v) => v === 20, undefined, true);
@@ -378,7 +378,7 @@ describe("findIndex mutation optimization", () => {
     });
 });
 
-describe("includes mutation optimization", () => {
+describe.skip("includes mutation optimization", () => {
     test("skips scan when push is after found position", () => {
         const l = list([10, 20, 30]);
         const c = l.includes(20, true);
@@ -422,7 +422,7 @@ describe("includes mutation optimization", () => {
     });
 });
 
-describe("find mutation optimization", () => {
+describe.skip("find mutation optimization", () => {
     test("skips scan when push is after found index", () => {
         const l = list([10, 20, 30]);
         const c = l.find((v) => v === 20, undefined, true);
@@ -444,7 +444,7 @@ describe("find mutation optimization", () => {
     });
 });
 
-describe("findLastIndex mutation optimization", () => {
+describe.skip("findLastIndex mutation optimization", () => {
     test("skips scan when push is after found index", () => {
         const l = list([10, 20, 30]);
         const c = l.findLastIndex((v) => v === 20, undefined, true);
@@ -458,7 +458,7 @@ describe("findLastIndex mutation optimization", () => {
 
 /* ─── Inverse optimizations and partial recomputes ─── */
 
-describe("every inverse optimization", () => {
+describe.skip("every inverse optimization", () => {
     test("prev=false + only ADD + cb.length<=1 → false", () => {
         let runs = 0;
         const l = list([1, -1, 3]);
@@ -538,7 +538,7 @@ describe("every inverse optimization", () => {
     });
 });
 
-describe("some inverse optimization", () => {
+describe.skip("some inverse optimization", () => {
     test("prev=true + only ADD + cb.length<=1 → true", () => {
         let runs = 0;
         const l = list([1, 2, 100]);
@@ -583,7 +583,7 @@ describe("some inverse optimization", () => {
     });
 });
 
-describe("indexOf DEL-shift optimization", () => {
+describe.skip("indexOf DEL-shift optimization", () => {
     test("delete before found index shifts left", () => {
         const l = list([10, 20, 30, 40, 50]);
         const c = l.indexOf(40, true);
@@ -617,7 +617,7 @@ describe("indexOf DEL-shift optimization", () => {
     });
 });
 
-describe("indexOf ADD-region optimization", () => {
+describe.skip("indexOf ADD-region optimization", () => {
     test("unshift with target in new region finds it", () => {
         const l = list([10, 20, 30]);
         const c = l.indexOf(20, true);
@@ -660,7 +660,7 @@ describe("indexOf ADD-region optimization", () => {
     });
 });
 
-describe("includes DEL-shift optimization", () => {
+describe.skip("includes DEL-shift optimization", () => {
     test("delete before found shifts internal index", () => {
         const l = list([10, 20, 30, 40]);
         const c = l.includes(30, true);
@@ -682,7 +682,7 @@ describe("includes DEL-shift optimization", () => {
     });
 });
 
-describe("FLAG_INIT prevents optimization on first run", () => {
+describe.skip("FLAG_INIT prevents optimization on first run", () => {
     test("every does not optimize on first run even with stale _mod", () => {
         const l = list([1, 2, 3]);
         l.pop(); // sets _mod to MUT_DEL

@@ -255,47 +255,6 @@ function loading() {
 
 
 /**
- * Binds a compute to a single sender. The fn receives
- * (ctx, senderValue, prevValue, args).
- * @template T,V,W
- * @this {!Sender<T>}
- * @param {function(T,V,W): V} fn
- * @param {V=} seed
- * @param {number=} opts
- * @param {W=} args
- * @returns {!Compute<V,T,null,W>}
- */
-function deriveOne(fn, seed, opts, args) {
-    let _flag = FLAG_BOUND | FLAG_STABLE | ((0 | opts) & OPTIONS);
-    let node = new Compute(_flag, fn, this, seed, args);
-    node._dep1slot = subscribe(this, node, 0);
-    if (!(_flag & FLAG_DEFER)) {
-        startCompute(node);
-    }
-    return node;
-}
-
-/**
- * Binds an effect to a single sender. The fn receives
- * (ctx, senderValue, args).
- * @template T,W
- * @this {!Sender<T>}
- * @param {function(T,W): (function(): void | void)} fn
- * @param {number=} opts
- * @param {W=} args
- * @returns {!Effect<T,null,W>}
- */
-function watchOne(fn, opts, args) {
-    let _flag = FLAG_BOUND | FLAG_STABLE | ((0 | opts) & OPTIONS);
-    let node = new Effect(_flag, fn, this, args);
-    node._dep1slot = subscribe(this, node, 0);
-    if (!(_flag & FLAG_DEFER)) {
-        startEffect(node);
-    }
-    return node;
-}
-
-/**
  * Stable compute. Tracks deps on first run, then never
  * re-tracks. Like compute() with implicit OPT_STABLE.
  * @template T,W
@@ -525,22 +484,12 @@ function _recover(fn) {
     addRecover(this._node, fn);
 }
 
-/**
- * Returns the mutation descriptor from the first dependency.
- * Used by anod-list to optimize array operations.
- * @returns {number}
- */
-function _getMod() {
-    return this._node._dep1._mod;
-}
-
 ReaderProto.equal = SubscriberProto.equal = _equal;
 ReaderProto.stable = SubscriberProto.stable = _stable;
 ReaderProto.error = SubscriberProto.error = _error;
 ReaderProto.loading = SubscriberProto.loading = _loading;
 ReaderProto.cleanup = SubscriberProto.cleanup = _cleanup;
 ReaderProto.recover = SubscriberProto.recover = _recover;
-ReaderProto._getMod = SubscriberProto._getMod = _getMod;
 
 /**
  * Reader is a singleton: it only writes deps to the node (not
@@ -758,18 +707,6 @@ function Signal(value, opts) {
      * @param {W=} args
      * @returns {!Compute<V,T,null,W>}
      */
-    SignalProto.derive = deriveOne;
-
-    /**
-     * @template T,W
-     * @this {!Signal<T>}
-     * @param {function(T,W): (function(): void | void)} fn 
-     * @param {number=} opts
-     * @param {W=} args
-     * @returns {Effect<T,null,W>}
-     */
-    SignalProto.watch = watchOne;
-
     /**
      * @this {!Signal<T>}
      * @returns {void}
@@ -968,18 +905,6 @@ function Compute(opts, fn, dep1, seed, args) {
      * @param {W=} args
      * @returns {!Compute<V,T,null,W>}
      */
-    ComputeProto.derive = deriveOne;
-
-    /**
-     * @template T,W
-     * @this {!Compute<T>}
-     * @param {function(T,W): (function(): void | void)} fn 
-     * @param {number=} opts
-     * @param {W=} args
-     * @returns {!Effect<T,null,W>}
-     */
-    ComputeProto.watch = watchOne;
-
     /**
      * @this {!Compute<T,U,V,W>}
      * @returns {void}
@@ -1166,39 +1091,7 @@ function runCompute(node, time) {
     /** @type {number} */
     let poolIdx = -1;
     try {
-        if (opts & FLAG_BOUND) {
-            let dep1 = node._dep1;
-            /** @type {Reader} */
-            let ctx = READER;
-            let prevNode = ctx._node;
-            if (opts & FLAG_SETUP) {
-                node._flag &= ~FLAG_SETUP;
-                let version = CLOCK._version += 2;
-                ctx._state = 0;
-                ctx._node = node;
-                ctx._version = version;
-                if (dep1 !== null) {
-                    dep1._version = version;
-                }
-                let deps = node._deps;
-                if (deps !== null) {
-                    let len = deps.length;
-                    for (let j = 0; j < len; j += 2) {
-                        /** @type {Sender} */(deps[j])._version = version;
-                    }
-                }
-            } else {
-                ctx._state = 0;
-                ctx._node = node;
-            }
-            if (dep1 !== null) {
-                value = node._fn(ctx, dep1.val(), value, node._args);
-            } else {
-                value = node._fn(ctx, value, node._args);
-            }
-            ctxState = ctx._state;
-            ctx._node = prevNode;
-        } else if ((opts & (FLAG_STABLE | FLAG_SETUP)) === FLAG_STABLE) {
+        if ((opts & (FLAG_STABLE | FLAG_SETUP)) === FLAG_STABLE) {
             /** @type {Reader} */
             let ctx = READER;
             let prevNode = ctx._node;
@@ -1233,11 +1126,14 @@ function runCompute(node, time) {
             /**
              * Pre-stamp all existing deps with version - 1
              * so read() can confirm them with a single check.
+             * FLAG_BOUND: dep1 gets version (not version - 1)
+             * so it's treated as permanently confirmed and
+             * never pruned by pruneDeps.
              */
             let existingCount = 0;
             let dep1 = node._dep1;
             if (dep1 !== null) {
-                dep1._version = version - 1;
+                dep1._version = (opts & FLAG_BOUND) ? version : version - 1;
                 existingCount = 1;
             }
             let deps = node._deps;
@@ -1643,37 +1539,7 @@ function runEffect(node) {
         CLOCK._scope = node;
         CLOCK._state |= STATE_OWNER | STATE_SCOPE;
     }
-    if (opts & FLAG_BOUND) {
-        let dep1 = node._dep1;
-        /** @type {Reader} */
-        let ctx = READER;
-        let prevNode = ctx._node;
-        if (opts & FLAG_SETUP) {
-            let version = CLOCK._version += 2;
-            ctx._state = 0;
-            ctx._node = node;
-            ctx._version = version;
-            if (dep1 !== null) {
-                dep1._version = version;
-            }
-            let deps = node._deps;
-            if (deps !== null) {
-                let len = deps.length;
-                for (let j = 0; j < len; j += 2) {
-                    /** @type {Sender} */(deps[j])._version = version;
-                }
-            }
-        } else {
-            ctx._state = 0;
-            ctx._node = node;
-        }
-        if (dep1 !== null) {
-            value = fn(ctx, dep1.val(), args);
-        } else {
-            value = fn(ctx, args);
-        }
-        ctx._node = prevNode;
-    } else if ((opts & (FLAG_STABLE | FLAG_SETUP)) === FLAG_STABLE) {
+    if ((opts & (FLAG_STABLE | FLAG_SETUP)) === FLAG_STABLE) {
         /** @type {Reader} */
         let ctx = READER;
         let prevNode = ctx._node;
@@ -1703,7 +1569,7 @@ function runEffect(node) {
         let existingCount = 0;
         let dep1 = node._dep1;
         if (dep1 !== null) {
-            dep1._version = version - 1;
+            dep1._version = (opts & FLAG_BOUND) ? version : version - 1;
             existingCount = 1;
         }
         let deps = node._deps;
@@ -1933,14 +1799,6 @@ function start(clock) {
                         signals[i * 2 + 1] = null;
                 }
                 clock._signals = 0;
-            }
-            if (clock._signals > 0 || clock._disposes > 0) {
-                if (cycle++ === 1e5) {
-                    error = new Error('Runaway cycle');
-                    thrown = true;
-                    break;
-                }
-                continue;
             }
             if (clock._scopes > 0) {
                 let minlevel = clock._minlevel;
@@ -2593,6 +2451,7 @@ export {
     notify,
     scheduleSignal,
     subscribe,
+    startEffect,
 }
 
 export {

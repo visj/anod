@@ -93,12 +93,12 @@ describe("OPT_WEAK", () => {
         expect(runs).toBe(1);
     });
 
-    test("works with derive (bound computes)", () => {
+    test("works with weak compute", () => {
         let runs = 0;
         const s1 = signal(1);
-        const c1 = s1.derive((c, val) => {
+        const c1 = compute((c) => {
             runs++;
-            return val * 2;
+            return c.read(s1) * 2;
         }, undefined, OPT_WEAK);
 
         const e1 = effect((e) => {

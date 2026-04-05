@@ -17,9 +17,12 @@ import {
     notify,
     scheduleSignal,
     subscribe,
+    startEffect,
 } from "./core/signal.js";
 
 import {
+    Reader,
+    Subscriber,
     isPrimitive,
     isFunction,
     isSignal
@@ -44,6 +47,9 @@ export {
     notify,
     scheduleSignal,
     subscribe,
+    startEffect,
+    Reader,
+    Subscriber,
     isPrimitive,
     isFunction,
     isSignal,
