@@ -53,6 +53,7 @@ function register(fn) {
 /** @const {number} */ const FLAG_SETUP = 4;
 /** @const {number} */ const FLAG_STALE = 8;
 /** @const {number} */ const FLAG_NOTIFY = 16;
+/** @const {number} */ const FLAG_PENDING = 32;
 /** @const {number} */ const FLAG_RUNNING = 64;
 /** @const {number} */ const FLAG_DISPOSED = 128;
 /** @const {number} */ const FLAG_LOADING = 256;
@@ -830,6 +831,14 @@ function Compute(opts, fn, dep1, seed, args) {
      */
     this._ctime = 0;
     /**
+     * Pending notification time: stamped when this compute is
+     * first notified (stale or pending) in a round. Acts as a
+     * diamond guard — prevents exponential re-notification in
+     * deep graphs where nodes share multiple upstream paths.
+     * @type {number}
+     */
+    this._ptime = 0;
+    /**
      * @type {W | undefined}
      */
     this._args = args;
@@ -889,6 +898,34 @@ function Compute(opts, fn, dep1, seed, args) {
             throw new Error('Circular dependency');
         }
         if (opts & FLAG_STALE) {
+            /**
+             * Guaranteed change: at least one dep definitely changed
+             * (Signal or OPT_NOTIFY compute). Skip pullCompute and
+             * run directly — runCompute calls dep.val() which pulls
+             * upstream deps current.
+             */
+            if (clock._state & STATE_IDLE) {
+                try {
+                    runCompute(this, time);
+                    this._time = time;
+                    if (clock._signals > 0 || clock._disposes > 0) {
+                        start(clock);
+                    }
+                } finally {
+                    clock._state = STATE_IDLE;
+                }
+            } else {
+                runCompute(this, time);
+                this._time = time;
+            }
+            if (this._flag & FLAG_ERROR) {
+                throw this._value;
+            }
+        } else if (opts & FLAG_PENDING) {
+            /**
+             * Maybe changed: upstream compute hasn't confirmed change
+             * yet. Pull to check if any dep's value actually changed.
+             */
             if (clock._state & STATE_IDLE) {
                 try {
                     pullCompute(this, time);
@@ -952,13 +989,40 @@ function Compute(opts, fn, dep1, seed, args) {
      * @returns {void} 
      */
     /**
-     * Pull-based: just mark STALE and propagate to subscribers.
-     * No COMPUTE_QUEUE — computes only run when pulled via .val().
+     * Called when a guaranteed-change source (Signal or OPT_NOTIFY
+     * compute) notifies this node. Uses _ptime as a diamond guard
+     * to prevent exponential re-notification in deep graphs.
+     *
+     * If _ptime >= time, we've already been notified this round
+     * (diamond case). Upgrade PENDING → STALE but don't re-propagate.
+     * If _ptime < time, this is a new round — notify downstream.
      */
     ComputeProto._setStale = function (time) {
-        if (!(this._flag & FLAG_STALE)) {
+        if (this._ptime < time) {
+            this._ptime = time;
             this._flag |= FLAG_STALE;
-            notifyStale(this, time);
+            if (this._flag & FLAG_NOTIFY) {
+                notifyStale(this, time);
+            } else {
+                notifyPending(this, time);
+            }
+        } else if (!(this._flag & FLAG_STALE)) {
+            /** Already notified this round but only PENDING — upgrade */
+            this._flag |= FLAG_STALE;
+        }
+    };
+
+    /**
+     * Called when a maybe-change source (regular compute without
+     * OPT_NOTIFY) notifies this node. Uses _ptime as a diamond
+     * guard — if already notified this round, skip. If new round,
+     * re-notify even if flags are leftover from a previous round.
+     */
+    ComputeProto._setPending = function (time) {
+        if (this._ptime < time) {
+            this._ptime = time;
+            this._flag |= FLAG_PENDING;
+            notifyPending(this, time);
         }
     };
 }
@@ -993,7 +1057,7 @@ function needsUpdate(node, time) {
     let lastRun = node._time;
     let dep = node._dep1;
     if (dep !== null) {
-        if ((dep.t === TYPE_COMPUTE) && (dep._flag & FLAG_STALE)) {
+        if ((dep.t === TYPE_COMPUTE) && (dep._flag & (FLAG_STALE | FLAG_PENDING))) {
             pullCompute(/** @type {Compute} */(dep), time);
         }
         if (dep._ctime > lastRun) {
@@ -1005,7 +1069,7 @@ function needsUpdate(node, time) {
         let len = deps.length;
         for (let i = 0; i < len; i += 2) {
             dep = /** @type {Sender} */(deps[i]);
-            if ((dep.t === TYPE_COMPUTE) && (dep._flag & FLAG_STALE)) {
+            if ((dep.t === TYPE_COMPUTE) && (dep._flag & (FLAG_STALE | FLAG_PENDING))) {
                 pullCompute(/** @type {Compute} */(dep), time);
             }
             if (dep._ctime > lastRun) {
@@ -1024,7 +1088,7 @@ function needsUpdate(node, time) {
  * @returns {void}
  */
 function pullCompute(node, time) {
-    if (!(node._flag & FLAG_STALE)) {
+    if (!(node._flag & (FLAG_STALE | FLAG_PENDING))) {
         return;
     }
     /**
@@ -1043,7 +1107,7 @@ function pullCompute(node, time) {
     let lastRun = node._time;
     let dep = node._dep1;
     if (dep !== null) {
-        if ((dep.t === TYPE_COMPUTE) && (dep._flag & FLAG_STALE)) {
+        if ((dep.t === TYPE_COMPUTE) && (dep._flag & (FLAG_STALE | FLAG_PENDING))) {
             pullCompute(/** @type {Compute} */(dep), time);
         }
         if (dep._ctime > lastRun) {
@@ -1057,7 +1121,7 @@ function pullCompute(node, time) {
         let len = deps.length;
         for (let i = 0; i < len; i += 2) {
             dep = /** @type {Sender} */(deps[i]);
-            if ((dep.t === TYPE_COMPUTE) && (dep._flag & FLAG_STALE)) {
+            if ((dep.t === TYPE_COMPUTE) && (dep._flag & (FLAG_STALE | FLAG_PENDING))) {
                 pullCompute(/** @type {Compute} */(dep), time);
             }
             if (dep._ctime > lastRun) {
@@ -1067,8 +1131,8 @@ function pullCompute(node, time) {
             }
         }
     }
-    /** No dep changed — clear stale without re-executing */
-    node._flag &= ~FLAG_STALE;
+    /** No dep changed — clear flags without re-executing */
+    node._flag &= ~(FLAG_STALE | FLAG_PENDING);
     node._time = time;
 }
 
@@ -1083,7 +1147,7 @@ function runCompute(node, time) {
     /** @type {T} */
     let value = node._value;
     let state = CLOCK._state;
-    node._flag = (opts & ~(FLAG_STALE | FLAG_INIT)) | FLAG_RUNNING;
+    node._flag = (opts & ~(FLAG_STALE | FLAG_PENDING | FLAG_INIT)) | FLAG_RUNNING;
     CLOCK._state &= RESET;
     /** @type {number} */
     let ctxState = 0;
@@ -1193,7 +1257,7 @@ function runCompute(node, time) {
     } finally {
         CLOCK._state = state;
         opts = node._flag;
-        node._flag &= ~(FLAG_RUNNING | FLAG_STALE | FLAG_INIT);
+        node._flag &= ~(FLAG_RUNNING | FLAG_STALE | FLAG_PENDING | FLAG_INIT);
     }
     if (opts & FLAG_ERROR) {
         node._value = value;
@@ -1441,11 +1505,50 @@ function Effect(opts, fn, dep1, args) {
      * @param {number} time
      * @returns {void} 
      */
+    /**
+     * Called when a guaranteed-change source notifies this effect.
+     * If already PENDING (enqueued), upgrades to STALE without
+     * re-enqueuing. If already STALE, no-op.
+     */
     EffectProto._setStale = function (time) {
         if (this._flag & FLAG_STALE) {
             return;
         }
+        let wasPending = this._flag & FLAG_PENDING;
         this._flag |= FLAG_STALE;
+        if (!wasPending) {
+            if (this._flag & FLAG_SCOPE) {
+                let level = this._level;
+                let count = SCOPE_LEVELS[level];
+                SCOPE_QUEUE[level][count] = this;
+                SCOPE_LEVELS[level] = count + 1;
+                if (CLOCK._scopes++ === 0) {
+                    CLOCK._minlevel =
+                        CLOCK._maxlevel = level;
+                } else {
+                    if (level < CLOCK._minlevel) {
+                        CLOCK._minlevel = level;
+                    }
+                    if (level > CLOCK._maxlevel) {
+                        CLOCK._maxlevel = level;
+                    }
+                }
+            } else {
+                EFFECT_QUEUE[CLOCK._effects++] = this;
+            }
+        }
+    };
+
+    /**
+     * Called when a maybe-change source (regular compute) notifies
+     * this effect. Marks PENDING and enqueues for later evaluation.
+     * No-op if already STALE or PENDING.
+     */
+    EffectProto._setPending = function (time) {
+        if (this._flag & (FLAG_STALE | FLAG_PENDING)) {
+            return;
+        }
+        this._flag |= FLAG_PENDING;
         if (this._flag & FLAG_SCOPE) {
             let level = this._level;
             let count = SCOPE_LEVELS[level];
@@ -1598,7 +1701,7 @@ function runEffect(node) {
     }
     CLOCK._state = state;
     CLOCK._scope = scope;
-    node._flag &= ~(FLAG_RUNNING | FLAG_STALE | FLAG_INIT);
+    node._flag &= ~(FLAG_RUNNING | FLAG_STALE | FLAG_PENDING | FLAG_INIT);
     if (typeof value === 'function') {
         addCleanup(node, value);
     }
@@ -1747,7 +1850,7 @@ function start(clock) {
                     let count = levels[i];
                     for (let j = 0; j < count; j++) {
                         let node = effects[j];
-                        if ((node._flag & FLAG_STALE) && needsUpdate(node, time)) {
+                        if ((node._flag & FLAG_STALE) || ((node._flag & FLAG_PENDING) && needsUpdate(node, time))) {
                             try {
                                 runEffect(node);
                             } catch (err) {
@@ -1760,7 +1863,7 @@ function start(clock) {
                                 }
                             }
                         } else {
-                            node._flag &= ~FLAG_STALE;
+                            node._flag &= ~(FLAG_STALE | FLAG_PENDING);
                         }
                         node._time = time;
                         effects[j] = null;
@@ -1776,7 +1879,7 @@ function start(clock) {
                 let effects = EFFECT_QUEUE;
                 for (let i = 0; i < count; i++) {
                     let node = effects[i];
-                    if ((node._flag & FLAG_STALE) && needsUpdate(node, time)) {
+                    if ((node._flag & FLAG_STALE) || ((node._flag & FLAG_PENDING) && needsUpdate(node, time))) {
                         try {
                             runEffect(node);
                         } catch (err) {
@@ -1789,7 +1892,7 @@ function start(clock) {
                             }
                         }
                     } else {
-                        node._flag &= ~FLAG_STALE;
+                        node._flag &= ~(FLAG_STALE | FLAG_PENDING);
                     }
                     node._time = time;
                     effects[i] = null;
@@ -2207,6 +2310,34 @@ function notifyStale(send, time) {
 }
 
 /**
+ * Propagates PENDING to all subscribers of a sender.
+ * Called when a compute without OPT_NOTIFY is marked stale —
+ * its subscribers may or may not need to update depending on
+ * whether this compute's value actually changes after re-eval.
+ * @param {Sender} send
+ * @param {number} time
+ * @returns {void}
+ */
+function notifyPending(send, time) {
+    /** @type {Receiver} */
+    let sub = send._sub1;
+    if (sub !== null && sub._time < time) {
+        sub._setPending(time);
+    }
+    /** @type {Array<Receiver | number> | null} */
+    let subs = send._subs;
+    if (subs !== null) {
+        let len = subs.length;
+        for (let i = 0; i < len; i += 2) {
+            sub = /** @type {Receiver} */(subs[i]);
+            if (sub._time < time) {
+                sub._setPending(time);
+            }
+        }
+    }
+}
+
+/**
  * @param {function(): ((function(): void) | void)} fn
  * @returns {Root}
  */
@@ -2294,7 +2425,7 @@ function batch(fn) {
 export {
     CLOCK,
     STATE_START, STATE_IDLE, STATE_OWNER, STATE_SCOPE,
-    FLAG_DEFER, FLAG_STABLE, FLAG_SETUP, FLAG_STALE,
+    FLAG_DEFER, FLAG_STABLE, FLAG_SETUP, FLAG_STALE, FLAG_PENDING,
     FLAG_RUNNING, FLAG_DISPOSED, FLAG_LOADING, FLAG_ERROR, FLAG_RECOVER,
     FLAG_BOUND, FLAG_DERIVED, FLAG_SCOPE, FLAG_NOTIFY, FLAG_EQUAL, FLAG_WEAK,
     FLAG_INIT,
