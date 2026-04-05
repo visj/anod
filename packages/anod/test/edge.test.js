@@ -48,7 +48,7 @@ describe("edge cases", () => {
             const r = root((r) => {
                 r.recover(() => true);
 
-                effect((e) => {
+                r.effect((e) => {
                     outerRuns++;
                     e.read(s1);
                     if (s1.val() === 1) {
@@ -76,7 +76,7 @@ describe("edge cases", () => {
             const r = root((r) => {
                 r.recover(() => true);
 
-                effect((e) => {
+                r.effect((e) => {
                     outerRuns++;
                     e.read(s1);
                     if (s1.val() === 1) {
@@ -121,12 +121,12 @@ describe("edge cases", () => {
             const r = root((r) => {
                 r.recover(() => true);
 
-                scope((s) => {
+                r.scope((s) => {
                     parentRuns++;
                     s.read(s1);
 
                     if (s1.val() === 1) {
-                        scope(() => {
+                        s.scope(() => {
                             throw new Error("inner scope");
                         });
                     }
@@ -150,13 +150,13 @@ describe("edge cases", () => {
             const r = root((r) => {
                 r.recover(() => true);
 
-                effect((e) => {
+                r.effect((e) => {
                     if (e.read(s1) > 0) {
                         throw new Error("first");
                     }
                 });
 
-                effect((e) => {
+                r.effect((e) => {
                     e.read(s1);
                     secondRan = true;
                 });
@@ -175,13 +175,13 @@ describe("edge cases", () => {
             const r = root((r) => {
                 r.recover(() => true);
 
-                scope((s) => {
+                r.scope((s) => {
                     if (s.read(s1) > 0) {
                         throw new Error("scope boom");
                     }
                 });
 
-                scope((s) => {
+                r.scope((s) => {
                     s.read(s1);
                     siblingRuns++;
                 });
@@ -428,8 +428,8 @@ describe("edge cases", () => {
             let cleaned = false;
             const s1 = signal(0);
 
-            const r = root(() => {
-                spawn((c) => {
+            const r = root((r) => {
+                r.spawn((c) => {
                     c.read(s1);
                     return Promise.resolve(() => { cleaned = false; });
                 });
@@ -690,9 +690,9 @@ describe("edge cases", () => {
             const s1 = signal(0);
             let runs = 0;
 
-            const r = root(() => {
-                effect((e) => { runs++; e.read(s1); });
-                effect((e) => { runs++; e.read(s1); });
+            const r = root((r) => {
+                r.effect((e) => { runs++; e.read(s1); });
+                r.effect((e) => { runs++; e.read(s1); });
             });
 
             expect(runs).toBe(2);
@@ -893,8 +893,8 @@ describe("edge cases", () => {
             const r = root((r) => {
                 r.recover((err) => { caught = err; return true; });
 
-                const c1 = compute(() => { throw new Error("compute err"); });
-                effect((e) => { e.read(c1); });
+                const c1 = r.compute(() => { throw new Error("compute err"); });
+                r.effect((e) => { e.read(c1); });
             });
 
             expect(caught).toBeInstanceOf(Error);

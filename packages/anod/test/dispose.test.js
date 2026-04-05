@@ -11,7 +11,7 @@ describe("dispose", () => {
             const r1 = root((r) => {
                 count = 0;
                 s1 = signal(0);
-                c1 = compute((c) => {
+                c1 = r.compute((c) => {
                     count++;
                     return c.read(s1);
                 });
@@ -36,10 +36,10 @@ describe("dispose", () => {
         test("persists through cycle when manually disposed", () => {
             scope((s) => {
                 const s1 = signal(0);
-                const c1 = compute((c) => c.read(s1));
+                const c1 = s.compute((c) => c.read(s1));
                 let count = 0;
 
-                effect((e) => {
+                s.effect((e) => {
                     effect((e2) => {
                         if (e2.read(s1) > 0) {
                             c1.dispose();

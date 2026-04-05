@@ -8,9 +8,9 @@ describe("update", () => {
             let outerCount = 0;
             let innerCount = 0;
 
-            scope((s) => {
+            r.scope((s) => {
                 outerCount++;
-                effect((e) => {
+                s.effect((e) => {
                     innerCount++;
                     e.read(s1);
                 });
@@ -61,7 +61,7 @@ describe("update", () => {
             scope((s) => {
                 s.read(c1);
                 order += "e1";
-                effect((e) => {
+                s.effect((e) => {
                     order += "e2";
                     e.read(s2);
                     e.cleanup(() => { order += "cl1"; });

@@ -12,7 +12,7 @@ describe("recover", () => {
                     return true;
                 });
 
-                effect(() => {
+                r.effect(() => {
                     throw new Error("boom");
                 });
             });
@@ -32,7 +32,7 @@ describe("recover", () => {
                         return false;
                     });
 
-                    effect(() => {
+                    r.effect(() => {
                         throw new Error("boom");
                     });
                 });
@@ -44,7 +44,7 @@ describe("recover", () => {
         test("propagates error when no recover is registered", () => {
             expect(() => {
                 root((r) => {
-                    effect(() => {
+                    r.effect(() => {
                         throw new Error("unhandled");
                     });
                 });
@@ -66,7 +66,7 @@ describe("recover", () => {
                     return true;
                 });
 
-                effect(() => {
+                r.effect(() => {
                     throw new Error("boom");
                 });
             });
@@ -88,7 +88,7 @@ describe("recover", () => {
                     return true;
                 });
 
-                effect(() => {
+                r.effect(() => {
                     throw new Error("boom");
                 });
             });
@@ -108,11 +108,11 @@ describe("recover", () => {
                     return true;
                 });
 
-                const c1 = compute(() => {
+                const c1 = r.compute(() => {
                     throw new Error("compute error");
                 });
 
-                effect((e) => {
+                r.effect((e) => {
                     e.read(c1);
                 });
             });
@@ -134,13 +134,13 @@ describe("recover", () => {
                     return true;
                 });
 
-                scope((s) => {
+                r.scope((s) => {
                     s.recover(() => {
                         innerCalled = true;
                         return true;
                     });
 
-                    effect(() => {
+                    s.effect(() => {
                         throw new Error("inner error");
                     });
                 });
@@ -161,13 +161,13 @@ describe("recover", () => {
                     return true;
                 });
 
-                scope((s) => {
+                r.scope((s) => {
                     s.recover(() => {
                         innerCalled = true;
                         return false;
                     });
 
-                    effect(() => {
+                    s.effect(() => {
                         throw new Error("bubble up");
                     });
                 });
@@ -187,7 +187,7 @@ describe("recover", () => {
             const r1 = root((r) => {
                 r.recover(() => true);
 
-                effect((e) => {
+                r.effect((e) => {
                     runs++;
                     if (e.read(s1) > 0) {
                         throw new Error("boom");
@@ -218,13 +218,13 @@ describe("recover", () => {
                     return true;
                 });
 
-                effect((e) => {
+                r.effect((e) => {
                     if (e.read(s1)) {
                         throw new Error("batch error");
                     }
                 });
 
-                effect((e) => {
+                r.effect((e) => {
                     s2val = e.read(s2);
                 });
             });
@@ -252,7 +252,7 @@ describe("recover", () => {
                     return true;
                 });
 
-                effect((e) => {
+                r.effect((e) => {
                     if (e.read(s1)) {
                         throw new Error("triggered");
                     }
@@ -274,7 +274,7 @@ describe("recover", () => {
             let recoveredVersion = -1;
 
             const r1 = root((r) => {
-                scope((s) => {
+                r.scope((s) => {
                     let version = s.read(s1);
                     handlerVersion = version;
 
@@ -284,7 +284,7 @@ describe("recover", () => {
                     });
 
                     if (version > 1) {
-                        effect(() => {
+                        s.effect(() => {
                             throw new Error("fail");
                         });
                     }
@@ -318,7 +318,7 @@ describe("recover", () => {
             // that throw will not be caught
             expect(() => {
                 root((r) => {
-                    effect(() => {
+                    r.effect(() => {
                         throw new Error("after dispose");
                     });
                 });

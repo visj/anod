@@ -47,6 +47,7 @@ function register(fn) {
 /** @const {number} */ const CTX_PROMISE = 4;
 /** @const {number} */ const CTX_ITERABLE = 8;
 /** @const {number} */ const CTX_ASYNC = CTX_PROMISE | CTX_ITERABLE;
+/** @const {number} */ const CTX_OWNER = 16;
 
 /** @const {number} */ const FLAG_DEFER = 1;
 /** @const {number} */ const FLAG_STABLE = 2;
@@ -492,6 +493,218 @@ ReaderProto.cleanup = SubscriberProto.cleanup = _cleanup;
 ReaderProto.recover = SubscriberProto.recover = _recover;
 
 /**
+ * Creates an owned Compute node. Only valid inside a Root or Scope.
+ * @template T,W
+ * @param {function(T,W): T} fn
+ * @param {T=} seed
+ * @param {number=} opts
+ * @param {W=} args
+ * @returns {!Compute<T,null,null,W>}
+ */
+function _ctxCompute(fn, seed, opts, args) {
+    if (!(this._state & CTX_OWNER)) {
+        throw new Error('Ownership required');
+    }
+    let flag = FLAG_SETUP | ((0 | opts) & OPTIONS);
+    let node = new Compute(flag, fn, null, seed, args);
+    addOwned(this._node, node);
+    if (!(flag & FLAG_DEFER)) {
+        startCompute(node);
+    }
+    return node;
+}
+
+/**
+ * Creates an owned stable Compute node. Only valid inside a Root or Scope.
+ * @template T,W
+ * @param {function(T,W): T} fn
+ * @param {T=} seed
+ * @param {W=} args
+ * @returns {!Compute<T,null,null,W>}
+ */
+function _ctxDerive(fn, seed, args) {
+    if (!(this._state & CTX_OWNER)) {
+        throw new Error('Ownership required');
+    }
+    let node = new Compute(FLAG_STABLE | FLAG_SETUP, fn, null, seed, args);
+    addOwned(this._node, node);
+    startCompute(node);
+    return node;
+}
+
+/**
+ * Creates an owned stable Compute with OPT_NOTIFY. Only valid inside a Root or Scope.
+ * @template T,W
+ * @param {function(T,W): T} fn
+ * @param {T=} seed
+ * @param {W=} args
+ * @returns {!Compute<T,null,null,W>}
+ */
+function _ctxTransmit(fn, seed, args) {
+    if (!(this._state & CTX_OWNER)) {
+        throw new Error('Ownership required');
+    }
+    let node = new Compute(FLAG_STABLE | FLAG_SETUP | FLAG_NOTIFY, fn, null, seed, args);
+    addOwned(this._node, node);
+    startCompute(node);
+    return node;
+}
+
+/**
+ * Creates an owned Effect node. Only valid inside a Root or Scope.
+ * @template W
+ * @param {function(W): (function(): void | void)} fn
+ * @param {number=} opts
+ * @param {W=} args
+ * @returns {!Effect<null,null,W>}
+ */
+function _ctxEffect(fn, opts, args) {
+    if (!(this._state & CTX_OWNER)) {
+        throw new Error('Ownership required');
+    }
+    let flag = FLAG_SETUP | ((0 | opts) & OPTIONS);
+    let node = new Effect(flag, fn, null, args);
+    node._owner = this._node;
+    addOwned(this._node, node);
+    startEffect(node);
+    return node;
+}
+
+/**
+ * Creates an owned stable Effect node. Only valid inside a Root or Scope.
+ * @template W
+ * @param {function(W): (function(): void | void)} fn
+ * @param {W=} args
+ * @returns {!Effect<null,null,W>}
+ */
+function _ctxWatch(fn, args) {
+    if (!(this._state & CTX_OWNER)) {
+        throw new Error('Ownership required');
+    }
+    let node = new Effect(FLAG_STABLE | FLAG_SETUP, fn, null, args);
+    node._owner = this._node;
+    addOwned(this._node, node);
+    startEffect(node);
+    return node;
+}
+
+/**
+ * Creates an owned Scope (Effect with FLAG_SCOPE). Only valid inside a Root or Scope.
+ * @param {function(): (function(): void | void)} fn
+ * @param {number=} opts
+ * @returns {!Effect}
+ */
+function _ctxScope(fn, opts) {
+    if (!(this._state & CTX_OWNER)) {
+        throw new Error('Ownership required');
+    }
+    opts = 0 | opts;
+    let flag = FLAG_SETUP | FLAG_SCOPE | (opts & OPTIONS);
+    if (!(opts & OPT_DYNAMIC)) {
+        flag |= FLAG_STABLE;
+    }
+    let node = new Effect(flag, fn, null);
+    let owner = this._node;
+    node._owner = owner;
+    addOwned(owner, node);
+    /** Only call setScope for scope Effects, not Root (Root has FLAG_SCOPE but no _level) */
+    if ((owner._flag & FLAG_SCOPE) && (owner.t & TYPEFLAG_RECEIVE)) {
+        setScope(node, owner);
+    }
+    startEffect(node);
+    return node;
+}
+
+/**
+ * Creates an owned async Compute. Only valid inside a Root or Scope.
+ * @template T,W
+ * @param {function(T,W): Promise<T>} fn
+ * @param {T=} seed
+ * @param {number=} opts
+ * @param {W=} args
+ * @returns {!Compute<T,null,null,W>}
+ */
+function _ctxTask(fn, seed, opts, args) {
+    if (!(this._state & CTX_OWNER)) {
+        throw new Error('Ownership required');
+    }
+    opts = 0 | opts;
+    let flag = FLAG_ASYNC | FLAG_SETUP | (opts & OPTIONS);
+    if (!(opts & OPT_DYNAMIC)) {
+        flag |= FLAG_STABLE;
+    }
+    let node = new Compute(flag, fn, null, seed, args);
+    addOwned(this._node, node);
+    if (!(flag & FLAG_DEFER)) {
+        startCompute(node);
+    }
+    return node;
+}
+
+/**
+ * Creates an owned async Effect. Only valid inside a Root or Scope.
+ * @template W
+ * @param {function(W): Promise<(function(): void) | void>} fn
+ * @param {number=} opts
+ * @param {W=} args
+ * @returns {!Effect<null,null,W>}
+ */
+function _ctxSpawn(fn, opts, args) {
+    if (!(this._state & CTX_OWNER)) {
+        throw new Error('Ownership required');
+    }
+    opts = 0 | opts;
+    let flag = FLAG_ASYNC | FLAG_SETUP | (opts & OPTIONS);
+    if (!(opts & OPT_DYNAMIC)) {
+        flag |= FLAG_STABLE;
+    }
+    let node = new Effect(flag, fn, null, args);
+    node._owner = this._node;
+    addOwned(this._node, node);
+    startEffect(node);
+    return node;
+}
+
+/**
+ * Creates an owned Root. Only valid inside a Root or Scope.
+ * @param {function(): ((function(): void) | void)} fn
+ * @returns {!Root}
+ */
+function _ctxRoot(fn) {
+    if (!(this._state & CTX_OWNER)) {
+        throw new Error('Ownership required');
+    }
+    let node = new Root();
+    addOwned(this._node, node);
+    startRoot(node, fn);
+    return node;
+}
+
+/**
+ * Creates an owned Signal. Only valid inside a Root or Scope.
+ * @template T
+ * @param {T} value
+ * @returns {!Signal<T>}
+ */
+function _ctxSignal(value) {
+    if (!(this._state & CTX_OWNER)) {
+        throw new Error('Ownership required');
+    }
+    return new Signal(value);
+}
+
+ReaderProto.compute = SubscriberProto.compute = _ctxCompute;
+ReaderProto.derive = SubscriberProto.derive = _ctxDerive;
+ReaderProto.transmit = SubscriberProto.transmit = _ctxTransmit;
+ReaderProto.effect = SubscriberProto.effect = _ctxEffect;
+ReaderProto.watch = SubscriberProto.watch = _ctxWatch;
+ReaderProto.scope = SubscriberProto.scope = _ctxScope;
+ReaderProto.task = SubscriberProto.task = _ctxTask;
+ReaderProto.spawn = SubscriberProto.spawn = _ctxSpawn;
+ReaderProto.root = SubscriberProto.root = _ctxRoot;
+ReaderProto.signal = SubscriberProto.signal = _ctxSignal;
+
+/**
  * Reader is a singleton: it only writes deps to the node (not
  * to itself), so nested runCompute calls just save/restore
  * _node and _version on the stack. Safe for any nesting depth.
@@ -597,15 +810,23 @@ RootProto._dispose = function () {
 function startRoot(root, fn) {
     let state = CLOCK._state;
     let scope = CLOCK._scope;
+    /** @type {Reader} */
+    let ctx = READER;
+    let prevNode = ctx._node;
+    let prevCtxState = ctx._state;
     CLOCK._state &= (RESET | STATE_IDLE);
     CLOCK._scope = root;
     CLOCK._state |= STATE_OWNER;
+    ctx._node = root;
+    ctx._state = CTX_OWNER;
     try {
-        let cleanup = fn(root);
+        let cleanup = fn(ctx);
         if (typeof cleanup === 'function') {
             addCleanup(root, cleanup);
         }
     } finally {
+        ctx._node = prevNode;
+        ctx._state = prevCtxState;
         CLOCK._state = state;
         CLOCK._scope = scope;
     }
@@ -791,9 +1012,6 @@ function Compute(opts, fn, dep1, seed, args) {
      * @type {W | undefined}
      */
     this._args = args;
-    if (CLOCK._state & STATE_OWNER) {
-        addOwned(CLOCK._scope, this);
-    }
 }
 
 {
@@ -1090,27 +1308,30 @@ function runCompute(node, time) {
     let ctxState = 0;
     /** @type {number} */
     let poolIdx = -1;
+    /**
+     * Save READER state at the outer scope so it survives
+     * errors thrown inside fn(). The READER singleton is shared
+     * across nested executions and must always be restored.
+     */
+    let prevReaderNode = READER._node;
+    let prevReaderState = READER._state;
     try {
         if ((opts & (FLAG_STABLE | FLAG_SETUP)) === FLAG_STABLE) {
             /** @type {Reader} */
             let ctx = READER;
-            let prevNode = ctx._node;
             ctx._state = 0;
             ctx._node = node;
             value = node._fn(ctx, value, node._args);
             ctxState = ctx._state;
-            ctx._node = prevNode;
         } else if (opts & FLAG_SETUP) {
             /** @type {Reader} */
             let ctx = READER;
-            let prevNode = ctx._node;
             let version = CLOCK._version += 2;
             ctx._state = 0;
             ctx._node = node;
             ctx._version = version;
             value = node._fn(ctx, value, node._args);
             ctxState = ctx._state;
-            ctx._node = prevNode;
             node._flag &= ~FLAG_SETUP;
         } else {
             /**
@@ -1163,6 +1384,8 @@ function runCompute(node, time) {
             SUBSCRIBER_IDX = poolIdx;
         }
     } finally {
+        READER._node = prevReaderNode;
+        READER._state = prevReaderState;
         CLOCK._state = state;
         opts = node._flag;
         node._flag &= ~(FLAG_RUNNING | FLAG_STALE | FLAG_PENDING | FLAG_INIT);
@@ -1352,10 +1575,6 @@ function Effect(opts, fn, dep1, args) {
      * @type {(function(*): boolean) | Array<(function(*): boolean)> | null}
      */
     this._recover = null;
-    if (CLOCK._state & STATE_OWNER) {
-        this._owner = CLOCK._scope;
-        addOwned(CLOCK._scope, this);
-    }
 }
 
 {
@@ -1535,35 +1754,35 @@ function runEffect(node) {
     let scope = CLOCK._scope;
     node._flag |= FLAG_RUNNING;
     CLOCK._state &= RESET;
+    /** @type {number} */
+    let ctxOwner = (opts & FLAG_SCOPE) ? CTX_OWNER : 0;
     if (opts & FLAG_SCOPE) {
         CLOCK._scope = node;
         CLOCK._state |= STATE_OWNER | STATE_SCOPE;
     }
+    let prevReaderNode = READER._node;
+    let prevReaderState = READER._state;
     if ((opts & (FLAG_STABLE | FLAG_SETUP)) === FLAG_STABLE) {
         /** @type {Reader} */
         let ctx = READER;
-        let prevNode = ctx._node;
-        ctx._state = 0;
+        ctx._state = ctxOwner;
         ctx._node = node;
         value = fn(ctx, args);
-        ctx._node = prevNode;
     } else if (opts & FLAG_SETUP) {
         /** @type {Reader} */
         let ctx = READER;
-        let prevNode = ctx._node;
         let version = CLOCK._version += 2;
-        ctx._state = 0;
+        ctx._state = ctxOwner;
         ctx._node = node;
         ctx._version = version;
         value = fn(ctx, args);
-        ctx._node = prevNode;
         node._flag &= ~FLAG_SETUP;
     } else {
         let poolIdx = SUBSCRIBER_IDX;
         /** @type {Subscriber} */
         let ctx = poolIdx < POOL_SIZE ? SUBSCRIBER_POOL[SUBSCRIBER_IDX++] : new Subscriber();
         let version = CLOCK._version += 2;
-        ctx._state = 0;
+        ctx._state = ctxOwner;
         ctx._node = node;
         ctx._version = version;
         let existingCount = 0;
@@ -1590,6 +1809,8 @@ function runEffect(node) {
         ctx._node = null;
         SUBSCRIBER_IDX = poolIdx;
     }
+    READER._node = prevReaderNode;
+    READER._state = prevReaderState;
     CLOCK._state = state;
     CLOCK._scope = scope;
     node._flag &= ~(FLAG_RUNNING | FLAG_STALE | FLAG_PENDING | FLAG_INIT);
@@ -2442,7 +2663,7 @@ export {
     register,
     MUT_ADD, MUT_DEL, MUT_SORT,
     MUT_OP_MASK, MUT_LEN_SHIFT, MUT_LEN_MASK, MUT_POS_SHIFT, MUT_POS_MASK,
-    CTX_EQUAL, CTX_NOTEQUAL, CTX_PROMISE, CTX_ITERABLE, CTX_ASYNC,
+    CTX_EQUAL, CTX_NOTEQUAL, CTX_PROMISE, CTX_ITERABLE, CTX_ASYNC, CTX_OWNER,
     FLAG_ASYNC, FLAG_STREAM,
     OPT_DEFER, OPT_STABLE, OPT_SETUP, OPT_NOTIFY, OPT_WEAK, OPT_DYNAMIC,
     TYPE_ROOT, TYPE_SIGNAL, TYPE_COMPUTE, TYPE_EFFECT,

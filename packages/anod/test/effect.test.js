@@ -115,7 +115,7 @@ describe("effect", () => {
 
             scope((s) => {
                 s.read(s1);
-                effect((e) => {
+                s.effect((e) => {
                     e.cleanup(() => { calls++; });
                 });
             });
@@ -130,7 +130,7 @@ describe("effect", () => {
             let calls = 0;
 
             const r1 = root((r) => {
-                effect((e) => {
+                r.effect((e) => {
                     e.read(s1);
                     e.cleanup(() => { calls++; });
                 });

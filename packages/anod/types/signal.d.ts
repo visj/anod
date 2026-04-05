@@ -61,6 +61,36 @@ export interface IReader extends IReceiver {
     loading(): boolean;
     cleanup(fn: () => void): void;
     recover(fn: (error: any) => boolean): void;
+
+    signal<T>(value: T): ISignal<T>;
+
+    compute<U>(fn: (c: IReader) => U): ICompute<Resolve<U>>;
+    compute<U>(fn: (c: IReader, prev: Resolve<U>) => U, seed: Resolve<U>): ICompute<Resolve<U>>;
+    compute<U, W>(fn: (c: IReader, prev: Resolve<U>, args: W) => U, seed: Resolve<U>, opts?: number, args?: W): ICompute<Resolve<U>>;
+    compute<U, W>(fn: (c: IReader, prev: Resolve<U> | undefined, args: W) => U, seed?: Resolve<U>, opts?: number, args?: W): ICompute<Resolve<U>>;
+
+    derive<U>(fn: (c: IReader, prev: Resolve<U>) => U, seed?: Resolve<U>): ICompute<Resolve<U>>;
+    derive<U, W>(fn: (c: IReader, prev: Resolve<U>, args: W) => U, seed?: Resolve<U>, args?: W): ICompute<Resolve<U>>;
+
+    transmit<U>(fn: (c: IReader, prev: Resolve<U>) => U, seed?: Resolve<U>): ICompute<Resolve<U>>;
+    transmit<U, W>(fn: (c: IReader, prev: Resolve<U>, args: W) => U, seed?: Resolve<U>, args?: W): ICompute<Resolve<U>>;
+
+    effect(fn: (c: IReader) => (() => void) | void, opts?: number): IEffect;
+    effect<W>(fn: (c: IReader, args: W) => void | (() => void), opts?: number, args?: W): IEffect;
+
+    watch(fn: (c: IReader) => void | (() => void)): IEffect;
+    watch<W>(fn: (c: IReader, args: W) => void | (() => void), args?: W): IEffect;
+
+    scope(fn: (c: IReader) => void | (() => void), opts?: number): IEffect;
+    scope<W>(fn: (c: IReader, args: W) => void | (() => void), opts?: number, args?: W): IEffect;
+
+    task<U>(fn: (c: IReader, prev: Resolve<U>) => Promise<U>, seed?: Resolve<U>, opts?: number): ICompute<Resolve<U>>;
+    task<U, W>(fn: (c: IReader, prev: Resolve<U>, args: W) => Promise<U>, seed?: Resolve<U>, opts?: number, args?: W): ICompute<Resolve<U>>;
+
+    spawn(fn: (c: IReader) => Promise<(() => void) | void>, opts?: number): IEffect;
+    spawn<W>(fn: (c: IReader, args: W) => Promise<(() => void) | void>, opts?: number, args?: W): IEffect;
+
+    root(fn: () => void): IRoot;
 }
 
 export interface IReadonlySignal<T, TYPE extends number = number> extends IDispose<TYPE> {
@@ -93,6 +123,7 @@ export interface IAwaitable {
 
 export interface IRoot extends IDispose<Type.ROOT> {
     recover(fn: (error: any) => boolean): void;
+    cleanup(fn: () => void): void;
 }
 
 export interface ISignal<T> extends IReadonlySignal<T, Type.SIGNAL> {
@@ -103,7 +134,7 @@ export interface ICompute<T> extends IReadonlySignal<T, Type.COMPUTE>, IAwaitabl
 
 export interface IEffect extends IDispose<Type.EFFECT> { }
 
-export declare function root(fn: () => void): IRoot;
+export declare function root(fn: (c: IReader) => void | (() => void)): IRoot;
 
 export declare function signal<T>(value: T): ISignal<T>;
 
@@ -188,11 +219,12 @@ export declare class Context {
     resume<T>(fn: () => T): T;
 }
 
-export declare class Root implements IDispose<Type.ROOT> {
+export declare class Root implements IRoot {
     readonly [ANOD]: never;
     readonly t: Type.ROOT;
     dispose(): void;
     recover(fn: (error: any) => boolean): void;
+    cleanup(fn: () => void): void;
 }
 
 export declare class Signal<T> implements ISignal<T> {
