@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { signal, compute, effect, CTX_PROMISE, CTX_ITERABLE } from "../";
+import { signal, compute, effect, task, FLAG_STREAM } from "../";
 
 const tick = () => Promise.resolve();
 
@@ -7,7 +7,7 @@ describe("async", () => {
     describe("promise", () => {
         test("is loading while the promise is pending", async () => {
             let resolve;
-            const c1 = compute((c) => { c.async(CTX_PROMISE); return new Promise(r => { resolve = r; }); });
+            const c1 = task((c) => { return new Promise(r => { resolve = r; }); });
 
             expect(c1.loading()).toBe(true);
 
@@ -19,7 +19,7 @@ describe("async", () => {
 
         test("returns seed value while loading", async () => {
             let resolve;
-            const c1 = compute((c) => { c.async(CTX_PROMISE); return new Promise(r => { resolve = r; }); }, 0);
+            const c1 = task((c) => { return new Promise(r => { resolve = r; }); }, 0);
 
             expect(c1.val()).toBe(0);
             expect(c1.loading()).toBe(true);
@@ -32,7 +32,7 @@ describe("async", () => {
         });
 
         test("settles to the resolved value", async () => {
-            const c1 = compute((c) => { c.async(CTX_PROMISE); return Promise.resolve(42); });
+            const c1 = task((c) => { return Promise.resolve(42); });
 
             expect(c1.loading()).toBe(true);
             await tick();
@@ -43,7 +43,7 @@ describe("async", () => {
         });
 
         test("sets error flag on rejection", async () => {
-            const c1 = compute((c) => { c.async(CTX_PROMISE); return Promise.reject(new Error("async error")); });
+            const c1 = task((c) => { return Promise.reject(new Error("async error")); });
 
             await tick();
 
@@ -52,7 +52,7 @@ describe("async", () => {
         });
 
         test("rethrows the error when read after rejection", async () => {
-            const c1 = compute((c) => { c.async(CTX_PROMISE); return Promise.reject(new Error("async error")); });
+            const c1 = task((c) => { return Promise.reject(new Error("async error")); });
 
             await tick();
 
@@ -61,8 +61,7 @@ describe("async", () => {
 
         test("clears error on subsequent successful resolution", async () => {
             const s1 = signal(true);
-            const c1 = compute((c) => {
-                c.async(CTX_PROMISE);
+            const c1 = task((c) => {
                 return c.read(s1)
                     ? Promise.reject(new Error("fail"))
                     : Promise.resolve(42);
@@ -80,7 +79,7 @@ describe("async", () => {
         });
 
         test("notifies downstream effect when promise settles", async () => {
-            const c1 = compute((c) => { c.async(CTX_PROMISE); return Promise.resolve(42); });
+            const c1 = task((c) => { return Promise.resolve(42); });
             let received = void 0;
 
             effect((e) => { received = e.read(c1); });
@@ -95,8 +94,7 @@ describe("async", () => {
             const resolvers = [];
             const s1 = signal(0);
 
-            const c1 = compute((c) => {
-                c.async(CTX_PROMISE);
+            const c1 = task((c) => {
                 const v = c.read(s1);
                 return new Promise(r => { resolvers[v] = r; });
             });
@@ -128,7 +126,7 @@ describe("async", () => {
                 next() { return new Promise(r => { resolver = r; }); }
             };
 
-            const c1 = compute((c) => { c.async(CTX_ITERABLE); return iter; });
+            const c1 = compute((c) => { return iter; }, undefined, FLAG_STREAM);
 
             expect(c1.loading()).toBe(true);
             expect(c1.val()).toBeUndefined();
@@ -145,7 +143,7 @@ describe("async", () => {
                 return() { return Promise.resolve({ done: true }); }
             };
 
-            const c1 = compute((c) => { c.async(CTX_ITERABLE); return iter; });
+            const c1 = compute((c) => { return iter; }, undefined, FLAG_STREAM);
             const values = [];
 
             // Always call c1.val() so the effect subscribes to c1 as a dependency;
@@ -179,7 +177,7 @@ describe("async", () => {
                 return() { return Promise.resolve({ done: true }); }
             };
 
-            const c1 = compute((c) => { c.async(CTX_ITERABLE); return iter; });
+            const c1 = compute((c) => { return iter; }, undefined, FLAG_STREAM);
 
             expect(c1.loading()).toBe(true);
 
@@ -195,7 +193,7 @@ describe("async", () => {
                 throw new Error("iterator error");
             }
 
-            const c1 = compute((c) => { c.async(CTX_ITERABLE); return failing(); });
+            const c1 = compute((c) => { return failing(); }, undefined, FLAG_STREAM);
 
             await tick();
 
@@ -220,12 +218,10 @@ describe("async", () => {
             const s1 = signal(true);
             const c1 = compute((c) => {
                 if (c.read(s1)) {
-                    c.async(CTX_ITERABLE);
                     return staleIter;
                 }
-                c.async(CTX_ITERABLE);
                 return (async function*() { yield 99; })();
-            });
+            }, undefined, FLAG_STREAM);
 
             // Signal update — c1 re-runs, picks up the new generator; staleIter is now stale
             s1.set(false);

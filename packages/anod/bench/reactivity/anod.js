@@ -2,8 +2,8 @@ import { bench, group, run } from 'mitata';
 import { EXPECTED, OVERRIDES_ANOD } from './expected.js';
 import {
     batch,
-    memo,
-    reaction,
+    derive,
+    watch,
     compute,
     signal,
 } from '../../dist/index.mjs';
@@ -25,10 +25,10 @@ function setupDeep() {
     let current = head;
     for (let i = 0; i < len; i++) {
         const prev = current;
-        current = memo(c => { counter++; return c.read(prev) + 1; });
+        current = derive(c => { counter++; return c.read(prev) + 1; });
     }
     const tail = current;
-    reaction(c => {
+    watch(c => {
         counter++;
         sink += c.read(tail);
     });
@@ -41,9 +41,9 @@ function setupDeep() {
 function setupBroad() {
     const head = signal(0);
     for (let i = 0; i < 50; i++) {
-        const current = memo(c => { counter++; return c.read(head) + i; });
-        const current2 = memo(c => { counter++; return c.read(current) + 1; });
-        reaction(c => {
+        const current = derive(c => { counter++; return c.read(head) + i; });
+        const current2 = derive(c => { counter++; return c.read(current) + 1; });
+        watch(c => {
             counter++;
             sink += c.read(current2);
         });
@@ -59,9 +59,9 @@ function setupDiamond() {
     const head = signal(0);
     const branches = [];
     for (let i = 0; i < width; i++) {
-        branches.push(memo(c => { counter++; return c.read(head) + 1; }));
+        branches.push(derive(c => { counter++; return c.read(head) + 1; }));
     }
-    const sum = memo(c => {
+    const sum = derive(c => {
         counter++;
         let total = 0;
         for (let i = 0; i < branches.length; i++) {
@@ -69,7 +69,7 @@ function setupDiamond() {
         }
         return total;
     });
-    reaction(c => {
+    watch(c => {
         counter++;
         sink += c.read(sum);
     });
@@ -87,10 +87,10 @@ function setupTriangle() {
     for (let i = 0; i < width - 1; i++) {
         const prev = current;
         list.push(current);
-        current = memo(c => { counter++; return c.read(prev) + 1; });
+        current = derive(c => { counter++; return c.read(prev) + 1; });
     }
     list.push(current);
-    const sum = memo(c => {
+    const sum = derive(c => {
         counter++;
         let total = 0;
         for (let i = 0; i < list.length; i++) {
@@ -98,7 +98,7 @@ function setupTriangle() {
         }
         return total;
     });
-    reaction(c => {
+    watch(c => {
         counter++;
         sink += c.read(sum);
     });
@@ -110,12 +110,12 @@ function setupTriangle() {
 
 function setupMux() {
     const heads = new Array(100).fill(null).map(() => signal(0));
-    const mux = memo(c => { counter++; return heads.map(h => c.read(h)); });
+    const mux = derive(c => { counter++; return heads.map(h => c.read(h)); });
     const split = heads
-        .map((_, index) => memo(c => { counter++; return c.read(mux)[index]; }))
-        .map(x => memo(c => { counter++; return c.read(x) + 1; }));
+        .map((_, index) => derive(c => { counter++; return c.read(mux)[index]; }))
+        .map(x => derive(c => { counter++; return c.read(x) + 1; }));
     for (const x of split) {
-        reaction(c => {
+        watch(c => {
             counter++;
             sink += c.read(x);
         });
@@ -129,8 +129,8 @@ function setupMux() {
 
 function setupUnstable() {
     const head = signal(0);
-    const double = memo(c => { counter++; return c.read(head) * 2; });
-    const inverse = memo(c => { counter++; return -c.read(head); });
+    const double = derive(c => { counter++; return c.read(head) * 2; });
+    const inverse = derive(c => { counter++; return -c.read(head); });
     const current = compute(c => {
         counter++;
         let result = 0;
@@ -139,7 +139,7 @@ function setupUnstable() {
         }
         return result;
     });
-    reaction(c => {
+    watch(c => {
         counter++;
         sink += c.read(current);
     });
@@ -151,12 +151,12 @@ function setupUnstable() {
 
 function setupAvoidable() {
     const head = signal(0);
-    const computed1 = memo(c => { counter++; return c.read(head); });
-    const computed2 = memo(c => { counter++; c.read(computed1); return 0; });
-    const computed3 = memo(c => { counter++; return c.read(computed2) + 1; });
-    const computed4 = memo(c => { counter++; return c.read(computed3) + 2; });
-    const computed5 = memo(c => { counter++; return c.read(computed4) + 3; });
-    reaction(c => {
+    const computed1 = derive(c => { counter++; return c.read(head); });
+    const computed2 = derive(c => { counter++; c.read(computed1); return 0; });
+    const computed3 = derive(c => { counter++; return c.read(computed2) + 1; });
+    const computed4 = derive(c => { counter++; return c.read(computed3) + 2; });
+    const computed5 = derive(c => { counter++; return c.read(computed4) + 3; });
+    watch(c => {
         counter++;
         sink += c.read(computed5);
     });
@@ -177,7 +177,7 @@ function setupRepeatedObservers() {
         }
         return result;
     });
-    reaction(c => {
+    watch(c => {
         counter++;
         sink += c.read(current);
     });
@@ -200,19 +200,19 @@ function setupCellx(layers) {
     for (let i = layers; i > 0; i--) {
         const m = layer;
         const s = {
-            prop1: memo(c => { counter++; return c.read(m.prop2); }),
-            prop2: memo(c => { counter++; return c.read(m.prop1) - c.read(m.prop3); }),
-            prop3: memo(c => { counter++; return c.read(m.prop2) + c.read(m.prop4); }),
-            prop4: memo(c => { counter++; return c.read(m.prop3); }),
+            prop1: derive(c => { counter++; return c.read(m.prop2); }),
+            prop2: derive(c => { counter++; return c.read(m.prop1) - c.read(m.prop3); }),
+            prop3: derive(c => { counter++; return c.read(m.prop2) + c.read(m.prop4); }),
+            prop4: derive(c => { counter++; return c.read(m.prop3); }),
         };
-        reaction(c => { counter++; sink += c.read(s.prop1); });
-        reaction(c => { counter++; sink += c.read(s.prop2); });
-        reaction(c => { counter++; sink += c.read(s.prop3); });
-        reaction(c => { counter++; sink += c.read(s.prop4); });
-        reaction(c => { counter++; sink += c.read(s.prop1); });
-        reaction(c => { counter++; sink += c.read(s.prop2); });
-        reaction(c => { counter++; sink += c.read(s.prop3); });
-        reaction(c => { counter++; sink += c.read(s.prop4); });
+        watch(c => { counter++; sink += c.read(s.prop1); });
+        watch(c => { counter++; sink += c.read(s.prop2); });
+        watch(c => { counter++; sink += c.read(s.prop3); });
+        watch(c => { counter++; sink += c.read(s.prop4); });
+        watch(c => { counter++; sink += c.read(s.prop1); });
+        watch(c => { counter++; sink += c.read(s.prop2); });
+        watch(c => { counter++; sink += c.read(s.prop3); });
+        watch(c => { counter++; sink += c.read(s.prop4); });
         layer = s;
     }
     const end = layer;
@@ -238,20 +238,20 @@ function setupMolWire() {
     const numbers = Array.from({ length: 5 }, (_, i) => i);
     const A = signal(0);
     const B = signal(0);
-    const C = memo(c => { counter++; return (c.read(A) % 2) + (c.read(B) % 2); });
-    const D = memo(c => {
+    const C = derive(c => { counter++; return (c.read(A) % 2) + (c.read(B) % 2); });
+    const D = derive(c => {
         counter++;
         return numbers.map(i => ({ x: i + (c.read(A) % 2) - (c.read(B) % 2) }));
     });
-    const E = memo(c => { counter++; return hard(c.read(C) + c.read(A) + c.read(D)[0].x, 'E'); });
+    const E = derive(c => { counter++; return hard(c.read(C) + c.read(A) + c.read(D)[0].x, 'E'); });
     const F = compute(c => { counter++; return hard(c.read(D)[2].x || c.read(B), 'F'); });
     const G = compute(c => {
         counter++;
         return c.read(C) + (c.read(C) || c.read(E) % 2) + c.read(D)[4].x + c.read(F);
     });
-    reaction(c => { counter++; sink += hard(c.read(G), 'H'); });
-    reaction(c => { counter++; sink += c.read(G); });
-    reaction(c => { counter++; sink += hard(c.read(F), 'J'); });
+    watch(c => { counter++; sink += hard(c.read(G), 'H'); });
+    watch(c => { counter++; sink += c.read(G); });
+    watch(c => { counter++; sink += hard(c.read(F), 'J'); });
     let i = 0;
     return () => {
         i++;
@@ -276,8 +276,8 @@ function benchCreateComputations(count) {
     return () => {
         const src = signal(0);
         for (let i = 0; i < count; i++) {
-            const comp = memo(c => { counter++; return c.read(src); });
-            reaction(c => {
+            const comp = derive(c => { counter++; return c.read(src); });
+            watch(c => {
                 counter++;
                 sink += c.read(comp);
             });
@@ -337,7 +337,7 @@ function removeElems(src, rmCount, rand) {
 
 /**
  * Build a rectangular reactive dependency graph.
- * Static nodes use memo() (stable). Dynamic nodes use compute() for conditional reads.
+ * Static nodes use derive() (stable). Dynamic nodes use compute() for conditional reads.
  * @param {number} width
  * @param {number} totalLayers
  * @param {number} staticFraction - fraction of static nodes [0, 1]
@@ -359,7 +359,7 @@ function makeDynGraph(width, totalLayers, staticFraction, nSources) {
                 mySources[s] = prevRow[(myDex + s) % width];
             }
             if (random() < staticFraction) {
-                row[myDex] = memo(c => {
+                row[myDex] = derive(c => {
                     counter++;
                     let sum = 0;
                     for (let s = 0; s < mySources.length; s++) {
