@@ -1,0 +1,173 @@
+clk: ~3.04 GHz
+cpu: Apple M1 Pro
+runtime: node 25.9.0 (arm64-darwin)
+
+benchmark                   avg (min … max) p75 / p99    (min … top 1%)
+------------------------------------------- -------------------------------
+• Kairo: deep propagation
+------------------------------------------- -------------------------------
+alien-signals                  1.26 µs/iter   1.27 µs ▃█▅ ▆ ▂▃             
+                        (1.23 µs … 1.32 µs)   1.31 µs ███▄████▂   ▄        
+                    ( 16.16  b … 220.16  b)  17.89  b ██████████▇██▃▄▄▁▃▄▃▃
+                  6.37 ipc (  0.01% stalls) 100.00% L1 data cache
+          4.03k cycles  25.67k instructions  40.21% retired LD/ST ( 10.32k)
+
+• Kairo: broad propagation
+------------------------------------------- -------------------------------
+alien-signals                  3.88 µs/iter   3.90 µs         █            
+                        (3.82 µs … 3.95 µs)   3.93 µs       ▆ █  ▆ ▃▆ █    
+                    (799.28  b … 804.23  b) 800.33  b █▄▄▁▄▁█▁█▄▁████▄█▄▄▄▄
+                  6.22 ipc (  0.16% stalls)  99.95% L1 data cache
+         12.42k cycles  77.31k instructions  40.51% retired LD/ST ( 31.32k)
+
+• Kairo: diamond
+------------------------------------------- -------------------------------
+alien-signals                221.78 ns/iter 223.34 ns █▆                   
+                    (217.37 ns … 316.14 ns) 248.51 ns ██                   
+                    (  6.42  b … 264.17  b)  73.09  b ██▇▅▅▅▄▃▃▂▁▁▁▁▁▁▁▁▁▁▁
+                  6.26 ipc (  0.43% stalls)  99.92% L1 data cache
+         711.49 cycles   4.46k instructions  40.25% retired LD/ST (  1.79k)
+
+• Kairo: triangle
+------------------------------------------- -------------------------------
+alien-signals                418.93 ns/iter 420.23 ns ▃█                   
+                    (409.91 ns … 509.18 ns) 481.35 ns ██                   
+                    (146.57  b … 626.13  b) 392.18  b ███▆▄▄▄▂▂▂▂▂▂▁▁▁▁▁▁▁▁
+                  6.22 ipc (  0.94% stalls)  99.75% L1 data cache
+          1.34k cycles   8.36k instructions  41.05% retired LD/ST (  3.43k)
+
+• Kairo: mux
+------------------------------------------- -------------------------------
+alien-signals                  4.90 µs/iter   4.88 µs ▆ █                  
+                        (4.82 µs … 5.36 µs)   5.34 µs █▅█                  
+                    (  0.98 kb …   0.98 kb)   0.98 kb ████▃▁▁▁▁▁▁▁▃▁▁▁▁▁▁▁▃
+                  6.71 ipc (  0.82% stalls)  99.17% L1 data cache
+         15.84k cycles 106.31k instructions  39.05% retired LD/ST ( 41.51k)
+
+• Kairo: unstable
+------------------------------------------- -------------------------------
+alien-signals                306.42 ns/iter 312.48 ns █ ▆                  
+                    (285.97 ns … 732.10 ns) 529.49 ns █▆█                  
+                    ( 43.46  b … 440.11  b) 256.69  b ███▆▁▂▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+                  6.04 ipc (  1.24% stalls)  99.15% L1 data cache
+         989.26 cycles   5.98k instructions  38.98% retired LD/ST (  2.33k)
+
+• Kairo: avoidable propagation
+------------------------------------------- -------------------------------
+alien-signals                 81.09 ns/iter  81.20 ns  █                   
+                     (79.21 ns … 113.66 ns)  94.36 ns  █                   
+                    (  0.11  b … 254.13  b)   0.69  b ██▇▄▃▄▂▂▁▁▁▁▁▁▁▁▁▁▁▁▁
+                  6.96 ipc (  0.00% stalls) 100.00% L1 data cache
+         260.28 cycles   1.81k instructions  39.50% retired LD/ST ( 715.51)
+
+• Kairo: repeated observers
+------------------------------------------- -------------------------------
+alien-signals                142.30 ns/iter 142.11 ns █▃                   
+                    (140.08 ns … 227.37 ns) 159.95 ns ██                   
+                    (  3.11  b … 202.11  b)  16.87  b ██▅▄▃▃▂▂▂▁▁▁▂▁▁▁▁▁▁▁▁
+                  6.70 ipc (  0.11% stalls)  99.98% L1 data cache
+         457.93 cycles   3.07k instructions  33.84% retired LD/ST (  1.04k)
+
+• CellX 10 layers
+------------------------------------------- -------------------------------
+alien-signals                  3.85 µs/iter   3.87 µs ▂  █ ▂ ▂▂ ▂ ▂        
+                        (3.80 µs … 3.96 µs)   3.91 µs █ ▅█ █▅██ █▅█▅▅▅  ▅  
+                    (  2.83 kb …   2.89 kb)   2.89 kb █▁██▇████▁██████▇▇█▁▇
+                  6.11 ipc (  0.43% stalls)  99.87% L1 data cache
+         12.39k cycles  75.67k instructions  40.26% retired LD/ST ( 30.47k)
+
+• $mol_wire
+------------------------------------------- -------------------------------
+alien-signals                 47.43 µs/iter  47.66 µs       █             █
+                      (46.89 µs … 48.22 µs)  47.74 µs ▅   ▅▅█    ▅   ▅▅ ▅ █
+                    (  1.52 kb …   1.54 kb)   1.52 kb █▁▁▁███▁▁▁▁█▁▁▁██▁█▁█
+                  5.36 ipc (  0.02% stalls)  99.98% L1 data cache
+        151.61k cycles 813.10k instructions  36.07% retired LD/ST (293.29k)
+
+• Create 1k signals
+------------------------------------------- -------------------------------
+alien-signals                  9.87 µs/iter   8.29 µs █▄                   
+                        (5.13 µs … 2.49 ms)  76.25 µs ██                   
+                    (  5.73 kb … 273.78 kb) 139.30 kb ██▃▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+                  4.26 ipc ( 13.20% stalls)  92.41% L1 data cache
+         35.74k cycles 152.17k instructions  37.32% retired LD/ST ( 56.79k)
+
+• Create 1k computations
+------------------------------------------- -------------------------------
+alien-signals                 84.14 µs/iter  73.67 µs █                    
+                       (65.87 µs … 1.96 ms) 294.79 µs █▅                   
+                    (144.21 kb … 836.21 kb) 516.33 kb ██▃▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+                  4.68 ipc (  3.16% stalls)  97.02% L1 data cache
+        273.21k cycles   1.28M instructions  44.25% retired LD/ST (566.17k)
+
+• Dynamic build: simple component
+------------------------------------------- -------------------------------
+alien-signals                  7.31 µs/iter   8.05 µs                  ██  
+                        (5.62 µs … 8.32 µs)   8.28 µs ▇▇               ██  
+                    ( 17.21 kb …  20.65 kb)  17.97 kb ██▁▁▁▁▁▁▁▁▁▁▁▁▁▁▆██▆▆
+                  4.15 ipc (  2.73% stalls)  98.05% L1 data cache
+         22.68k cycles  94.15k instructions  38.51% retired LD/ST ( 36.26k)
+
+• Dynamic build: large web app
+------------------------------------------- -------------------------------
+alien-signals                  2.80 ms/iter   1.75 ms █                    
+                       (1.58 ms … 14.40 ms)  13.64 ms █                    
+                    (127.48 kb …   7.16 mb)   6.73 mb █▂▁▁▂▁▁▁▁▁▁▁▁▁▁▁▁▁▁▂▂
+                  4.07 ipc (  1.89% stalls)  96.98% L1 data cache
+          9.10M cycles  36.98M instructions  38.78% retired LD/ST ( 14.34M)
+
+• Dynamic build: wide dense
+------------------------------------------- -------------------------------
+alien-signals                  3.01 ms/iter   2.76 ms █                    
+                       (2.58 ms … 15.64 ms)   7.51 ms █▂                   
+                    (  3.47 mb …   9.69 mb)   9.63 mb ██▂▁▁▁▁▁▁▂▁▁▁▁▁▁▁▁▁▁▁
+                  5.09 ipc (  2.19% stalls)  98.88% L1 data cache
+         10.13M cycles  51.60M instructions  39.64% retired LD/ST ( 20.45M)
+
+• Dynamic update: simple component
+------------------------------------------- -------------------------------
+alien-signals                332.23 ns/iter 336.23 ns  █                   
+                    (321.51 ns … 407.44 ns) 373.01 ns  █▇                  
+                    (110.05  b … 815.26  b) 297.15  b ▇███▆▆▅▅▃▃▄▂▃▂▂▁▁▁▁▁▁
+                  5.37 ipc (  0.83% stalls)  99.74% L1 data cache
+          1.06k cycles   5.71k instructions  40.04% retired LD/ST (  2.29k)
+
+• Dynamic update: dynamic component
+------------------------------------------- -------------------------------
+alien-signals                  9.57 µs/iter   9.62 µs █        █  ██       
+                        (9.41 µs … 9.70 µs)   9.70 µs █ ▅  ▅   █  ██ ▅▅▅  ▅
+                    (  3.47 kb …   4.04 kb)   3.86 kb █▁█▁▁█▁▁▁█▁▁██▁███▁▁█
+                  4.88 ipc (  0.28% stalls)  99.74% L1 data cache
+         30.56k cycles 149.11k instructions  38.24% retired LD/ST ( 57.02k)
+
+• Dynamic update: large web app
+------------------------------------------- -------------------------------
+alien-signals                 30.26 µs/iter  30.85 µs █       █     █    █ 
+                      (29.29 µs … 31.15 µs)  30.95 µs █     ▅ █▅    █    █▅
+                    (  8.10 kb …   9.28 kb)   8.86 kb █▁▁▁▁▁█▁██▁▁▁▁█▁▁▁▁██
+                  4.29 ipc (  3.55% stalls)  94.22% L1 data cache
+         97.02k cycles 416.02k instructions  40.74% retired LD/ST (169.50k)
+
+• Dynamic update: wide dense
+------------------------------------------- -------------------------------
+alien-signals                119.66 µs/iter 120.96 µs       █              
+                    (105.13 µs … 230.58 µs) 144.38 µs       ██             
+                    (  5.88 kb … 350.30 kb)   6.86 kb ▁▂▂▂▄▇██▇▆▄▃▂▂▂▂▂▁▁▁▁
+                  4.17 ipc (  2.30% stalls)  96.09% L1 data cache
+        387.38k cycles   1.62M instructions  39.13% retired LD/ST (632.34k)
+
+• Dynamic update: deep
+------------------------------------------- -------------------------------
+alien-signals                183.53 µs/iter 183.63 µs █▆                   
+                    (176.58 µs … 537.71 µs) 235.92 µs ███                  
+                    (  3.13 kb … 507.14 kb) 155.75 kb ███▇▃▃▃▂▂▂▂▁▁▁▁▁▁▁▁▁▁
+                  4.97 ipc (  4.63% stalls)  97.29% L1 data cache
+        591.38k cycles   2.94M instructions  40.37% retired LD/ST (  1.19M)
+
+• Dynamic update: very dynamic
+------------------------------------------- -------------------------------
+alien-signals                 98.84 µs/iter  98.38 µs   █                  
+                     (93.79 µs … 285.25 µs) 128.25 µs  ▆█                  
+                    (  4.75 kb … 260.55 kb)  37.20 kb ▁███▄▂▂▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+                  3.52 ipc (  1.74% stalls)  95.05% L1 data cache
+        322.32k cycles   1.13M instructions  37.07% retired LD/ST (420.28k)
