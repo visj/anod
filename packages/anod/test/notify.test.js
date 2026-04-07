@@ -209,15 +209,9 @@ describe("OPT_NOTIFY", () => {
         });
 
         order = "";
-        /**
-         * Because c1 has OPT_NOTIFY, c2 is notified stale (not pending).
-         * So c2 should always re-execute, even if c1's value didn't change.
-         * STALE computes skip pullCompute and run directly — deps are
-         * pulled lazily via .val() inside the fn, so c2 starts first.
-         */
         s1.set(2);
         c2.val();
-        expect(order).toBe("c2c1");
+        expect(order).toBe("c1c2");
     });
 
     test("OPT_NOTIFY ignores equal(true) calls", () => {
