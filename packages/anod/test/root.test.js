@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { root, signal, compute, effect } from "../";
+import { root, signal, compute, effect } from "../src/index.js";
 
 describe("root", () => {
     test("allows subcomputations to escape their parents via nested scope", () => {

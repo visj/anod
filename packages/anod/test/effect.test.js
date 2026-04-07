@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { root, signal, compute, effect, scope, batch } from "../";
+import { root, signal, compute, effect, scope, batch } from "../src/core/signal.js";
 
 describe("effect", () => {
     describe("modifies signals", () => {
@@ -69,7 +69,6 @@ describe("effect", () => {
         let seq = "";
         const s1 = signal(0);
         const s2 = signal(0);
-
         const c1 = compute((c) => { seq += "c1"; return c.read(s1); });
 
         effect((e) => {
@@ -88,7 +87,6 @@ describe("effect", () => {
             seq += "e3s2{" + e.read(s2) + "}";
             e.read(c2);
         });
-
         seq = "";
         s1.set(1);
         expect(seq).toBe("c1e2s2{0}e1e3s2{1}c2e2s2{1}"); // "Pull: effects pull computes lazily"
