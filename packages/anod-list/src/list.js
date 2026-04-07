@@ -25,19 +25,44 @@ var SubscriberProto = Subscriber.prototype;
 /**
  * Returns the bound source value (dep1.val()).
  * Used by array methods to access the underlying array.
+ * On Reader/Subscriber: delegates through _node.
+ * On Compute: the node IS the context, accesses _dep1 directly.
  * @returns {*}
  */
 ReaderProto._source = SubscriberProto._source = function () {
     return this._node._dep1.val();
 };
+ComputeProto._source = function () {
+    return this._dep1.val();
+};
+
+/** @const */
+var EffectProto = Effect.prototype;
+
+/**
+ * On Effect: the node IS the context, accesses _dep1 directly.
+ * Needed for forEach which creates a bound Effect.
+ * @returns {*}
+ */
+EffectProto._source = function () {
+    return this._dep1.val();
+};
 
 /**
  * Returns the mutation descriptor from the first dependency.
  * Used by array methods to optimize incremental updates.
+ * On Reader/Subscriber: delegates through _node.
+ * On Compute: the node IS the context, accesses _dep1 directly.
  * @returns {number}
  */
 ReaderProto._getMod = SubscriberProto._getMod = function () {
     return this._node._dep1._mod;
+};
+ComputeProto._getMod = function () {
+    return this._dep1._mod;
+};
+EffectProto._getMod = function () {
+    return this._dep1._mod;
 };
 
 
