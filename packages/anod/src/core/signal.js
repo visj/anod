@@ -382,6 +382,27 @@ function updateStable(time) {
 }
 
 /**
+ * Bound single-dep re-execution. Skips the read() indirection
+ * entirely — calls dep1.val() and passes the value directly to fn.
+ * No context, no version tracking. The leanest possible path.
+ * @this {Compute}
+ * @returns {*}
+ */
+function updateBound() {
+    return this._fn(this._dep1.val(), this._value, this._args);
+}
+
+/**
+ * Bound single-dep re-execution for effects.
+ * @this {Effect}
+ * @returns {*}
+ */
+function updateEffectBound() {
+    this._flag |= FLAG_RUNNING;
+    return this._fn(this._dep1.val(), this._args);
+}
+
+/**
  * Dynamic re-execution path. Bumps CLOCK._version, prescans
  * existing deps, runs fn(), then reconciles via pruneDeps.
  * New deps discovered during fn() are pushed directly to _deps
@@ -1169,6 +1190,7 @@ function Signal(value, opts) {
             this._value = null;
         }
     };
+
 }
 
 /**
@@ -1181,7 +1203,7 @@ function Signal(value, opts) {
  * @param {W=} args
  * @implements {ICompute<T>}
  */
-function Compute(opts, fn, dep1, seed, args) {
+function Compute(opts, fn, dep1, seed, args, update) {
     /**
      * @type {number}
      */
@@ -1209,7 +1231,7 @@ function Compute(opts, fn, dep1, seed, args) {
     /**
      * @type {function(number): void}
      */
-    this._update = updateSetup;
+    this._update = update || updateSetup;
     /**
      * @type {(function(T): T) | (function(T, U): T) | (function(T,U,V): T) | null}
      */
@@ -1630,7 +1652,7 @@ function settle(node, value) {
  * @param {W=} args
  * @implements {IEffect}
  */
-function Effect(opts, fn, dep1, args) {
+function Effect(opts, fn, dep1, args, update) {
     /**
      * @type {number}
      */
@@ -1687,7 +1709,7 @@ function Effect(opts, fn, dep1, args) {
      * Function pointer for the current update strategy.
      * @type {function(Effect): *}
      */
-    this._update = updateEffectSetup;
+    this._update = update || updateEffectSetup;
 }
 
 {
@@ -2759,37 +2781,68 @@ function spawn(fn, opts, args) {
  * @param {W=} args
  * @returns {!Compute<T,null,null,W>}
  */
-function derive(fn, seed, args) {
-    let node = new Compute(FLAG_STABLE | FLAG_SETUP, fn, null, seed, args);
+/**
+ * Stable compute. Two signatures:
+ *   derive(fn, seed?, args?)       — multi-dep, uses setup tracking
+ *   derive(dep, fn, seed?, args?)  — bound single-dep, skips setup
+ * @param {function|Sender} fnOrDep
+ * @param {*=} seedOrFn
+ * @param {*=} argsOrSeed
+ * @param {*=} args
+ * @returns {!Compute}
+ */
+function derive(fnOrDep, seedOrFn, argsOrSeed, args) {
+    if (typeof fnOrDep === 'function') {
+        let node = new Compute(FLAG_STABLE | FLAG_SETUP, fnOrDep, null, seedOrFn, argsOrSeed);
+        startCompute(node);
+        return node;
+    }
+    let node = new Compute(FLAG_STABLE | FLAG_BOUND, seedOrFn, fnOrDep, argsOrSeed, args, updateBound);
+    node._dep1slot = subscribe(fnOrDep, node, 0);
     startCompute(node);
     return node;
 }
 
 /**
- * Stable effect. Tracks deps on first run, then never
- * re-tracks. Like effect() with implicit OPT_STABLE.
- * @template W
- * @param {function(W): (function(): void | void)} fn
- * @param {W=} args
- * @returns {!Effect<null,null,W>}
+ * Stable effect. Two signatures:
+ *   watch(fn, args?)       — multi-dep, uses setup tracking
+ *   watch(dep, fn, args?)  — bound single-dep, skips setup
+ * @param {function|Sender} fnOrDep
+ * @param {*=} fnOrArgs
+ * @param {*=} args
+ * @returns {!Effect}
  */
-function watch(fn, args) {
-    let node = new Effect(FLAG_STABLE | FLAG_SETUP, fn, null, args);
+function watch(fnOrDep, fnOrArgs, args) {
+    if (typeof fnOrDep === 'function') {
+        let node = new Effect(FLAG_STABLE | FLAG_SETUP, fnOrDep, null, fnOrArgs);
+        startEffect(node);
+        return node;
+    }
+    let node = new Effect(FLAG_STABLE | FLAG_BOUND, fnOrArgs, fnOrDep, args, updateEffectBound);
+    node._dep1slot = subscribe(fnOrDep, node, 0);
+    node._owner = CLOCK._scope;
     startEffect(node);
     return node;
 }
 
 /**
- * Stable compute with OPT_NOTIFY. Always propagates STALE
- * downstream regardless of value equality.
- * @template T,W
- * @param {function(T,W): T} fn
- * @param {T=} seed
- * @param {W=} args
- * @returns {!Compute<T,null,null,W>}
+ * Stable compute with FLAG_TRANSMIT. Two signatures:
+ *   transmit(fn, seed?, args?)       — multi-dep, uses setup tracking
+ *   transmit(dep, fn, seed?, args?)  — bound single-dep, skips setup
+ * @param {function|Sender} fnOrDep
+ * @param {*=} seedOrFn
+ * @param {*=} argsOrSeed
+ * @param {*=} args
+ * @returns {!Compute}
  */
-function transmit(fn, seed, args) {
-    let node = new Compute(FLAG_STABLE | FLAG_SETUP | FLAG_TRANSMIT, fn, null, seed, args);
+function transmit(fnOrDep, seedOrFn, argsOrSeed, args) {
+    if (typeof fnOrDep === 'function') {
+        let node = new Compute(FLAG_STABLE | FLAG_SETUP | FLAG_TRANSMIT, fnOrDep, null, seedOrFn, argsOrSeed);
+        startCompute(node);
+        return node;
+    }
+    let node = new Compute(FLAG_STABLE | FLAG_BOUND | FLAG_TRANSMIT, seedOrFn, fnOrDep, argsOrSeed, args, updateBound);
+    node._dep1slot = subscribe(fnOrDep, node, 0);
     startCompute(node);
     return node;
 }
