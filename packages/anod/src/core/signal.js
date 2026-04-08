@@ -2444,17 +2444,13 @@ function read(sender) {
         }
     } else {
         /**
-         * DYNAMIC path: push new dep with slot 0 (unsubscribed).
-         * pruneDeps will handle subscription after fn() returns.
+         * DYNAMIC path: always push new dep to _deps with slot 0.
+         * pruneDeps handles subscription after fn() returns.
          */
-        if (this._dep1 === null) {
-            this._dep1 = sender;
+        if (this._deps === null) {
+            this._deps = [sender, 0];
         } else {
-            if (this._deps === null) {
-                this._deps = [sender, 0];
-            } else {
-                this._deps.push(sender, 0);
-            }
+            this._deps.push(sender, 0);
         }
     }
 
@@ -2480,138 +2476,130 @@ function read(sender) {
  * @returns {void}
  */
 function pruneDeps(node, version, depCount) {
-    /** Handle dep1 separately */
+    let deps = node._deps;
+    let existingLen = depCount > 1 ? (depCount - 1) * 2 : 0;
+    /** ni = index of next new dep to consume (unsubscribed, slot 0) */
+    let ni = deps !== null ? existingLen : 0;
+    let totalLen = deps !== null ? deps.length : 0;
+
+    /** Check dep1 */
     let dep1 = node._dep1;
-    let dep1Dropped = 0;
     if (dep1 !== null && depCount >= 1) {
         if (dep1._version !== version) {
             clearReceiver(dep1, node._dep1slot);
-            node._dep1 = null;
-            node._dep1slot = 0;
-            dep1Dropped = 1;
+            if (ni < totalLen) {
+                /** Fill dep1 with a new dep */
+                node._dep1 = /** @type {Sender} */(deps[ni]);
+                node._dep1slot = subscribe(/** @type {Sender} */(deps[ni]), node, 0);
+                ni += 2;
+            } else {
+                node._dep1 = null;
+                node._dep1slot = 0;
+            }
         }
     }
 
-    let deps = node._deps;
     if (deps === null) {
-        /**
-         * No _deps array. If dep1 was dropped and a new dep was
-         * pushed to dep1 slot (by _read), subscribe it now.
-         */
-        if (dep1Dropped && node._dep1 !== null) {
-            node._dep1slot = subscribe(node._dep1, node, 0);
-        }
         return;
     }
 
-    let existingLen = depCount > 1 ? (depCount - 1) * 2 : 0;
-    let totalLen = deps.length;
-    let newStart = existingLen;
-    let newEnd = totalLen;
-    let removed = 0;
-
     /**
-     * Single pass over existing deps. When a dep is dropped,
-     * fill its slot with a new dep popped from the tail of the
-     * new-deps region. If no new deps remain, pop the last
-     * kept existing dep into the hole.
+     * Three-pointer scan:
+     *   i    — forward through existing region
+     *   ni   — next new dep to consume (unsubscribed, in new region)
+     *   tail — end of live region, shrinks when we pop reused deps from the back
+     *
+     * When we hit a dropped dep at position i:
+     *   1. If new deps available (ni < totalLen): subscribe new dep at position i
+     *   2. Else: scan backward from tail to find last reused dep, move it to i
+     *      Any dropped deps found during backward scan are also cleared.
+     *      When forward and backward pointers meet, we're done.
      */
-    let write = 0;
-    for (let i = 0; i < existingLen; i += 2) {
+    let tail = existingLen;
+    let i = 0;
+    while (i < tail) {
         let dep = /** @type {Sender} */(deps[i]);
         let slot = /** @type {number} */(deps[i + 1]);
         if (dep._version === version) {
-            /** Reused — keep at write position */
-            if (write !== i) {
-                deps[write] = dep;
-                deps[write + 1] = slot;
-                let depslot = write / 2 + 1;
-                if (slot === 0) {
-                    dep._sub1slot = depslot;
-                } else {
-                    dep._subs[(slot - 1) * 2 + 1] = depslot;
-                }
-            }
-            write += 2;
-        } else {
-            /** Dropped — unbind */
-            clearReceiver(dep, slot);
-            removed++;
+            /** Reused — stays in place */
+            i += 2;
+            continue;
         }
-    }
-
-    if (removed === 0 && newStart < newEnd) {
-        /**
-         * Fast path: all old deps kept, just subscribe new ones
-         * in the position they already occupy.
-         */
-        for (let i = newStart; i < newEnd; i += 2) {
-            let dep = /** @type {Sender} */(deps[i]);
+        /** Dropped — unbind */
+        clearReceiver(dep, slot);
+        if (ni < totalLen) {
+            /** Fill hole with next new dep */
+            let newDep = /** @type {Sender} */(deps[ni]);
             let depslot = i / 2 + 1;
-            let subslot = subscribe(dep, node, depslot);
+            let subslot = subscribe(newDep, node, depslot);
+            deps[i] = newDep;
             deps[i + 1] = subslot;
-        }
-    } else if (newStart < newEnd) {
-        /**
-         * Removed some old deps AND have new deps. Move new deps
-         * into compacted region and subscribe them.
-         */
-        for (let i = newStart; i < newEnd; i += 2) {
-            let dep = /** @type {Sender} */(deps[i]);
-            let depslot = write / 2 + 1;
-            let subslot = subscribe(dep, node, depslot);
-            deps[write] = dep;
-            deps[write + 1] = subslot;
-            write += 2;
-        }
-        deps.length = write;
-    } else {
-        /** No new deps — just trim */
-        if (write === 0) {
-            node._deps = null;
+            ni += 2;
+            i += 2;
         } else {
-            deps.length = write;
+            /**
+             * No new deps left. Scan backward from tail to find
+             * the last reused dep and swap it into this hole.
+             */
+            let found = 0;
+            while (tail > i + 2) {
+                tail -= 2;
+                let tDep = /** @type {Sender} */(deps[tail]);
+                let tSlot = /** @type {number} */(deps[tail + 1]);
+                if (tDep._version === version) {
+                    /** Move reused dep into the hole at i */
+                    deps[i] = tDep;
+                    deps[i + 1] = tSlot;
+                    let depslot = i / 2 + 1;
+                    if (tSlot === 0) {
+                        tDep._sub1slot = depslot;
+                    } else {
+                        tDep._subs[(tSlot - 1) * 2 + 1] = depslot;
+                    }
+                    found = 1;
+                    break;
+                } else {
+                    /** Also dropped — unbind */
+                    clearReceiver(tDep, tSlot);
+                }
+            }
+            if (found) {
+                i += 2;
+            } else {
+                /** Pointers met — i is the new tail */
+                tail = i;
+            }
         }
     }
 
-    /**
-     * If dep1 was dropped, promote first dep from _deps.
-     * The promoted dep is already subscribed at depslot 1,
-     * so patch its back-reference to depslot 0.
-     */
-    if (dep1Dropped) {
-        if (node._deps !== null && node._deps.length > 0) {
-            let dep = /** @type {Sender} */(node._deps[0]);
-            let slot = /** @type {number} */(node._deps[1]);
-            node._dep1 = dep;
-            node._dep1slot = slot;
-            /** Patch sender's back-ref from depslot 1 to depslot 0 */
-            if (slot === 0) {
-                dep._sub1slot = 0;
-            } else {
-                dep._subs[(slot - 1) * 2 + 1] = 0;
-            }
-            if (node._deps.length === 2) {
-                node._deps = null;
-            } else {
-                node._deps.splice(0, 2);
-                /** Patch remaining depslots */
-                let dps = node._deps;
-                for (let i = 0; i < dps.length; i += 2) {
-                    let d = /** @type {Sender} */(dps[i]);
-                    let s = /** @type {number} */(dps[i + 1]);
-                    let depslot = i / 2 + 1;
-                    if (s === 0) {
-                        d._sub1slot = depslot;
-                    } else {
-                        d._subs[(s - 1) * 2 + 1] = depslot;
-                    }
-                }
-            }
-        } else if (node._dep1 !== null) {
-            /** New dep was pushed directly to dep1 by _read */
-            node._dep1slot = subscribe(node._dep1, node, 0);
+    /** Remaining new deps — subscribe at the end of the live region */
+    while (ni < totalLen) {
+        let dep = /** @type {Sender} */(deps[ni]);
+        let depslot = tail / 2 + 1;
+        let subslot = subscribe(dep, node, depslot);
+        deps[tail] = dep;
+        deps[tail + 1] = subslot;
+        tail += 2;
+        ni += 2;
+    }
+
+    /** Trim or null out */
+    if (tail === 0) {
+        node._deps = null;
+    } else if (tail === 2 && node._dep1 === null) {
+        /** Single dep in array, dep1 empty — promote to dep1 */
+        let dep = /** @type {Sender} */(deps[0]);
+        let slot = /** @type {number} */(deps[1]);
+        node._dep1 = dep;
+        node._dep1slot = slot;
+        if (slot === 0) {
+            dep._sub1slot = 0;
+        } else {
+            dep._subs[(slot - 1) * 2 + 1] = 0;
         }
+        node._deps = null;
+    } else {
+        deps.length = tail;
     }
 }
 
