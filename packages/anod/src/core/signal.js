@@ -134,6 +134,19 @@ const RESET = ~(STATE_IDLE | STATE_OWNER);
 var VER_HEAD = 0;
 
 /**
+ * Global version conflict stack. Stores [sender, version] pairs
+ * when prescanDep or _read encounters a dep already tagged by
+ * another running node (version > VER_HEAD). Restored by
+ * updateDynamicVersion after pruneDeps completes.
+ * @type {Array}
+ */
+var VSTACK = new Array(64);
+/** @type {number} Tail pointer into VSTACK */
+var VCOUNT = 0;
+/** @type {number} Count of existing deps confirmed during dynamic re-execution */
+var REUSED = 0;
+
+/**
  * @returns {!Clock}
  */
 function clock() {
@@ -312,19 +325,24 @@ function countDeps(node) {
  * @param {number} version
  * @returns {void}
  */
+/**
+ * Pre-stamps a dependency with version - 1 before fn() runs.
+ * Returns 0 if no conflict, 1 if a version conflict was detected
+ * (dep was already tagged by another running node this tree).
+ * @param {Sender} dep
+ * @param {number} version
+ * @returns {number}
+ */
 function prescanDep(dep, version) {
     let v = dep._version;
-    if (v > VER_HEAD) {
-        /**
-         * Already tagged by another running node in this execution
-         * tree. Save their tag so we can restore it in pruneDeps.
-         */
-        if (dep._vstack === null) {
-            dep._vstack = [];
-        }
-        dep._vstack.push(v);
-    }
     dep._version = version - 1;
+    if (v > VER_HEAD) {
+        /** Conflict: save [sender, version] to global VSTACK */
+        VSTACK[VCOUNT++] = dep;
+        VSTACK[VCOUNT++] = v;
+        return 1;
+    }
+    return 0;
 }
 
 /**
@@ -335,15 +353,19 @@ function prescanDep(dep, version) {
  * @returns {T}
  */
 function updateSetup(time) {
+    let prevVersion = this._version;
     let version = CLOCK._version += 2;
-    this._execVersion = version;
+    this._version = version;
 
+    let value = this._fn(this, this._value, this._args);
+
+    this._version = prevVersion;
     if (this._flag & FLAG_STABLE) {
         this._update = updateStable;
     } else {
         this._update = updateDynamic;
     }
-    return this._fn(this, this._value, this._args);
+    return value;
 }
 
 /**
@@ -369,51 +391,79 @@ function updateStable(time) {
  * @returns {void}
  */
 function updateDynamic(time) {
+    let prevVersion = this._version;
     let version = CLOCK._version += 2;
-    this._execVersion = version;
+    this._version = version;
 
     /**
-     * Snapshot dep count BEFORE fn runs. Prescan all existing deps
-     * with version - 1 so _read can confirm them with a single check.
-     * New deps will be pushed beyond this region during fn().
+     * Prescan all existing deps with version - 1 so _read
+     * can confirm them with a single comparison.
      */
     let depCount = 0;
     let dep1 = this._dep1;
     if (dep1 !== null) {
         if (this._flag & FLAG_BOUND) {
-            /**
-             * FLAG_BOUND: dep1 gets version (not version - 1)
-             * so it's treated as permanently confirmed and
-             * never pruned by pruneDeps.
-             */
             dep1._version = version;
         } else {
-            prescanDep(dep1, version);
+            if (prescanDep(dep1, version)) {
+                return updateDynamicVersion.call(this, version, prevVersion, 1);
+            }
         }
         depCount = 1;
     }
     let deps = this._deps;
     if (deps !== null) {
-        /**
-         * Only prescan existing deps, not any new ones appended
-         * last run. node._depCount from previous run tells us
-         * where existing ends.
-         */
-        let existingLen = this._depCount > 1 ? (this._depCount - 1) * 2 : 0;
-        for (let i = 0; i < existingLen; i += 2) {
+        let len = deps.length;
+        for (let i = 0; i < len; i += 2) {
+            if (prescanDep(/** @type {Sender} */(deps[i]), version)) {
+                return updateDynamicVersion.call(this, version, prevVersion, depCount + i / 2 + 1);
+            }
+        }
+        depCount += len / 2;
+    }
+
+    let value = this._fn(this, this._value, this._args);
+    pruneDeps(this, version, depCount);
+    this._version = prevVersion;
+    return value;
+}
+
+/**
+ * Slow path for dynamic execution when a version conflict was
+ * detected at dep index `depCount` during prescan. Continues
+ * prescanning from where updateDynamic stopped, runs fn(), then
+ * restores VSTACK entries in a finally block.
+ * @param {number} version
+ * @param {number} depCount - number of deps already prescanned
+ * @returns {*}
+ */
+function updateDynamicVersion(version, prevVersion, depCount) {
+    let saveStart = VCOUNT;
+    /**
+     * Continue prescanning remaining deps that updateDynamic
+     * didn't reach. The dep that triggered the conflict was
+     * already saved by prescanDep before we got here.
+     */
+    let deps = this._deps;
+    if (deps !== null) {
+        let startIdx = depCount > 1 ? (depCount - 1) * 2 : 0;
+        let len = deps.length;
+        for (let i = startIdx; i < len; i += 2) {
             prescanDep(/** @type {Sender} */(deps[i]), version);
         }
-        depCount += existingLen / 2;
+        depCount += (len - startIdx) / 2;
     }
     let value;
     try {
         value = this._fn(this, this._value, this._args);
-        this._flag &= ~FLAG_ERROR;
-    } catch (err) {
+    } finally {
         pruneDeps(this, version, depCount);
-        throw err;
+        for (let i = VCOUNT - 2; i >= saveStart; i -= 2) {
+            VSTACK[i]._version = VSTACK[i + 1];
+        }
+        VCOUNT = saveStart;
+        this._version = prevVersion;
     }
-    pruneDeps(this, version, depCount);
     return value;
 }
 
@@ -425,15 +475,13 @@ function updateDynamic(time) {
  * @returns {void}
  */
 function updateEffectSetup(node) {
+    let prevVersion = node._version;
     let version = CLOCK._version += 2;
-    node._execVersion = version;
+    node._version = version;
 
-    let opts = node._flag;
-    node._flag |= FLAG_RUNNING;
-    let fn = node._fn;
-    let args = node._args;
+    let value = node._fn(node, node._args);
 
-    let value = fn(node, args);
+    node._version = prevVersion;
 
     /** Clear FLAG_SETUP after first run */
     node._flag &= ~FLAG_SETUP;
@@ -442,7 +490,6 @@ function updateEffectSetup(node) {
     if (node._flag & FLAG_STABLE) {
         node._update = updateEffectStable;
     } else {
-        node._depCount = countDeps(node);
         node._update = updateEffectDynamic;
     }
 
@@ -465,8 +512,9 @@ function updateEffectStable(node) {
  * @returns {*}
  */
 function updateEffectDynamic(node) {
+    let prevVersion = node._version;
     let version = CLOCK._version += 2;
-    node._execVersion = version;
+    node._version = version;
 
     let depCount = 0;
     let dep1 = node._dep1;
@@ -474,26 +522,61 @@ function updateEffectDynamic(node) {
         if (node._flag & FLAG_BOUND) {
             dep1._version = version;
         } else {
-            prescanDep(dep1, version);
+            if (prescanDep(dep1, version)) {
+                return updateEffectDynamicVersion(node, version, prevVersion, 1);
+            }
         }
         depCount = 1;
     }
     let deps = node._deps;
     if (deps !== null) {
-        let existingLen = node._depCount > 1 ? (node._depCount - 1) * 2 : 0;
-        for (let i = 0; i < existingLen; i += 2) {
-            prescanDep(/** @type {Sender} */(deps[i]), version);
+        let len = deps.length;
+        for (let i = 0; i < len; i += 2) {
+            if (prescanDep(/** @type {Sender} */(deps[i]), version)) {
+                return updateEffectDynamicVersion(node, version, prevVersion, depCount + i / 2 + 1);
+            }
         }
-        depCount += existingLen / 2;
+        depCount += len / 2;
     }
-    node._depCount = depCount;
 
     node._flag |= FLAG_RUNNING;
-
     let value = node._fn(node, node._args);
+    pruneDeps(node, version, depCount);
+    node._version = prevVersion;
+    return value;
+}
 
-    pruneDeps(node, version);
-
+/**
+ * Slow path for effect dynamic execution with version conflicts.
+ * @param {Effect} node
+ * @param {number} version
+ * @param {number} prevVersion
+ * @param {number} depCount
+ * @returns {*}
+ */
+function updateEffectDynamicVersion(node, version, prevVersion, depCount) {
+    let saveStart = VCOUNT;
+    let deps = node._deps;
+    if (deps !== null) {
+        let startIdx = depCount > 1 ? (depCount - 1) * 2 : 0;
+        let len = deps.length;
+        for (let i = startIdx; i < len; i += 2) {
+            prescanDep(/** @type {Sender} */(deps[i]), version);
+        }
+        depCount += (len - startIdx) / 2;
+    }
+    node._flag |= FLAG_RUNNING;
+    let value;
+    try {
+        value = node._fn(node, node._args);
+    } finally {
+        pruneDeps(node, version, depCount);
+        for (let i = VCOUNT - 2; i >= saveStart; i -= 2) {
+            VSTACK[i]._version = VSTACK[i + 1];
+        }
+        VCOUNT = saveStart;
+        node._version = prevVersion;
+    }
     return value;
 }
 
@@ -1072,13 +1155,6 @@ function Signal(value, opts) {
      * @type {number}
      */
     this._mod = 0;
-    /**
-     * Per-sender version conflict stack. Null in the common case,
-     * only allocated when two concurrently executing nodes both tag
-     * this sender within the same top-level execution tree.
-     * @type {Array<number> | null}
-     */
-    this._vstack = null;
 }
 
 {
@@ -1231,28 +1307,6 @@ function Compute(opts, fn, dep1, seed, args) {
      * @type {W | undefined}
      */
     this._args = args;
-    /**
-     * Per-sender version conflict stack. Null in the common case.
-     * @type {Array<number> | null}
-     */
-    this._vstack = null;
-    /**
-     * Number of deps at the START of the current execution.
-     * New deps are pushed beyond this index during fn().
-     * @type {number}
-     */
-    this._depCount = 0;
-    /**
-     * CLOCK._version assigned to this execution. Used by _read
-     * for re-read dedup and reuse detection.
-     * @type {number}
-     */
-    this._execVersion = 0;
-    /**
-     * Reader object for async nodes only. Null for sync nodes.
-     * @type {AsyncReader | null}
-     */
-    this._reader = null;
 }
 
 {
@@ -1310,7 +1364,7 @@ function Compute(opts, fn, dep1, seed, args) {
                 clock._state &= RESET;
                 try {
                     if (opts & FLAG_STALE) {
-                        this._update(time);
+                        this._run(time);
                     } else {
                         checkRun(this, time);
                     }
@@ -1322,7 +1376,7 @@ function Compute(opts, fn, dep1, seed, args) {
                 }
             } else {
                 if (opts & FLAG_STALE) {
-                    this._update(time);
+                    this._run(time);
                 } else {
                     checkRun(this, time);
                 }
@@ -1475,7 +1529,7 @@ function needsUpdate(node, time) {
     let lastRun = node._time;
     let dep = node._dep1;
     if (dep !== null) {
-        if ((dep.t === TYPE_COMPUTE) && (dep._flag & (FLAG_STALE | FLAG_PENDING))) {
+        if (dep._flag & (FLAG_STALE | FLAG_PENDING)) {
             checkRun(/** @type {Compute} */(dep), time);
         }
         if (dep._ctime > lastRun) {
@@ -1487,7 +1541,7 @@ function needsUpdate(node, time) {
         let len = deps.length;
         for (let i = 0; i < len; i += 2) {
             dep = /** @type {Sender} */(deps[i]);
-            if ((dep.t === TYPE_COMPUTE) && (dep._flag & (FLAG_STALE | FLAG_PENDING))) {
+            if (dep._flag & (FLAG_STALE | FLAG_PENDING)) {
                 checkRun(/** @type {Compute} */(dep), time);
             }
             if (dep._ctime > lastRun) {
@@ -1543,24 +1597,6 @@ function checkRun(node, time) {
     /** No dep changed -- clear flags without re-executing */
     node._flag &= ~(FLAG_STALE | FLAG_PENDING);
     node._time = time;
-}
-
-/**
- * Dispatches to the node's current update strategy (updateSetup,
- * updateStable, or updateDynamic). Saves and restores CLOCK._state.
- * @template T,U,V,W
- * @param {Compute<T,U,V,W>} node
- * @param {number} time
- * @returns {void}
- */
-function runCompute(node, time) {
-    let state = CLOCK._state;
-    CLOCK._state &= RESET;
-    try {
-        node._update(time);
-    } finally {
-        CLOCK._state = state;
-    }
 }
 
 /**
@@ -1712,25 +1748,9 @@ function Effect(opts, fn, dep1, args) {
      */
     this._recover = null;
     /**
-     * Number of deps at the START of the current execution.
      * @type {number}
      */
-    this._depCount = 0;
-    /**
-     * CLOCK._version assigned to this execution.
-     * @type {number}
-     */
-    this._execVersion = 0;
-    /**
-     * Reader object for async nodes only.
-     * @type {AsyncReader | null}
-     */
-    this._reader = null;
-    /**
-     * Self-reference for backward compat with anod-list.
-     * @type {Effect}
-     */
-    this._node = this;
+    this._version = 0;
     /**
      * Function pointer for the current update strategy.
      * @type {function(Effect): *}
@@ -1747,6 +1767,7 @@ function Effect(opts, fn, dep1, args) {
      * @type {number}
      */
     EffectProto.t = TYPE_EFFECT;
+
 
     /**
      * @public
@@ -2443,29 +2464,28 @@ function read(sender) {
         return value;
     }
 
-    let version = this._execVersion;
+    let version = this._version;
     let v = sender._version;
 
-    /** Re-read dedup: already visited this execution -- O(1) */
+    /** Re-read dedup: already visited this execution — O(1) */
     if (v === version) {
         return value;
     }
 
-    /** Reuse: was our dep last run, visited again this run -- O(1) */
+    /** Reuse: was our dep last run, visited again this run — O(1) */
     if (v === version - 1) {
         sender._version = version;
+        REUSED++;
         return value;
     }
 
     /**
      * Conflict: tagged by some other running node in this execution
-     * tree. Save their tag so we can restore it in pruneDeps.
+     * tree. Save [sender, version] to global VSTACK for restoration.
      */
     if (v > VER_HEAD) {
-        if (sender._vstack === null) {
-            sender._vstack = [];
-        }
-        sender._vstack.push(v);
+        VSTACK[VCOUNT++] = sender;
+        VSTACK[VCOUNT++] = v;
     }
 
     /** New dep (or cold sender): stamp and subscribe */
@@ -2536,19 +2556,10 @@ function pruneDeps(node, version, depCount) {
     /** Handle dep1 separately */
     let dep1 = node._dep1;
     if (dep1 !== null && depCount >= 1) {
-        if (dep1._version === version) {
-            /** Reused, keep it */
-        } else {
+        if (dep1._version !== version) {
             clearReceiver(dep1, node._dep1slot);
             node._dep1 = null;
             node._dep1slot = 0;
-        }
-        /** Restore vstack inline */
-        if (dep1._vstack !== null && dep1._vstack.length > 0) {
-            dep1._version = dep1._vstack.pop();
-            if (dep1._vstack.length === 0) {
-                dep1._vstack = null;
-            }
         }
     }
 
@@ -2558,19 +2569,15 @@ function pruneDeps(node, version, depCount) {
         let totalLen = deps.length;
         let write = 0;
 
-        /** Pass over existing deps: keep confirmed, drop stale, restore vstack */
+        /** Pass over existing deps: keep confirmed, drop stale */
         for (let i = 0; i < existingLen; i += 2) {
             let dep = /** @type {Sender} */(deps[i]);
             let slot = /** @type {number} */(deps[i + 1]);
             if (dep._version === version) {
-                /** Reused -- compact into write position */
+                /** Reused — compact into write position */
                 if (write !== i) {
                     deps[write] = dep;
                     deps[write + 1] = slot;
-                    /**
-                     * Patch back-reference: update depslot stored in sender._subs.
-                     * +1 because dep1 occupies depslot 0, deps[0] occupies depslot 1, etc.
-                     */
                     let newDepslot = write / 2 + 1;
                     if (slot === 0) {
                         dep._sub1slot = newDepslot;
@@ -2580,28 +2587,18 @@ function pruneDeps(node, version, depCount) {
                 }
                 write += 2;
             } else {
-                /** Dropped -- unbind */
+                /** Dropped — unbind */
                 clearReceiver(dep, slot);
-            }
-            /** Restore vstack inline regardless of keep/drop */
-            if (dep._vstack !== null && dep._vstack.length > 0) {
-                dep._version = dep._vstack.pop();
-                if (dep._vstack.length === 0) {
-                    dep._vstack = null;
-                }
             }
         }
 
-        /** Append new deps (pushed beyond _depCount during fn()) */
+        /** Append new deps (pushed beyond depCount during fn()) */
         for (let i = existingLen; i < totalLen; i += 2) {
             if (write !== i) {
                 let dep = /** @type {Sender} */(deps[i]);
                 let slot = /** @type {number} */(deps[i + 1]);
                 deps[write] = dep;
                 deps[write + 1] = slot;
-                /**
-                 * Patch back-reference for the moved new dep.
-                 */
                 let newDepslot = write / 2 + 1;
                 if (slot === 0) {
                     dep._sub1slot = newDepslot;
@@ -2619,27 +2616,21 @@ function pruneDeps(node, version, depCount) {
         }
     }
 
-    /**
-     * Handle the case where dep1 was dropped but new deps were pushed.
-     * Move the first new dep from _deps to _dep1.
-     */
+    /** dep1 was dropped but new deps exist — promote first from _deps */
     if (node._dep1 === null && node._deps !== null && node._deps.length > 0) {
         let dep = /** @type {Sender} */(node._deps[0]);
         let slot = /** @type {number} */(node._deps[1]);
         node._dep1 = dep;
         node._dep1slot = slot;
-        /** Update the sender's back-reference to point to depslot 0 */
         if (slot === 0) {
             dep._sub1slot = 0;
         } else {
             dep._subs[(slot - 1) * 2 + 1] = 0;
         }
-        /** Remove the first entry from _deps and patch remaining back-refs */
         if (node._deps.length === 2) {
             node._deps = null;
         } else {
             node._deps.splice(0, 2);
-            /** Patch depslots for remaining deps in _deps */
             let dps = node._deps;
             for (let i = 0; i < dps.length; i += 2) {
                 let d = /** @type {Sender} */(dps[i]);
@@ -2674,8 +2665,8 @@ function notify(node, flag, time) {
     /** @type {Array<Receiver | number> | null} */
     let subs = node._subs;
     if (subs !== null) {
-        let len = subs.length;
-        for (let i = 0; i < len; i += 2) {
+        let count = subs.length;
+        for (let i = 0; i < count; i += 2) {
             sub = /** @type {Receiver} */(subs[i]);
             if (sub._flag & (FLAG_PENDING | FLAG_STALE)) {
                 sub._flag |= flag;
