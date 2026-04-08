@@ -400,14 +400,13 @@ function updateDynamic(time) {
      * can confirm them with a single comparison.
      */
     let depCount = 0;
+    let saveStart = VCOUNT;
     let dep1 = this._dep1;
     if (dep1 !== null) {
         if (this._flag & FLAG_BOUND) {
             dep1._version = version;
         } else {
-            if (prescanDep(dep1, version)) {
-                return updateDynamicVersion.call(this, version, prevVersion, 1);
-            }
+            prescanDep(dep1, version);
         }
         depCount = 1;
     }
@@ -415,49 +414,17 @@ function updateDynamic(time) {
     if (deps !== null) {
         let len = deps.length;
         for (let i = 0; i < len; i += 2) {
-            if (prescanDep(/** @type {Sender} */(deps[i]), version)) {
-                return updateDynamicVersion.call(this, version, prevVersion, depCount + i / 2 + 1);
-            }
+            prescanDep(/** @type {Sender} */(deps[i]), version);
         }
         depCount += len / 2;
     }
 
-    let value = this._fn(this, this._value, this._args);
-    pruneDeps(this, version, depCount);
-    this._version = prevVersion;
-    return value;
-}
-
-/**
- * Slow path for dynamic execution when a version conflict was
- * detected at dep index `depCount` during prescan. Continues
- * prescanning from where updateDynamic stopped, runs fn(), then
- * restores VSTACK entries in a finally block.
- * @param {number} version
- * @param {number} depCount - number of deps already prescanned
- * @returns {*}
- */
-function updateDynamicVersion(version, prevVersion, depCount) {
-    let saveStart = VCOUNT;
-    /**
-     * Continue prescanning remaining deps that updateDynamic
-     * didn't reach. The dep that triggered the conflict was
-     * already saved by prescanDep before we got here.
-     */
-    let deps = this._deps;
-    if (deps !== null) {
-        let startIdx = depCount > 1 ? (depCount - 1) * 2 : 0;
-        let len = deps.length;
-        for (let i = startIdx; i < len; i += 2) {
-            prescanDep(/** @type {Sender} */(deps[i]), version);
-        }
-        depCount += (len - startIdx) / 2;
-    }
     let value;
     try {
         value = this._fn(this, this._value, this._args);
     } finally {
         pruneDeps(this, version, depCount);
+        /** Restore any saved version tags from VSTACK */
         for (let i = VCOUNT - 2; i >= saveStart; i -= 2) {
             VSTACK[i]._version = VSTACK[i + 1];
         }
@@ -474,108 +441,73 @@ function updateDynamicVersion(version, prevVersion, depCount) {
  * @param {Effect} node
  * @returns {void}
  */
-function updateEffectSetup(node) {
-    let prevVersion = node._version;
+function updateEffectSetup() {
+    let prevVersion = this._version;
     let version = CLOCK._version += 2;
-    node._version = version;
+    this._version = version;
 
-    let value = node._fn(node, node._args);
+    let value = this._fn(this, this._args);
 
-    node._version = prevVersion;
+    this._version = prevVersion;
+    this._flag &= ~FLAG_SETUP;
 
-    /** Clear FLAG_SETUP after first run */
-    node._flag &= ~FLAG_SETUP;
-
-    /** Transition update function for future runs */
-    if (node._flag & FLAG_STABLE) {
-        node._update = updateEffectStable;
+    if (this._flag & FLAG_STABLE) {
+        this._update = updateEffectStable;
     } else {
-        node._update = updateEffectDynamic;
+        this._update = updateEffectDynamic;
     }
-
     return value;
 }
 
 /**
  * Stable re-execution path for effects.
- * @param {Effect} node
  * @returns {*}
  */
-function updateEffectStable(node) {
-    node._flag |= FLAG_RUNNING;
-    return node._fn(node, node._args);
+function updateEffectStable() {
+    this._flag |= FLAG_RUNNING;
+    return this._fn(this, this._args);
 }
 
 /**
  * Dynamic re-execution path for effects.
- * @param {Effect} node
  * @returns {*}
  */
-function updateEffectDynamic(node) {
-    let prevVersion = node._version;
+function updateEffectDynamic() {
+    let prevVersion = this._version;
     let version = CLOCK._version += 2;
-    node._version = version;
+    this._version = version;
 
     let depCount = 0;
-    let dep1 = node._dep1;
+    let saveStart = VCOUNT;
+    let dep1 = this._dep1;
     if (dep1 !== null) {
-        if (node._flag & FLAG_BOUND) {
+        if (this._flag & FLAG_BOUND) {
             dep1._version = version;
         } else {
-            if (prescanDep(dep1, version)) {
-                return updateEffectDynamicVersion(node, version, prevVersion, 1);
-            }
+            prescanDep(dep1, version);
         }
         depCount = 1;
     }
-    let deps = node._deps;
+    let deps = this._deps;
     if (deps !== null) {
         let len = deps.length;
         for (let i = 0; i < len; i += 2) {
-            if (prescanDep(/** @type {Sender} */(deps[i]), version)) {
-                return updateEffectDynamicVersion(node, version, prevVersion, depCount + i / 2 + 1);
-            }
+            prescanDep(/** @type {Sender} */(deps[i]), version);
         }
         depCount += len / 2;
     }
 
-    node._flag |= FLAG_RUNNING;
-    let value = node._fn(node, node._args);
-    pruneDeps(node, version, depCount);
-    node._version = prevVersion;
-    return value;
-}
-
-/**
- * Slow path for effect dynamic execution with version conflicts.
- * @param {Effect} node
- * @param {number} version
- * @param {number} prevVersion
- * @param {number} depCount
- * @returns {*}
- */
-function updateEffectDynamicVersion(node, version, prevVersion, depCount) {
-    let saveStart = VCOUNT;
-    let deps = node._deps;
-    if (deps !== null) {
-        let startIdx = depCount > 1 ? (depCount - 1) * 2 : 0;
-        let len = deps.length;
-        for (let i = startIdx; i < len; i += 2) {
-            prescanDep(/** @type {Sender} */(deps[i]), version);
-        }
-        depCount += (len - startIdx) / 2;
-    }
-    node._flag |= FLAG_RUNNING;
+    this._flag |= FLAG_RUNNING;
     let value;
     try {
-        value = node._fn(node, node._args);
+        value = this._fn(this, this._args);
     } finally {
-        pruneDeps(node, version, depCount);
+        pruneDeps(this, version, depCount);
         for (let i = VCOUNT - 2; i >= saveStart; i -= 2) {
             VSTACK[i]._version = VSTACK[i + 1];
         }
         VCOUNT = saveStart;
-        node._version = prevVersion;
+        this._version = prevVersion;
     }
     return value;
 }
@@ -1809,7 +1741,7 @@ function Effect(opts, fn, dep1, args) {
             CLOCK._state |= STATE_OWNER | STATE_SCOPE;
         }
         try {
-            value = this._update(this);
+            value = this._update();
         } finally {
             CLOCK._state = state;
             CLOCK._scope = scope;
@@ -2512,21 +2444,16 @@ function read(sender) {
         }
     } else {
         /**
-         * DYNAMIC path: push new dep directly beyond _depCount region.
-         * No OVERFLOW needed -- just append to _deps and subscribe
-         * immediately.
+         * DYNAMIC path: push new dep with slot 0 (unsubscribed).
+         * pruneDeps will handle subscription after fn() returns.
          */
         if (this._dep1 === null) {
             this._dep1 = sender;
-            let subslot = subscribe(sender, this, 0);
-            this._dep1slot = subslot;
         } else {
-            let depslot = this._deps === null ? 1 : this._deps.length / 2 + 1;
-            let subslot = subscribe(sender, this, depslot);
             if (this._deps === null) {
-                this._deps = [sender, subslot];
+                this._deps = [sender, 0];
             } else {
-                this._deps.push(sender, subslot);
+                this._deps.push(sender, 0);
             }
         }
     }
@@ -2555,60 +2482,91 @@ function read(sender) {
 function pruneDeps(node, version, depCount) {
     /** Handle dep1 separately */
     let dep1 = node._dep1;
+    let dep1Dropped = 0;
     if (dep1 !== null && depCount >= 1) {
         if (dep1._version !== version) {
             clearReceiver(dep1, node._dep1slot);
             node._dep1 = null;
             node._dep1slot = 0;
+            dep1Dropped = 1;
         }
     }
 
     let deps = node._deps;
-    if (deps !== null) {
-        let existingLen = depCount > 1 ? (depCount - 1) * 2 : 0;
-        let totalLen = deps.length;
-        let write = 0;
-
-        /** Pass over existing deps: keep confirmed, drop stale */
-        for (let i = 0; i < existingLen; i += 2) {
-            let dep = /** @type {Sender} */(deps[i]);
-            let slot = /** @type {number} */(deps[i + 1]);
-            if (dep._version === version) {
-                /** Reused — compact into write position */
-                if (write !== i) {
-                    deps[write] = dep;
-                    deps[write + 1] = slot;
-                    let newDepslot = write / 2 + 1;
-                    if (slot === 0) {
-                        dep._sub1slot = newDepslot;
-                    } else {
-                        dep._subs[(slot - 1) * 2 + 1] = newDepslot;
-                    }
-                }
-                write += 2;
-            } else {
-                /** Dropped — unbind */
-                clearReceiver(dep, slot);
-            }
+    if (deps === null) {
+        /**
+         * No _deps array. If dep1 was dropped and a new dep was
+         * pushed to dep1 slot (by _read), subscribe it now.
+         */
+        if (dep1Dropped && node._dep1 !== null) {
+            node._dep1slot = subscribe(node._dep1, node, 0);
         }
+        return;
+    }
 
-        /** Append new deps (pushed beyond depCount during fn()) */
-        for (let i = existingLen; i < totalLen; i += 2) {
+    let existingLen = depCount > 1 ? (depCount - 1) * 2 : 0;
+    let totalLen = deps.length;
+    let newStart = existingLen;
+    let newEnd = totalLen;
+    let removed = 0;
+
+    /**
+     * Single pass over existing deps. When a dep is dropped,
+     * fill its slot with a new dep popped from the tail of the
+     * new-deps region. If no new deps remain, pop the last
+     * kept existing dep into the hole.
+     */
+    let write = 0;
+    for (let i = 0; i < existingLen; i += 2) {
+        let dep = /** @type {Sender} */(deps[i]);
+        let slot = /** @type {number} */(deps[i + 1]);
+        if (dep._version === version) {
+            /** Reused — keep at write position */
             if (write !== i) {
-                let dep = /** @type {Sender} */(deps[i]);
-                let slot = /** @type {number} */(deps[i + 1]);
                 deps[write] = dep;
                 deps[write + 1] = slot;
-                let newDepslot = write / 2 + 1;
+                let depslot = write / 2 + 1;
                 if (slot === 0) {
-                    dep._sub1slot = newDepslot;
+                    dep._sub1slot = depslot;
                 } else {
-                    dep._subs[(slot - 1) * 2 + 1] = newDepslot;
+                    dep._subs[(slot - 1) * 2 + 1] = depslot;
                 }
             }
             write += 2;
+        } else {
+            /** Dropped — unbind */
+            clearReceiver(dep, slot);
+            removed++;
         }
+    }
 
+    if (removed === 0 && newStart < newEnd) {
+        /**
+         * Fast path: all old deps kept, just subscribe new ones
+         * in the position they already occupy.
+         */
+        for (let i = newStart; i < newEnd; i += 2) {
+            let dep = /** @type {Sender} */(deps[i]);
+            let depslot = i / 2 + 1;
+            let subslot = subscribe(dep, node, depslot);
+            deps[i + 1] = subslot;
+        }
+    } else if (newStart < newEnd) {
+        /**
+         * Removed some old deps AND have new deps. Move new deps
+         * into compacted region and subscribe them.
+         */
+        for (let i = newStart; i < newEnd; i += 2) {
+            let dep = /** @type {Sender} */(deps[i]);
+            let depslot = write / 2 + 1;
+            let subslot = subscribe(dep, node, depslot);
+            deps[write] = dep;
+            deps[write + 1] = subslot;
+            write += 2;
+        }
+        deps.length = write;
+    } else {
+        /** No new deps — just trim */
         if (write === 0) {
             node._deps = null;
         } else {
@@ -2616,32 +2574,43 @@ function pruneDeps(node, version, depCount) {
         }
     }
 
-    /** dep1 was dropped but new deps exist — promote first from _deps */
-    if (node._dep1 === null && node._deps !== null && node._deps.length > 0) {
-        let dep = /** @type {Sender} */(node._deps[0]);
-        let slot = /** @type {number} */(node._deps[1]);
-        node._dep1 = dep;
-        node._dep1slot = slot;
-        if (slot === 0) {
-            dep._sub1slot = 0;
-        } else {
-            dep._subs[(slot - 1) * 2 + 1] = 0;
-        }
-        if (node._deps.length === 2) {
-            node._deps = null;
-        } else {
-            node._deps.splice(0, 2);
-            let dps = node._deps;
-            for (let i = 0; i < dps.length; i += 2) {
-                let d = /** @type {Sender} */(dps[i]);
-                let s = /** @type {number} */(dps[i + 1]);
-                let newDepslot = i / 2 + 1;
-                if (s === 0) {
-                    d._sub1slot = newDepslot;
-                } else {
-                    d._subs[(s - 1) * 2 + 1] = newDepslot;
+    /**
+     * If dep1 was dropped, promote first dep from _deps.
+     * The promoted dep is already subscribed at depslot 1,
+     * so patch its back-reference to depslot 0.
+     */
+    if (dep1Dropped) {
+        if (node._deps !== null && node._deps.length > 0) {
+            let dep = /** @type {Sender} */(node._deps[0]);
+            let slot = /** @type {number} */(node._deps[1]);
+            node._dep1 = dep;
+            node._dep1slot = slot;
+            /** Patch sender's back-ref from depslot 1 to depslot 0 */
+            if (slot === 0) {
+                dep._sub1slot = 0;
+            } else {
+                dep._subs[(slot - 1) * 2 + 1] = 0;
+            }
+            if (node._deps.length === 2) {
+                node._deps = null;
+            } else {
+                node._deps.splice(0, 2);
+                /** Patch remaining depslots */
+                let dps = node._deps;
+                for (let i = 0; i < dps.length; i += 2) {
+                    let d = /** @type {Sender} */(dps[i]);
+                    let s = /** @type {number} */(dps[i + 1]);
+                    let depslot = i / 2 + 1;
+                    if (s === 0) {
+                        d._sub1slot = depslot;
+                    } else {
+                        d._subs[(s - 1) * 2 + 1] = depslot;
+                    }
                 }
             }
+        } else if (node._dep1 !== null) {
+            /** New dep was pushed directly to dep1 by _read */
+            node._dep1slot = subscribe(node._dep1, node, 0);
         }
     }
 }
