@@ -316,33 +316,16 @@ function countDeps(node) {
 }
 
 /**
- * Pre-stamps a dependency with version - 1 before fn() runs,
- * enabling _read to detect reuse with a single comparison.
- * If the dep was already tagged by another running node in this
- * execution tree (version > VER_HEAD), saves its tag to _vstack
- * so pruneDeps can restore it.
+ * Saves a conflicting version tag to the global VSTACK.
+ * Called when a dep's version > VER_HEAD during prescan or _read,
+ * meaning another running node in this execution tree tagged it.
  * @param {Sender} dep
- * @param {number} version
+ * @param {number} v - the conflicting version to save
  * @returns {void}
  */
-/**
- * Pre-stamps a dependency with version - 1 before fn() runs.
- * Returns 0 if no conflict, 1 if a version conflict was detected
- * (dep was already tagged by another running node this tree).
- * @param {Sender} dep
- * @param {number} version
- * @returns {number}
- */
-function prescanDep(dep, version) {
-    let v = dep._version;
-    dep._version = version - 1;
-    if (v > VER_HEAD) {
-        /** Conflict: save [sender, version] to global VSTACK */
-        VSTACK[VCOUNT++] = dep;
-        VSTACK[VCOUNT++] = v;
-        return 1;
-    }
-    return 0;
+function vstackSave(dep, v) {
+    VSTACK[VCOUNT++] = dep;
+    VSTACK[VCOUNT++] = v;
 }
 
 /**
@@ -414,12 +397,10 @@ function updateEffectBound() {
 function updateDynamic(time) {
     let prevVersion = this._version;
     let version = CLOCK._version += 2;
+    let stamp = version - 1;
     this._version = version;
 
-    /**
-     * Prescan all existing deps with version - 1 so _read
-     * can confirm them with a single comparison.
-     */
+    /** Inline prescan: stamp existing deps with version - 1 */
     let depCount = 0;
     let saveStart = VCOUNT;
     let dep1 = this._dep1;
@@ -427,29 +408,47 @@ function updateDynamic(time) {
         if (this._flag & FLAG_BOUND) {
             dep1._version = version;
         } else {
-            prescanDep(dep1, version);
+            let v = dep1._version;
+            if (v > VER_HEAD) {
+                vstackSave(dep1, v);
+            }
+            dep1._version = stamp;
         }
         depCount = 1;
     }
     let deps = this._deps;
+    let depsLen = 0;
     if (deps !== null) {
-        let len = deps.length;
-        for (let i = 0; i < len; i += 2) {
-            prescanDep(/** @type {Sender} */(deps[i]), version);
+        depsLen = deps.length;
+        for (let i = 0; i < depsLen; i += 2) {
+            let dep = /** @type {Sender} */(deps[i]);
+            let v = dep._version;
+            if (v > VER_HEAD) {
+                vstackSave(dep, v);
+            }
+            dep._version = stamp;
         }
-        depCount += len / 2;
+        depCount += depsLen / 2;
     }
 
+    let prevReused = REUSED;
+    REUSED = 0;
     let value;
     try {
         value = this._fn(this, this._value, this._args);
     } finally {
-        pruneDeps(this, version, depCount);
-        /** Restore any saved version tags from VSTACK */
-        for (let i = VCOUNT - 2; i >= saveStart; i -= 2) {
-            VSTACK[i]._version = VSTACK[i + 1];
+        /** Only run pruneDeps if deps actually changed */
+        if (REUSED !== depCount || this._dep1 !== dep1 || (this._deps !== null ? this._deps.length : 0) !== depsLen) {
+            pruneDeps(this, version, depCount);
         }
-        VCOUNT = saveStart;
+        /** Restore any saved version tags from VSTACK */
+        if (VCOUNT > saveStart) {
+            for (let i = VCOUNT - 2; i >= saveStart; i -= 2) {
+                VSTACK[i]._version = VSTACK[i + 1];
+            }
+            VCOUNT = saveStart;
+        }
+        REUSED = prevReused;
         this._version = prevVersion;
     }
     return value;
@@ -496,6 +495,7 @@ function updateEffectStable() {
 function updateEffectDynamic() {
     let prevVersion = this._version;
     let version = CLOCK._version += 2;
+    let stamp = version - 1;
     this._version = version;
 
     let depCount = 0;
@@ -505,29 +505,46 @@ function updateEffectDynamic() {
         if (this._flag & FLAG_BOUND) {
             dep1._version = version;
         } else {
-            prescanDep(dep1, version);
+            let v = dep1._version;
+            if (v > VER_HEAD) {
+                vstackSave(dep1, v);
+            }
+            dep1._version = stamp;
         }
         depCount = 1;
     }
     let deps = this._deps;
+    let depsLen = 0;
     if (deps !== null) {
-        let len = deps.length;
-        for (let i = 0; i < len; i += 2) {
-            prescanDep(/** @type {Sender} */(deps[i]), version);
+        depsLen = deps.length;
+        for (let i = 0; i < depsLen; i += 2) {
+            let dep = /** @type {Sender} */(deps[i]);
+            let v = dep._version;
+            if (v > VER_HEAD) {
+                vstackSave(dep, v);
+            }
+            dep._version = stamp;
         }
-        depCount += len / 2;
+        depCount += depsLen / 2;
     }
 
     this._flag |= FLAG_RUNNING;
+    let prevReused = REUSED;
+    REUSED = 0;
     let value;
     try {
         value = this._fn(this, this._args);
     } finally {
-        pruneDeps(this, version, depCount);
-        for (let i = VCOUNT - 2; i >= saveStart; i -= 2) {
-            VSTACK[i]._version = VSTACK[i + 1];
+        if (REUSED !== depCount || this._dep1 !== dep1 || (this._deps !== null ? this._deps.length : 0) !== depsLen) {
+            pruneDeps(this, version, depCount);
         }
-        VCOUNT = saveStart;
+        if (VCOUNT > saveStart) {
+            for (let i = VCOUNT - 2; i >= saveStart; i -= 2) {
+                VSTACK[i]._version = VSTACK[i + 1];
+            }
+            VCOUNT = saveStart;
+        }
+        REUSED = prevReused;
         this._version = prevVersion;
     }
     return value;
@@ -1307,32 +1324,30 @@ function Compute(opts, fn, dep1, seed, args, update) {
      * @returns {T}
      */
     ComputeProto.val = function () {
-        let clock = CLOCK;
-        let time = clock._time;
         let opts = this._flag;
         if (opts & FLAG_RUNNING) {
             throw new Error('Circular dependency');
         }
         if (opts & (FLAG_STALE | FLAG_PENDING)) {
-            if (clock._state & STATE_IDLE) {
-                clock._state &= RESET;
+            if (CLOCK._state & STATE_IDLE) {
+                CLOCK._state &= RESET;
                 try {
                     if (opts & FLAG_STALE) {
-                        this._run(time);
+                        this._run(CLOCK._time);
                     } else {
-                        checkRun(this, time);
+                        checkRun(this, CLOCK._time);
                     }
-                    if (clock._signals > 0 || clock._disposes > 0) {
-                        start(clock);
+                    if (CLOCK._signals > 0 || CLOCK._disposes > 0) {
+                        start(CLOCK);
                     }
                 } finally {
-                    clock._state = STATE_IDLE;
+                    CLOCK._state = STATE_IDLE;
                 }
             } else {
                 if (opts & FLAG_STALE) {
-                    this._run(time);
+                    this._run(CLOCK._time);
                 } else {
-                    checkRun(this, time);
+                    checkRun(this, CLOCK._time);
                 }
             }
         }
@@ -1549,8 +1564,8 @@ function checkRun(node, time) {
         }
     }
     /** No dep changed -- clear flags without re-executing */
-    node._flag &= ~(FLAG_STALE | FLAG_PENDING);
     node._time = time;
+    node._flag &= ~(FLAG_STALE | FLAG_PENDING);
 }
 
 /**
@@ -1765,11 +1780,11 @@ function Effect(opts, fn, dep1, args, update) {
         try {
             value = this._update();
         } finally {
+            this._time = time;
+            this._flag &= ~(FLAG_RUNNING | FLAG_STALE | FLAG_PENDING | FLAG_INIT | FLAG_SETUP);
             CLOCK._state = state;
             CLOCK._scope = scope;
         }
-        this._time = time;
-        this._flag &= ~(FLAG_RUNNING | FLAG_STALE | FLAG_PENDING | FLAG_INIT);
         if (opts & (FLAG_ASYNC | FLAG_STREAM)) {
             this._flag |= FLAG_LOADING;
             if (opts & FLAG_STREAM) {
@@ -1888,8 +1903,7 @@ function startEffect(node) {
     let state = clock._state;
     try {
         VER_HEAD = clock._version;
-        node._run();
-        node._time = clock._time;
+        node._run(clock._time);
         if (clock._signals > 0 || clock._disposes > 0) {
             start(clock);
         }
@@ -2094,7 +2108,7 @@ function start(clock) {
                         if ((node._flag & FLAG_STALE) || ((node._flag & FLAG_PENDING) && needsUpdate(node, time))) {
                             VER_HEAD = clock._version;
                             try {
-                                node._run();
+                                node._run(time);
                             } catch (err) {
                                 clock._state = STATE_START;
                                 let recovered = tryRecover(node, err);
@@ -2107,7 +2121,6 @@ function start(clock) {
                         } else {
                             node._flag &= ~(FLAG_STALE | FLAG_PENDING);
                         }
-                        node._time = time;
                         effects[j] = null;
                     }
                     levels[i] = 0;
@@ -2438,8 +2451,7 @@ function read(sender) {
      * tree. Save [sender, version] to global VSTACK for restoration.
      */
     if (v > VER_HEAD) {
-        VSTACK[VCOUNT++] = sender;
-        VSTACK[VCOUNT++] = v;
+        vstackSave(sender, v);
     }
 
     /** New dep (or cold sender): stamp and subscribe */
