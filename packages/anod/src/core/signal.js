@@ -1141,91 +1141,91 @@ function Compute(opts, fn, dep1, seed, args) {
     };
 
     /**
-     * Unified update method. Handles all execution modes inline:
-     * async (delegates to _updateAsync), bound, stable, setup, and dynamic.
+     * Unified update method. Two top-level branches:
+     * 1. Stable/bound — simple try/catch, no version tracking
+     * 2. Setup/dynamic — version bump, optional prescan, VSTACK restore
+     * Async nodes delegate to _updateAsync before branching.
      * @param {number} time
      */
     ComputeProto._update = function (time) {
         let flag = this._flag;
         this._flag = (flag & ~(FLAG_STALE | FLAG_INIT | FLAG_EQUAL | FLAG_NOTEQUAL)) | FLAG_RUNNING;
 
-        /** Async nodes delegate to a dedicated method */
         if (flag & (FLAG_ASYNC | FLAG_STREAM)) {
             return this._updateAsync(time);
         }
 
         let value;
-        try {
-            if (flag & FLAG_BOUND) {
-                /** Bound single-dep: skip read() indirection entirely */
-                value = this._fn(this._dep1.val(), this._value, this._args);
-            } else if ((flag & (FLAG_STABLE | FLAG_SETUP)) === FLAG_STABLE) {
-                /** Stable post-setup: no version bumping, no tracking */
-                value = this._fn(this, this._value, this._args);
-            } else {
-                /** Setup or dynamic: bump version for dep tracking */
-                let prevVersion = this._version;
-                let version = CLOCK._version += 2;
-                this._version = version;
+        if ((flag & (FLAG_STABLE | FLAG_SETUP)) === FLAG_STABLE) {
+            /** Stable or bound: no version tracking, no dep management */
+            try {
+                value = (flag & FLAG_BOUND)
+                    ? this._fn(this._dep1.val(), this._value, this._args)
+                    : this._fn(this, this._value, this._args);
+                this._flag &= ~FLAG_ERROR;
+            } catch (err) {
+                value = err;
+                this._flag |= FLAG_ERROR;
+            }
+        } else {
+            /** Setup or dynamic: bump version for dep tracking */
+            let prevVersion = this._version;
+            let version = CLOCK._version += 2;
+            this._version = version;
+            let saveStart = VCOUNT;
+            let depCount = 0;
+            let dep1 = this._dep1;
+            let depsLen = 0;
+            let prevReused = REUSED;
 
-                if (flag & FLAG_SETUP) {
-                    /** Setup: deps are tracked via read() directly */
-                    value = this._fn(this, this._value, this._args);
-                    this._version = prevVersion;
-                } else {
-                    /** Dynamic: prescan existing deps, reconcile after fn() */
-                    let stamp = version - 1;
-                    let depCount = 0;
-                    let saveStart = VCOUNT;
-                    let dep1 = this._dep1;
-                    if (dep1 !== null) {
-                        let v = dep1._version;
+            if (!(flag & FLAG_SETUP)) {
+                /** Dynamic: prescan existing deps with version - 1 */
+                REUSED = 0;
+                let stamp = version - 1;
+                if (dep1 !== null) {
+                    let v = dep1._version;
+                    if (v > VER_HEAD) {
+                        vstackSave(dep1, v);
+                    }
+                    dep1._version = stamp;
+                    depCount = 1;
+                }
+                let deps = this._deps;
+                if (deps !== null) {
+                    depsLen = deps.length;
+                    for (let i = 0; i < depsLen; i += 2) {
+                        let dep = /** @type {Sender} */(deps[i]);
+                        let v = dep._version;
                         if (v > VER_HEAD) {
-                            vstackSave(dep1, v);
+                            vstackSave(dep, v);
                         }
-                        dep1._version = stamp;
-                        depCount = 1;
+                        dep._version = stamp;
                     }
-                    let deps = this._deps;
-                    let depsLen = 0;
-                    if (deps !== null) {
-                        depsLen = deps.length;
-                        for (let i = 0; i < depsLen; i += 2) {
-                            let dep = /** @type {Sender} */(deps[i]);
-                            let v = dep._version;
-                            if (v > VER_HEAD) {
-                                vstackSave(dep, v);
-                            }
-                            dep._version = stamp;
-                        }
-                        depCount += depsLen / 2;
-                    }
-
-                    let prevReused = REUSED;
-                    REUSED = 0;
-                    try {
-                        value = this._fn(this, this._value, this._args);
-                    } finally {
-                        /** Only run pruneDeps if deps actually changed */
-                        if (REUSED !== depCount || this._dep1 !== dep1 || (this._deps !== null ? this._deps.length : 0) !== depsLen) {
-                            pruneDeps(this, version, depCount);
-                        }
-                        /** Restore any saved version tags from VSTACK */
-                        if (VCOUNT > saveStart) {
-                            for (let i = VCOUNT - 2; i >= saveStart; i -= 2) {
-                                VSTACK[i]._version = VSTACK[i + 1];
-                            }
-                            VCOUNT = saveStart;
-                        }
-                        REUSED = prevReused;
-                        this._version = prevVersion;
-                    }
+                    depCount += depsLen / 2;
                 }
             }
-            this._flag &= ~FLAG_ERROR;
-        } catch (err) {
-            value = err;
-            this._flag |= FLAG_ERROR;
+
+            try {
+                value = this._fn(this, this._value, this._args);
+                this._flag &= ~FLAG_ERROR;
+            } catch (err) {
+                value = err;
+                this._flag |= FLAG_ERROR;
+            }
+
+            /** Reconcile deps (dynamic only) */
+            if (!(flag & FLAG_SETUP) && (REUSED !== depCount || this._dep1 !== dep1 || (this._deps !== null ? this._deps.length : 0) !== depsLen)) {
+                pruneDeps(this, version, depCount);
+            }
+            REUSED = prevReused;
+            /** Restore saved version tags from VSTACK (both setup and dynamic) */
+            if (VCOUNT > saveStart) {
+                for (let i = VCOUNT - 2; i >= saveStart; i -= 2) {
+                    VSTACK[i]._version = VSTACK[i + 1];
+                }
+                VCOUNT = saveStart;
+            }
+            this._version = prevVersion;
         }
 
         flag = this._flag;
@@ -1239,85 +1239,84 @@ function Compute(opts, fn, dep1, seed, args) {
             if (!(flag & FLAG_EQUAL)) {
                 this._ctime = time;
             }
-        } else if (flag & FLAG_NOTEQUAL) {
-            this._ctime = time;
-        } else if (flag & FLAG_TRANSMIT) {
+        } else if (flag & (FLAG_NOTEQUAL | FLAG_TRANSMIT)) {
             this._ctime = time;
         }
     };
 
     /**
-     * Async update path. Handles bound/stable/setup/dynamic branching
-     * with async-specific post-processing (resolvePromise/resolveIterator).
+     * Async update path. Same two-branch structure as _update but with
+     * async post-processing (resolvePromise/resolveIterator).
      * @param {number} time
      */
     ComputeProto._updateAsync = function (time) {
         let flag = this._flag;
         let value;
-        try {
-            if (flag & FLAG_BOUND) {
-                value = this._fn(this._dep1.val(), this._value, this._args);
-            } else if ((flag & (FLAG_STABLE | FLAG_SETUP)) === FLAG_STABLE) {
-                value = this._fn(this, this._value, this._args);
-            } else {
-                let prevVersion = this._version;
-                let version = CLOCK._version += 2;
-                this._version = version;
+        if ((flag & (FLAG_STABLE | FLAG_SETUP)) === FLAG_STABLE) {
+            try {
+                value = (flag & FLAG_BOUND)
+                    ? this._fn(this._dep1.val(), this._value, this._args)
+                    : this._fn(this, this._value, this._args);
+                this._flag &= ~FLAG_ERROR;
+            } catch (err) {
+                value = err;
+                this._flag |= FLAG_ERROR;
+            }
+        } else {
+            let prevVersion = this._version;
+            let version = CLOCK._version += 2;
+            this._version = version;
+            let saveStart = VCOUNT;
+            let depCount = 0;
+            let dep1 = this._dep1;
+            let depsLen = 0;
+            let prevReused = REUSED;
 
-                if (flag & FLAG_SETUP) {
-                    value = this._fn(this, this._value, this._args);
-                    this._version = prevVersion;
-                } else {
-                    let stamp = version - 1;
-                    let depCount = 0;
-                    let saveStart = VCOUNT;
-                    let dep1 = this._dep1;
-                    if (dep1 !== null) {
-                        let v = dep1._version;
+            if (!(flag & FLAG_SETUP)) {
+                REUSED = 0;
+                let stamp = version - 1;
+                if (dep1 !== null) {
+                    let v = dep1._version;
+                    if (v > VER_HEAD) {
+                        vstackSave(dep1, v);
+                    }
+                    dep1._version = stamp;
+                    depCount = 1;
+                }
+                let deps = this._deps;
+                if (deps !== null) {
+                    depsLen = deps.length;
+                    for (let i = 0; i < depsLen; i += 2) {
+                        let dep = /** @type {Sender} */(deps[i]);
+                        let v = dep._version;
                         if (v > VER_HEAD) {
-                            vstackSave(dep1, v);
+                            vstackSave(dep, v);
                         }
-                        dep1._version = stamp;
-                        depCount = 1;
+                        dep._version = stamp;
                     }
-                    let deps = this._deps;
-                    let depsLen = 0;
-                    if (deps !== null) {
-                        depsLen = deps.length;
-                        for (let i = 0; i < depsLen; i += 2) {
-                            let dep = /** @type {Sender} */(deps[i]);
-                            let v = dep._version;
-                            if (v > VER_HEAD) {
-                                vstackSave(dep, v);
-                            }
-                            dep._version = stamp;
-                        }
-                        depCount += depsLen / 2;
-                    }
-
-                    let prevReused = REUSED;
-                    REUSED = 0;
-                    try {
-                        value = this._fn(this, this._value, this._args);
-                    } finally {
-                        if (REUSED !== depCount || this._dep1 !== dep1 || (this._deps !== null ? this._deps.length : 0) !== depsLen) {
-                            pruneDeps(this, version, depCount);
-                        }
-                        if (VCOUNT > saveStart) {
-                            for (let i = VCOUNT - 2; i >= saveStart; i -= 2) {
-                                VSTACK[i]._version = VSTACK[i + 1];
-                            }
-                            VCOUNT = saveStart;
-                        }
-                        REUSED = prevReused;
-                        this._version = prevVersion;
-                    }
+                    depCount += depsLen / 2;
                 }
             }
-            this._flag &= ~FLAG_ERROR;
-        } catch (err) {
-            value = err;
-            this._flag |= FLAG_ERROR;
+
+            try {
+                value = this._fn(this, this._value, this._args);
+                this._flag &= ~FLAG_ERROR;
+            } catch (err) {
+                value = err;
+                this._flag |= FLAG_ERROR;
+            }
+
+            if (!(flag & FLAG_SETUP) && (REUSED !== depCount || this._dep1 !== dep1 || (this._deps !== null ? this._deps.length : 0) !== depsLen)) {
+                pruneDeps(this, version, depCount);
+            }
+            REUSED = prevReused;
+            if (VCOUNT > saveStart) {
+                for (let i = VCOUNT - 2; i >= saveStart; i -= 2) {
+                    VSTACK[i]._version = VSTACK[i + 1];
+                }
+                VCOUNT = saveStart;
+            }
+            this._version = prevVersion;
         }
 
         flag = this._flag;
@@ -1674,9 +1673,11 @@ function Effect(opts, fn, dep1, args) {
     EffectProto.loading = loading;
 
     /**
-     * Unified update method for effects. Handles pre-execution cleanup,
-     * scope save/restore, and all execution modes inline: async (delegates
-     * to _updateAsync), bound, stable, setup, and dynamic.
+     * Unified update method for effects. Two top-level branches:
+     * 1. Stable/bound — set FLAG_RUNNING, call fn, restore state
+     * 2. Setup/dynamic — version bump, optional prescan, VSTACK restore
+     * Pre-execution cleanup and scope save happen before branching.
+     * Async nodes delegate to _updateAsync before state modification.
      * @param {number} time
      */
     EffectProto._update = function (time) {
@@ -1685,6 +1686,11 @@ function Effect(opts, fn, dep1, args) {
         /** Pre-execution cleanup for non-setup runs */
         if (!(flag & FLAG_SETUP) && ((flag & FLAG_SCOPE) || this._cleanup !== null)) {
             clearOwned(this);
+        }
+
+        /** Async nodes delegate before modifying CLOCK state */
+        if (flag & (FLAG_ASYNC | FLAG_STREAM)) {
+            return this._updateAsync(time);
         }
 
         /** @type {(function(): void) | null | undefined} */
@@ -1697,84 +1703,79 @@ function Effect(opts, fn, dep1, args) {
             CLOCK._state |= STATE_OWNER | STATE_SCOPE;
         }
 
-        /** Async nodes delegate to a dedicated method */
-        if (flag & (FLAG_ASYNC | FLAG_STREAM)) {
-            return this._updateAsync(time);
-        }
+        if ((flag & (FLAG_STABLE | FLAG_SETUP)) === FLAG_STABLE) {
+            /** Stable or bound: no version tracking, no dep management */
+            this._flag |= FLAG_RUNNING;
+            try {
+                value = (flag & FLAG_BOUND)
+                    ? this._fn(this._dep1.val(), this._args)
+                    : this._fn(this, this._args);
+            } finally {
+                this._time = time;
+                this._flag &= ~(FLAG_RUNNING | FLAG_STALE | FLAG_PENDING);
+                CLOCK._state = state;
+                CLOCK._scope = scope;
+            }
+        } else {
+            /** Setup or dynamic: bump version for dep tracking */
+            let prevVersion = this._version;
+            let version = CLOCK._version += 2;
+            this._version = version;
+            let saveStart = VCOUNT;
+            let depCount = 0;
+            let dep1 = this._dep1;
+            let depsLen = 0;
+            let prevReused = REUSED;
 
-        try {
-            if (flag & FLAG_BOUND) {
-                /** Bound single-dep: skip read() indirection entirely */
+            if (!(flag & FLAG_SETUP)) {
+                /** Dynamic: prescan existing deps with version - 1 */
                 this._flag |= FLAG_RUNNING;
-                value = this._fn(this._dep1.val(), this._args);
-            } else if ((flag & (FLAG_STABLE | FLAG_SETUP)) === FLAG_STABLE) {
-                /** Stable post-setup: no version bumping, no tracking */
-                this._flag |= FLAG_RUNNING;
-                value = this._fn(this, this._args);
-            } else {
-                /** Setup or dynamic: bump version for dep tracking */
-                let prevVersion = this._version;
-                let version = CLOCK._version += 2;
-                this._version = version;
-
-                if (flag & FLAG_SETUP) {
-                    /** Setup: deps are tracked via read() directly, no FLAG_RUNNING */
-                    value = this._fn(this, this._args);
-                    this._version = prevVersion;
-                } else {
-                    /** Dynamic: prescan existing deps, reconcile after fn() */
-                    this._flag |= FLAG_RUNNING;
-                    let stamp = version - 1;
-                    let depCount = 0;
-                    let saveStart = VCOUNT;
-                    let dep1 = this._dep1;
-                    if (dep1 !== null) {
-                        let v = dep1._version;
+                REUSED = 0;
+                let stamp = version - 1;
+                if (dep1 !== null) {
+                    let v = dep1._version;
+                    if (v > VER_HEAD) {
+                        vstackSave(dep1, v);
+                    }
+                    dep1._version = stamp;
+                    depCount = 1;
+                }
+                let deps = this._deps;
+                if (deps !== null) {
+                    depsLen = deps.length;
+                    for (let i = 0; i < depsLen; i += 2) {
+                        let dep = /** @type {Sender} */(deps[i]);
+                        let v = dep._version;
                         if (v > VER_HEAD) {
-                            vstackSave(dep1, v);
+                            vstackSave(dep, v);
                         }
-                        dep1._version = stamp;
-                        depCount = 1;
+                        dep._version = stamp;
                     }
-                    let deps = this._deps;
-                    let depsLen = 0;
-                    if (deps !== null) {
-                        depsLen = deps.length;
-                        for (let i = 0; i < depsLen; i += 2) {
-                            let dep = /** @type {Sender} */(deps[i]);
-                            let v = dep._version;
-                            if (v > VER_HEAD) {
-                                vstackSave(dep, v);
-                            }
-                            dep._version = stamp;
-                        }
-                        depCount += depsLen / 2;
-                    }
-
-                    let prevReused = REUSED;
-                    REUSED = 0;
-                    try {
-                        value = this._fn(this, this._args);
-                    } finally {
-                        if (REUSED !== depCount || this._dep1 !== dep1 || (this._deps !== null ? this._deps.length : 0) !== depsLen) {
-                            pruneDeps(this, version, depCount);
-                        }
-                        if (VCOUNT > saveStart) {
-                            for (let i = VCOUNT - 2; i >= saveStart; i -= 2) {
-                                VSTACK[i]._version = VSTACK[i + 1];
-                            }
-                            VCOUNT = saveStart;
-                        }
-                        REUSED = prevReused;
-                        this._version = prevVersion;
-                    }
+                    depCount += depsLen / 2;
                 }
             }
-        } finally {
-            this._time = time;
-            this._flag &= ~(FLAG_RUNNING | FLAG_STALE | FLAG_PENDING | FLAG_INIT | FLAG_SETUP);
-            CLOCK._state = state;
-            CLOCK._scope = scope;
+
+            try {
+                value = this._fn(this, this._args);
+            } finally {
+                /** Reconcile deps (dynamic only) */
+                if (!(flag & FLAG_SETUP) && (REUSED !== depCount || this._dep1 !== dep1 || (this._deps !== null ? this._deps.length : 0) !== depsLen)) {
+                    pruneDeps(this, version, depCount);
+                }
+                REUSED = prevReused;
+                /** Restore saved version tags from VSTACK (both setup and dynamic) */
+                if (VCOUNT > saveStart) {
+                    for (let i = VCOUNT - 2; i >= saveStart; i -= 2) {
+                        VSTACK[i]._version = VSTACK[i + 1];
+                    }
+                    VCOUNT = saveStart;
+                }
+                this._version = prevVersion;
+                this._time = time;
+                this._flag &= ~(FLAG_RUNNING | FLAG_STALE | FLAG_PENDING | FLAG_INIT | FLAG_SETUP);
+                CLOCK._state = state;
+                CLOCK._scope = scope;
+            }
         }
 
         if (typeof value === 'function') {
@@ -1783,83 +1784,89 @@ function Effect(opts, fn, dep1, args) {
     };
 
     /**
-     * Async update path for effects. Handles bound/stable/setup/dynamic
-     * branching with async-specific post-processing.
+     * Async update path for effects. Same two-branch structure as _update
+     * but with async post-processing (resolveEffectPromise/resolveEffectIterator).
      * @param {number} time
      */
     EffectProto._updateAsync = function (time) {
         let flag = this._flag;
+        let value;
         let state = CLOCK._state;
         let scope = CLOCK._scope;
-        let value;
-        try {
-            if (flag & FLAG_BOUND) {
-                this._flag |= FLAG_RUNNING;
-                value = this._fn(this._dep1.val(), this._args);
-            } else if ((flag & (FLAG_STABLE | FLAG_SETUP)) === FLAG_STABLE) {
-                this._flag |= FLAG_RUNNING;
-                value = this._fn(this, this._args);
-            } else {
-                let prevVersion = this._version;
-                let version = CLOCK._version += 2;
-                this._version = version;
+        CLOCK._state &= RESET;
+        if (flag & FLAG_SCOPE) {
+            CLOCK._scope = this;
+            CLOCK._state |= STATE_OWNER | STATE_SCOPE;
+        }
 
-                if (flag & FLAG_SETUP) {
-                    value = this._fn(this, this._args);
-                    this._version = prevVersion;
-                } else {
-                    this._flag |= FLAG_RUNNING;
-                    let stamp = version - 1;
-                    let depCount = 0;
-                    let saveStart = VCOUNT;
-                    let dep1 = this._dep1;
-                    if (dep1 !== null) {
-                        let v = dep1._version;
+        if ((flag & (FLAG_STABLE | FLAG_SETUP)) === FLAG_STABLE) {
+            this._flag |= FLAG_RUNNING;
+            try {
+                value = (flag & FLAG_BOUND)
+                    ? this._fn(this._dep1.val(), this._args)
+                    : this._fn(this, this._args);
+            } finally {
+                this._time = time;
+                this._flag &= ~(FLAG_RUNNING | FLAG_STALE | FLAG_PENDING);
+                CLOCK._state = state;
+                CLOCK._scope = scope;
+            }
+        } else {
+            let prevVersion = this._version;
+            let version = CLOCK._version += 2;
+            this._version = version;
+            let saveStart = VCOUNT;
+            let depCount = 0;
+            let dep1 = this._dep1;
+            let depsLen = 0;
+            let prevReused = REUSED;
+
+            if (!(flag & FLAG_SETUP)) {
+                this._flag |= FLAG_RUNNING;
+                REUSED = 0;
+                let stamp = version - 1;
+                if (dep1 !== null) {
+                    let v = dep1._version;
+                    if (v > VER_HEAD) {
+                        vstackSave(dep1, v);
+                    }
+                    dep1._version = stamp;
+                    depCount = 1;
+                }
+                let deps = this._deps;
+                if (deps !== null) {
+                    depsLen = deps.length;
+                    for (let i = 0; i < depsLen; i += 2) {
+                        let dep = /** @type {Sender} */(deps[i]);
+                        let v = dep._version;
                         if (v > VER_HEAD) {
-                            vstackSave(dep1, v);
+                            vstackSave(dep, v);
                         }
-                        dep1._version = stamp;
-                        depCount = 1;
+                        dep._version = stamp;
                     }
-                    let deps = this._deps;
-                    let depsLen = 0;
-                    if (deps !== null) {
-                        depsLen = deps.length;
-                        for (let i = 0; i < depsLen; i += 2) {
-                            let dep = /** @type {Sender} */(deps[i]);
-                            let v = dep._version;
-                            if (v > VER_HEAD) {
-                                vstackSave(dep, v);
-                            }
-                            dep._version = stamp;
-                        }
-                        depCount += depsLen / 2;
-                    }
-
-                    let prevReused = REUSED;
-                    REUSED = 0;
-                    try {
-                        value = this._fn(this, this._args);
-                    } finally {
-                        if (REUSED !== depCount || this._dep1 !== dep1 || (this._deps !== null ? this._deps.length : 0) !== depsLen) {
-                            pruneDeps(this, version, depCount);
-                        }
-                        if (VCOUNT > saveStart) {
-                            for (let i = VCOUNT - 2; i >= saveStart; i -= 2) {
-                                VSTACK[i]._version = VSTACK[i + 1];
-                            }
-                            VCOUNT = saveStart;
-                        }
-                        REUSED = prevReused;
-                        this._version = prevVersion;
-                    }
+                    depCount += depsLen / 2;
                 }
             }
-        } finally {
-            this._time = time;
-            this._flag &= ~(FLAG_RUNNING | FLAG_STALE | FLAG_PENDING | FLAG_INIT | FLAG_SETUP);
-            CLOCK._state = state;
-            CLOCK._scope = scope;
+
+            try {
+                value = this._fn(this, this._args);
+            } finally {
+                if (!(flag & FLAG_SETUP) && (REUSED !== depCount || this._dep1 !== dep1 || (this._deps !== null ? this._deps.length : 0) !== depsLen)) {
+                    pruneDeps(this, version, depCount);
+                }
+                REUSED = prevReused;
+                if (VCOUNT > saveStart) {
+                    for (let i = VCOUNT - 2; i >= saveStart; i -= 2) {
+                        VSTACK[i]._version = VSTACK[i + 1];
+                    }
+                    VCOUNT = saveStart;
+                }
+                this._version = prevVersion;
+                this._time = time;
+                this._flag &= ~(FLAG_RUNNING | FLAG_STALE | FLAG_PENDING | FLAG_INIT | FLAG_SETUP);
+                CLOCK._state = state;
+                CLOCK._scope = scope;
+            }
         }
 
         this._flag |= FLAG_LOADING;
