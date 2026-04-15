@@ -1,158 +1,74 @@
-# Failing Tests Analysis (Round 3)
+# Failing Tests Analysis (Round 4)
 
 **Unit tests:** 59/59 pass (both src and dist)
-**Benchmarks:** `dynUpdateVeryDynamic` crashes in `_reconcile` — the only remaining failure blocking both `anod.js` and `anod-ref.js`.
-
-All other benchmarks (deep, broad, diamond, triangle, mux, unstable, avoidable, repeatedObservers, cellx10, molWire, createComputations1k, dynBuildSimple, dynBuildLargeWebApp, dynUpdateSimple, dynUpdateDynamic, dynUpdateLargeWebApp, dynUpdateWideDense, dynUpdateDeep) pass validation.
+**Benchmarks:** All validations pass. All benchmarks run clean except "Dynamic update: very dynamic" which crashes after ~25-70 iterations during the benchmark loop.
 
 ---
 
-## The Crash
+## Changes made this round
 
-```
-TypeError: Cannot read properties of null (reading '_slot')
-    at Compute._reconcile (signal.js:1536)
-```
+### 1. Sub-slot/dep-slot encoding changed from -1 to 0-based
 
-Line 1536 in `_reconcile`:
-```js
-if (deps[index]._slot === append || !(deps[index + 1] & MISSING))
-```
+**Problem:** The old encoding used `-1` for sub1/dep1. Since `-1` has all bits set, `deps[i+1] & FOUND` was true when the sub-slot was `-1`, causing the `_search` FOUND-loop to falsely trigger and corrupt the dep cursor.
 
-`deps[index]` is `null`. The `index` was stored by `_search` and points into the appended region of `deps` where a previous `_search` call had pushed a `[null, cursor]` placeholder.
+**Fix:** Both sub-slots and dep-slots now use `0` for the first position (sub1/dep1) and `n+1` for array index `n`:
+- Sub-slots: `0` = sub1, `1` = subs[0], `3` = subs[2], `5` = subs[4]... (always odd for subs)
+- Dep-slots: `0` = dep1, `1` = deps[0], `3` = deps[2], `5` = deps[4]... (always odd for deps)
 
----
+This ensures FOUND (1<<29) and MISSING (1<<30) bits never collide with valid slot values.
 
-## Root Cause: `_search` FOUND-loop advances cursor past `oldlen`
+**Files changed:** `_connect`, `_disconnect`, `_subscribe`, `_unsubscribe`, `_search`, `_reconcile` (all the dep-slot/sub-slot patching), `derive`/`watch` bound connections.
 
-**File:** `src/core/signal.js` — `_search()` (lines 1128–1175)
+### 2. oldlen stored in `_ctime` instead of `_dep1slot`
 
-### The bug in detail
+**Problem:** `_update` temporarily stored `oldlen` in `_dep1slot` for `_search` to read. But during fn execution, a nested compute's `_disconnect` could swap entries in a shared sender's subs array, triggering an update to `current._dep1slot` via the swap-with-last logic. This corrupted the temporary oldlen.
 
-`_search` has a FOUND-loop (lines 1133–1141) that skips over entries already matched by previous out-of-order reads:
+**Fix:** Renamed Effect's `_level` to `_ctime` so both Compute and Effect have the field. Store oldlen in `_ctime` during execution. `_search` reads `this._ctime` for oldlen. `_dep1slot` is never repurposed — it just holds the actual sub-slot throughout.
 
-```js
-function _search(sender) {
-    let deps = this._deps;
-    let cursor = this._time;
-    let oldlen = this._dep1slot;
-    let reuse = cursor < oldlen;          // ← computed BEFORE the FOUND loop
-    if (reuse && deps[cursor + 1] & FOUND) {
-        do {
-            deps[cursor + 1] &= ~FOUND;
-            cursor += 2;                  // ← can advance past oldlen!
-        } while (cursor < oldlen && deps[cursor + 1] & FOUND);
-        if (deps[cursor] === sender) {    // ← may read from appended region
-            this._time = cursor + 2;
-            return;
-        }
-    }
-    // ... skip-one-ahead check, slot lookup ...
-    if (reuse) {                          // ← still true (pre-loop value!)
-        this._time = cursor + 2;          // ← sets _time past oldlen
-        deps.push(sender, cursor);        // ← stores cursor pointing to appended null
-    }
-}
-```
+### 3. Reconcile fast-path guards
 
-**The sequence:**
+**Problem:** Fast paths assumed invariants that weren't always met:
+- "cursor === oldlen, new appended" path didn't check for reuse back-pointers
+- "cursor < oldlen, nothing appended" path didn't check for FOUND flags
 
-1. The FOUND-loop advances `cursor` from within the old region to exactly `oldlen` (or beyond, if all remaining old entries were FOUND-flagged).
+**Fix:** Added validation loops to fall through to the complex path when invariants are violated.
 
-2. `reuse` was computed as `true` before the loop ran (original cursor was < oldlen). It's never re-checked.
+### 4. FOUND-loop cursor overflow guard in `_search`
 
-3. The sender isn't found via skip-one-ahead (bounds check fails since cursor is at/past oldlen) or via slot lookup.
+**Problem:** The FOUND-loop could advance cursor to exactly oldlen, then `deps[cursor]` would access the appended region.
 
-4. Since `reuse` is `true`, `_search` executes:
-   ```js
-   this._time = cursor + 2;       // _time = oldlen + 2 (past old region)
-   deps.push(sender, cursor);     // index = oldlen (into appended region)
-   ```
+**Fix:** Added `cursor < oldlen` guard after the loop before accessing `deps[cursor]`.
 
-5. `deps[oldlen]` is a `null` that was pushed by a prior `_search` call's skip-one-ahead (`deps.push(null, ...)` at line 1146).
+### 5. MISSING flag on reuse push in `_search`
 
-6. When `_reconcile` later processes the appended entry and dereferences `deps[index]` at line 1536, it hits `null._slot` → crash.
+**Problem:** When `_search` pushed a new dep with a reuse back-pointer (`deps.push(sender, cursor)`), the old entry at `cursor` wasn't marked MISSING. Reconcile couldn't distinguish "replaced" from "still present".
 
-### Concrete trace
+**Fix:** Set MISSING on `deps[cursor + 1]` before the push.
 
-Old deps (oldlen=8): `[A, slotA, B, slotB, C, slotC, D, slotD]`
+### 6. `deps.length = write` always runs in reconcile
 
-Re-execution reads: A, C, D (then later E and F out of order)
+**Problem:** The truncation `deps.length = write` was conditional on `write !== oldlen`. When `write === oldlen` but appended entries existed (with nulls from `_search`), they persisted into the next execution as part of the "old" region.
 
-1. `read(A)` → match at 0. `_time=2`.
-2. `read(C)` → miss, `_search(C)`. Skip-one-ahead at (2,4). Push `[null, 2]`. `_time=6`.
-3. `read(D)` → match at 6. `_time=8` (= oldlen).
-4. Deps now: `[A,sa, B,sb|M, C,sc, D,sd, null, 2]`
-5. Some out-of-order read marks D (slot 6) with FOUND.
-6. `read(F)` → miss, `_search(F)`. cursor=8. cursor ≥ oldlen → `reuse=false`. Falls to `deps.push(F, -1)`. Fine.
+**Fix:** Always set `deps.length = write`.
 
-But with a more complex interleaving where FOUND entries accumulate:
+### 7. Mask FOUND/MISSING in reconcile compaction
 
-1. Several deps are matched via the slot-lookup path in `_search`, flagging them FOUND.
-2. A later `_search` enters the FOUND-loop with `cursor < oldlen`, loops through all FOUND entries, and exits with `cursor = oldlen`.
-3. The sender isn't in old deps → falls to the `reuse` branch → stores `cursor = oldlen` as index, which points to the appended null.
+**Problem:** When reconcile compacts deps entries, the sub-slot copied from `deps[j+1]` could carry residual FOUND/MISSING bits.
 
-### Minimal reproduction
-
-```
-makeDynGraph(20, 10, 0.5, 6)
-```
-Width=20, 10 layers, 50% dynamic nodes with 6 sources each. The dynamic `compute()` nodes conditionally skip deps based on value parity, creating heavy dep churn. After the first `batch()` + leaf reads, `_reconcile` crashes.
+**Fix:** Mask with `& ~(FOUND | MISSING)` when reading sub-slots for patching.
 
 ---
 
-## Fix options
+## Remaining issue: subs corruption in "very dynamic" benchmark
 
-### Option A: Re-check `reuse` after the FOUND loop
+After ~25-70 iterations of `dynUpdateVeryDynamic` (100-wide, 15-layer, 50% dynamic nodes), a sender's `_subs` array develops an `undefined` entry at a receiver position (even index). The next `_notify` reads it and crashes on `undefined._flag`.
 
-After the FOUND loop exits, re-evaluate whether we're still in the reusable region:
+**What we know:**
+- All validations (single iteration) pass
+- All other benchmarks (including heavy ones like dynUpdateLargeWebApp, dynUpdateWideDense) run clean
+- The corruption is gradual — it takes many iterations of heavy dep churn
+- The OOB check in `_disconnect` doesn't trigger — sub-slots are within bounds
+- `_connect` always pushes pairs, `_disconnect` always pops pairs — subs length stays even
+- The `undefined` appears at an even index (receiver position), suggesting a dep-slot number was written there
 
-```js
-if (reuse && deps[cursor + 1] & FOUND) {
-    do {
-        deps[cursor + 1] &= ~FOUND;
-        cursor += 2;
-    } while (cursor < oldlen && deps[cursor + 1] & FOUND);
-    reuse = cursor < oldlen;   // ← ADD THIS
-    if (reuse && deps[cursor] === sender) {
-        this._time = cursor + 2;
-        return;
-    }
-}
-```
-
-And correspondingly, the skip-one-ahead check also needs to respect the updated cursor:
-
-```js
-if (reuse && cursor + 2 < oldlen && deps[cursor + 2] === sender) {
-```
-
-### Option B: Clamp cursor before the final push
-
-```js
-if (reuse && cursor < oldlen) {
-    this._time = cursor + 2;
-    deps.push(sender, cursor);
-} else {
-    deps.push(sender, -1);
-}
-```
-
-### Option C: Guard in `_reconcile`
-
-Add a null check: `if (index !== -1 && index < oldlen)` before dereferencing `deps[index]`. This is a band-aid — the root issue is that `_search` shouldn't produce indexes pointing to the appended region.
-
-**Recommendation:** Option A is the cleanest — it fixes the invariant at the source. The FOUND loop should update `reuse` since it may exhaust the old region.
-
----
-
-## Summary
-
-| Issue | Status | Impact |
-|-------|--------|--------|
-| dep1slot restore (Bug B from round 2) | **Fixed** | Was causing 18 unit test failures |
-| _subscribe dispatch (Bug A from round 2) | **Fixed** | Was causing subs.pop crash |
-| dep1 null (Bug C from round 2) | **Fixed** | Was causing wrong slot on re-exec |
-| `_search` FOUND-loop cursor overflow | **Active** | Crashes `dynUpdateVeryDynamic` benchmark |
-
-The FOUND-loop cursor overflow is the **sole remaining bug**. Fixing it should make both `anod.js` and `anod-ref.js` benchmarks pass all validations and run to completion.
+**Likely cause:** A cross-reference between sub-slot and dep-slot gets out of sync after many reconcile cycles. When reconcile patches `dep._subs[subslot] = newDepSlot`, if `subslot` is stale (pointing to a position that was compacted away and reused), the write goes to the wrong position. This is extremely hard to reproduce in isolation because it requires a specific sequence of dep additions/removals across many nodes sharing the same sender.

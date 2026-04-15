@@ -289,7 +289,7 @@ function Effect(opts, fn, dep1, args, owner) {
     /**
      * @type {number}
      */
-    this._level = 0;
+    this._ctime = 0;
     /**
      * @type {Owner | null}
      */
@@ -927,15 +927,15 @@ function Effect(opts, fn, dep1, args, owner) {
      */
     function _connect(receiver, slot) {
         /** @type {number} */
-        let subslot = -1;
+        let subslot = 0;
         if (this._sub1 === null) {
             this._sub1 = receiver;
             this._sub1slot = slot;
         } else if (this._subs === null) {
-            subslot = 0;
+            subslot = 1;
             this._subs = [receiver, slot];
         } else {
-            subslot = this._subs.length;
+            subslot = this._subs.length + 1;
             this._subs.push(receiver, slot);
         }
         return subslot;
@@ -956,19 +956,19 @@ function Effect(opts, fn, dep1, args, owner) {
      * @returns {void}
      */
     function _disconnect(slot) {
-        if (slot === -1) {
+        if (slot === 0) {
             this._sub1 = null;
         } else {
             let subs = this._subs;
-            let lastSlot = /** @type {number} */ (subs.pop());
+            let lastDepSlot = /** @type {number} */ (subs.pop());
             let lastNode = /** @type {Receiver} */ (subs.pop());
-            if (slot !== subs.length) {
-                subs[slot] = lastNode;
-                subs[slot + 1] = lastSlot;
-                if (lastSlot === -1) {
+            if (slot - 1 !== subs.length) {
+                subs[slot - 1] = lastNode;
+                subs[slot] = lastDepSlot;
+                if (lastDepSlot === 0) {
                     lastNode._dep1slot = slot;
                 } else {
-                    lastNode._deps[lastSlot + 1] = slot;
+                    lastNode._deps[lastDepSlot] = slot;
                 }
             }
         }
@@ -1128,13 +1128,13 @@ function Effect(opts, fn, dep1, args, owner) {
     function _search(sender) {
         let deps = this._deps;
         let cursor = this._time;
-        let oldlen = this._dep1slot;
+        let oldlen = this._ctime;
         if (cursor < oldlen && deps[cursor + 1] & FOUND) {
             do {
                 deps[cursor + 1] &= ~FOUND;
                 cursor += 2;
             } while (cursor < oldlen && deps[cursor + 1] & FOUND);
-            if (deps[cursor] === sender) {
+            if (cursor < oldlen && deps[cursor] === sender) {
                 this._time = cursor + 2;
                 return;
             }
@@ -1146,26 +1146,31 @@ function Effect(opts, fn, dep1, args, owner) {
             this._time = cursor + 4;
             return;
         }
-        let slot = -2;
         if (sender._sub1 === this) {
-            slot = sender._sub1slot;
-        } else {
-            let _slot = sender._slot;
-            if (_slot >= 0 && _slot < oldlen && deps[_slot] === sender) {
-                slot = _slot;
-            }
-        }
-        if (slot > -2) {
-            if (slot === -1) {
+            let depslot = sender._sub1slot;
+            if (depslot === 0) {
                 this._flag |= FLAG_DEP1;
-            } else if (slot < cursor) {
-                deps[slot + 1] &= ~MISSING;
-            } else if (slot < oldlen) {
-                deps[slot + 1] |= FOUND;
+            } else {
+                let idx = depslot - 1;
+                if (idx < cursor) {
+                    deps[idx + 1] &= ~MISSING;
+                } else if (idx < oldlen) {
+                    deps[idx + 1] |= FOUND;
+                }
+            }
+            return;
+        }
+        let _slot = sender._slot;
+        if (_slot >= 0 && _slot < oldlen && deps[_slot] === sender) {
+            if (_slot < cursor) {
+                deps[_slot + 1] &= ~MISSING;
+            } else {
+                deps[_slot + 1] |= FOUND;
             }
             return;
         }
         if (cursor < oldlen) {
+            deps[cursor + 1] |= MISSING;
             this._time = cursor + 2;
             deps.push(sender, cursor);
         } else {
@@ -1189,11 +1194,11 @@ function Effect(opts, fn, dep1, args, owner) {
     function _subscribe(sender) {
         if (this._dep1 === null) {
             this._dep1 = sender;
-            this._dep1slot = sender._connect(this, -1);
+            this._dep1slot = sender._connect(this, 0);
         } else if (this._deps === null) {
-            this._deps = [sender, sender._connect(this, 0)];
+            this._deps = [sender, sender._connect(this, 1)];
         } else {
-            this._deps.push(sender, sender._connect(this, this._deps.length));
+            this._deps.push(sender, sender._connect(this, this._deps.length + 1));
         }
     }
 
@@ -1211,19 +1216,19 @@ function Effect(opts, fn, dep1, args, owner) {
      * @returns {void}
      */
     function _unsubscribe(slot) {
-        if (slot === -1) {
+        if (slot === 0) {
             this._dep1 = null;
         } else {
             let deps = this._deps;
-            let lastSlot = /** @type {number} */ (deps.pop());
+            let lastSubSlot = /** @type {number} */ (deps.pop());
             let lastNode = /** @type {Sender} */ (deps.pop());
-            if (slot !== deps.length) {
-                deps[slot] = lastNode;
-                deps[slot + 1] = lastSlot;
-                if (lastSlot === -1) {
+            if (slot - 1 !== deps.length) {
+                deps[slot - 1] = lastNode;
+                deps[slot] = lastSubSlot;
+                if (lastSubSlot === 0) {
                     lastNode._sub1slot = slot;
                 } else {
-                    lastNode._subs[lastSlot + 1] = slot;
+                    lastNode._subs[lastSubSlot] = slot;
                 }
             }
         }
@@ -1279,7 +1284,7 @@ function Effect(opts, fn, dep1, args, owner) {
             EFFECTS[EFFECTS_COUNT++] = this;
         } else {
             SCOPES_COUNT++;
-            let level = this._level;
+            let level = this._ctime;
             let count = LEVELS[level];
             SCOPES[level][count] = this;
             LEVELS[level] = count + 1;
@@ -1369,23 +1374,21 @@ function Effect(opts, fn, dep1, args, owner) {
             }
         } else {
             let slot = this._slot;
-            let dep1slot = this._dep1slot;
             this._slot = VERSION--;
             let deps = this._deps;
+            let oldlen = 0;
             if (deps !== null) {
                 this._time = 0;
-                this._dep1slot = deps.length;
+                oldlen = this._ctime = deps.length;
             } else if (this._dep1 !== null) {
                 this._flag |= FLAG_SETUP;
-                this._dep1._disconnect(dep1slot);
+                this._dep1._disconnect(this._dep1slot);
                 this._dep1 = null;
             }
             try {
                 value = this._fn(this, this._value, this._args);
             } catch (err) {
                 if (deps !== null) {
-                    let oldlen = this._dep1slot;
-                    this._dep1slot = dep1slot;
                     this._reconcile(oldlen);
                 }
                 this._slot = slot;
@@ -1395,8 +1398,6 @@ function Effect(opts, fn, dep1, args, owner) {
                 return;
             }
             if (deps !== null) {
-                let oldlen = this._dep1slot;
-                this._dep1slot = dep1slot;
                 this._reconcile(oldlen);
             }
             this._slot = slot;
@@ -1457,21 +1458,19 @@ function Effect(opts, fn, dep1, args, owner) {
                 : this._fn(this, this._args);
         } else {
             let slot = this._slot;
-            let dep1slot = this._dep1slot;
             this._slot = VERSION--;
             let deps = this._deps;
+            let oldlen = 0;
             if (deps !== null) {
                 this._time = 0;
-                this._dep1slot = deps.length;
+                oldlen = this._ctime = deps.length;
             } else if (this._dep1 !== null) {
                 this._flag |= FLAG_SETUP;
-                this._dep1._disconnect(dep1slot);
+                this._dep1._disconnect(this._dep1slot);
                 this._dep1 = null;
             }
             cleanup = this._fn(this, this._args);
             if (deps !== null) {
-                let oldlen = this._dep1slot;
-                this._dep1slot = dep1slot;
                 this._reconcile(oldlen);
             }
             this._slot = slot;
@@ -1508,21 +1507,39 @@ function Effect(opts, fn, dep1, args, owner) {
         }
 
         if (cursor === oldlen && newlen > oldlen) {
-            for (let i = oldlen; i < newlen; i += 2) {
-                let dep = deps[i];
-                if (dep !== null) {
-                    deps[i + 1] = dep._connect(this, i);
+            let fast = true;
+            for (let i = oldlen + 1; i < newlen; i += 2) {
+                if (deps[i] !== -1) {
+                    fast = false;
+                    break;
                 }
             }
-            return;
+            if (fast) {
+                for (let i = oldlen; i < newlen; i += 2) {
+                    let dep = deps[i];
+                    if (dep !== null) {
+                        deps[i + 1] = dep._connect(this, i + 1);
+                    }
+                }
+                return;
+            }
         }
 
         if (cursor < oldlen && newlen === oldlen) {
-            for (let i = cursor; i < oldlen; i += 2) {
-                deps[i]._disconnect(deps[i + 1]);
+            let fast = true;
+            for (let i = cursor + 1; i < oldlen; i += 2) {
+                if (deps[i] & FOUND) {
+                    fast = false;
+                    break;
+                }
             }
-            deps.length = cursor;
-            return;
+            if (fast) {
+                for (let i = cursor; i < oldlen; i += 2) {
+                    deps[i]._disconnect(deps[i + 1]);
+                }
+                deps.length = cursor;
+                return;
+            }
         }
 
         let append = this._slot;
@@ -1570,12 +1587,12 @@ function Effect(opts, fn, dep1, args, owner) {
                         deps[j]._disconnect(deps[j + 1] & ~MISSING);
                     } else {
                         deps[write] = deps[j];
-                        deps[write + 1] = deps[j + 1];
-                        let depslot = deps[write + 1];
-                        if (depslot === -1) {
-                            deps[j]._sub1slot = write;
+                        let subslot = deps[j + 1] & ~(FOUND | MISSING);
+                        deps[write + 1] = subslot;
+                        if (subslot === 0) {
+                            deps[j]._sub1slot = write + 1;
                         } else {
-                            deps[j]._subs[depslot] = write;
+                            deps[j]._subs[subslot] = write + 1;
                         }
                         write += 2;
                     }
@@ -1601,14 +1618,14 @@ function Effect(opts, fn, dep1, args, owner) {
             deps[dropped]._disconnect(deps[dropped + 1] & ~MISSING);
             deps[dropped] = dep;
             if (index >= oldlen) {
-                deps[dropped + 1] = dep._connect(this, dropped);
+                deps[dropped + 1] = dep._connect(this, dropped + 1);
             } else {
-                let depslot = deps[index + 1] & ~FOUND;
-                deps[dropped + 1] = depslot;
-                if (depslot === -1) {
-                    dep._sub1slot = dropped;
+                let subslot = deps[index + 1] & ~FOUND;
+                deps[dropped + 1] = subslot;
+                if (subslot === 0) {
+                    dep._sub1slot = dropped + 1;
                 } else {
-                    dep._subs[depslot] = dropped;
+                    dep._subs[subslot] = dropped + 1;
                 }
             }
         }
@@ -1646,15 +1663,15 @@ function Effect(opts, fn, dep1, args, owner) {
                 dep._slot = reuse;
                 if (kept >= oldlen) {
                     deps[write] = dep;
-                    deps[write + 1] = dep._connect(this, write);
+                    deps[write + 1] = dep._connect(this, write + 1);
                 } else if (kept !== write) {
-                    let depslot = deps[kept + 1] & ~FOUND;
+                    let subslot = deps[kept + 1] & ~FOUND;
                     deps[write] = dep;
-                    deps[write + 1] = depslot;
-                    if (depslot === -1) {
-                        dep._sub1slot = write;
+                    deps[write + 1] = subslot;
+                    if (subslot === 0) {
+                        dep._sub1slot = write + 1;
                     } else {
-                        dep._subs[depslot] = write;
+                        dep._subs[subslot] = write + 1;
                     }
                 } else {
                     deps[kept + 1] &= ~FOUND;
@@ -1666,9 +1683,7 @@ function Effect(opts, fn, dep1, args, owner) {
             }
         }
 
-        if (write !== oldlen) {
-            deps.length = write;
-        }
+        deps.length = write;
     }
 
     /**
