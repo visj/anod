@@ -123,8 +123,8 @@ describe("recover", () => {
         });
     });
 
-    describe("nested scope recovery", () => {
-        test("inner scope handles error without reaching outer", () => {
+    describe("nested effect recovery", () => {
+        test("inner effect handles error without reaching outer", () => {
             let innerCalled = false;
             let outerCalled = false;
 
@@ -134,7 +134,7 @@ describe("recover", () => {
                     return true;
                 });
 
-                r.scope((s) => {
+                r.effect((s) => {
                     s.recover(() => {
                         innerCalled = true;
                         return true;
@@ -161,7 +161,7 @@ describe("recover", () => {
                     return true;
                 });
 
-                r.scope((s) => {
+                r.effect((s) => {
                     s.recover(() => {
                         innerCalled = true;
                         return false;
@@ -274,7 +274,7 @@ describe("recover", () => {
             let recoveredVersion = -1;
 
             const r1 = root((r) => {
-                r.scope((s) => {
+                r.effect((s) => {
                     let version = s.read(s1);
                     handlerVersion = version;
 

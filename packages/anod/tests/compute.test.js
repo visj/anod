@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { signal, compute, Signal, Compute } from "../";
+import { signal, compute, Signal, Compute } from "../dist";
 
 describe("compute", () => {
     test("returns initial value of wrapped function", () => {

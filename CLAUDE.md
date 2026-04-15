@@ -113,7 +113,7 @@ Computes can return Promises or AsyncIterables. The library detects these via `i
 
 ### Scoped effects and hierarchical disposal
 
-Effects created with `Flag._SCOPE` (via `scope()`) participate in **topological level-based execution**. Each scoped effect tracks its `_level` (depth in the ownership tree). `SCOPE_QUEUE` is an array of arrays indexed by level (initially 4 slots, extended on demand). Parent-level effects always execute before child-level effects, ensuring proper cleanup ordering.
+Effects with owned nodes (owned !== null) participate in **topological level-based execution**. Each scoped effect tracks its `_level` (depth in the ownership tree). `SCOPE_QUEUE` is an array of arrays indexed by level (initially 4 slots, extended on demand). Parent-level effects always execute before child-level effects, ensuring proper cleanup ordering.
 
 Owner nodes (`Root`, scoped `Effect`) track `_owned` children. Disposing an owner recursively disposes all owned nodes. Cleanup functions are stored compactly: a single function for count=1, an array for count>1, with slot recycling.
 

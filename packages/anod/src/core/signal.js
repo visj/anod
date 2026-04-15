@@ -246,9 +246,10 @@ function Compute(opts, fn, dep1, seed, args) {
  * @param {(function(W): (Cleanup | void)) | (function(U,W): (Cleanup| void))} fn
  * @param {Sender<U> | null} dep1
  * @param {W=} args
+ * @param {Owner=} owner
  * @implements {IEffect}
  */
-function Effect(opts, fn, dep1, args) {
+function Effect(opts, fn, dep1, args, owner) {
     /**
      * @type {number}
      */
@@ -292,7 +293,7 @@ function Effect(opts, fn, dep1, args) {
     /**
      * @type {Owner | null}
      */
-    this._owner = null;
+    this._owner = owner != null ? owner : null;
     /**
      * @type {(function(*): boolean) | Array<(function(*): boolean)> | null}
      */
@@ -456,7 +457,7 @@ function Effect(opts, fn, dep1, args) {
      * @param {T | (function(T): T)=} seedOrFn
      * @param {T | W=} argsOrSeed
      * @param {W=} args
-     * @returns {!Compute<T,U,W>}
+     * @returns {Compute<T,U,W>}
      */
     function ownDerive(fnOrDep, seedOrFn, argsOrSeed, args) {
         let node = derive(fnOrDep, seedOrFn, argsOrSeed, args);
@@ -498,7 +499,7 @@ function Effect(opts, fn, dep1, args) {
      * @param {T=} seed
      * @param {number=} opts
      * @param {W=} args
-     * @returns {!Compute<T,null,null,W>}
+     * @returns {Compute<T,null,null,W>}
      */
     RootProto.task =
         EffectProto.task = ownTask;
@@ -512,7 +513,7 @@ function Effect(opts, fn, dep1, args) {
      * @returns {Effect<null,null,W>}
      */
     function ownEffect(fn, opts, args) {
-        let node = effect(fn, opts, args);
+        let node = effect(fn, opts, args, this);
         this._own(node);
         return node;
     }
@@ -523,7 +524,7 @@ function Effect(opts, fn, dep1, args) {
      * @param {function(): (function(): void | void)} fn
      * @param {number=} opts
      * @param {W=} args
-     * @returns {Effect<null,null,W>}
+     * @returns {Effect<null,W>}
      */
     RootProto.effect =
         EffectProto.effect = ownEffect;
@@ -535,10 +536,10 @@ function Effect(opts, fn, dep1, args) {
      * @param {Sender<U> | (function(W): (void | (function(): void)))} fnOrDep
      * @param {W | (function(W): (void | (function(): void)))=} fnOrArgs
      * @param {W=} args
-     * @returns {!Effect<U,W>}
+     * @returns {Effect<U,W>}
      */
     function ownWatch(fnOrDep, fnOrArgs, args) {
-        let node = watch(fnOrDep, fnOrArgs, args);
+        let node = watch(fnOrDep, fnOrArgs, args, this);
         this._own(node);
         return node;
     }
@@ -549,7 +550,7 @@ function Effect(opts, fn, dep1, args) {
      * @param {Sender<U> | (function(W): (void | (function(): void)))} fnOrDep
      * @param {W | (function(W): (void | (function(): void)))=} fnOrArgs
      * @param {W=} args
-     * @returns {!Effect<U,W>}
+     * @returns {Effect<U,W>}
      */
     RootProto.watch =
         EffectProto.watch = ownWatch;
@@ -560,10 +561,10 @@ function Effect(opts, fn, dep1, args) {
      * @param {function(W): Promise<(function(): void) | void>} fn
      * @param {number=} opts
      * @param {W=} args
-     * @returns {!Effect<null,null,W>}
+     * @returns {Effect<null,W>}
      */
     function ownSpawn(fn, opts, args) {
-        let node = spawn(fn, opts, args);
+        let node = spawn(fn, opts, args, this);
         this._own(node);
         return node;
     }
@@ -574,7 +575,7 @@ function Effect(opts, fn, dep1, args) {
      * @param {function(W): Promise<(function(): void) | void>} fn
      * @param {number=} opts
      * @param {W=} args
-     * @returns {!Effect<null,null,W>}
+     * @returns {Effect<null,W>}
      */
     RootProto.spawn =
         EffectProto.spawn = ownSpawn;
@@ -1364,7 +1365,7 @@ function Effect(opts, fn, dep1, args) {
 
         let value;
 
-        if (flag & (FLAG_STABLE | FLAG_SETUP)) {
+        if ((flag & (FLAG_STABLE | FLAG_SETUP)) === FLAG_STABLE) {
             try {
                 value = (flag & FLAG_BOUND)
                     ? this._fn(this._dep1.val(), this._value, this._args)
@@ -1383,7 +1384,7 @@ function Effect(opts, fn, dep1, args) {
             if (deps !== null) {
                 this._time = 0;
                 this._dep1slot = deps.length;
-            } else {
+            } else if (this._dep1 !== null) {
                 this._flag |= FLAG_SETUP;
                 this._dep1._disconnect(dep1slot);
             }
@@ -1913,7 +1914,7 @@ function startEffect(node) {
     } else {
         try {
             node._update(TIME);
-        } catch {
+        } catch (err) {
             let recovered = node._tryRecover(err);
             node._dispose();
             if (!recovered) {
@@ -2166,11 +2167,12 @@ function task(fn, seed, opts, args) {
  * @param {function(): (function(): void | void)} fn
  * @param {number=} opts
  * @param {W=} args
+ * @param {Owner=} owner
  * @returns {Effect<null,null,W>}
  */
-function effect(fn, opts, args) {
+function effect(fn, opts, args, owner) {
     let flag = FLAG_SETUP | ((0 | opts) & OPTIONS);
-    let node = new Effect(flag, fn, null, args);
+    let node = new Effect(flag, fn, null, args, owner);
     startEffect(node);
     return node;
 }
@@ -2180,14 +2182,15 @@ function effect(fn, opts, args) {
  * @param {Sender<U> | (function(W): (void | (function(): void)))} fnOrDep
  * @param {W | (function(W): (void | (function(): void)))=} fnOrArgs
  * @param {W=} args
+ * @param {Owner=} owner
  * @returns {!Effect<U,W>}
  */
-function watch(fnOrDep, fnOrArgs, args) {
+function watch(fnOrDep, fnOrArgs, args, owner) {
     let node;
     if (typeof fnOrDep === 'function') {
-        node = new Effect(FLAG_STABLE | FLAG_SETUP, fnOrDep, null, fnOrArgs);
+        node = new Effect(FLAG_STABLE | FLAG_SETUP, fnOrDep, null, fnOrArgs, owner);
     } else {
-        node = new Effect(FLAG_STABLE | FLAG_BOUND, fnOrArgs, fnOrDep, args);
+        node = new Effect(FLAG_STABLE | FLAG_BOUND, fnOrArgs, fnOrDep, args, owner);
         node._dep1slot = fnOrDep._connect(node, 0);
     }
     startEffect(node);
@@ -2199,11 +2202,12 @@ function watch(fnOrDep, fnOrArgs, args) {
  * @param {function(W): Promise<(function(): void) | void>} fn
  * @param {number=} opts
  * @param {W=} args
+ * @param {Owner=} owner
  * @returns {!Effect<null,null,W>}
  */
-function spawn(fn, opts, args) {
+function spawn(fn, opts, args, owner) {
     let flag = FLAG_ASYNC | FLAG_SETUP | ((0 | opts) & OPTIONS);
-    let node = new Effect(flag, fn, null, args);
+    let node = new Effect(flag, fn, null, args, owner);
     startEffect(node);
     return node;
 }
