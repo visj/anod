@@ -42,6 +42,9 @@ Sender.prototype._subs;
 /** @package @type {number} */
 Sender.prototype._ctime;
 
+/** @type {function(): void} */
+var Cleanup;
+
 /**
  * @interface
  * @extends {Disposer}
@@ -116,4 +119,4 @@ IEffect.prototype.error = function () { };
 /** @public @returns {boolean} */
 IEffect.prototype.loading = function () { };
 
-export { Disposer, Owner, Sender, Receiver, Clock, ISignal, ICompute, IEffect };
+export { Disposer, Owner, Sender, Cleanup, Receiver, ISignal, ICompute, IEffect };

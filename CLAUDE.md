@@ -29,7 +29,7 @@ function allocOnSlab(types, volatile, kind) { }
 ```
 Always avoid heap allocations when possible. Prefer code duplication over heap allocs. Never allocate strings, arrays, destructured return arguments unless absolutely necessary.
 ### Comments
-Always write meaningful comments about how the code works. Do not insert meaningless section comments. Prefer JSDoc style comments over regular // comments.
+Write meaningful comments, only when the code is not obvious, or for very complicated algorithms. Prefer JSDoc style comments over // comments.
 ### JSDoc
 If you can, add correct JSDoc type definitions. Because we "fake" a lot of typescript features, this project is built on javascript and uses jsdoc for type safety, instead of Typescript. That way, we can fully create a virtual API through typescript that fakes the number as a Complex/Type etc.
 
