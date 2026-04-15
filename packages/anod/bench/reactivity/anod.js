@@ -6,8 +6,7 @@ import {
     watch,
     compute,
     signal,
-    transmit
-} from '../../dist/index.mjs';
+} from '../../src/index.js';
 
 let sink = 0;
 let counter = 0;
@@ -25,7 +24,7 @@ function setupDeep() {
     const head = signal(0);
     let current = head;
     for (let i = 0; i < len; i++) {
-        current = transmit(current, (v) => { counter++; return v + 1; });
+        current = derive(current, (v) => { counter++; return v + 1; });
     }
     const tail = current;
     watch(tail, (v) => {

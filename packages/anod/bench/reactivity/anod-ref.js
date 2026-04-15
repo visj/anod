@@ -11,7 +11,7 @@ import {
     compute,
     effect,
     signal,
-} from '../../dist/index.mjs';
+} from '../../src/index.js';
 
 let sink = 0;
 let counter = 0;

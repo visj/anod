@@ -1401,7 +1401,6 @@ function Effect(opts, fn, dep1, args, owner) {
                 this._reconcile(oldlen);
             }
             this._slot = slot;
-            this._dep1slot = dep1slot;
         }
 
         flag = this._flag &= ~(FLAG_RUNNING | FLAG_INIT | FLAG_SETUP | FLAG_ERROR);
@@ -1443,6 +1442,8 @@ function Effect(opts, fn, dep1, args, owner) {
                 }
             }
         }
+
+        this._recover = null;
 
         if (flag & FLAG_ASYNC) {
             this._updateAsync(time, flag);
