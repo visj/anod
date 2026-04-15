@@ -1,8 +1,8 @@
 import { describe, test, expect } from "bun:test";
-import { root, signal, compute, effect, scope, Signal, Compute } from "../";
+import { root, signal, compute, effect, Signal, Compute } from "../";
 
 describe("dispose", () => {
-    describe("scope", () => {
+    describe("effect scope", () => {
         test("disables updates and clears computation's value", () => {
             let count = 0;
             let s1;
@@ -34,7 +34,7 @@ describe("dispose", () => {
 
     describe("computations", () => {
         test("persists through cycle when manually disposed", () => {
-            scope((s) => {
+            effect((s) => {
                 const s1 = signal(0);
                 const c1 = s.compute((c) => c.read(s1));
                 let count = 0;

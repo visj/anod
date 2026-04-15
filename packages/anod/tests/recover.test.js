@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { root, signal, compute, effect, scope, batch } from "../";
+import { root, signal, batch } from "../";
 
 describe("recover", () => {
     describe("root recovery", () => {

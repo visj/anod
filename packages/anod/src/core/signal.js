@@ -1422,7 +1422,7 @@ function Effect(opts, fn, dep1, args) {
     /**
      * @this {Effect}
      */
-    EffectProto._cleanup = function () {
+    EffectProto._resetOwned = function () {
         let owned = this._owned;
         if (owned !== null) {
             let count = owned.length;
@@ -1452,7 +1452,7 @@ function Effect(opts, fn, dep1, args) {
         let flag = this._flag;
         this._flag = (flag & ~(FLAG_STALE | FLAG_PENDING | FLAG_EQUAL | FLAG_NOTEQUAL | FLAG_DEP1)) | FLAG_RUNNING;
 
-        this._cleanup();
+        this._resetOwned();
 
         if (flag & FLAG_ASYNC) {
             this._updateAsync(time, flag);

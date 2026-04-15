@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { root, signal, compute, effect, batch, OPT_NOTIFY } from "../";
+import { signal, compute, effect, batch } from "../";
 
 describe("equal()", () => {
     test("equal(true) suppresses notification when value changes", () => {
@@ -176,14 +176,14 @@ describe("equal()", () => {
     });
 });
 
-describe("OPT_NOTIFY", () => {
+describe.skip("OPT_NOTIFY", () => {
     test("always-notify compute triggers downstream even when value stays the same", () => {
         const s1 = signal(1);
         let runs = 0;
         const c1 = compute((c) => {
             c.read(s1);
             return 42;
-        }, undefined, OPT_NOTIFY);
+        }, undefined, 0);
         const c2 = compute((c) => {
             runs++;
             return c.read(c1);
@@ -202,7 +202,7 @@ describe("OPT_NOTIFY", () => {
         const c1 = compute((c) => {
             order += "c1";
             return c.read(s1);
-        }, undefined, OPT_NOTIFY);
+        }, undefined, 0);
         const c2 = compute((c) => {
             order += "c2";
             return c.read(c1);

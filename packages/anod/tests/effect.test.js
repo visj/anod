@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { root, signal, compute, effect, scope, batch } from "../src/core/signal.js";
+import { root, signal, compute, effect, batch } from "../src/core/signal.js";
 
 describe("effect", () => {
     describe("modifies signals", () => {
@@ -111,7 +111,7 @@ describe("effect", () => {
             const s1 = signal(1);
             let calls = 0;
 
-            scope((s) => {
+            effect((s) => {
                 s.read(s1);
                 s.effect((e) => {
                     e.cleanup(() => { calls++; });
@@ -123,7 +123,7 @@ describe("effect", () => {
             expect(calls).toBe(1); // "Nested effect cleanup triggered"
         });
 
-        test("is run only once when a scope is disposed", () => {
+        test("is run only once when a effect scope is disposed", () => {
             const s1 = signal(1);
             let calls = 0;
 

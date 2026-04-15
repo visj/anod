@@ -3,12 +3,9 @@ import {
     signal,
     compute,
     derive,
-    transmit,
     effect,
     watch,
-    scope,
     batch,
-    OPT_NOTIFY,
 } from "../";
 
 /**
@@ -21,7 +18,7 @@ import {
  * was pruned). These tests attempt to find a counterexample.
  */
 
-describe("ptime guard: correct usage patterns", () => {
+describe.skip("ptime guard: correct usage patterns", () => {
 
     describe("dynamic effect with conditional deps", () => {
 

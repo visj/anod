@@ -9,7 +9,6 @@ import {
     effect,
     watch,
     spawn,
-    scope,
     batch,
     OPT_NOTIFY,
     OPT_DYNAMIC,
@@ -121,12 +120,12 @@ describe("edge cases", () => {
             const r = root((r) => {
                 r.recover(() => true);
 
-                r.scope((s) => {
+                r.effect((s) => {
                     parentRuns++;
                     s.read(s1);
 
                     if (s1.val() === 1) {
-                        s.scope(() => {
+                        s.effect(() => {
                             throw new Error("inner scope");
                         });
                     }
@@ -175,13 +174,13 @@ describe("edge cases", () => {
             const r = root((r) => {
                 r.recover(() => true);
 
-                r.scope((s) => {
+                r.effect((s) => {
                     if (s.read(s1) > 0) {
                         throw new Error("scope boom");
                     }
                 });
 
-                r.scope((s) => {
+                r.effect((s) => {
                     s.read(s1);
                     siblingRuns++;
                 });
