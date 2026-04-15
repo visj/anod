@@ -1129,8 +1129,7 @@ function Effect(opts, fn, dep1, args, owner) {
         let deps = this._deps;
         let cursor = this._time;
         let oldlen = this._dep1slot;
-        let reuse = cursor < oldlen;
-        if (reuse && deps[cursor + 1] & FOUND) {
+        if (cursor < oldlen && deps[cursor + 1] & FOUND) {
             do {
                 deps[cursor + 1] &= ~FOUND;
                 cursor += 2;
@@ -1161,12 +1160,12 @@ function Effect(opts, fn, dep1, args, owner) {
                 this._flag |= FLAG_DEP1;
             } else if (slot < cursor) {
                 deps[slot + 1] &= ~MISSING;
-            } else {
+            } else if (slot < oldlen) {
                 deps[slot + 1] |= FOUND;
             }
             return;
         }
-        if (reuse) {
+        if (cursor < oldlen) {
             this._time = cursor + 2;
             deps.push(sender, cursor);
         } else {
@@ -1498,6 +1497,10 @@ function Effect(opts, fn, dep1, args, owner) {
         let deps = this._deps;
         let cursor = this._time;
         let newlen = deps.length;
+
+        if (cursor === oldlen && oldlen === newlen) {
+            return;
+        }
 
         if (this._dep1 !== null && !(this._flag & FLAG_DEP1)) {
             this._dep1._disconnect(this._dep1slot);

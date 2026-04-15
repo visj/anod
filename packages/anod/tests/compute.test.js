@@ -92,6 +92,7 @@ describe("compute", () => {
         });
 
         it("activates new dependencies", () => {
+            debugger;
             const s1 = signal(true);
             const s2 = signal(1);
             const s3 = signal(2);
