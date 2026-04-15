@@ -1,44 +1,19 @@
-import {
-    CLOCK,
-    STATE_START, STATE_IDLE, STATE_OWNER, STATE_SCOPE,
-    FLAG_DEFER, FLAG_STABLE, FLAG_SETUP, FLAG_STALE, FLAG_PENDING,
-    FLAG_RUNNING, FLAG_DISPOSED, FLAG_LOADING, FLAG_ERROR,
-    FLAG_BOUND, FLAG_SCOPE, FLAG_NOTIFY, FLAG_EQUAL, FLAG_WEAK,
-    FLAG_INIT,
-    OPT_DEFER, OPT_STABLE, OPT_SETUP, OPT_NOTIFY, OPT_WEAK,
-    TYPE_ROOT, TYPE_SIGNAL, TYPE_COMPUTE, TYPE_EFFECT,
-    TYPEFLAG_SEND,
-    RESET, OPTIONS,
-    scheduleSignal,
-    subscribe,
-    startEffect,
-    Compute,
-} from "./core/signal.js";
-
-import {
-    Reader,
-    isPrimitive,
-    isFunction,
-    isSignal
-} from "./core/signal.js";
-
 export {
-    CLOCK,
+    OPT_DEFER,
+    OPT_STABLE,
+    OPT_SETUP,
+    OPT_WEAK,
+    Root,
+    Signal,
     Compute,
-    STATE_START, STATE_IDLE, STATE_OWNER, STATE_SCOPE,
-    FLAG_DEFER, FLAG_STABLE, FLAG_SETUP, FLAG_STALE, FLAG_PENDING,
-    FLAG_RUNNING, FLAG_DISPOSED, FLAG_LOADING, FLAG_ERROR,
-    FLAG_BOUND, FLAG_SCOPE, FLAG_NOTIFY, FLAG_EQUAL, FLAG_WEAK,
-    FLAG_INIT,
-    OPT_DEFER, OPT_STABLE, OPT_SETUP, OPT_NOTIFY, OPT_WEAK,
-    TYPE_ROOT, TYPE_SIGNAL, TYPE_COMPUTE, TYPE_EFFECT,
-    TYPEFLAG_SEND,
-    RESET, OPTIONS,
-    scheduleSignal,
-    subscribe,
-    startEffect,
-    Reader,
-    isPrimitive,
-    isFunction,
-    isSignal,
-}
+    Effect,
+    root,
+    signal,
+    compute,
+    derive,
+    task,
+    effect,
+    watch,
+    spawn,
+    batch
+} from "./core/signal.js";
