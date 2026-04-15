@@ -1462,7 +1462,7 @@ function Effect(opts, fn, dep1, args, owner) {
 
         let cleanup;
 
-        if (flag & (FLAG_STABLE | FLAG_SETUP)) {
+        if ((flag & (FLAG_STABLE | FLAG_SETUP)) === FLAG_STABLE) {
             cleanup = (flag & FLAG_BOUND)
                 ? this._fn(this._dep1.val(), this._args)
                 : this._fn(this, this._args);
@@ -1474,7 +1474,7 @@ function Effect(opts, fn, dep1, args, owner) {
             if (deps !== null) {
                 this._time = 0;
                 this._dep1slot = deps.length;
-            } else {
+            } else if (this._dep1 !== null) {
                 this._flag |= FLAG_SETUP;
                 this._dep1._disconnect(dep1slot);
             }

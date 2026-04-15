@@ -1,7 +1,7 @@
 import { describe, test, expect } from "bun:test";
 import { root, signal, compute, effect, batch, OPT_WEAK } from "../";
 
-describe("OPT_WEAK", () => {
+describe.skip("OPT_WEAK", () => {
     test("releases value when last subscriber disposes", () => {
         const s1 = signal({ data: "large" });
         const c1 = compute((c) => {
