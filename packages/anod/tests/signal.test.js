@@ -1,78 +1,70 @@
-import { describe, test, expect } from "bun:test";
-import { signal, compute } from "../";
+import { describe, it } from "node:test";
+import assert from "node:assert/strict";
+import { signal, compute } from "./_helper.js";
 
 describe("signal", () => {
-    test("takes and returns an initial value", () => {
+    it("takes and returns an initial value", () => {
         const s1 = signal(1);
-        expect(s1.val()).toBe(1); // "Initial value should match"
+        assert.strictEqual(s1.val(), 1);
     });
 
-    test("can be set by passing in a new value", () => {
+    it("can be set by passing in a new value", () => {
         const s1 = signal(1);
         s1.set(2);
-        expect(s1.val()).toBe(2); // "Value should update"
+        assert.strictEqual(s1.val(), 2);
     });
 
-    test("does not propagate if set to equal value", () => {
+    it("does not propagate if set to equal value", () => {
         const s1 = signal(1);
         let count = 0;
-
         const c1 = compute((c) => {
             c.read(s1);
             return ++count;
         });
-
-        expect(c1.val()).toBe(1);
+        assert.strictEqual(c1.val(), 1);
         s1.set(1);
-        expect(c1.val()).toBe(1); // "Compute count should remain 1"
+        assert.strictEqual(c1.val(), 1);
     });
 
-    test("propagates if set to unequal value", () => {
+    it("propagates if set to unequal value", () => {
         const s1 = signal(1);
         let count = 0;
-
         const c1 = compute((c) => {
             c.read(s1);
             return ++count;
         });
-
-        expect(c1.val()).toBe(1);
+        assert.strictEqual(c1.val(), 1);
         s1.set(2);
-        expect(c1.val()).toBe(2); // "Compute count should increment"
+        assert.strictEqual(c1.val(), 2);
     });
 
     describe("val", () => {
-        test("returns the value of a signal", () => {
+        it("returns the value of a signal", () => {
             const s1 = signal(1);
-            expect(s1.val()).toBe(1); // "val should return current value"
+            assert.strictEqual(s1.val(), 1);
         });
 
-        test("does not track a dependency", () => {
+        it("does not track a dependency", () => {
             const s1 = signal(1);
             const s2 = signal(2);
             const s3 = signal(3);
             let count = 0;
-
             const c1 = compute((c) => {
                 count++;
                 c.read(s1);
-                s2.val(); // Should not track
+                s2.val();
                 c.read(s3);
             });
-
-            expect(count).toBe(1, "initial"); // "Initial execution"
-
+            assert.strictEqual(count, 1);
             s1.set(5);
-            c1.val(); // Pull to trigger re-evaluation
-            expect(count).toBe(2, "s1"); // "Propagates on s1 change"
-
+            c1.val();
+            assert.strictEqual(count, 2);
             s2.set(4);
             c1.val();
-            expect(count).toBe(2, "s2"); // "Does not propagate on s2 (peek) change"
-
+            assert.strictEqual(count, 2);
             s3.set(6);
             c1.val();
-            expect(count).toBe(3, "s3"); // "Propagates on s3 change"
+            assert.strictEqual(count, 3);
         });
     });
 });

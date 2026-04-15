@@ -1,4 +1,5 @@
-import { describe, test, expect } from "bun:test";
+import { describe, it } from "node:test";
+import assert from "node:assert/strict";
 import {
     root,
     signal,
@@ -9,14 +10,14 @@ import {
     watch,
     spawn,
     batch,
-} from "../";
+} from "./_helper.js";
 
 const tick = () => Promise.resolve();
 
-describe.skip("edge cases", () => {
+describe("edge cases", { skip: true }, () => {
 
     describe("effect error does not corrupt ctx", () => {
-        test("effect throwing during creation does not corrupt outer compute", () => {
+        it("effect throwing during creation does not corrupt outer compute", () => {
             const s1 = signal(1);
             const c1 = compute((c) => {
                 let val = c.read(s1);
@@ -28,14 +29,14 @@ describe.skip("edge cases", () => {
                 return val * 10;
             });
 
-            expect(c1.val()).toBe(10);
+            assert.strictEqual(c1.val(), 10);
             s1.set(2);
-            expect(c1.val()).toBe(20);
+            assert.strictEqual(c1.val(), 20);
             s1.set(3);
-            expect(c1.val()).toBe(30);
+            assert.strictEqual(c1.val(), 30);
         });
 
-        test("effect throwing during creation does not corrupt outer effect deps (with try/catch)", () => {
+        it("effect throwing during creation does not corrupt outer effect deps (with try/catch)", () => {
             const s1 = signal(0);
             const s2 = signal(0);
             let outerRuns = 0;
@@ -55,16 +56,15 @@ describe.skip("edge cases", () => {
                 });
             });
 
-            expect(outerRuns).toBe(1);
+            assert.strictEqual(outerRuns, 1);
             s1.set(1);
-            expect(outerRuns).toBe(2);
-            /** Outer effect should still track s2 */
+            assert.strictEqual(outerRuns, 2);
             s2.set(1);
-            expect(outerRuns).toBe(3);
+            assert.strictEqual(outerRuns, 3);
             r.dispose();
         });
 
-        test("unhandled inner effect error disposes outer effect", () => {
+        it("unhandled inner effect error disposes outer effect", () => {
             const s1 = signal(0);
             let outerRuns = 0;
 
@@ -75,22 +75,20 @@ describe.skip("edge cases", () => {
                     outerRuns++;
                     e.read(s1);
                     if (s1.val() === 1) {
-                        /** No try/catch — error propagates, outer effect is disposed */
                         effect(() => { throw new Error("inner"); });
                     }
                 });
             });
 
-            expect(outerRuns).toBe(1);
+            assert.strictEqual(outerRuns, 1);
             s1.set(1);
-            expect(outerRuns).toBe(2);
-            /** Outer effect was disposed by the error — s1 changes don't trigger it */
+            assert.strictEqual(outerRuns, 2);
             s1.set(2);
-            expect(outerRuns).toBe(2);
+            assert.strictEqual(outerRuns, 2);
             r.dispose();
         });
 
-        test("effect throwing during creation inside compute does not corrupt compute", () => {
+        it("effect throwing during creation inside compute does not corrupt compute", () => {
             const s1 = signal(1);
             const c1 = compute((c) => {
                 let val = c.read(s1);
@@ -102,14 +100,14 @@ describe.skip("edge cases", () => {
                 return val + 100;
             });
 
-            expect(c1.val()).toBe(101);
+            assert.strictEqual(c1.val(), 101);
             s1.set(2);
-            expect(c1.val()).toBe(102);
+            assert.strictEqual(c1.val(), 102);
             s1.set(3);
-            expect(c1.val()).toBe(103);
+            assert.strictEqual(c1.val(), 103);
         });
 
-        test("nested scope throwing does not corrupt parent scope", () => {
+        it("nested scope throwing does not corrupt parent scope", () => {
             const s1 = signal(0);
             let parentRuns = 0;
 
@@ -128,17 +126,17 @@ describe.skip("edge cases", () => {
                 });
             });
 
-            expect(parentRuns).toBe(1);
+            assert.strictEqual(parentRuns, 1);
             s1.set(1);
-            expect(parentRuns).toBe(2);
+            assert.strictEqual(parentRuns, 2);
             s1.set(2);
-            expect(parentRuns).toBe(3);
+            assert.strictEqual(parentRuns, 3);
             r.dispose();
         });
     });
 
     describe("effect error in start() loop", () => {
-        test("second effect still runs after first effect throws", () => {
+        it("second effect still runs after first effect throws", () => {
             const s1 = signal(0);
             let secondRan = false;
 
@@ -159,11 +157,11 @@ describe.skip("edge cases", () => {
 
             secondRan = false;
             s1.set(1);
-            expect(secondRan).toBe(true);
+            assert.strictEqual(secondRan, true);
             r.dispose();
         });
 
-        test("scoped effect throwing does not break sibling scope", () => {
+        it("scoped effect throwing does not break sibling scope", () => {
             const s1 = signal(0);
             let siblingRuns = 0;
 
@@ -184,13 +182,13 @@ describe.skip("edge cases", () => {
 
             siblingRuns = 0;
             s1.set(1);
-            expect(siblingRuns).toBe(1);
+            assert.strictEqual(siblingRuns, 1);
             r.dispose();
         });
     });
 
     describe("derive (was memo)", () => {
-        test("tracks deps on first run only", () => {
+        it("tracks deps on first run only", () => {
             const s1 = signal(1);
             const s2 = signal(10);
             let runs = 0;
@@ -200,19 +198,19 @@ describe.skip("edge cases", () => {
                 return c.read(s1) + c.read(s2);
             });
 
-            expect(d.val()).toBe(11);
-            expect(runs).toBe(1);
+            assert.strictEqual(d.val(), 11);
+            assert.strictEqual(runs, 1);
 
             s1.set(2);
-            expect(d.val()).toBe(12);
-            expect(runs).toBe(2);
+            assert.strictEqual(d.val(), 12);
+            assert.strictEqual(runs, 2);
 
             s2.set(20);
-            expect(d.val()).toBe(22);
-            expect(runs).toBe(3);
+            assert.strictEqual(d.val(), 22);
+            assert.strictEqual(runs, 3);
         });
 
-        test("does not re-execute when value unchanged", () => {
+        it("does not re-execute when value unchanged", () => {
             const s1 = signal(1);
             let runs = 0;
 
@@ -222,29 +220,28 @@ describe.skip("edge cases", () => {
                 return 42;
             });
 
-            expect(d.val()).toBe(42);
-            expect(runs).toBe(1);
+            assert.strictEqual(d.val(), 42);
+            assert.strictEqual(runs, 1);
 
             s1.set(2);
-            /** derive runs because s1 changed, but value is still 42 */
-            expect(d.val()).toBe(42);
-            expect(runs).toBe(2);
+            assert.strictEqual(d.val(), 42);
+            assert.strictEqual(runs, 2);
         });
     });
 
     describe("watch (was reaction)", () => {
-        test("runs when dependency changes", () => {
+        it("runs when dependency changes", () => {
             const s1 = signal(1);
             let last = 0;
 
             watch((c) => { last = c.read(s1); });
 
-            expect(last).toBe(1);
+            assert.strictEqual(last, 1);
             s1.set(2);
-            expect(last).toBe(2);
+            assert.strictEqual(last, 2);
         });
 
-        test("cleanup is called on update", () => {
+        it("cleanup is called on update", () => {
             const s1 = signal(1);
             let cleanups = 0;
 
@@ -253,14 +250,14 @@ describe.skip("edge cases", () => {
                 c.cleanup(() => { cleanups++; });
             });
 
-            expect(cleanups).toBe(0);
+            assert.strictEqual(cleanups, 0);
             s1.set(2);
-            expect(cleanups).toBe(1);
+            assert.strictEqual(cleanups, 1);
         });
     });
 
     describe("task", () => {
-        test("is stable by default", () => {
+        it("is stable by default", () => {
             const s1 = signal(1);
             const s2 = signal(10);
             let runs = 0;
@@ -270,94 +267,58 @@ describe.skip("edge cases", () => {
                 return Promise.resolve(c.read(s1) + c.read(s2));
             }, 0);
 
-            expect(runs).toBe(1);
-            expect(t.loading()).toBe(true);
+            assert.strictEqual(runs, 1);
+            assert.strictEqual(t.loading(), true);
         });
 
-        test("settles to resolved value", async () => {
+        it("settles to resolved value", async () => {
             const t = task((c) => Promise.resolve(42), 0);
 
-            expect(t.val()).toBe(0);
-            expect(t.loading()).toBe(true);
+            assert.strictEqual(t.val(), 0);
+            assert.strictEqual(t.loading(), true);
 
             await tick();
 
-            expect(t.val()).toBe(42);
-            expect(t.loading()).toBe(false);
+            assert.strictEqual(t.val(), 42);
+            assert.strictEqual(t.loading(), false);
         });
 
-        test("notifies downstream on settle", async () => {
+        it("notifies downstream on settle", async () => {
             const t = task((c) => Promise.resolve(42), 0);
             let received = 0;
 
             effect((e) => { received = e.read(t); });
 
-            expect(received).toBe(0);
+            assert.strictEqual(received, 0);
             await tick();
-            expect(received).toBe(42);
+            assert.strictEqual(received, 42);
         });
 
-        test("sets error flag on rejection", async () => {
+        it("sets error flag on rejection", async () => {
             const t = task((c) => Promise.reject(new Error("fail")), 0);
 
             await tick();
 
-            expect(t.error()).toBe(true);
-            expect(() => t.val()).toThrow("fail");
+            assert.strictEqual(t.error(), true);
+            assert.throws(() => t.val(), { message: "fail" });
         });
 
-        test("re-evaluates when dep changes", async () => {
+        it("re-evaluates when dep changes", async () => {
             const s1 = signal(1);
             const t = task((c) => Promise.resolve(c.read(s1) * 10), 0);
 
             await tick();
-            expect(t.val()).toBe(10);
+            assert.strictEqual(t.val(), 10);
 
             s1.set(2);
             t.val();
             await tick();
-            expect(t.val()).toBe(20);
-        });
-
-        test.skip("with OPT_DYNAMIC allows changing deps", async () => {
-            const s1 = signal(true);
-            const s2 = signal("a");
-            const s3 = signal("b");
-            let runs = 0;
-
-            const t = task((c) => {
-                runs++;
-                return Promise.resolve(c.read(s1) ? c.read(s2) : c.read(s3));
-            }, "", OPT_DYNAMIC);
-
-            await tick();
-            expect(t.val()).toBe("a");
-            expect(runs).toBe(1);
-
-            s1.set(false);
-            t.val();
-            await tick();
-            expect(t.val()).toBe("b");
-            expect(runs).toBe(2);
-
-            /** s2 should no longer be tracked */
-            s2.set("x");
-            t.val();
-            await tick();
-            expect(t.val()).toBe("b");
-            expect(runs).toBe(2);
-
-            /** s3 should be tracked */
-            s3.set("y");
-            t.val();
-            await tick();
-            expect(t.val()).toBe("y");
-            expect(runs).toBe(3);
+            assert.strictEqual(t.val(), 20);
         });
     });
 
     describe("spawn", () => {
-        test("runs async effect", async () => {
+        it("runs async effect", async () => {
             let ran = false;
 
             spawn((c) => {
@@ -368,10 +329,10 @@ describe.skip("edge cases", () => {
             });
 
             await tick();
-            expect(ran).toBe(true);
+            assert.strictEqual(ran, true);
         });
 
-        test("resolved function is registered as cleanup", async () => {
+        it("resolved function is registered as cleanup", async () => {
             let cleaned = false;
             const s1 = signal(0);
 
@@ -383,12 +344,10 @@ describe.skip("edge cases", () => {
             });
 
             await tick();
-            /** Cleanup registered; dispose should call it */
             r.dispose();
-            /** Note: cleanup from async resolve may have timing nuances */
         });
 
-        test("is stable by default", () => {
+        it("is stable by default", () => {
             const s1 = signal(1);
             const s2 = signal(2);
             let runs = 0;
@@ -400,15 +359,12 @@ describe.skip("edge cases", () => {
                 return Promise.resolve();
             });
 
-            expect(runs).toBe(1);
+            assert.strictEqual(runs, 1);
         });
 
-        test("sets loading flag", () => {
-            let node;
+        it("sets loading flag", () => {
             const s1 = signal(0);
 
-            /** We can't easily check loading on Effect from outside,
-             *  but we verify the effect doesn't crash */
             spawn((c) => {
                 c.read(s1);
                 return new Promise((r) => setTimeout(r, 100));
@@ -417,7 +373,7 @@ describe.skip("edge cases", () => {
     });
 
     describe("scope stable by default", () => {
-        test("scope is stable by default", () => {
+        it("scope is stable by default", () => {
             const s1 = signal(1);
             const s2 = signal(10);
             let runs = 0;
@@ -428,51 +384,18 @@ describe.skip("edge cases", () => {
                 c.read(s2);
             });
 
-            expect(runs).toBe(1);
+            assert.strictEqual(runs, 1);
 
             s1.set(2);
-            expect(runs).toBe(2);
+            assert.strictEqual(runs, 2);
 
             s2.set(20);
-            expect(runs).toBe(3);
-        });
-
-        test.skip("scope with OPT_DYNAMIC can change deps", () => {
-            const s1 = signal(true);
-            const s2 = signal(0);
-            const s3 = signal(0);
-            let runs = 0;
-
-            effect((c) => {
-                runs++;
-                if (c.read(s1)) {
-                    c.read(s2);
-                } else {
-                    c.read(s3);
-                }
-            }, OPT_DYNAMIC);
-
-            expect(runs).toBe(1);
-
-            s2.set(1);
-            expect(runs).toBe(2);
-
-            s1.set(false);
-            expect(runs).toBe(3);
-
-            /** s2 should no longer be tracked */
-            s2.set(2);
-            expect(runs).toBe(3);
-
-            /** s3 should be tracked now */
-            s3.set(1);
-            expect(runs).toBe(4);
+            assert.strictEqual(runs, 3);
         });
     });
 
-
     describe("diamond dependency", () => {
-        test("effect runs once for diamond update", () => {
+        it("effect runs once for diamond update", () => {
             const s1 = signal(0);
             const c1 = derive((c) => c.read(s1) + 1);
             const c2 = derive((c) => c.read(s1) + 10);
@@ -484,25 +407,25 @@ describe.skip("edge cases", () => {
                 e.read(c2);
             });
 
-            expect(runs).toBe(1);
+            assert.strictEqual(runs, 1);
             s1.set(1);
-            expect(runs).toBe(2);
+            assert.strictEqual(runs, 2);
         });
 
-        test("compute evaluates correctly in diamond", () => {
+        it("compute evaluates correctly in diamond", () => {
             const s1 = signal(1);
             const left = derive((c) => c.read(s1) * 2);
             const right = derive((c) => c.read(s1) * 3);
             const sum = derive((c) => c.read(left) + c.read(right));
 
-            expect(sum.val()).toBe(5);
+            assert.strictEqual(sum.val(), 5);
             s1.set(2);
-            expect(sum.val()).toBe(10);
+            assert.strictEqual(sum.val(), 10);
             s1.set(3);
-            expect(sum.val()).toBe(15);
+            assert.strictEqual(sum.val(), 15);
         });
 
-        test("deep diamond with pending/stale split", () => {
+        it("deep diamond with pending/stale split", () => {
             const s1 = signal(0);
             const a = derive((c) => c.read(s1) + 1);
             const b = derive((c) => c.read(a) + 1);
@@ -514,35 +437,33 @@ describe.skip("edge cases", () => {
                 e.read(c1);
             });
 
-            expect(runs).toBe(1);
+            assert.strictEqual(runs, 1);
             s1.set(1);
-            expect(runs).toBe(2);
-            expect(c1.val()).toBe(5);
+            assert.strictEqual(runs, 2);
+            assert.strictEqual(c1.val(), 5);
         });
     });
 
     describe("avoidable computation", () => {
-        test("downstream skips when upstream absorbs change", () => {
+        it("downstream skips when upstream absorbs change", () => {
             const s1 = signal(1);
             let c1Runs = 0;
             let c2Runs = 0;
 
-            /** c1 absorbs: always returns 0 regardless of s1 */
             const c1 = derive((c) => { c1Runs++; c.read(s1); return 0; });
             const c2 = derive((c) => { c2Runs++; return c.read(c1) + 1; });
 
             effect((e) => { e.read(c2); });
 
-            expect(c1Runs).toBe(1);
-            expect(c2Runs).toBe(1);
+            assert.strictEqual(c1Runs, 1);
+            assert.strictEqual(c2Runs, 1);
 
             s1.set(2);
-            /** c1 runs but returns same value; c2 should NOT run */
-            expect(c1Runs).toBe(2);
-            expect(c2Runs).toBe(1);
+            assert.strictEqual(c1Runs, 2);
+            assert.strictEqual(c2Runs, 1);
         });
 
-        test("deep chain avoids unnecessary work", () => {
+        it("deep chain avoids unnecessary work", () => {
             const s1 = signal(0);
             const c1 = derive((c) => { c.read(s1); return 0; });
             const c2 = derive((c) => c.read(c1) + 1);
@@ -552,15 +473,14 @@ describe.skip("edge cases", () => {
 
             effect((e) => { runs++; e.read(c4); });
 
-            expect(runs).toBe(1);
+            assert.strictEqual(runs, 1);
             s1.set(1);
-            /** c1 absorbs, c2/c3/c4 should not run, effect should not run */
-            expect(runs).toBe(1);
+            assert.strictEqual(runs, 1);
         });
     });
 
     describe("batch", () => {
-        test("coalesces multiple signal updates", () => {
+        it("coalesces multiple signal updates", () => {
             const s1 = signal(0);
             const s2 = signal(0);
             let runs = 0;
@@ -571,31 +491,30 @@ describe.skip("edge cases", () => {
                 e.read(s2);
             });
 
-            expect(runs).toBe(1);
+            assert.strictEqual(runs, 1);
             batch(() => {
                 s1.set(1);
                 s2.set(2);
             });
-            expect(runs).toBe(2);
+            assert.strictEqual(runs, 2);
         });
 
-        test("nested batch is a no-op", () => {
+        it("nested batch is a no-op", () => {
             const s1 = signal(0);
             let runs = 0;
 
             effect((e) => { runs++; e.read(s1); });
 
-            expect(runs).toBe(1);
+            assert.strictEqual(runs, 1);
             batch(() => {
                 batch(() => {
                     s1.set(1);
                 });
-                /** Still inside outer batch — effect hasn't run yet */
             });
-            expect(runs).toBe(2);
+            assert.strictEqual(runs, 2);
         });
 
-        test("signal read inside batch sees old value", () => {
+        it("signal read inside batch sees old value", () => {
             const s1 = signal(0);
             let mid = -1;
 
@@ -604,36 +523,34 @@ describe.skip("edge cases", () => {
                 mid = s1.val();
             });
 
-            /** Inside batch, set is deferred, so val sees old value */
-            expect(mid).toBe(0);
-            expect(s1.val()).toBe(1);
+            assert.strictEqual(mid, 0);
+            assert.strictEqual(s1.val(), 1);
         });
     });
 
     describe("dispose", () => {
-        test("disposed compute returns last value", () => {
+        it("disposed compute returns last value", () => {
             const s1 = signal(1);
             const c1 = derive((c) => c.read(s1) * 2);
 
-            expect(c1.val()).toBe(2);
+            assert.strictEqual(c1.val(), 2);
             c1.dispose();
             s1.set(2);
-            /** Disposed compute retains nothing usable */
         });
 
-        test("disposed effect stops running", () => {
+        it("disposed effect stops running", () => {
             const s1 = signal(0);
             let runs = 0;
 
             const e1 = effect((e) => { runs++; e.read(s1); });
 
-            expect(runs).toBe(1);
+            assert.strictEqual(runs, 1);
             e1.dispose();
             s1.set(1);
-            expect(runs).toBe(1);
+            assert.strictEqual(runs, 1);
         });
 
-        test("root.dispose() cleans up all owned nodes", () => {
+        it("root.dispose() cleans up all owned nodes", () => {
             const s1 = signal(0);
             let runs = 0;
 
@@ -642,13 +559,13 @@ describe.skip("edge cases", () => {
                 r.effect((e) => { runs++; e.read(s1); });
             });
 
-            expect(runs).toBe(2);
+            assert.strictEqual(runs, 2);
             r.dispose();
             s1.set(1);
-            expect(runs).toBe(2);
+            assert.strictEqual(runs, 2);
         });
 
-        test("double dispose is safe", () => {
+        it("double dispose is safe", () => {
             const e1 = effect(() => { });
             e1.dispose();
             e1.dispose();
@@ -656,7 +573,7 @@ describe.skip("edge cases", () => {
     });
 
     describe("circular dependency", () => {
-        test("compute reading itself via signal indirection throws", () => {
+        it("compute reading itself via signal indirection throws", () => {
             const s1 = signal(0);
             const c1 = compute((c) => {
                 let v = c.read(s1);
@@ -666,14 +583,14 @@ describe.skip("edge cases", () => {
                 return v;
             });
 
-            expect(c1.val()).toBe(0);
+            assert.strictEqual(c1.val(), 0);
             s1.set(1);
-            expect(() => c1.val()).toThrow("Circular dependency");
+            assert.throws(() => c1.val(), { message: "Circular dependency" });
         });
     });
 
     describe("dynamic dependency changes", () => {
-        test("compute drops old deps and picks up new ones", () => {
+        it("compute drops old deps and picks up new ones", () => {
             const s1 = signal(true);
             const s2 = signal("a");
             const s3 = signal("b");
@@ -686,27 +603,24 @@ describe.skip("edge cases", () => {
 
             effect((e) => { e.read(c1); });
 
-            expect(runs).toBe(1);
-            expect(c1.val()).toBe("a");
+            assert.strictEqual(runs, 1);
+            assert.strictEqual(c1.val(), "a");
 
-            /** Switch branch */
             s1.set(false);
-            expect(c1.val()).toBe("b");
-            expect(runs).toBe(2);
+            assert.strictEqual(c1.val(), "b");
+            assert.strictEqual(runs, 2);
 
-            /** s2 should no longer trigger */
             s2.set("x");
-            expect(runs).toBe(2);
+            assert.strictEqual(runs, 2);
 
-            /** s3 should trigger */
             s3.set("y");
-            expect(c1.val()).toBe("y");
-            expect(runs).toBe(3);
+            assert.strictEqual(c1.val(), "y");
+            assert.strictEqual(runs, 3);
         });
     });
 
     describe("equal() API", () => {
-        test("equal(true) suppresses notification", () => {
+        it("equal(true) suppresses notification", () => {
             const s1 = signal(0);
             let runs = 0;
 
@@ -717,13 +631,12 @@ describe.skip("edge cases", () => {
 
             effect((e) => { runs++; e.read(c1); });
 
-            expect(runs).toBe(1);
+            assert.strictEqual(runs, 1);
             s1.set(1);
-            /** c1 value changed but equal(true) suppresses */
-            expect(runs).toBe(1);
+            assert.strictEqual(runs, 1);
         });
 
-        test("equal(false) forces notification", () => {
+        it("equal(false) forces notification", () => {
             const s1 = signal(0);
             let runs = 0;
 
@@ -735,86 +648,38 @@ describe.skip("edge cases", () => {
 
             effect((e) => { runs++; e.read(c1); });
 
-            expect(runs).toBe(1);
+            assert.strictEqual(runs, 1);
             s1.set(1);
-            /** Value didn't change (still 42) but equal(false) forces */
-            expect(runs).toBe(2);
-        });
-    });
-
-    describe.skip("FLAG_STREAM via compute", () => {
-        test("async iterable compute settles on each yield", async () => {
-            const resolvers = [];
-            const iter = {
-                [Symbol.asyncIterator]() { return this; },
-                next() { return new Promise(r => resolvers.push(r)); },
-                return() { return Promise.resolve({ done: true }); }
-            };
-
-            const c1 = compute((c) => iter, undefined, FLAG_STREAM);
-            const values = [];
-
-            effect((e) => {
-                const v = e.read(c1);
-                if (!c1.loading()) {
-                    values.push(v);
-                }
-            });
-
-            resolvers[0]({ value: 10, done: false });
-            await tick();
-            expect(values).toEqual([10]);
-
-            resolvers[1]({ value: 20, done: false });
-            await tick();
-            expect(values).toEqual([10, 20]);
-        });
-    });
-
-    describe.skip("OPT_NOTIFY via compute", () => {
-        test("compute with OPT_NOTIFY always propagates", () => {
-            const s1 = signal(1);
-            let runs = 0;
-
-            const c1 = compute((c) => {
-                c.read(s1);
-                return 42;
-            }, undefined, OPT_NOTIFY);
-
-            effect((e) => { runs++; e.read(c1); });
-
-            expect(runs).toBe(1);
-            s1.set(2);
-            expect(runs).toBe(2);
+            assert.strictEqual(runs, 2);
         });
     });
 
     describe("seed value", () => {
-        test("compute receives seed as prev on first run", () => {
+        it("compute receives seed as prev on first run", () => {
             let received;
             const c1 = compute((c, prev) => {
                 received = prev;
                 return prev + 1;
             }, 10);
 
-            expect(c1.val()).toBe(11);
-            expect(received).toBe(10);
+            assert.strictEqual(c1.val(), 11);
+            assert.strictEqual(received, 10);
         });
 
-        test("derive receives seed", () => {
+        it("derive receives seed", () => {
             let received;
             const d = derive((c, prev) => {
                 received = prev;
                 return 42;
             }, 99);
 
-            expect(d.val()).toBe(42);
-            expect(received).toBe(99);
+            assert.strictEqual(d.val(), 42);
+            assert.strictEqual(received, 99);
         });
     });
 
     describe("multiple signal writes in effect", () => {
-        test("effect writing to signal triggers another cycle", () => {
+        it("effect writing to signal triggers another cycle", () => {
             const s1 = signal(0);
             const s2 = signal(0);
             let s2val = 0;
@@ -827,14 +692,14 @@ describe.skip("edge cases", () => {
                 s2val = e.read(s2);
             });
 
-            expect(s2val).toBe(0);
+            assert.strictEqual(s2val, 0);
             s1.set(1);
-            expect(s2val).toBe(10);
+            assert.strictEqual(s2val, 10);
         });
     });
 
     describe("recover edge cases", () => {
-        test("error in compute is caught when effect reads it", () => {
+        it("error in compute is caught when effect reads it", () => {
             let caught = null;
 
             const r = root((r) => {
@@ -844,24 +709,24 @@ describe.skip("edge cases", () => {
                 r.effect((e) => { e.read(c1); });
             });
 
-            expect(caught).toBeInstanceOf(Error);
-            expect(caught.message).toBe("compute err");
+            assert(caught instanceof Error);
+            assert.strictEqual(caught.message, "compute err");
             r.dispose();
         });
 
-        test("compute.error() returns true after throw", () => {
+        it("compute.error() returns true after throw", () => {
             const c1 = compute(() => { throw new Error("fail"); });
-            expect(c1.error()).toBe(true);
+            assert.strictEqual(c1.error(), true);
         });
 
-        test("compute.val() rethrows stored error", () => {
+        it("compute.val() rethrows stored error", () => {
             const c1 = compute(() => { throw new Error("rethrow me"); });
-            expect(() => c1.val()).toThrow("rethrow me");
+            assert.throws(() => c1.val(), { message: "rethrow me" });
         });
     });
 
     describe("stress: deep chain", () => {
-        test("50-deep chain propagates correctly", () => {
+        it("50-deep chain propagates correctly", () => {
             const head = signal(0);
             let current = head;
             for (let i = 0; i < 50; i++) {
@@ -869,14 +734,14 @@ describe.skip("edge cases", () => {
                 current = derive((c) => c.read(prev) + 1);
             }
 
-            expect(current.val()).toBe(50);
+            assert.strictEqual(current.val(), 50);
             head.set(1);
-            expect(current.val()).toBe(51);
+            assert.strictEqual(current.val(), 51);
         });
     });
 
     describe("stress: wide fan-out", () => {
-        test("50 effects on one signal", () => {
+        it("50 effects on one signal", () => {
             const s1 = signal(0);
             let total = 0;
 
@@ -884,15 +749,15 @@ describe.skip("edge cases", () => {
                 effect((e) => { total += e.read(s1); });
             }
 
-            expect(total).toBe(0);
+            assert.strictEqual(total, 0);
             total = 0;
             s1.set(1);
-            expect(total).toBe(50);
+            assert.strictEqual(total, 50);
         });
     });
 
     describe("interleaved reads", () => {
-        test("compute reading another compute during evaluation", () => {
+        it("compute reading another compute during evaluation", () => {
             const s1 = signal(1);
             const s2 = signal(2);
 
@@ -900,9 +765,9 @@ describe.skip("edge cases", () => {
             const c2 = derive((c) => c.read(c1) * 2);
             const c3 = derive((c) => c.read(c1) + c.read(c2));
 
-            expect(c3.val()).toBe(9);
+            assert.strictEqual(c3.val(), 9);
             s1.set(3);
-            expect(c3.val()).toBe(15);
+            assert.strictEqual(c3.val(), 15);
         });
     });
 });

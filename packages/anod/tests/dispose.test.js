@@ -1,13 +1,13 @@
-import { describe, test, expect } from "bun:test";
-import { root, signal, compute, effect, Signal, Compute } from "anod";
+import { describe, it } from "node:test";
+import assert from "node:assert/strict";
+import { root, signal, compute, effect, Signal, Compute } from "./_helper.js";
 
 describe("dispose", () => {
     describe("effect scope", () => {
-        test("disables updates and clears computation's value", () => {
+        it("disables updates and clears computation's value", () => {
             let count = 0;
             let s1;
             let c1;
-
             const r1 = root((r) => {
                 count = 0;
                 s1 = signal(0);
@@ -15,30 +15,25 @@ describe("dispose", () => {
                     count++;
                     return c.read(s1);
                 });
-
-                expect(c1.val()).toBe(0);
-                expect(count).toBe(1);
-
+                assert.strictEqual(c1.val(), 0);
+                assert.strictEqual(count, 1);
                 s1.set(1);
-                expect(c1.val()).toBe(1);
-                expect(count).toBe(2);
+                assert.strictEqual(c1.val(), 1);
+                assert.strictEqual(count, 2);
             });
-
             r1.dispose();
             s1.set(2);
-
-            expect(count).toBe(2); // "Compute should not execute after disposal"
-            expect(c1.val()).toBeNull(); // "Disposed compute value should be null"
+            assert.strictEqual(count, 2);
+            assert.strictEqual(c1.val(), null);
         });
     });
 
     describe("computations", () => {
-        test("persists through cycle when manually disposed", () => {
+        it("persists through cycle when manually disposed", () => {
             effect((s) => {
                 const s1 = signal(0);
                 const c1 = s.compute((c) => c.read(s1));
                 let count = 0;
-
                 s.effect((e) => {
                     effect((e2) => {
                         if (e2.read(s1) > 0) {
@@ -49,10 +44,9 @@ describe("dispose", () => {
                         count += (e3.read(c1) || 0);
                     });
                 });
-
                 s1.set(s1.val() + 1);
                 s1.set(s1.val() + 1);
-                expect(count).toBe(0); // "Disposed node should not contribute to count"
+                assert.strictEqual(count, 0);
             });
         });
     });

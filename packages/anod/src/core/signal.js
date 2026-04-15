@@ -1418,17 +1418,21 @@ function Effect(opts, fn, dep1, args, owner) {
 
     /**
      * @this {Effect}
+     * @param {number} time
      */
-    EffectProto._resetOwned = function () {
-        let owned = this._owned;
-        if (owned !== null) {
+    EffectProto._update = function (time) {
+        let flag = this._flag;
+        this._flag = (flag & ~(FLAG_STALE | FLAG_PENDING | FLAG_EQUAL | FLAG_NOTEQUAL | FLAG_DEP1)) | FLAG_RUNNING;
+
+        if (this._owned !== null) {
+            let owned = this._owned;
             let count = owned.length;
             while (count-- > 0) {
                 owned.pop()._dispose();
             }
         }
-        let cleanup = this._cleanup;
-        if (cleanup !== null) {
+        if (this._cleanup !== null) {
+            let cleanup = this._cleanup;
             if (typeof cleanup === 'function') {
                 cleanup();
                 this._cleanup = null;
@@ -1439,17 +1443,6 @@ function Effect(opts, fn, dep1, args, owner) {
                 }
             }
         }
-    };
-
-    /**
-     * @this {Effect}
-     * @param {number} time
-     */
-    EffectProto._update = function (time) {
-        let flag = this._flag;
-        this._flag = (flag & ~(FLAG_STALE | FLAG_PENDING | FLAG_EQUAL | FLAG_NOTEQUAL | FLAG_DEP1)) | FLAG_RUNNING;
-
-        this._resetOwned();
 
         if (flag & FLAG_ASYNC) {
             this._updateAsync(time, flag);
