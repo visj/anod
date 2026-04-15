@@ -32,15 +32,13 @@ function Sender() { }
 /** @package @type {T} */
 Sender.prototype._value;
 /** @package @type {number} */
-Sender.prototype._version;
+Sender.prototype._slot;
 /** @package @type {Receiver | null} */
 Sender.prototype._sub1;
 /** @package @type {number} */
 Sender.prototype._sub1slot;
 /** @package @type {Array<Receiver | number> | null} */
 Sender.prototype._subs;
-/** @package @type {number} */
-Sender.prototype._mod;
 /** @package @type {number} */
 Sender.prototype._ctime;
 
@@ -59,29 +57,6 @@ Receiver.prototype._deps;
 Receiver.prototype._time;
 /** @package @param {number} time @returns {void} */
 Receiver.prototype._setStale = function (time) { };
-
-/** @interface */
-function Clock() { }
-/** @type {number} */
-Clock.prototype._state;
-/** @type {number} */
-Clock.prototype._time;
-/** @type {number} */
-Clock.prototype._version;
-/** @type {number} */
-Clock.prototype._minlevel;
-/** @type {number} */
-Clock.prototype._maxlevel;
-/** @type {number} */
-Clock.prototype._disposes;
-/** @type {number} */
-Clock.prototype._signals;
-/** @type {number} */
-Clock.prototype._scopes;
-/** @type {number} */
-Clock.prototype._effects;
-/** @type {Owner | null} */
-Clock.prototype._scope;
 
 /**
  * @interface

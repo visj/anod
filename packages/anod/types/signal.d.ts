@@ -134,7 +134,7 @@ export interface ICompute<T> extends IReadonlySignal<T, Type.COMPUTE>, IAwaitabl
 
 export interface IEffect extends IDispose<Type.EFFECT> { }
 
-export declare function root(fn: (c: IReader) => void | (() => void)): IRoot;
+export declare function root(fn: (c: IReader) => void): IRoot;
 
 export declare function signal<T>(value: T): ISignal<T>;
 

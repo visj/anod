@@ -7,11 +7,17 @@ import {
     CLOCK, STATE_IDLE,
     FLAG_STALE, FLAG_INIT, FLAG_BOUND,
     register, notify, scheduleSignal, subscribe, startEffect,
-    Reader, Subscriber,
-    MUT_ADD, MUT_DEL, MUT_SORT,
-    MUT_OP_MASK, MUT_LEN_SHIFT, MUT_LEN_MASK, MUT_POS_SHIFT, MUT_POS_MASK,
     isPrimitive, isFunction, isSignal
 } from 'anod/internal';
+
+const MUT_ADD = 1;
+const MUT_DEL = 2;
+const MUT_SORT = 4;
+const MUT_OP_MASK = 7;
+const MUT_LEN_SHIFT = 3;
+const MUT_LEN_MASK = 0xFFF;
+const MUT_POS_SHIFT = 15;
+const MUT_POS_MASK = 0x1FFFF;
 
 /** @const */
 var SignalProto = Signal.prototype;
