@@ -1188,21 +1188,13 @@ function Effect(opts, fn, dep1, args, owner) {
      * @returns {void}
      */
     function _subscribe(sender) {
-        let slot = -1;
         if (this._dep1 === null) {
             this._dep1 = sender;
+            this._dep1slot = sender._connect(this, -1);
         } else if (this._deps === null) {
-            slot = 0;
+            this._deps = [sender, sender._connect(this, 0)];
         } else {
-            slot = this._deps.length;
-        }
-        slot = sender._connect(this, slot);
-        if (slot === -1) {
-            this._dep1slot = slot;
-        } else if (slot === 0) {
-            this._deps = [sender, slot];
-        } else {
-            this._deps.push(sender, slot);
+            this._deps.push(sender, sender._connect(this, this._deps.length));
         }
     }
 
@@ -1387,22 +1379,26 @@ function Effect(opts, fn, dep1, args, owner) {
             } else if (this._dep1 !== null) {
                 this._flag |= FLAG_SETUP;
                 this._dep1._disconnect(dep1slot);
+                this._dep1 = null;
             }
             try {
                 value = this._fn(this, this._value, this._args);
             } catch (err) {
                 if (deps !== null) {
-                    this._reconcile();
+                    let oldlen = this._dep1slot;
+                    this._dep1slot = dep1slot;
+                    this._reconcile(oldlen);
                 }
                 this._slot = slot;
-                this._dep1slot = dep1slot;
                 this._value = err;
                 this._time = this._ctime = time;
                 this._flag = (this._flag & ~(FLAG_RUNNING | FLAG_INIT | FLAG_SETUP)) | FLAG_ERROR;
                 return;
             }
             if (deps !== null) {
-                this._reconcile();
+                let oldlen = this._dep1slot;
+                this._dep1slot = dep1slot;
+                this._reconcile(oldlen);
             }
             this._slot = slot;
             this._dep1slot = dep1slot;
@@ -1477,16 +1473,15 @@ function Effect(opts, fn, dep1, args, owner) {
             } else if (this._dep1 !== null) {
                 this._flag |= FLAG_SETUP;
                 this._dep1._disconnect(dep1slot);
+                this._dep1 = null;
             }
-            try {
-                cleanup = this._fn(this, this._args);
-            } finally {
-                if (deps !== null) {
-                    this._reconcile();
-                }
-                this._slot = slot;
+            cleanup = this._fn(this, this._args);
+            if (deps !== null) {
+                let oldlen = this._dep1slot;
                 this._dep1slot = dep1slot;
+                this._reconcile(oldlen);
             }
+            this._slot = slot;
         }
 
         flag = this._flag &= ~(FLAG_RUNNING | FLAG_INIT | FLAG_SETUP | FLAG_ERROR);
@@ -1503,11 +1498,11 @@ function Effect(opts, fn, dep1, args, owner) {
 
     /**
      * @this {Receiver}
+     * @param {number} oldlen
      */
-    function _reconcile() {
+    function _reconcile(oldlen) {
         let deps = this._deps;
         let cursor = this._time;
-        let oldlen = this._dep1slot;
         let newlen = deps.length;
 
         if (this._dep1 !== null && !(this._flag & FLAG_DEP1)) {

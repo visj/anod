@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { root, signal, compute, effect, Signal, Compute } from "../";
+import { root, signal, compute, effect, Signal, Compute } from "anod";
 
 describe("dispose", () => {
     describe("effect scope", () => {

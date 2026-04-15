@@ -1,289 +1,211 @@
-# Failing Tests Analysis
+# Failing Tests Analysis (Round 2)
 
-Test results: **22 pass, 53 fail, 26 skip, 2 errors**
+Test results: **27 pass, 36 fail, 38 skip, 2 errors**
 
----
-
-## Bug 1: Slot collision prevents all subscriptions (CRITICAL)
-
-**File:** `src/core/signal.js` — `read()` function (~line 994) and constructors
-
-**Root cause:** Both `Signal._slot` and `Compute._slot` (and `Effect._slot`) initialize to `0`. The `read()` function has a fast-path check:
-
-```js
-sender._slot === this._slot
-```
-
-On the very first execution (FLAG_SETUP), the receiver's `_slot` is `0` (constructor default) and the sender's `_slot` is also `0`. This condition is `true`, so `read()` returns early **without ever calling `_subscribe()`**. No dependency link is established — the entire reactive graph is inert.
-
-The `sender._slot === this._slot` check is designed to prevent double-tracking within a single execution (a node reads the same signal twice). But the initial `0 === 0` collision defeats it on the first read of every setup phase.
-
-**Why it's critical:** Without subscriptions, `_notify()` never reaches downstream nodes. Signals fire into the void. This single bug causes ~80% of all test failures.
-
-**Tests affected (directly):**
-- `signal > propagates if set to unequal value`
-- `signal > val > does not track a dependency`
-- ALL `effect` tests (effects never re-run after signal changes)
-- ALL `update` tests
-- `root > allows subcomputations to escape their parents`
-- `root > does not batch updates within scope`
-- `dispose > effect scope > disables updates and clears computation's value`
-- ALL `notify/equal()` tests (computes never re-run)
-- ALL `weak` tests
-- Most `recover` tests (effects don't re-trigger on signal changes)
-
-**Likely fix:** During the SETUP path in `_update()`, set `this._slot = VERSION--` before executing the fn, just like the dynamic path does. This ensures the receiver's slot is a unique negative number that can never collide with a sender's default `0`.
+The previous round's fixes (owner passthrough, FLAG_SETUP routing to dynamic path, catch(err), dep1 null guard) resolved several issues. The remaining 36 failures are dominated by a single crash that cascades through nearly every test.
 
 ---
 
-## Bug 2: `_owner` is never set on Effect nodes
+## The Crash: `null is not an object (evaluating 'subs.pop')`
 
-**File:** `src/core/signal.js` — Effect constructor (line 295), `_tryRecover()` (line 676)
+**30 of 36 failures** throw this error inside `_disconnect()`. It happens when `_disconnect(slot)` is called with `slot >= 0`, causing it to access `this._subs` which is `null` (because the subscription is actually in `_sub1`, not `_subs`).
 
-**Root cause:** The Effect constructor sets `this._owner = null`, and nothing ever assigns it. `_tryRecover()` walks the `_owner` chain to find recover handlers:
-
-```js
-function _tryRecover(error) {
-    let owner = this._owner;  // Always null
-    while (owner !== null) { ... }
-    return false;  // Always returns false
-}
-```
-
-Since `_owner` is never set, error recovery never reaches any handler registered on a Root or parent Effect.
-
-**Tests affected:**
-- `recover > root recovery > swallows error when recover returns true`
-- `recover > root recovery > propagates error when recover returns false`
-- `recover > multiple handlers > stops bubbling when first handler returns true`
-- `recover > multiple handlers > tries second handler when first returns false`
-- `recover > compute mine to effect > recovers when effect reads errored compute`
-- `recover > effect disposal > errored effect is disposed even when recovered`
-- `recover > batch recovery > recovers error during batch and completes normally`
-- `recover > recovery on triggered update > recovers error triggered by signal change`
-- All `edge > effect error` tests that depend on `r.recover()`
-
-**Likely fix:** The `ownEffect()` / `ownCompute()` / `ownWatch()` functions (and their equivalents) need to set `node._owner = this` before the node is started. This also means restructuring the creation flow — see Bug 3.
+This is caused by **two cooperating bugs** in the subscription machinery.
 
 ---
 
-## Bug 3: Owner is set AFTER startEffect/startCompute
+## Bug A: `_subscribe` uses the sub-slot for dispatch instead of the dep-slot
 
-**File:** `src/core/signal.js` — `ownEffect()` (line 514), `ownCompute()` (line 434), etc.
-
-**Root cause:** The `own*` functions call the top-level factory first, then `_own()`:
+**File:** `src/core/signal.js` — `_subscribe()` (~line 1190)
 
 ```js
-function ownEffect(fn, opts, args) {
-    let node = effect(fn, opts, args);  // Creates AND starts the effect
-    this._own(node);                    // Sets ownership AFTER execution
-    return node;
-}
-```
-
-`effect()` calls `startEffect(node)` which runs the effect immediately. If the effect throws during this initial execution, `_tryRecover()` can't find the owner because `_own()` hasn't been called yet. The error is unrecoverable even if a recover handler exists on the parent.
-
-**Tests affected:** Same as Bug 2 — any test where an effect throws during initial creation inside a root with `.recover()`.
-
-**Likely fix:** Split effect/compute creation into two steps: (1) construct the node and set `_owner`, (2) then start it. The `own*` functions should create the raw node, assign ownership, then call `startEffect`/`startCompute`.
-
----
-
-## Bug 4: `startEffect` catch block references undefined `err`
-
-**File:** `src/core/signal.js` — `startEffect()` (line 1916)
-
-**Root cause:** The non-idle catch block uses bare `catch` without binding the error:
-
-```js
-} catch {                                    // No (err) binding!
-    let recovered = node._tryRecover(err);   // err is undefined
-    node._dispose();
-    if (!recovered) {
-        throw err;                           // throws undefined
+function _subscribe(sender) {
+    let slot = -1;                          // ← dep-slot: where in THIS node
+    if (this._dep1 === null) {
+        this._dep1 = sender;
+    } else if (this._deps === null) {
+        slot = 0;                           // dep-slot = 0 (deps[0])
+    } else {
+        slot = this._deps.length;
+    }
+    slot = sender._connect(this, slot);     // ← OVERWRITES dep-slot with sub-slot!
+    if (slot === -1) {                      // ← dispatches on SUB-slot, not dep-slot
+        this._dep1slot = slot;
+    } else if (slot === 0) {
+        this._deps = [sender, slot];
+    } else {
+        this._deps.push(sender, slot);
     }
 }
 ```
 
-Compare with the idle branch (line 1904) which correctly uses `catch (err)`.
+`_connect(receiver, depslot)` returns a **sub-slot** (where in the *sender's* subscriber list the subscription lives: `-1` = `_sub1`, `0` = `_subs[0]`, etc.).
 
-**Tests affected:** Any effect that throws while already inside a transaction (i.e., during `start()`).
+The bug: `slot` is overwritten with the sub-slot, then the `if/else` chain uses this sub-slot to decide *where to store the dep*. This is wrong — it should use the original dep-slot for dispatch.
 
-**Likely fix:** Change `catch {` to `catch (err) {`.
+**Concrete example — second dep whose sender has no existing subscribers:**
 
----
+1. dep-slot = `0` (should create `deps = [sender, subslot]`)
+2. `sender._connect(this, 0)` → sender's `_sub1` was empty → stores `sub1 = this, sub1slot = 0` → returns `-1`
+3. `slot = -1` (sub-slot)
+4. `slot === -1` → `this._dep1slot = -1` — **WRONG!** Should have created `this._deps`
 
-## Bug 5: `scope()` method missing on Root
+This corrupts `dep1slot` and fails to create the `_deps` array.
 
-**File:** `src/core/signal.js` — Root prototype
-
-**Root cause:** Several recover tests call `r.scope(fn)` but no `scope` method is defined on `Root.prototype`. The concept may have been removed or renamed during the refactor.
-
-```js
-r.scope((s) => {
-    s.recover(() => { ... });
-    s.effect(() => { throw ... });
-});
-```
-
-**Tests affected:**
-- `recover > nested scope recovery > inner scope handles error without reaching outer` — TypeError: `r.scope is not a function`
-- `recover > nested scope recovery > bubbles to outer when inner returns false` — same
-- `recover > recover re-registration > old recover handler is cleared on effect re-run` — same
-- `recover > dispose clears recover > dispose nullifies recover handlers` — same (indirectly)
-
-**Likely fix:** Either re-implement `Root.prototype.scope` (and `Effect.prototype.scope`), or update the tests to use the new API (e.g., nested `root()` or a different scoping mechanism).
-
----
-
-## Bug 6: Missing exports break edge.test.js entirely
-
-**File:** `src/index.js`
-
-**Root cause:** `edge.test.js` imports several symbols that don't exist:
-
-```js
-import { transmit, OPT_NOTIFY, OPT_DYNAMIC, FLAG_STREAM } from "../";
-```
-
-- `transmit` — concept was dropped (computes are now raw pull, never push)
-- `OPT_NOTIFY` — not defined or exported
-- `OPT_DYNAMIC` — not defined or exported
-- `FLAG_STREAM` — not defined or exported
-
-This causes a SyntaxError that prevents the entire file from loading. **All 30+ tests in edge.test.js are blocked.**
-
-**Tests affected:** Every test in `edge.test.js` (module fails to load).
-
-**Likely fix:** Either re-export the missing symbols (if the functionality exists under different names) or update the test imports. Tests that use `transmit`, `OPT_DYNAMIC`, `FLAG_STREAM`, and `OPT_NOTIFY` need to be removed or rewritten.
-
----
-
-## Bug 7: Effect stable/setup path has no try/catch
-
-**File:** `src/core/signal.js` — `EffectProto._update()` (line 1464)
-
-**Root cause:** The stable/setup execution path doesn't wrap the fn call in try/catch:
-
-```js
-if (flag & (FLAG_STABLE | FLAG_SETUP)) {
-    cleanup = (flag & FLAG_BOUND)
-        ? this._fn(this._dep1.val(), this._args)
-        : this._fn(this, this._args);           // No try/catch!
-} else {
-    // ... dynamic path has try/finally
-}
-```
-
-If the fn throws on the stable path:
-1. `FLAG_RUNNING` is never cleared
-2. `_time` is never updated
-3. The error propagates raw, bypassing any cleanup or state recovery
-
-Compare with the dynamic path (line 1480) which wraps in `try { ... } finally { ... }`.
-
-**Tests affected:** Effects using `watch()` or bound effects that throw.
-
-**Likely fix:** Wrap the stable/setup path in try/catch, similar to how `ComputeProto._update` handles errors in its stable path.
-
----
-
-## Bug 8: dep1 not nulled during single-dep re-execution
-
-**File:** `src/core/signal.js` — `ComputeProto._update()` (line 1378–1389) and `EffectProto._update()` (line 1468–1489)
-
-**Root cause:** When a compute/effect has only `_dep1` (no `_deps` array) and re-executes:
-
-```js
-if (deps !== null) {
-    this._time = 0;
-    this._dep1slot = deps.length;
-} else {
-    this._flag |= FLAG_SETUP;
-    this._dep1._disconnect(dep1slot);  // Disconnects from sender
-    // But does NOT set this._dep1 = null!
-}
-```
-
-After disconnecting, `_dep1` still references the old sender. When `_subscribe()` is called during re-execution:
+**Fix:** Use the dep-slot for dispatch, store the sub-slot at that location:
 
 ```js
 function _subscribe(sender) {
     if (this._dep1 === null) {
-        this._dep1 = sender;    // Would go here if _dep1 was null
+        this._dep1 = sender;
+        this._dep1slot = sender._connect(this, -1);
     } else if (this._deps === null) {
-        slot = 0;               // Goes here instead — creates deps array
+        this._deps = [sender, sender._connect(this, 0)];
+    } else {
+        let slot = this._deps.length;
+        this._deps.push(sender, sender._connect(this, slot));
     }
 }
 ```
 
-The re-subscription creates a `_deps` entry instead of reusing `_dep1`. This leads to:
-- `_dep1` = old sender reference (stale, disconnected)
-- New connection stored in wrong slot
-- Sender's `_sub1slot` points to a deps index that doesn't exist yet
+---
 
-Additionally, `_dep1slot` is saved and restored after execution (line 1406–1407), overwriting whatever `_subscribe` set during re-execution.
+## Bug B: `dep1slot` restore overwrites what `_subscribe` set
 
-**Tests affected:** Any compute/effect with a single dep that re-executes (i.e., almost all dynamic tracking after the first run). This bug is currently masked by Bug 1 (no subscriptions at all), but will surface once Bug 1 is fixed.
+**File:** `src/core/signal.js` — `ComputeProto._update()` (~line 1407) and `EffectProto._update()` (~line 1487)
 
-**Likely fix:** Set `this._dep1 = null` before disconnecting in the `deps === null` branch. Also, don't restore `dep1slot` when coming from the setup re-entry path, or restructure the save/restore to only apply to the `deps !== null` case.
+The dynamic path saves and restores `dep1slot`:
+
+```js
+let dep1slot = this._dep1slot;    // save (line 1381)
+this._slot = VERSION--;
+// ... disconnect, run fn (which calls _subscribe), reconcile ...
+this._slot = slot;
+this._dep1slot = dep1slot;        // restore (line 1408) ← OVERWRITES _subscribe's value
+```
+
+On **first execution** (setup path through dynamic):
+- `dep1slot` is saved as `0` (constructor default)
+- `_subscribe` sets `dep1slot = -1` (correct sub-slot for `_sub1`)
+- Restore overwrites it back to `0`
+
+On next signal change → re-execution → `dep1._disconnect(dep1slot)` → `dep1._disconnect(0)` → tries `this._subs.pop()` → **CRASH** because the subscription is in `_sub1` (slot `-1`), not `_subs`.
+
+**Fix:** Only restore `dep1slot` when going through the reconcile path (`deps !== null`):
+
+```js
+this._slot = slot;
+if (deps !== null) {
+    this._dep1slot = dep1slot;
+}
+```
+
+Apply in both `ComputeProto._update` and `EffectProto._update`.
 
 ---
 
-## Summary: Test failures by root cause
+## Bug C: `dep1` not nulled during single-dep re-execution
 
-| Bug | Tests directly affected | Severity |
-|-----|------------------------|----------|
-| Bug 1 (slot collision) | ~40 tests | **Critical** — breaks all reactivity |
-| Bug 2 (_owner never set) | ~10 recover tests | High |
-| Bug 3 (owner set after start) | Same as Bug 2 | High |
-| Bug 4 (catch missing err) | Effects throwing in transaction | Medium |
-| Bug 5 (scope missing) | 4 recover tests | Medium |
-| Bug 6 (missing exports) | All edge.test.js (~30 tests) | High (blocks entire file) |
-| Bug 7 (no try/catch stable) | Bound effects that throw | Medium |
-| Bug 8 (dep1 re-exec) | All single-dep re-executions | High (masked by Bug 1) |
+**File:** `src/core/signal.js` — `ComputeProto._update()` (~line 1387) and `EffectProto._update()` (~line 1477)
 
-### Recommended fix order
+```js
+} else if (this._dep1 !== null) {
+    this._flag |= FLAG_SETUP;
+    this._dep1._disconnect(dep1slot);
+    // Missing: this._dep1 = null;
+}
+```
 
-1. **Bug 1** — fixes the majority of failures in one shot
-2. **Bug 8** — will surface immediately after Bug 1 is fixed
-3. **Bug 2 + Bug 3** — together fix error recovery
-4. **Bug 4** — trivial one-character fix
-5. **Bug 6** — decide which exports to add vs. which tests to update
-6. **Bug 5** — decide if `scope()` returns or tests change
-7. **Bug 7** — wrap stable path in try/catch
+After disconnecting `dep1` from the sender, `dep1` still references the old sender. When `_subscribe` runs during re-execution, it sees `dep1 !== null` and routes to `deps[0]` instead of reusing `dep1`. This creates a cross-wired state where:
+- `dep1` points to the old sender (stale, disconnected)
+- The new subscription is stored in `deps` at the wrong position
 
-### Tests expected to pass after Bug 1 + Bug 8 are fixed
+**Fix:** Add `this._dep1 = null;` after the disconnect:
 
-- `signal > propagates if set to unequal value`
-- `signal > val > does not track a dependency`
-- `effect > modifies signals > batches data while executing`
-- `effect > modifies signals > throws when continually setting a direct dependency`
-- `effect > modifies signals > throws when continually setting an indirect dependency`
-- `effect > modifies signals > throws on error inside batch`
-- `effect > propagates changes topologically`
-- `effect > cleanup > is called when effect is updated`
-- `effect > cleanup > can be called from within a subcomputation`
-- `effect > cleanup > is run only once when a effect scope is disposed`
-- `update > does not register a dependency on the subcomputation`
-- `update > may update > does not trigger downstream computations unless changed`
-- `update > may update > updates downstream pending nodes`
-- `root > allows subcomputations to escape their parents via nested scope`
-- `root > does not batch updates within scope`
-- `dispose > effect scope > disables updates and clears computation's value`
-- All `notify/equal()` tests
-- All `weak` tests
+```js
+} else if (this._dep1 !== null) {
+    this._flag |= FLAG_SETUP;
+    this._dep1._disconnect(dep1slot);
+    this._dep1 = null;
+}
+```
 
-### Tests that need Bug 2 + Bug 3 (in addition to Bug 1)
+---
 
-- All `recover` tests (error recovery chain)
-- `edge > effect error` tests
+## The 2 "Circular dependency" errors
 
-### Tests that need Bug 5 or test updates
+**Tests:** `compute > with changing dependencies > does not update on inactive dependencies` and `activates new dependencies`
 
-- `recover > nested scope recovery` tests (`r.scope` missing)
-- `recover > recover re-registration` test (`r.scope` missing)
+These are **not real circular dependency bugs**. They're cascading from the `subs.pop` crash in the preceding test (`updates on active dependencies`). The `compute.test.js` file uses describe-level shared state:
 
-### Tests that need Bug 6 or test updates
+```js
+describe("with changing dependencies", () => {
+    const c1 = compute((c) => { ... });  // shared across all tests
+    
+    test("updates on active dependencies", () => { ... });  // CRASHES → c1 left with FLAG_RUNNING
+    test("does not update on inactive dependencies", () => {
+        c1.val();  // FLAG_RUNNING still set → throws "Circular dependency"
+    });
+});
+```
 
-- All `edge.test.js` tests (import error)
+After the crash, `FLAG_RUNNING` is never cleared on the compute. Subsequent `val()` calls hit the circular dependency guard. **These will pass once Bugs A+B+C are fixed.**
+
+---
+
+## The `_deps.push` error
+
+**Test:** `effect > propagates changes topologically`
+
+```
+TypeError: null is not an object (evaluating 'this._deps.push')
+```
+
+This is the same root cause as Bugs A+B. The effect subscribes to multiple senders during setup. Bug A causes the second subscription to misroute (writes to `dep1slot` instead of creating `deps`). Then a later `_subscribe` call tries `this._deps.push(...)` on a null `_deps`. **Will pass once Bug A is fixed.**
+
+---
+
+## The 2 `SyntaxError` (edge.test.js)
+
+```
+SyntaxError: Export named 'transmit' not found
+SyntaxError: Export named 'FLAG_STREAM' not found
+```
+
+`edge.test.js` imports `transmit`, `OPT_NOTIFY`, `OPT_DYNAMIC`, `FLAG_STREAM` — none of which exist. This blocks all ~30 tests in the file from loading. The 2 errors count toward the "2 errors" in the test summary.
+
+**Fix:** Update the test imports. Remove tests for `transmit`/`OPT_DYNAMIC`/`FLAG_STREAM`. Either re-export `OPT_NOTIFY` or remove those tests.
+
+---
+
+## The `r.scope()` failure
+
+**Test:** `recover > recover re-registration > old recover handler is cleared on effect re-run`
+
+```
+TypeError: r.scope is not a function
+```
+
+`Root.prototype.scope` doesn't exist. This test needs either a `scope()` implementation or a rewrite using existing API.
+
+---
+
+## Summary by root cause
+
+| Root Cause | # Tests | Error |
+|-----------|---------|-------|
+| Bug A + B (subscribe dispatch + dep1slot restore) | 30 | `subs.pop()` on null |
+| Cascading from Bug A+B (stale FLAG_RUNNING) | 2 | "Circular dependency" |
+| Bug A variant (multi-dep) | 1 | `_deps.push()` on null |
+| Missing exports (edge.test.js) | 2 errors | SyntaxError |
+| Missing `scope()` method | 1 | TypeError |
+
+### Fix priority
+
+1. **Bug A** (`_subscribe` dispatch) — fixes the routing
+2. **Bug B** (`dep1slot` restore) — fixes the overwrite
+3. **Bug C** (`dep1 = null`) — fixes single-dep re-execution
+
+All three are in `_subscribe`, `ComputeProto._update`, and `EffectProto._update`. Fixing them should resolve **33 of 36 test failures** (the 30 `subs.pop` + 2 circular + 1 `deps.push`).
+
+The remaining 3 are the `edge.test.js` import errors (2) and the missing `scope()` method (1).
