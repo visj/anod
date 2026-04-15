@@ -5,10 +5,8 @@
   "main": "./dist/index.mjs",
   "types": "./dist/index.d.ts",
   "scripts": {
-    "make": "node scripts/build.js",
-    "test": "node --test tests/*.test.js",
-    "test:debug": "ANOD_DEBUG=1 node --test tests/*.test.js",
-    "closure": "node scripts/closure.js"
+    "make": "bun scripts/build.js",
+    "closure": "bun scripts/closure.js"
   },
   "keywords": [],
   "author": "Vilhelm Sjölund",

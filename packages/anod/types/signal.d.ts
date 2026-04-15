@@ -81,6 +81,9 @@ export interface IReader extends IReceiver {
     watch(fn: (c: IReader) => void | (() => void)): IEffect;
     watch<W>(fn: (c: IReader, args: W) => void | (() => void), args?: W): IEffect;
 
+    scope(fn: (c: IReader) => void | (() => void), opts?: number): IEffect;
+    scope<W>(fn: (c: IReader, args: W) => void | (() => void), opts?: number, args?: W): IEffect;
+
     task<U>(fn: (c: IReader, prev: Resolve<U>) => Promise<U>, seed?: Resolve<U>, opts?: number): ICompute<Resolve<U>>;
     task<U, W>(fn: (c: IReader, prev: Resolve<U>, args: W) => Promise<U>, seed?: Resolve<U>, opts?: number, args?: W): ICompute<Resolve<U>>;
 
@@ -131,7 +134,7 @@ export interface ICompute<T> extends IReadonlySignal<T, Type.COMPUTE>, IAwaitabl
 
 export interface IEffect extends IDispose<Type.EFFECT> { }
 
-export declare function root(fn: (c: IReader) => void): IRoot;
+export declare function root(fn: (c: IReader) => void | (() => void)): IRoot;
 
 export declare function signal<T>(value: T): ISignal<T>;
 
@@ -167,6 +170,11 @@ export declare function effect<W>(
     fn: (c: IReader, args: W) => void | (() => void),
     opts?: number,
     args?: W
+): IEffect;
+
+export declare function scope(
+    fn: (c: IReader) => void | (() => void),
+    opts?: number
 ): IEffect;
 
 export declare function scope<W>(
