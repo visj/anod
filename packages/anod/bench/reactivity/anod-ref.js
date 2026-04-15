@@ -423,7 +423,7 @@ function setupDynUpdate(width, totalLayers, staticFraction, nSources, readFracti
     const leaves = layers[layers.length - 1];
     /** Force-read ALL leaves so lazy frameworks fully materialize the graph. */
     for (let r = 0; r < leaves.length; r++) {
-        leaves[r].val();
+        sink += leaves[r].val();
     }
     const rand = pseudoRandom('seed');
     const skipCount = Math.round(leaves.length * (1 - readFraction));
@@ -438,9 +438,6 @@ function setupDynUpdate(width, totalLayers, staticFraction, nSources, readFracti
         batch(() => {
             sources[sourceDex].set(iter + sourceDex);
         });
-        for (let r = 0; r < readLen; r++) {
-            readLeaves[r].val();
-        }
         let sum = 0;
         for (let r = 0; r < readLen; r++) {
             sum += readLeaves[r].val();

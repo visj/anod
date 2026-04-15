@@ -993,20 +993,17 @@ function Effect(opts, fn, dep1, args, owner) {
      * @returns {T}
      */
     function read(sender) {
-        let value = sender.val();
         if (
             (this._flag & (FLAG_STABLE | FLAG_SETUP)) === FLAG_STABLE ||
             sender._slot === this._slot ||
             (this._flag & FLAG_DISPOSED)
         ) {
-            return value;
+            return sender.val();
         }
-        sender._slot = this._slot;
         if (this._flag & FLAG_SETUP) {
             this._subscribe(sender);
         } else {
             if (this._deps[this._time] === sender) {
-                this._deps[this._time + 1] &= ~FOUND;
                 this._time += 2;
             } else if (this._dep1 === sender) {
                 this._flag |= FLAG_DEP1;
@@ -1014,7 +1011,8 @@ function Effect(opts, fn, dep1, args, owner) {
                 this._search(sender);
             }
         }
-        return value;
+        sender._slot = this._slot;
+        return sender.val();
     }
 
     /**
@@ -1129,53 +1127,58 @@ function Effect(opts, fn, dep1, args, owner) {
         let deps = this._deps;
         let cursor = this._time;
         let oldlen = this._ctime;
-        if (cursor < oldlen && deps[cursor + 1] & FOUND) {
-            do {
-                deps[cursor + 1] &= ~FOUND;
-                cursor += 2;
-            } while (cursor < oldlen && deps[cursor + 1] & FOUND);
-            if (cursor < oldlen && deps[cursor] === sender) {
-                this._time = cursor + 2;
-                return;
-            }
-        }
+        /**
+         * Look ahead: if sender is at cursor+2 (skip one), push the
+         * missed index and advance cursor past both.
+         */
         if (cursor + 2 < oldlen && deps[cursor + 2] === sender) {
-            deps[cursor]._slot = cursor;
-            deps[cursor + 1] |= MISSING;
-            deps.push(null, cursor);
+            deps.push(cursor | MISSING);
             this._time = cursor + 4;
             return;
         }
+        /**
+         * Check if sender is dep1.
+         */
         if (sender._sub1 === this) {
             let depslot = sender._sub1slot;
             if (depslot === 0) {
                 this._flag |= FLAG_DEP1;
-            } else {
-                let idx = depslot - 1;
-                if (idx < cursor) {
-                    deps[idx + 1] &= ~MISSING;
-                } else if (idx < oldlen) {
-                    deps[idx + 1] |= FOUND;
-                }
+                return;
             }
-            return;
+            let idx = depslot - 1;
+            if (idx >= cursor && idx < oldlen) {
+                deps.push(idx | FOUND);
+                return;
+            }
         }
+        /**
+         * Check sender._slot as a hint into deps.
+         */
         let _slot = sender._slot;
         if (_slot >= 0 && _slot < oldlen && deps[_slot] === sender) {
-            if (_slot < cursor) {
-                deps[_slot + 1] &= ~MISSING;
-            } else {
-                deps[_slot + 1] |= FOUND;
+            if (_slot >= cursor) {
+                deps.push(_slot | FOUND);
             }
             return;
         }
-        if (cursor < oldlen) {
-            deps[cursor + 1] |= MISSING;
-            this._time = cursor + 2;
-            deps.push(sender, cursor);
-        } else {
-            deps.push(sender, -1);
+        /**
+         * Linear scan: last resort for when _slot was corrupted
+         * by a nested compute.
+         */
+        for (let j = cursor; j < oldlen; j += 2) {
+            if (deps[j] === sender) {
+                deps.push(j | FOUND);
+                return;
+            }
         }
+        /**
+         * Genuinely new sender — push the object itself.
+         */
+        if (cursor < oldlen) {
+            deps.push(cursor | MISSING);
+            this._time = cursor + 2;
+        }
+        deps.push(sender);
     }
 
     /**
@@ -1497,51 +1500,66 @@ function Effect(opts, fn, dep1, args, owner) {
         let cursor = this._time;
         let newlen = deps.length;
 
-        if (cursor === oldlen && oldlen === newlen) {
-            return;
-        }
-
+        /** Disconnect dep1 if it wasn't re-read */
         if (this._dep1 !== null && !(this._flag & FLAG_DEP1)) {
             this._dep1._disconnect(this._dep1slot);
             this._dep1 = null;
         }
 
-        if (cursor === oldlen && newlen > oldlen) {
+        /**
+         * Fast path: all deps consumed sequentially, nothing appended.
+         */
+        if (cursor === oldlen && newlen === oldlen) {
+            return;
+        }
+
+        /**
+         * Fast path: all old deps consumed, only new senders appended
+         * (stride 1 — no index entries, only objects).
+         */
+        if (cursor === oldlen) {
             let fast = true;
-            for (let i = oldlen + 1; i < newlen; i += 2) {
-                if (deps[i] !== -1) {
+            for (let i = oldlen; i < newlen; i++) {
+                if (typeof deps[i] === 'number') {
                     fast = false;
                     break;
                 }
             }
             if (fast) {
-                for (let i = oldlen; i < newlen; i += 2) {
-                    let dep = deps[i];
-                    if (dep !== null) {
-                        deps[i + 1] = dep._connect(this, i + 1);
-                    }
+                let count = newlen - oldlen;
+                deps.length = oldlen + count * 2;
+                for (let i = count - 1; i >= 0; i--) {
+                    let dep = deps[oldlen + i];
+                    let pos = oldlen + i * 2;
+                    deps[pos] = dep;
+                    deps[pos + 1] = dep._connect(this, pos + 1);
                 }
                 return;
             }
         }
 
-        if (cursor < oldlen && newlen === oldlen) {
-            let fast = true;
-            for (let i = cursor + 1; i < oldlen; i += 2) {
-                if (deps[i] & FOUND) {
-                    fast = false;
-                    break;
-                }
+        /**
+         * Fast path: some old deps dropped (cursor < oldlen),
+         * nothing appended (newlen === oldlen).
+         */
+        if (newlen === oldlen) {
+            for (let i = cursor; i < oldlen; i += 2) {
+                deps[i]._disconnect(deps[i + 1]);
             }
-            if (fast) {
-                for (let i = cursor; i < oldlen; i += 2) {
-                    deps[i]._disconnect(deps[i + 1]);
-                }
-                deps.length = cursor;
-                return;
-            }
+            deps.length = cursor;
+            return;
         }
 
+        /**
+         * Complex path.
+         *
+         * The appended region (oldlen..newlen) is stride-1 and contains:
+         *   - number with MISSING bit: cursor index that was skipped
+         *   - number with FOUND bit: index beyond cursor that was matched out of order
+         *   - object: new sender to connect
+         *
+         * We use _slot = append/reuse on sender objects to deduplicate.
+         */
         let append = this._slot;
         let reuse = VERSION--;
         let missed = MISSED;
@@ -1549,78 +1567,52 @@ function Effect(opts, fn, dep1, args, owner) {
         let missTail = 0;
         let reuseTail = 0;
 
-        for (let i = oldlen; i < newlen; i += 2) {
-            let dep = deps[i];
-            let index = deps[i + 1];
-            if (index !== -1) {
-                if (deps[index]._slot === append || !(deps[index + 1] & MISSING)) {
-                    deps[index]._slot = reuse;
-                    deps[index + 1] &= ~MISSING;
+        /**
+         * Phase 1: walk the appended region. Classify each entry.
+         * For reused entries, capture [dep, subslot] now since the
+         * deps array may be overwritten during compaction.
+         */
+        for (let i = oldlen; i < newlen; i++) {
+            let entry = deps[i];
+            if (typeof entry === 'number') {
+                let idx = entry & ~(FOUND | MISSING);
+                if (entry & FOUND) {
+                    if (deps[idx]._slot !== reuse) {
+                        deps[idx]._slot = reuse;
+                        reused[reuseTail++] = deps[idx];
+                        reused[reuseTail++] = deps[idx + 1];
+                    }
                 } else {
-                    missed[missTail++] = index;
+                    missed[missTail++] = idx;
+                }
+            } else {
+                if (entry._slot !== reuse && entry._slot !== append) {
+                    entry._slot = append;
+                    reused[reuseTail++] = entry;
+                    reused[reuseTail++] = -1;
                 }
             }
-            if (dep !== null && dep._slot !== reuse) {
-                dep._slot = append;
-            }
         }
 
-        for (let i = oldlen - 2; i >= cursor; i -= 2) {
-            if (deps[i + 1] & FOUND) {
-                reused[reuseTail++] = i;
-            }
-        }
-
-        for (let i = newlen - 2; i >= oldlen; i -= 2) {
-            if (deps[i] !== null && deps[i]._slot === append) {
-                reused[reuseTail++] = i;
-            }
-        }
-
+        /**
+         * Phase 2: replace missed entries with reused/new entries.
+         */
         let missHead = 0;
 
-        while (missHead < missTail) {
-            if (reuseTail === 0) {
-                let write = missed[missHead];
-                for (let j = write; j < cursor; j += 2) {
-                    if (deps[j + 1] & MISSING) {
-                        deps[j]._disconnect(deps[j + 1] & ~MISSING);
-                    } else {
-                        deps[write] = deps[j];
-                        let subslot = deps[j + 1] & ~(FOUND | MISSING);
-                        deps[write + 1] = subslot;
-                        if (subslot === 0) {
-                            deps[j]._sub1slot = write + 1;
-                        } else {
-                            deps[j]._subs[subslot] = write + 1;
-                        }
-                        write += 2;
-                    }
-                }
-                for (let j = cursor; j < oldlen; j += 2) {
-                    let slot = deps[j + 1];
-                    if (!(slot & FOUND)) {
-                        deps[j]._disconnect(slot);
-                    }
-                }
-                deps.length = write;
-                return;
-            }
-
-            let index = reused[--reuseTail];
-            let dep = deps[index];
-
+        while (missHead < missTail && reuseTail > 0) {
+            let subslot = reused[--reuseTail];
+            let dep = reused[--reuseTail];
             if (dep._slot === reuse) {
+                /** Already placed — try next */
                 continue;
             }
-            dep._slot = reuse;
             let dropped = missed[missHead++];
-            deps[dropped]._disconnect(deps[dropped + 1] & ~MISSING);
+            dep._slot = reuse;
+            deps[dropped]._disconnect(deps[dropped + 1]);
             deps[dropped] = dep;
-            if (index >= oldlen) {
+            if (subslot === -1) {
                 deps[dropped + 1] = dep._connect(this, dropped + 1);
             } else {
-                let subslot = deps[index + 1] & ~FOUND;
                 deps[dropped + 1] = subslot;
                 if (subslot === 0) {
                     dep._sub1slot = dropped + 1;
@@ -1630,56 +1622,61 @@ function Effect(opts, fn, dep1, args, owner) {
             }
         }
 
+        /**
+         * Phase 3: compact the cursor..oldlen region.
+         * Keep deps marked reuse, disconnect the rest.
+         * Place remaining reused entries.
+         */
         let write = cursor;
         let i = cursor;
 
         while (i < oldlen || reuseTail > 0) {
-            if (i < oldlen && deps[i + 1] & FOUND) {
-                if (write === i) {
-                    deps[i + 1] &= ~FOUND;
-                    write += 2;
+            if (i < oldlen && deps[i]._slot === reuse) {
+                if (write !== i) {
+                    let subslot = deps[i + 1];
+                    deps[write] = deps[i];
+                    deps[write + 1] = subslot;
+                    if (subslot === 0) {
+                        deps[i]._sub1slot = write + 1;
+                    } else {
+                        deps[i]._subs[subslot] = write + 1;
+                    }
                 }
+                write += 2;
                 i += 2;
             } else {
                 if (i < oldlen) {
                     deps[i]._disconnect(deps[i + 1]);
-                }
-
-                if (reuseTail === 0) {
                     i += 2;
-                    continue;
                 }
-
-                let kept = reused[--reuseTail];
-                let dep = deps[kept];
-
-                if (dep._slot === reuse) {
-                    if (kept < oldlen) {
-                        deps[kept + 1] &= ~FOUND;
+                if (reuseTail > 0) {
+                    let subslot = reused[--reuseTail];
+                    let dep = reused[--reuseTail];
+                    if (dep._slot === reuse) {
+                        continue;
                     }
-                    continue;
-                }
-
-                dep._slot = reuse;
-                if (kept >= oldlen) {
+                    dep._slot = reuse;
                     deps[write] = dep;
-                    deps[write + 1] = dep._connect(this, write + 1);
-                } else if (kept !== write) {
-                    let subslot = deps[kept + 1] & ~FOUND;
-                    deps[write] = dep;
-                    deps[write + 1] = subslot;
-                    if (subslot === 0) {
-                        dep._sub1slot = write + 1;
+                    if (subslot === -1) {
+                        deps[write + 1] = dep._connect(this, write + 1);
                     } else {
-                        dep._subs[subslot] = write + 1;
+                        deps[write + 1] = subslot;
+                        if (subslot === 0) {
+                            dep._sub1slot = write + 1;
+                        } else {
+                            dep._subs[subslot] = write + 1;
+                        }
                     }
-                } else {
-                    deps[kept + 1] &= ~FOUND;
+                    write += 2;
                 }
-                write += 2;
-                if (i < oldlen) {
-                    i += 2;
-                }
+            }
+        }
+
+        /** Disconnect remaining missed that couldn't be replaced */
+        while (missHead < missTail) {
+            let dropped = missed[missHead++];
+            if (deps[dropped]._slot !== reuse) {
+                deps[dropped]._disconnect(deps[dropped + 1]);
             }
         }
 
