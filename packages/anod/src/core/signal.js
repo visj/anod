@@ -245,32 +245,6 @@ function loading() {
     return (this._flag & FLAG_LOADING) !== 0;
 }
 
-/**
- * Counts the total number of dependencies on a node.
- * @param {Receiver} node
- * @returns {number}
- */
-function countDeps(node) {
-    let count = node._dep1 !== null ? 1 : 0;
-    if (node._deps !== null) {
-        count += node._deps.length / 2;
-    }
-    return count;
-}
-
-/**
- * Saves a conflicting version tag to the global VSTACK.
- * Called when a dep's version > VER_HEAD during prescan or _read,
- * meaning another running node in this execution tree tagged it.
- * @param {Sender} dep
- * @param {number} v - the conflicting version to save
- * @returns {void}
- */
-function vstackSave(dep, v) {
-    VSTACK[VCOUNT++] = dep;
-    VSTACK[VCOUNT++] = v;
-}
-
 
 // ─── Reader / Subscriber ───────────────────────────────────────────────────
 // Reader and Subscriber still exist as exported constructors for backward
@@ -1143,7 +1117,7 @@ function Compute(opts, fn, dep1, seed, args) {
                         }
                         dep._version = stamp;
                     }
-                    depCount += depsLen / 2;
+                    depCount += depsLen >> 1;
                 }
             }
 
@@ -1218,9 +1192,10 @@ function Compute(opts, fn, dep1, seed, args) {
                 REUSED = 0;
                 let stamp = version - 1;
                 if (dep1 !== null) {
-                    let v = dep1._version;
-                    if (v > TRANSACTION) {
-                        vstackSave(dep1, v);
+                    let depver = dep1._version;
+                    if (depver > TRANSACTION) {
+                        VSTACK[VCOUNT++] = dep1;
+                        VSTACK[VCOUNT++] = depver;
                     }
                     dep1._version = stamp;
                     depCount = 1;
@@ -1230,9 +1205,10 @@ function Compute(opts, fn, dep1, seed, args) {
                     depsLen = deps.length;
                     for (let i = 0; i < depsLen; i += 2) {
                         let dep = /** @type {Sender} */(deps[i]);
-                        let v = dep._version;
-                        if (v > TRANSACTION) {
-                            vstackSave(dep, v);
+                        let depver = dep._version;
+                        if (depver > TRANSACTION) {
+                            VSTACK[VCOUNT++] = dep;
+                            VSTACK[VCOUNT++] = depver;
                         }
                         dep._version = stamp;
                     }
@@ -1679,9 +1655,10 @@ function Effect(opts, fn, dep1, args) {
                 REUSED = 0;
                 let stamp = version - 1;
                 if (dep1 !== null) {
-                    let v = dep1._version;
-                    if (v > TRANSACTION) {
-                        vstackSave(dep1, v);
+                    let depver = dep1._version;
+                    if (depver > TRANSACTION) {
+                        VSTACK[VCOUNT++] = dep1;
+                        VSTACK[VCOUNT++] = depver;
                     }
                     dep1._version = stamp;
                     depCount = 1;
@@ -1691,13 +1668,14 @@ function Effect(opts, fn, dep1, args) {
                     depsLen = deps.length;
                     for (let i = 0; i < depsLen; i += 2) {
                         let dep = /** @type {Sender} */(deps[i]);
-                        let v = dep._version;
-                        if (v > TRANSACTION) {
-                            vstackSave(dep, v);
+                        let depver = dep._version;
+                        if (depver > TRANSACTION) {
+                            VSTACK[VCOUNT++] = dep;
+                            VSTACK[VCOUNT++] = depver;
                         }
                         dep._version = stamp;
                     }
-                    depCount += depsLen / 2;
+                    depCount += depsLen >> 1;
                 }
             }
 
@@ -1772,9 +1750,10 @@ function Effect(opts, fn, dep1, args) {
                 REUSED = 0;
                 let stamp = version - 1;
                 if (dep1 !== null) {
-                    let v = dep1._version;
-                    if (v > TRANSACTION) {
-                        vstackSave(dep1, v);
+                    let depver = dep1._version;
+                    if (depver > TRANSACTION) {
+                        VSTACK[VCOUNT++] = dep1;
+                        VSTACK[VCOUNT++] = depver;
                     }
                     dep1._version = stamp;
                     depCount = 1;
@@ -1784,13 +1763,14 @@ function Effect(opts, fn, dep1, args) {
                     depsLen = deps.length;
                     for (let i = 0; i < depsLen; i += 2) {
                         let dep = /** @type {Sender} */(deps[i]);
-                        let v = dep._version;
-                        if (v > TRANSACTION) {
-                            vstackSave(dep, v);
+                        let depver = dep._version;
+                        if (depver > TRANSACTION) {
+                            VSTACK[VCOUNT++] = dep;
+                            VSTACK[VCOUNT++] = depver;
                         }
                         dep._version = stamp;
                     }
-                    depCount += depsLen / 2;
+                    depCount += depsLen >> 1;
                 }
             }
 
