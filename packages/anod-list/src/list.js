@@ -8,10 +8,24 @@ import {
     FLAG_STALE, FLAG_INIT, FLAG_BOUND,
     register, notify, scheduleSignal, subscribe, startEffect,
     Reader, Subscriber,
-    MUT_ADD, MUT_DEL, MUT_SORT,
-    MUT_OP_MASK, MUT_LEN_SHIFT, MUT_LEN_MASK, MUT_POS_SHIFT, MUT_POS_MASK,
     isPrimitive, isFunction, isSignal
 } from 'anod/internal';
+
+/**
+ * Mutation tracking bit layout (32-bit unsigned via >>> 0):
+ *
+ *   Bits  0– 2 : op type   (MUT_ADD=1, MUT_DEL=2, MUT_SORT=4)
+ *   Bits  3–14 : length    (12 bits, max 4095 — affected region extent)
+ *   Bits 15–31 : position  (17 bits, max 131071 — mutation start index)
+ */
+/** @const {number} */ const MUT_ADD = 1;
+/** @const {number} */ const MUT_DEL = 2;
+/** @const {number} */ const MUT_SORT = 4;
+/** @const {number} */ const MUT_OP_MASK = 7;
+/** @const {number} */ const MUT_LEN_SHIFT = 3;
+/** @const {number} */ const MUT_LEN_MASK = 0xFFF;
+/** @const {number} */ const MUT_POS_SHIFT = 15;
+/** @const {number} */ const MUT_POS_MASK = 0x1FFFF;
 
 /** @const */
 var SignalProto = Signal.prototype;

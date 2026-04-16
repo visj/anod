@@ -1,33 +1,3 @@
-import {
-    OPT_DEFER,
-    OPT_STABLE,
-    OPT_SETUP,
-    OPT_NOTIFY,
-    OPT_WEAK,
-    OPT_DYNAMIC,
-    FLAG_ASYNC,
-    FLAG_STREAM,
-    TYPE_ROOT,
-    TYPE_SIGNAL,
-    TYPE_COMPUTE,
-    TYPE_EFFECT,
-    Root,
-    Signal,
-    Compute,
-    Effect,
-    root,
-    signal,
-    compute,
-    derive,
-    transmit,
-    task,
-    effect,
-    watch,
-    spawn,
-    scope,
-    batch
-} from "./core/signal.js";
-
 export {
     OPT_DEFER,
     OPT_STABLE,
@@ -56,4 +26,4 @@ export {
     spawn,
     scope,
     batch
-}
+} from "./core/signal.js";

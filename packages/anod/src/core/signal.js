@@ -21,124 +21,69 @@ function register(fn) {
     return index | OP_CALLBACK;
 }
 
-/**
- * Mutation tracking bit layout (32-bit unsigned via >>> 0):
- *
- *   Bits  0– 2 : op type   (MUT_ADD=1, MUT_DEL=2, MUT_SORT=4)
- *   Bits  3–14 : length    (12 bits, max 4095 — affected region extent)
- *   Bits 15–31 : position  (17 bits, max 131071 — mutation start index)
- */
-/** @const {number} */ const MUT_ADD = 1;
-/** @const {number} */ const MUT_DEL = 2;
-/** @const {number} */ const MUT_SORT = 4;
-/** @const {number} */ const MUT_OP_MASK = 7;
-/** @const {number} */ const MUT_LEN_SHIFT = 3;
-/** @const {number} */ const MUT_LEN_MASK = 0xFFF;
-/** @const {number} */ const MUT_POS_SHIFT = 15;
-/** @const {number} */ const MUT_POS_MASK = 0x1FFFF;
-
-/**
- * Context state bits, stored on Reader._state / Subscriber._state.
- * Encodes per-execution state that the user can set
- * via the IReader API during a compute/effect fn.
- */
-/** @const {number} */ const CTX_EQUAL = 1;
-/** @const {number} */ const CTX_NOTEQUAL = 2;
-/** @const {number} */ const CTX_PROMISE = 4;
-/** @const {number} */ const CTX_ITERABLE = 8;
-/** @const {number} */ const CTX_ASYNC = CTX_PROMISE | CTX_ITERABLE;
-/** @const {number} */ const CTX_OWNER = 16;
-
-/** @const {number} */ const FLAG_DEFER = 1;
-/** @const {number} */ const FLAG_STABLE = 2;
-/** @const {number} */ const FLAG_SETUP = 4;
-/** @const {number} */ const FLAG_STALE = 8;
-/** @const {number} */ const FLAG_TRANSMIT = 16;
-/** @const {number} */ const FLAG_PENDING = 32;
-/** @const {number} */ const FLAG_RUNNING = 64;
-/** @const {number} */ const FLAG_DISPOSED = 128;
-/** @const {number} */ const FLAG_LOADING = 256;
-/** @const {number} */ const FLAG_ERROR = 512;
-/** @const {number} */ const FLAG_RECOVER = 1024;
-/** @const {number} */ const FLAG_BOUND = 2048;
-/** @const {number} */ const FLAG_DERIVED = 4096;
-/** @const {number} */ const FLAG_SCOPE = 8192;
-/** @const {number} */ const FLAG_WEAK = 16384;
+const CTX_EQUAL = 1;
+const CTX_NOTEQUAL = 2;
+const CTX_PROMISE = 4;
+const CTX_ITERABLE = 8;
+const CTX_ASYNC = CTX_PROMISE | CTX_ITERABLE;
+const CTX_OWNER = 16;
+const FLAG_DEFER = 1;
+const FLAG_STABLE = 2;
+const FLAG_SETUP = 4;
+const FLAG_STALE = 8;
+const FLAG_TRANSMIT = 16;
+const FLAG_PENDING = 32;
+const FLAG_RUNNING = 64;
+const FLAG_DISPOSED = 128;
+const FLAG_LOADING = 256;
+const FLAG_ERROR = 512;
+const FLAG_RECOVER = 1024;
+const FLAG_BOUND = 2048;
+const FLAG_DERIVED = 4096;
+const FLAG_SCOPE = 8192;
+const FLAG_WEAK = 16384;
 
 const FLAG_SCHEDULED = 1 << 30;
 
-/**
- * Runtime bit set/cleared by the equal() method during a compute
- * execution.  Separate from FLAG_NOTIFY (the opt) so both features
- * can coexist on a single node.
- * Set  -> "I am equal, suppress notification"
- * Clear -> default; or if the user explicitly calls equal(false),
- *         the absence of FLAG_EQUAL combined with the absence of
- *         FLAG_NOTIFY triggers forced notification (see FLAG_NOTEQUAL).
- */
-/** @const {number} */ const FLAG_EQUAL = 0x40000;
-/**
- * Runtime bit set by equal(false) to indicate "I am NOT equal,
- * force notification regardless of value change".
- */
-/** @const {number} */ const FLAG_NOTEQUAL = 0x80000;
-/**
- * Set in Compute/Effect constructors, cleared after the first
- * runCompute/runEffect.  Lets optimization code distinguish a
- * never-executed node from one whose previous value is valid.
- */
-/** @const {number} */ const FLAG_INIT = 0x100000;
-/** @const {number} */ const FLAG_ASYNC = 0x200000;
-/** @const {number} */ const FLAG_STREAM = 0x400000;
+const FLAG_EQUAL = 0x40000;
+const FLAG_NOTEQUAL = 0x80000;
+const FLAG_INIT = 0x100000;
+const FLAG_ASYNC = 0x200000;
+const FLAG_STREAM = 0x400000;
+const OPT_DEFER = FLAG_DEFER;
+const OPT_STABLE = FLAG_STABLE;
+const OPT_SETUP = FLAG_SETUP;
+const OPT_NOTIFY = FLAG_TRANSMIT;
+const OPT_WEAK = FLAG_WEAK;
 
-/** @const {number} */ const OPT_DEFER = FLAG_DEFER;
-/** @const {number} */ const OPT_STABLE = FLAG_STABLE;
-/** @const {number} */ const OPT_SETUP = FLAG_SETUP;
-/** @const {number} */ const OPT_NOTIFY = FLAG_TRANSMIT;
-/** @const {number} */ const OPT_WEAK = FLAG_WEAK;
-/**
- * Opt-in to dynamic dependency tracking. Only consumed at
- * construction time by task/spawn/scope to suppress the default
- * FLAG_STABLE. Not stored in node._flag -- not in OPTIONS mask.
- */
-/** @const {number} */ const OPT_DYNAMIC = 0x800000;
+const OPT_DYNAMIC = 0x800000;
 
-/** @const {number} */
 const OPTIONS = OPT_DEFER | OPT_STABLE | OPT_SETUP | OPT_NOTIFY | OPT_WEAK | FLAG_ASYNC | FLAG_STREAM;
 
-/** @const {number} */ const STATE_START = 0;
-/** @const {number} */ const STATE_IDLE = 1;
-/** @const {number} */ const STATE_OWNER = 8;
-/** @const {number} */ const STATE_SCOPE = 16;
+const STATE_START = 0;
+const STATE_IDLE = 1;
+const STATE_OWNER = 8;
+const STATE_SCOPE = 16;
 
 /** @const {number} */
 const RESET = ~(STATE_IDLE | STATE_OWNER);
 
-/** @const {number} */ const TYPEFLAG_MASK = 7;
-/** @const {number} */ const TYPEFLAG_SEND = 8;
-/** @const {number} */ const TYPEFLAG_RECEIVE = 16;
-/** @const {number} */ const TYPEFLAG_OWNER = 32;
-
-/** @const {number} */ const TYPE_ROOT = 1 | TYPEFLAG_OWNER;
-/** @const {number} */ const TYPE_SIGNAL = 2 | TYPEFLAG_SEND;
-/** @const {number} */ const TYPE_COMPUTE = 3 | TYPEFLAG_SEND | TYPEFLAG_RECEIVE;
-/** @const {number} */ const TYPE_EFFECT = 4 | TYPEFLAG_OWNER | TYPEFLAG_RECEIVE;
+const TYPEFLAG_MASK = 7;
+const TYPEFLAG_SEND = 8;
+const TYPEFLAG_RECEIVE = 16;
+const TYPEFLAG_OWNER = 32;
+const TYPE_ROOT = 1 | TYPEFLAG_OWNER;
+const TYPE_SIGNAL = 2 | TYPEFLAG_SEND;
+const TYPE_COMPUTE = 3 | TYPEFLAG_SEND | TYPEFLAG_RECEIVE;
+const TYPE_EFFECT = 4 | TYPEFLAG_OWNER | TYPEFLAG_RECEIVE;
 
 /**
- * VER_HEAD watermark: snapshot of CLOCK._version at start of each
- * top-level node dispatch in start(). Used by prescanDep to detect
- * version conflicts between concurrently executing nodes in the
- * same execution tree.
  * @type {number}
  */
-var VER_HEAD = 0;
+var TRANSACTION = 0;
 
 /**
- * Global version conflict stack. Stores [sender, version] pairs
- * when prescanDep or _read encounters a dep already tagged by
- * another running node (version > VER_HEAD). Restored by
- * updateDynamicVersion after pruneDeps completes.
- * @type {Array}
+ * @type {Array<Sender | number>}
  */
 var VSTACK = new Array(64);
 /** @type {number} Tail pointer into VSTACK */
@@ -1184,7 +1129,7 @@ function Compute(opts, fn, dep1, seed, args) {
                 let stamp = version - 1;
                 if (dep1 !== null) {
                     let v = dep1._version;
-                    if (v > VER_HEAD) {
+                    if (v > TRANSACTION) {
                         vstackSave(dep1, v);
                     }
                     dep1._version = stamp;
@@ -1196,7 +1141,7 @@ function Compute(opts, fn, dep1, seed, args) {
                     for (let i = 0; i < depsLen; i += 2) {
                         let dep = /** @type {Sender} */(deps[i]);
                         let v = dep._version;
-                        if (v > VER_HEAD) {
+                        if (v > TRANSACTION) {
                             vstackSave(dep, v);
                         }
                         dep._version = stamp;
@@ -1277,7 +1222,7 @@ function Compute(opts, fn, dep1, seed, args) {
                 let stamp = version - 1;
                 if (dep1 !== null) {
                     let v = dep1._version;
-                    if (v > VER_HEAD) {
+                    if (v > TRANSACTION) {
                         vstackSave(dep1, v);
                     }
                     dep1._version = stamp;
@@ -1289,7 +1234,7 @@ function Compute(opts, fn, dep1, seed, args) {
                     for (let i = 0; i < depsLen; i += 2) {
                         let dep = /** @type {Sender} */(deps[i]);
                         let v = dep._version;
-                        if (v > VER_HEAD) {
+                        if (v > TRANSACTION) {
                             vstackSave(dep, v);
                         }
                         dep._version = stamp;
@@ -1395,7 +1340,7 @@ function startCompute(node) {
     let clock = CLOCK;
     let state = clock._state;
     try {
-        VER_HEAD = clock._version;
+        TRANSACTION = clock._version;
         node._update(clock._time);
         if (clock._signals > 0 || clock._disposes > 0) {
             start(clock);
@@ -1734,7 +1679,7 @@ function Effect(opts, fn, dep1, args) {
                 let stamp = version - 1;
                 if (dep1 !== null) {
                     let v = dep1._version;
-                    if (v > VER_HEAD) {
+                    if (v > TRANSACTION) {
                         vstackSave(dep1, v);
                     }
                     dep1._version = stamp;
@@ -1746,7 +1691,7 @@ function Effect(opts, fn, dep1, args) {
                     for (let i = 0; i < depsLen; i += 2) {
                         let dep = /** @type {Sender} */(deps[i]);
                         let v = dep._version;
-                        if (v > VER_HEAD) {
+                        if (v > TRANSACTION) {
                             vstackSave(dep, v);
                         }
                         dep._version = stamp;
@@ -1827,7 +1772,7 @@ function Effect(opts, fn, dep1, args) {
                 let stamp = version - 1;
                 if (dep1 !== null) {
                     let v = dep1._version;
-                    if (v > VER_HEAD) {
+                    if (v > TRANSACTION) {
                         vstackSave(dep1, v);
                     }
                     dep1._version = stamp;
@@ -1839,7 +1784,7 @@ function Effect(opts, fn, dep1, args) {
                     for (let i = 0; i < depsLen; i += 2) {
                         let dep = /** @type {Sender} */(deps[i]);
                         let v = dep._version;
-                        if (v > VER_HEAD) {
+                        if (v > TRANSACTION) {
                             vstackSave(dep, v);
                         }
                         dep._version = stamp;
@@ -1982,7 +1927,7 @@ function startEffect(node) {
     let clock = CLOCK;
     let state = clock._state;
     try {
-        VER_HEAD = clock._version;
+        TRANSACTION = clock._version;
         node._update(clock._time);
         if (clock._signals > 0 || clock._disposes > 0) {
             start(clock);
@@ -2168,7 +2113,7 @@ function start(clock) {
                 for (let i = 0; i < clock._computes; i++) {
                     let node = COMPUTES[i];
                     if (node._flag & FLAG_STALE) {
-                        VER_HEAD = clock._version;
+                        TRANSACTION = clock._version;
                         node._update(time);
                     }
                     COMPUTES[i] = null;
@@ -2186,7 +2131,7 @@ function start(clock) {
                     for (let j = 0; j < count; j++) {
                         let node = effects[j];
                         if ((node._flag & FLAG_STALE) || ((node._flag & FLAG_PENDING) && needsUpdate(node, time))) {
-                            VER_HEAD = clock._version;
+                            TRANSACTION = clock._version;
                             try {
                                 node._update(time);
                             } catch (err) {
@@ -2215,7 +2160,7 @@ function start(clock) {
                 while (i < count) {
                     try {
                         for (; i < count; i++) {
-                            VER_HEAD = clock._version;
+                            TRANSACTION = clock._version;
                             checkRun(EFFECTS[i], time);
                             EFFECTS[i] = null;
                         }
@@ -2481,46 +2426,32 @@ function unbound(node) {
     )
 }
 
-// ─── _read function ────────────────────────────────────────────────────────
-
 /**
- * Core dependency tracking function. Called as node.read(sender)
- * during a compute/effect fn execution. Handles three execution
- * modes:
- *
- * 1. STABLE post-setup: pure value return, zero tracking overhead
- * 2. SETUP: subscribes deps directly onto the node
- * 3. DYNAMIC: confirms reused deps via version tag, pushes new deps
- *    directly to _deps beyond the _depCount region
- *
  * @template T
  * @this {Receiver}
  * @param {!Sender<T>} sender
  * @returns {T}
  */
 function read(sender) {
-    let value = sender.val();
     let flag = this._flag;
+    let value = sender.val();
 
-    /**
-     * Stable post-setup: pure value return, zero tracking overhead.
-     * (FLAG_STABLE | FLAG_SETUP) === FLAG_STABLE means stable AND
-     * NOT in setup mode.
-     */
-    if ((flag & (FLAG_STABLE | FLAG_SETUP)) === FLAG_STABLE) {
+    if (
+        (flag & (FLAG_STABLE | FLAG_SETUP)) === FLAG_STABLE
+    ) {
         return value;
     }
 
     let version = this._version;
-    let v = sender._version;
+    let stamp = sender._version;
 
     /** Re-read dedup: already visited this execution — O(1) */
-    if (v === version) {
+    if (stamp === version) {
         return value;
     }
 
     /** Reuse: was our dep last run, visited again this run — O(1) */
-    if (v === version - 1) {
+    if (stamp === version - 1) {
         sender._version = version;
         REUSED++;
         return value;
@@ -2530,8 +2461,9 @@ function read(sender) {
      * Conflict: tagged by some other running node in this execution
      * tree. Save [sender, version] to global VSTACK for restoration.
      */
-    if (v > VER_HEAD) {
-        vstackSave(sender, v);
+    if (stamp > TRANSACTION) {
+        VSTACK[VCOUNT++] = sender;
+        VSTACK[VCOUNT++] = stamp;
     }
 
     /** New dep (or cold sender): stamp and subscribe */
@@ -2967,8 +2899,6 @@ export {
     FLAG_INIT, FLAG_TRANSMIT,
     OP_VALUE, OP_CALLBACK,
     register,
-    MUT_ADD, MUT_DEL, MUT_SORT,
-    MUT_OP_MASK, MUT_LEN_SHIFT, MUT_LEN_MASK, MUT_POS_SHIFT, MUT_POS_MASK,
     CTX_EQUAL, CTX_NOTEQUAL, CTX_PROMISE, CTX_ITERABLE, CTX_ASYNC, CTX_OWNER,
     FLAG_ASYNC, FLAG_STREAM,
     OPT_DEFER, OPT_STABLE, OPT_SETUP, OPT_NOTIFY, OPT_WEAK, OPT_DYNAMIC,

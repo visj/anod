@@ -1,32 +1,3 @@
-import {
-    CLOCK,
-    STATE_START, STATE_IDLE, STATE_OWNER, STATE_SCOPE,
-    FLAG_DEFER, FLAG_STABLE, FLAG_SETUP, FLAG_STALE, FLAG_PENDING,
-    FLAG_RUNNING, FLAG_DISPOSED, FLAG_LOADING, FLAG_ERROR, FLAG_RECOVER,
-    FLAG_BOUND, FLAG_DERIVED, FLAG_SCOPE, FLAG_NOTIFY, FLAG_EQUAL, FLAG_WEAK,
-    FLAG_INIT,
-    OP_VALUE, OP_CALLBACK,
-    register,
-    MUT_ADD, MUT_DEL, MUT_SORT,
-    MUT_OP_MASK, MUT_LEN_SHIFT, MUT_LEN_MASK, MUT_POS_SHIFT, MUT_POS_MASK,
-    CTX_EQUAL, CTX_NOTEQUAL, CTX_PROMISE, CTX_ITERABLE, CTX_ASYNC,
-    OPT_DEFER, OPT_STABLE, OPT_SETUP, OPT_NOTIFY, OPT_WEAK,
-    TYPE_ROOT, TYPE_SIGNAL, TYPE_COMPUTE, TYPE_EFFECT,
-    TYPEFLAG_SEND,
-    RESET, OPTIONS,
-    scheduleSignal,
-    subscribe,
-    startEffect,
-} from "./core/signal.js";
-
-import {
-    Reader,
-    Subscriber,
-    isPrimitive,
-    isFunction,
-    isSignal
-} from "./core/signal.js";
-
 export {
     CLOCK,
     STATE_START, STATE_IDLE, STATE_OWNER, STATE_SCOPE,
@@ -36,8 +7,6 @@ export {
     FLAG_INIT,
     OP_VALUE, OP_CALLBACK,
     register,
-    MUT_ADD, MUT_DEL, MUT_SORT,
-    MUT_OP_MASK, MUT_LEN_SHIFT, MUT_LEN_MASK, MUT_POS_SHIFT, MUT_POS_MASK,
     CTX_EQUAL, CTX_NOTEQUAL, CTX_PROMISE, CTX_ITERABLE, CTX_ASYNC,
     OPT_DEFER, OPT_STABLE, OPT_SETUP, OPT_NOTIFY, OPT_WEAK,
     TYPE_ROOT, TYPE_SIGNAL, TYPE_COMPUTE, TYPE_EFFECT,
@@ -50,5 +19,5 @@ export {
     Subscriber,
     isPrimitive,
     isFunction,
-    isSignal,
-}
+    isSignal
+} from "./core/signal.js";

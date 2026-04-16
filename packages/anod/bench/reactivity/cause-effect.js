@@ -501,11 +501,9 @@ function setupDynUpdate(width, totalLayers, staticFraction, nSources, readFracti
     return () => {
         iter++;
         const sourceDex = iter % srcLen;
-        batch(() => {
-            sources[sourceDex].set(iter + sourceDex);
-        });
+        sources[sourceDex].set(iter + sourceDex);
         for (let r = 0; r < readLen; r++) {
-            readLeaves[r].get();
+            sink += readLeaves[r].get();
         }
     };
 }

@@ -481,13 +481,12 @@ function setupDynBuild(width, totalLayers, staticFraction, nSources) {
 function setupDynUpdate(width, totalLayers, staticFraction, nSources, readFraction) {
     const { sources, layers } = makeDynGraph(width, totalLayers, staticFraction, nSources);
     const leaves = layers[layers.length - 1];
-    const allLen = leaves.length;
     /** Force-read all leaves so lazy frameworks fully materialize the graph. */
-    for (let r = 0; r < allLen; r++) {
+    for (let r = 0; r < leaves.length; r++) {
         sink += leaves[r]();
     }
     const rand = pseudoRandom('seed');
-    const skipCount = Math.round(allLen * (1 - readFraction));
+    const skipCount = Math.round(leaves.length * (1 - readFraction));
     const readLeaves = removeElems(leaves, skipCount, rand);
     const readLen = readLeaves.length;
     const srcLen = sources.length;
@@ -496,11 +495,9 @@ function setupDynUpdate(width, totalLayers, staticFraction, nSources, readFracti
     return () => {
         iter++;
         const sourceDex = iter % srcLen;
-        startBatch();
         sources[sourceDex](iter + sourceDex);
-        endBatch();
         for (let r = 0; r < readLen; r++) {
-            readLeaves[r]();
+            sink += readLeaves[r]();
         }
     };
 }

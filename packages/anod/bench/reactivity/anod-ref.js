@@ -39,15 +39,21 @@ function setupDeep() {
     });
     let i = 0;
     return () => {
-        batch(() => { head.set(++i); });
+        head.set(++i);
     };
 }
 
 function setupBroad() {
     const head = signal(0);
     for (let i = 0; i < 50; i++) {
-        const current = compute(c => { counter++; return c.read(head) + i; });
-        const current2 = compute(c => { counter++; return c.read(current) + 1; });
+        const current = compute(c => {
+            counter++;
+            return c.read(head) + i;
+        });
+        const current2 = compute(c => {
+            counter++;
+            return c.read(current) + 1;
+        });
         effect(c => {
             counter++;
             sink += c.read(current2);
@@ -55,7 +61,7 @@ function setupBroad() {
     }
     let i = 0;
     return () => {
-        batch(() => { head.set(++i); });
+       head.set(++i);
     };
 }
 
@@ -64,15 +70,14 @@ function setupDiamond() {
     const head = signal(0);
     const branches = [];
     for (let i = 0; i < width; i++) {
-        branches.push(compute(c => { counter++; return c.read(head) + 1; }));
+        branches.push(compute(c => {
+            counter++;
+            return c.read(head) + 1;
+        }));
     }
     const sum = compute(c => {
         counter++;
-        let total = 0;
-        for (let i = 0; i < branches.length; i++) {
-            total += c.read(branches[i]);
-        }
-        return total;
+        return branches.reduce((a, b) => a + c.read(b), 0);
     });
     effect(c => {
         counter++;
@@ -80,7 +85,7 @@ function setupDiamond() {
     });
     let i = 0;
     return () => {
-        batch(() => { head.set(++i); });
+        head.set(++i);
     };
 }
 
@@ -92,16 +97,15 @@ function setupTriangle() {
     for (let i = 0; i < width - 1; i++) {
         const prev = current;
         list.push(current);
-        current = compute(c => { counter++; return c.read(prev) + 1; });
+        current = compute(c => {
+            counter++;
+            return c.read(prev) + 1;
+        });
     }
     list.push(current);
     const sum = compute(c => {
         counter++;
-        let total = 0;
-        for (let i = 0; i < list.length; i++) {
-            total += c.read(list[i]);
-        }
-        return total;
+        return list.reduce((a,b) => a + c.read(b), 0);
     });
     effect(c => {
         counter++;
@@ -109,16 +113,25 @@ function setupTriangle() {
     });
     let i = 0;
     return () => {
-        batch(() => { head.set(++i); });
+       head.set(++i);
     };
 }
 
 function setupMux() {
     const heads = new Array(100).fill(null).map(() => signal(0));
-    const mux = compute(c => { counter++; return heads.map(h => c.read(h)); });
+    const mux = compute(c => {
+        counter++;
+        return heads.map(h => c.read(h));
+    });
     const split = heads
-        .map((_, index) => compute(c => { counter++; return c.read(mux)[index]; }))
-        .map(x => compute(c => { counter++; return c.read(x) + 1; }));
+        .map((_, index) => compute(c => {
+            counter++;
+            return c.read(mux)[index];
+        }))
+        .map(x => compute(c => {
+            counter++;
+            return c.read(x) + 1;
+        }));
     for (const x of split) {
         effect(c => {
             counter++;
@@ -128,14 +141,20 @@ function setupMux() {
     let i = 0;
     return () => {
         const idx = i % heads.length;
-        batch(() => { heads[idx].set(++i); });
+        heads[idx].set(++i);
     };
 }
 
 function setupUnstable() {
     const head = signal(0);
-    const double = compute(c => { counter++; return c.read(head) * 2; });
-    const inverse = compute(c => { counter++; return -c.read(head); });
+    const double = compute(c => {
+        counter++;
+        return c.read(head) * 2;
+    });
+    const inverse = compute(c => {
+        counter++;
+        return -c.read(head);
+    });
     const current = compute(c => {
         counter++;
         let result = 0;
@@ -150,24 +169,40 @@ function setupUnstable() {
     });
     let i = 0;
     return () => {
-        batch(() => { head.set(++i); });
+        head.set(++i);
     };
 }
 
 function setupAvoidable() {
     const head = signal(0);
-    const computed1 = compute(c => { counter++; return c.read(head); });
-    const computed2 = compute(c => { counter++; c.read(computed1); return 0; });
-    const computed3 = compute(c => { counter++; return c.read(computed2) + 1; });
-    const computed4 = compute(c => { counter++; return c.read(computed3) + 2; });
-    const computed5 = compute(c => { counter++; return c.read(computed4) + 3; });
+    const computed1 = compute(c => {
+        counter++;
+        return c.read(head);
+    });
+    const computed2 = compute(c => {
+        counter++;
+        c.read(computed1);
+        return 0;
+    });
+    const computed3 = compute(c => { 
+        counter++;
+        return c.read(computed2) + 1;
+    });
+    const computed4 = compute(c => {
+        counter++;
+        return c.read(computed3) + 2;
+    });
+    const computed5 = compute(c => {
+        counter++;
+        return c.read(computed4) + 3;
+    });
     effect(c => {
         counter++;
         sink += c.read(computed5);
     });
     let i = 0;
     return () => {
-        batch(() => { head.set(++i); });
+        head.set(++i);
     };
 }
 
@@ -188,7 +223,7 @@ function setupRepeatedObservers() {
     });
     let i = 0;
     return () => {
-        batch(() => { head.set(++i); });
+        head.set(++i);
     };
 }
 
@@ -205,8 +240,14 @@ function setupCellx(layers) {
     for (let i = layers; i > 0; i--) {
         const m = layer;
         const s = {
-            prop1: compute(c => { counter++; return c.read(m.prop2); }),
-            prop2: compute(c => { counter++; return c.read(m.prop1) - c.read(m.prop3); }),
+            prop1: compute(c => {
+                counter++;
+                return c.read(m.prop2);
+            }),
+            prop2: compute(c => {
+                counter++;
+                return c.read(m.prop1) - c.read(m.prop3);
+            }),
             prop3: compute(c => { counter++; return c.read(m.prop2) + c.read(m.prop4); }),
             prop4: compute(c => { counter++; return c.read(m.prop3); }),
         };
@@ -423,7 +464,7 @@ function setupDynUpdate(width, totalLayers, staticFraction, nSources, readFracti
     const leaves = layers[layers.length - 1];
     /** Force-read ALL leaves so lazy frameworks fully materialize the graph. */
     for (let r = 0; r < leaves.length; r++) {
-        leaves[r].val();
+        sink += leaves[r].val();
     }
     const rand = pseudoRandom('seed');
     const skipCount = Math.round(leaves.length * (1 - readFraction));
@@ -435,17 +476,10 @@ function setupDynUpdate(width, totalLayers, staticFraction, nSources, readFracti
     return () => {
         iter++;
         const sourceDex = iter % srcLen;
-        batch(() => {
-            sources[sourceDex].set(iter + sourceDex);
-        });
+        sources[sourceDex].set(iter + sourceDex);
         for (let r = 0; r < readLen; r++) {
-            readLeaves[r].val();
+            sink += readLeaves[r].val();
         }
-        let sum = 0;
-        for (let r = 0; r < readLen; r++) {
-            sum += readLeaves[r].val();
-        }
-        sink += sum;
     };
 }
 
