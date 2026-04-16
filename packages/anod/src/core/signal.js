@@ -1039,7 +1039,7 @@ function Compute(opts, fn, dep1, seed, args) {
             if (IDLE) {
                 IDLE = false;
                 try {
-                    TRANSACTION = VERSION + 2;
+                    TRANSACTION = VERSION;
                     if (flag & FLAG_STALE) {
                         this._update(TIME);
                     } else {
@@ -1337,7 +1337,7 @@ function startCompute(node) {
         IDLE = false;
         let clock = CLOCK;
         try {
-            TRANSACTION = VERSION + 2;
+            TRANSACTION = VERSION;
             node._update(TIME);
             if (SIGNALS_COUNT > 0 || DISPOSES_COUNT > 0) {
                 start(clock);
@@ -1918,7 +1918,7 @@ function startEffect(node) {
     if (IDLE) {
         IDLE = false;
         try {
-            TRANSACTION = VERSION + 2;
+            TRANSACTION = VERSION;
             node._update(TIME);
             if (SIGNALS_COUNT > 0 || DISPOSES_COUNT > 0) {
                 start(clock);
@@ -2115,7 +2115,7 @@ function start(clock) {
                 for (let i = 0; i < COMPUTES_COUNT; i++) {
                     let node = COMPUTES[i];
                     if (node._flag & FLAG_STALE) {
-                        TRANSACTION = VERSION + 2;
+                        TRANSACTION = VERSION;
                         node._update(time);
                     }
                     COMPUTES[i] = null;
@@ -2130,7 +2130,7 @@ function start(clock) {
                     for (let j = 0; j < count; j++) {
                         let node = effects[j];
                         if ((node._flag & FLAG_STALE) || ((node._flag & FLAG_PENDING) && needsUpdate(node, time))) {
-                            TRANSACTION = VERSION + 2;
+                            TRANSACTION = VERSION;
                             try {
                                 node._update(time);
                             } catch (err) {
@@ -2157,7 +2157,7 @@ function start(clock) {
                 while (i < count) {
                     try {
                         for (; i < count; i++) {
-                            TRANSACTION = VERSION + 2;
+                            TRANSACTION = VERSION;
                             checkRun(EFFECTS[i], time);
                             EFFECTS[i] = null;
                         }
