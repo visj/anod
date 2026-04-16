@@ -87,6 +87,24 @@ var VCOUNT = 0;
 /** @type {number} Count of existing deps confirmed during dynamic re-execution */
 var REUSED = 0;
 
+/**
+ * Pre-allocated stack for iterative checkRun.
+ * CSTACK holds node references, CINDEX holds dep iteration positions.
+ * @type {Array<Compute>}
+ */
+var CSTACK = new Array(1024);
+/**
+ * Position encoding: -1 = was checking dep1, >= 0 = index in _deps array.
+ * @type {Array<number>}
+ */
+var CINDEX = new Array(1024);
+/**
+ * Global stack pointer for checkRun. Supports re-entrant calls via
+ * base-pointer saving (each call saves CTOP on entry).
+ * @type {number}
+ */
+var CTOP = 0;
+
 /** @type {number} */
 var MINLEVEL = 0;
 /** @type {number} */
@@ -1280,7 +1298,10 @@ function needsUpdate(node, time) {
     let lastRun = node._time;
     let dep = node._dep1;
     if (dep !== null) {
-        if (dep._flag & (FLAG_STALE | FLAG_PENDING)) {
+        let df = dep._flag;
+        if (df & FLAG_STALE) {
+            /** @type {Compute} */(dep)._update(time);
+        } else if (df & FLAG_PENDING) {
             checkRun(/** @type {Compute} */(dep), time);
         }
         if (dep._ctime > lastRun) {
@@ -1292,7 +1313,10 @@ function needsUpdate(node, time) {
         let len = deps.length;
         for (let i = 0; i < len; i += 2) {
             dep = /** @type {Sender} */(deps[i]);
-            if (dep._flag & (FLAG_STALE | FLAG_PENDING)) {
+            let df = dep._flag;
+            if (df & FLAG_STALE) {
+                /** @type {Compute} */(dep)._update(time);
+            } else if (df & FLAG_PENDING) {
                 checkRun(/** @type {Compute} */(dep), time);
             }
             if (dep._ctime > lastRun) {
@@ -1304,9 +1328,22 @@ function needsUpdate(node, time) {
 }
 
 /**
- * Pull-based evaluation. Recursively pulls deps, then only
- * runs this compute if a dep's value actually changed (_ctime).
- * @param {Compute | Effect} node
+ * Pull-based evaluation using an explicit stack instead of recursion.
+ * Walks down PENDING dep chains, updates STALE leaves, then ascends
+ * checking whether each dep's _ctime changed and updating accordingly.
+ *
+ * Stack frame encoding:
+ *   CSTACK[i] = the parent node that was being scanned
+ *   CINDEX[i] = -1 if we descended from dep1, >= 0 if from _deps[index]
+ *
+ * Re-entrancy safe: each call saves/restores CTOP via `base`.
+ *
+ * The ascend phase uses a tight while loop to cascade updates (when
+ * deps changed) or fast-clear flags (when deps didn't change) without
+ * re-entering the main scan loop. This avoids resumeFrom branching
+ * overhead in the common single-dep-chain case.
+ *
+ * @param {Compute} node
  * @param {number} time
  * @returns {void}
  */
@@ -1316,38 +1353,145 @@ function checkRun(node, time) {
         return;
     }
 
-    let lastRun = node._time;
+    let base = CTOP;
     let dep = node._dep1;
-    if (dep !== null) {
-        if (dep._flag & FLAG_STALE) {
-            dep._update(time);
-        } else if (dep._flag & FLAG_PENDING) {
-            checkRun(dep, time);
-        }
-        if (dep._ctime > lastRun) {
-            node._update(time);
-            return;
-        }
+
+    /**
+     * Fast descent: walk single-dep PENDING chains without the overhead
+     * of the full scan loop (no resumeFrom branching, no updated flag).
+     * Stops when dep1 is STALE, clean, null, or both STALE+PENDING.
+     */
+    while (dep !== null && ((dep._flag & (FLAG_STALE | FLAG_PENDING)) === FLAG_PENDING)) {
+        CSTACK[CTOP] = node;
+        CINDEX[CTOP] = -1;
+        CTOP++;
+        node = dep;
+        dep = node._dep1;
     }
-    let deps = node._deps;
-    if (deps !== null) {
-        let count = deps.length;
-        for (let i = 0; i < count; i += 2) {
-            dep = /** @type {Sender} */(deps[i]);
-            if (dep._flag & FLAG_STALE) {
-                dep._update(time);
-            } else if (dep._flag & FLAG_PENDING) {
-                checkRun(dep, time);
+
+    /** -2 = fresh entry (scan from dep1), -1 = resume after dep1, >= 0 = resume after _deps[n] */
+    let resumeFrom = -2;
+
+    outer:
+    for (;;) {
+        let lastRun = node._time;
+        let i;
+
+        /**
+         * Labeled block: `break scan` skips the flag-clearing code and
+         * jumps directly to the ascend loop when a dep has changed.
+         * This eliminates the `updated` boolean and its branches.
+         */
+        scan: {
+            if (resumeFrom === -2) {
+                /** Fresh entry: start scanning from dep1 */
+                dep = node._dep1;
+                if (dep !== null) {
+                    let df = dep._flag;
+                    if (df & FLAG_STALE) {
+                        dep._update(time);
+                    } else if (df & FLAG_PENDING) {
+                        /** Descend into dep1 — push current node, resume later */
+                        CSTACK[CTOP] = node;
+                        CINDEX[CTOP] = -1;
+                        CTOP++;
+                        node = dep;
+                        continue outer;
+                    }
+                    if (dep._ctime > lastRun) {
+                        node._update(time);
+                        break scan;
+                    }
+                }
+                i = 0;
+            } else if (resumeFrom === -1) {
+                /** Returned from processing dep1 — check if it changed */
+                if (node._dep1._ctime > lastRun) {
+                    node._update(time);
+                    break scan;
+                }
+                i = 0;
+            } else {
+                /** Returned from processing _deps[resumeFrom] — check ctime */
+                if (node._deps[resumeFrom]._ctime > lastRun) {
+                    node._update(time);
+                    break scan;
+                }
+                i = resumeFrom + 2;
             }
-            if (dep._ctime > lastRun) {
-                node._update(time);
-                return;
+
+            let deps = node._deps;
+            if (deps !== null) {
+                let count = deps.length;
+                for (; i < count; i += 2) {
+                    dep = /** @type {Sender} */(deps[i]);
+                    let df = dep._flag;
+                    if (df & FLAG_STALE) {
+                        dep._update(time);
+                    } else if (df & FLAG_PENDING) {
+                        /** Descend into deps[i] — push current node */
+                        CSTACK[CTOP] = node;
+                        CINDEX[CTOP] = i;
+                        CTOP++;
+                        node = dep;
+                        resumeFrom = -2;
+                        continue outer;
+                    }
+                    if (dep._ctime > lastRun) {
+                        node._update(time);
+                        break scan;
+                    }
+                }
             }
+
+            /** No dep changed — clear flags without re-executing */
+            node._time = time;
+            node._flag &= ~(FLAG_STALE | FLAG_PENDING);
         }
+
+        /**
+         * Unified ascend: tight loop that either cascades updates up the
+         * stack (when child _ctime changed) or fast-clears parent flags
+         * (when child didn't change and parent has no more deps to check).
+         * Falls back to the main scan loop only when a parent has
+         * remaining unchecked deps.
+         */
+        while (CTOP > base) {
+            CTOP--;
+            let parent = CSTACK[CTOP];
+            let idx = CINDEX[CTOP];
+            /**
+             * `node` is always the child that the parent was scanning
+             * when it pushed — no need to look it up from parent._dep1
+             * or parent._deps[idx].
+             */
+            if (node._ctime > parent._time) {
+                /** Child changed — update parent and keep cascading */
+                parent._update(time);
+                node = parent;
+                continue;
+            }
+            /** Child unchanged — check if parent has more deps to scan */
+            if (idx === -1) {
+                if (parent._deps !== null) {
+                    /** Has deps array — resume scanning in main loop */
+                    node = parent;
+                    resumeFrom = -1;
+                    continue outer;
+                }
+            } else if (idx + 2 < parent._deps.length) {
+                /** More entries in deps array — resume scanning */
+                node = parent;
+                resumeFrom = idx;
+                continue outer;
+            }
+            /** No more deps — clear parent and keep ascending */
+            parent._time = time;
+            parent._flag &= ~(FLAG_STALE | FLAG_PENDING);
+            node = parent;
+        }
+        return;
     }
-    /** No dep changed -- clear flags without re-executing */
-    node._time = time;
-    node._flag &= ~(FLAG_STALE | FLAG_PENDING);
 }
 
 /**
