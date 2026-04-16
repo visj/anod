@@ -1828,18 +1828,12 @@ function Effect(opts, fn, dep1, args) {
      * @returns {void}
      */
     EffectProto._dispose = function () {
-        let opts = this._flag;
-        if (!(opts & FLAG_DISPOSED)) {
-            this._flag |= FLAG_DISPOSED;
-            clearOwned(this);
-            clearDeps(this);
-            this._fn =
-                this._owned =
-                this._args =
-                this._cleanup =
-                this._recover =
-                this._owner = null;
-        }
+        this._flag = FLAG_DISPOSED;
+        clearDeps(this);
+        clearOwned(this);
+        this._fn =
+            this._args =
+            this._owner = null;
     };
 
     /**
@@ -2294,13 +2288,6 @@ function clearSender(receive, slot) {
             }
         }
     }
-    if (receive._dep1 === null && (receive._deps === null || receive._deps.length === 0)) {
-        if (receive.t === TYPE_EFFECT) {
-            // todo
-        } else {
-            /** @type {Compute} */(receive)._fn = null;
-        }
-    }
 }
 
 /**
@@ -2367,10 +2354,7 @@ function clearOwned(owner) {
         }
         owner._cleanup = null;
     }
-    if (owner._recover !== null) {
-        owner._recover = null;
-        owner._flag &= ~FLAG_RECOVER;
-    }
+    owner._recover = null;
 }
 
 /**
@@ -2439,10 +2423,10 @@ function read(sender) {
     if (stamp === version) {
         return value;
     }
+    sender._version = version;
 
     /** Reuse: was our dep last run, visited again this run — O(1) */
     if (stamp === version - 1) {
-        sender._version = version;
         REUSED++;
         return value;
     }
@@ -2455,15 +2439,10 @@ function read(sender) {
         VSTACK[VCOUNT++] = sender;
         VSTACK[VCOUNT++] = stamp;
     }
-    sender._version = version;
 
     if (flag & FLAG_SETUP) {
         connect(this, sender);
     } else {
-        /**
-         * DYNAMIC path: always push new dep to _deps with slot 0.
-         * pruneDeps handles subscription after fn() returns.
-         */
         if (this._deps === null) {
             this._deps = [sender, 0];
         } else {
