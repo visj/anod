@@ -317,8 +317,14 @@ function setupMolWire() {
     let i = 0;
     return () => {
         i++;
-        batch(() => { B.set(1); A.set(1 + i * 2); });
-        batch(() => { A.set(2 + i * 2); B.set(2); });
+        batch(() => {
+            B.set(1);
+            A.set(1 + i * 2);
+        });
+        batch(() => {
+            A.set(2 + i * 2);
+            B.set(2);
+        });
     };
 }
 

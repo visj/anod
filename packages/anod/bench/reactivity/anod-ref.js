@@ -30,7 +30,10 @@ function setupDeep() {
     let current = head;
     for (let i = 0; i < len; i++) {
         const prev = current;
-        current = compute(c => { counter++; return c.read(prev) + 1; });
+        current = compute(c => {
+            counter++;
+            return c.read(prev) + 1;
+        });
     }
     const tail = current;
     effect(c => {
@@ -61,7 +64,7 @@ function setupBroad() {
     }
     let i = 0;
     return () => {
-       head.set(++i);
+        head.set(++i);
     };
 }
 
@@ -105,7 +108,7 @@ function setupTriangle() {
     list.push(current);
     const sum = compute(c => {
         counter++;
-        return list.reduce((a,b) => a + c.read(b), 0);
+        return list.reduce((a, b) => a + c.read(b), 0);
     });
     effect(c => {
         counter++;
@@ -113,7 +116,7 @@ function setupTriangle() {
     });
     let i = 0;
     return () => {
-       head.set(++i);
+        head.set(++i);
     };
 }
 
@@ -184,7 +187,7 @@ function setupAvoidable() {
         c.read(computed1);
         return 0;
     });
-    const computed3 = compute(c => { 
+    const computed3 = compute(c => {
         counter++;
         return c.read(computed2) + 1;
     });
@@ -248,8 +251,14 @@ function setupCellx(layers) {
                 counter++;
                 return c.read(m.prop1) - c.read(m.prop3);
             }),
-            prop3: compute(c => { counter++; return c.read(m.prop2) + c.read(m.prop4); }),
-            prop4: compute(c => { counter++; return c.read(m.prop3); }),
+            prop3: compute(c => {
+                counter++;
+                return c.read(m.prop2) + c.read(m.prop4);
+            }),
+            prop4: compute(c => {
+                counter++;
+                return c.read(m.prop3);
+            }),
         };
         effect(c => { counter++; sink += c.read(s.prop1); });
         effect(c => { counter++; sink += c.read(s.prop2); });
@@ -284,25 +293,49 @@ function setupMolWire() {
     const numbers = Array.from({ length: 5 }, (_, i) => i);
     const A = signal(0);
     const B = signal(0);
-    const C = compute(c => { counter++; return (c.read(A) % 2) + (c.read(B) % 2); });
+    const C = compute(c => {
+        counter++;
+        return (c.read(A) % 2) + (c.read(B) % 2);
+    });
     const D = compute(c => {
         counter++;
         return numbers.map(i => ({ x: i + (c.read(A) % 2) - (c.read(B) % 2) }));
     });
-    const E = compute(c => { counter++; return hard(c.read(C) + c.read(A) + c.read(D)[0].x, 'E'); });
-    const F = compute(c => { counter++; return hard(c.read(D)[2].x || c.read(B), 'F'); });
+    const E = compute(c => {
+        counter++;
+        return hard(c.read(C) + c.read(A) + c.read(D)[0].x, 'E');
+    });
+    const F = compute(c => {
+        counter++;
+        return hard(c.read(D)[2].x || c.read(B), 'F');
+    });
     const G = compute(c => {
         counter++;
         return c.read(C) + (c.read(C) || c.read(E) % 2) + c.read(D)[4].x + c.read(F);
     });
-    effect(c => { counter++; sink += hard(c.read(G), 'H'); });
-    effect(c => { counter++; sink += c.read(G); });
-    effect(c => { counter++; sink += hard(c.read(F), 'J'); });
+    effect(c => {
+        counter++;
+        sink += hard(c.read(G), 'H');
+    });
+    effect(c => {
+        counter++;
+        sink += c.read(G);
+    });
+    effect(c => {
+        counter++;
+        sink += hard(c.read(F), 'J');
+    });
     let i = 0;
     return () => {
         i++;
-        batch(() => { B.set(1); A.set(1 + i * 2); });
-        batch(() => { A.set(2 + i * 2); B.set(2); });
+        batch(() => {
+            B.set(1);
+            A.set(1 + i * 2);
+        });
+        batch(() => {
+            A.set(2 + i * 2);
+            B.set(2);
+        });
     };
 }
 
@@ -322,7 +355,10 @@ function benchCreateComputations(count) {
     return () => {
         const src = signal(0);
         for (let i = 0; i < count; i++) {
-            const comp = compute(c => { counter++; return c.read(src); });
+            const comp = compute(c => {
+                counter++;
+                return c.read(src);
+            });
             effect(c => {
                 counter++;
                 sink += c.read(comp);
@@ -444,13 +480,11 @@ function makeDynGraph(width, totalLayers, staticFraction, nSources) {
  */
 function setupDynBuild(width, totalLayers, staticFraction, nSources) {
     return () => {
-        const { sources, layers } = makeDynGraph(width, totalLayers, staticFraction, nSources);
+        const { layers } = makeDynGraph(width, totalLayers, staticFraction, nSources);
         const leaves = layers[layers.length - 1];
-        let sum = 0;
         for (let r = 0; r < leaves.length; r++) {
-            sum += leaves[r].val();
+            sink += leaves[r].val();
         }
-        sink += sum;
     };
 }
 
@@ -486,7 +520,7 @@ function setupDynUpdate(width, totalLayers, staticFraction, nSources, readFracti
 /* === Validation === */
 
 function validate(name, setupFn) {
-    const expected = OVERRIDES_ANOD[name] ?? EXPECTED[name];
+    const expected = EXPECTED[name];
     const run = setupFn();
     counter = 0;
     run();
@@ -531,16 +565,16 @@ group('$mol_wire', () => { bench('anod-ref', setupMolWire()); });
 group('Create 1k signals', () => { bench('anod-ref', benchCreateSignals(1_000)); });
 group('Create 1k computations', () => { bench('anod-ref', benchCreateComputations(1_000)); });
 
-group('Dynamic build: simple component',  () => { bench('anod-ref', setupDynBuild(10, 5, 1, 2)); });
-group('Dynamic build: large web app',    () => { bench('anod-ref', setupDynBuild(1000, 12, 0.95, 4)); });
-group('Dynamic build: wide dense',       () => { bench('anod-ref', setupDynBuild(1000, 5, 1, 25)); });
+group('Dynamic build: simple component', () => { bench('anod-ref', setupDynBuild(10, 5, 1, 2)); });
+group('Dynamic build: large web app', () => { bench('anod-ref', setupDynBuild(1000, 12, 0.95, 4)); });
+group('Dynamic build: wide dense', () => { bench('anod-ref', setupDynBuild(1000, 5, 1, 25)); });
 group('Dynamic update: simple component', () => { bench('anod-ref', setupDynUpdate(10, 5, 1, 2, 0.2)); });
 group('Dynamic update: dynamic component', () => { bench('anod-ref', setupDynUpdate(10, 10, 0.75, 6, 0.2)); });
-group('Dynamic update: large web app',   () => { bench('anod-ref', setupDynUpdate(1000, 12, 0.95, 4, 1)); });
-group('Dynamic update: wide dense',      () => { bench('anod-ref', setupDynUpdate(1000, 5, 1, 25, 1)); });
-group('Dynamic update: deep',            () => { bench('anod-ref', setupDynUpdate(5, 500, 1, 3, 1)); });
-group('Dynamic update: very dynamic',    () => { bench('anod-ref', setupDynUpdate(100, 15, 0.5, 6, 1)); });
+group('Dynamic update: large web app', () => { bench('anod-ref', setupDynUpdate(1000, 12, 0.95, 4, 1)); });
+group('Dynamic update: wide dense', () => { bench('anod-ref', setupDynUpdate(1000, 5, 1, 25, 1)); });
+group('Dynamic update: deep', () => { bench('anod-ref', setupDynUpdate(5, 500, 1, 3, 1)); });
+group('Dynamic update: very dynamic', () => { bench('anod-ref', setupDynUpdate(100, 15, 0.5, 6, 1)); });
 
-await run();
+const results = await run();
 
 console.log(sink, counter);

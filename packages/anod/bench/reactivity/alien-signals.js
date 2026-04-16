@@ -11,6 +11,15 @@ const fib = (n) => {
 };
 const hard = (n, _log) => n + fib(16);
 
+function batch(fn) {
+    startBatch();
+    try {
+        fn();
+    } finally {
+        endBatch();
+    }
+}
+
 /* === Kairo Benchmarks === */
 
 function setupDeep() {
@@ -263,12 +272,12 @@ function setupCellx(layers) {
     let toggle = false;
     return () => {
         toggle = !toggle;
-        startBatch();
-        start.prop1(toggle ? 4 : 1);
-        start.prop2(toggle ? 3 : 2);
-        start.prop3(toggle ? 2 : 3);
-        start.prop4(toggle ? 1 : 4);
-        endBatch();
+        batch(() => {
+            start.prop1(toggle ? 4 : 1);
+            start.prop2(toggle ? 3 : 2);
+            start.prop3(toggle ? 2 : 3);
+            start.prop4(toggle ? 1 : 4);
+        });
         end.prop1();
         end.prop2();
         end.prop3();
@@ -302,18 +311,29 @@ function setupMolWire() {
         counter++;
         return C() + (C() || E() % 2) + D()[4].x + F();
     });
-    effect(() => { counter++; sink += hard(G(), 'H'); });
-    effect(() => { counter++; sink += G(); });
-    effect(() => { counter++; sink += hard(F(), 'J'); });
+    effect(() => {
+        counter++;
+        sink += hard(G(), 'H');
+    });
+    effect(() => {
+        counter++;
+        sink += G();
+    });
+    effect(() => {
+        counter++;
+        sink += hard(F(), 'J');
+    });
     let i = 0;
     return () => {
         i++;
-        startBatch();
-        B(1); A(1 + i * 2);
-        endBatch();
-        startBatch();
-        A(2 + i * 2); B(2);
-        endBatch();
+        batch(() => {
+            B(1);
+            A(1 + i * 2);
+        });
+        batch(() => {
+            A(2 + i * 2);
+            B(2);
+        });
     };
 }
 

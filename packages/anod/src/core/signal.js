@@ -767,13 +767,11 @@ RootProto.recover = function (fn) { addRecover(this, fn); };
  * @returns {void}
  */
 RootProto._dispose = function () {
-    if (!(this._flag & FLAG_DISPOSED)) {
-        this._flag |= FLAG_DISPOSED;
-        clearOwned(this);
-        this._cleanup =
-            this._owned =
-            this._recover = null;
-    }
+    this._flag = FLAG_DISPOSED;
+    clearOwned(this);
+    this._cleanup =
+        this._owned =
+        this._recover = null;
 };
 
 /**
@@ -838,10 +836,6 @@ function Signal(value, opts) {
      * @type {Array<Receiver | number> | null}
      */
     this._subs = null;
-    /**
-     * @type {number}
-     */
-    this._mod = 0;
 }
 
 {
@@ -919,10 +913,9 @@ function Signal(value, opts) {
      * @returns {void}
      */
     SignalProto._dispose = function () {
-        if (!(this._flag & FLAG_DISPOSED)) {
-            clearSubs(this);
-            this._value = null;
-        }
+        this._flag = FLAG_DISPOSED;
+        clearSubs(this);
+        this._value = null;
     };
 
 }
@@ -1004,12 +997,6 @@ function Compute(opts, fn, dep1, seed, args) {
     ComputeProto.t = TYPE_COMPUTE;
 
     /**
-     * @const
-     * @type {number}
-     */
-    ComputeProto._mod = 0;
-
-    /**
      * @public
      * @this {!Compute<T,U,V,W>}
      * @returns {void}
@@ -1037,15 +1024,15 @@ function Compute(opts, fn, dep1, seed, args) {
      * @returns {T}
      */
     ComputeProto.val = function () {
-        let opts = this._flag;
-        if (opts & FLAG_RUNNING) {
+        let flag = this._flag;
+        if (flag & FLAG_RUNNING) {
             throw new Error('Circular dependency');
         }
-        if (opts & (FLAG_STALE | FLAG_PENDING)) {
+        if (flag & (FLAG_STALE | FLAG_PENDING)) {
             if (CLOCK._state & STATE_IDLE) {
                 CLOCK._state &= RESET;
                 try {
-                    if (opts & FLAG_STALE) {
+                    if (flag & FLAG_STALE) {
                         this._update(CLOCK._time);
                     } else {
                         checkRun(this, CLOCK._time);
@@ -1057,7 +1044,7 @@ function Compute(opts, fn, dep1, seed, args) {
                     CLOCK._state = STATE_IDLE;
                 }
             } else {
-                if (opts & FLAG_STALE) {
+                if (flag & FLAG_STALE) {
                     this._update(CLOCK._time);
                 } else {
                     checkRun(this, CLOCK._time);
@@ -1075,14 +1062,12 @@ function Compute(opts, fn, dep1, seed, args) {
      * @returns {void}
      */
     ComputeProto._dispose = function () {
-        if (!(this._flag & FLAG_DISPOSED)) {
-            this._flag |= FLAG_DISPOSED;
-            clearSubs(this);
-            clearDeps(this);
-            this._fn =
-                this._value =
-                this._args = null;
-        }
+        this._flag = FLAG_DISPOSED;
+        clearSubs(this);
+        clearDeps(this);
+        this._fn =
+            this._value =
+            this._args = null;
     };
 
     /**
@@ -2315,15 +2300,14 @@ function clearSender(receive, slot) {
  * @returns {void}
  */
 function clearDeps(receive) {
-    let dep = receive._dep1;
-    if (dep !== null) {
-        clearReceiver(dep, receive._dep1slot);
+    if (receive._dep1 !== null) {
+        clearReceiver(receive._dep1, receive._dep1slot);
         receive._dep1 = null;
     }
     let deps = receive._deps;
     if (deps !== null) {
-        let len = deps.length;
-        for (let i = 0; i < len; i += 2) {
+        let count = deps.length;
+        for (let i = 0; i < count; i += 2) {
             clearReceiver(/** @type {Sender} */(deps[i]), /** @type {number} */(deps[i + 1]));
         }
         receive._deps = null;
@@ -2335,15 +2319,14 @@ function clearDeps(receive) {
  * @returns {void}
  */
 function clearSubs(send) {
-    let sub = send._sub1;
-    if (sub !== null) {
-        clearSender(sub, send._sub1slot);
+    if (send._sub1 !== null) {
+        clearSender(send._sub1, send._sub1slot);
         send._sub1 = null;
     }
     let subs = send._subs;
     if (subs !== null) {
-        let len = subs.length;
-        for (let i = 0; i < len; i += 2) {
+        let count = subs.length;
+        for (let i = 0; i < count; i += 2) {
             clearSender(/** @type {Receiver} */(subs[i]), /** @type {number} */(subs[i + 1]));
         }
         send._subs = null;
@@ -2355,27 +2338,25 @@ function clearSubs(send) {
  * @returns {void}
  */
 function clearOwned(owner) {
-    if (owner._flag & FLAG_SCOPE) {
-        let owned = owner._owned;
-        if (owned !== null) {
-            let len = owned.length;
-            for (let i = 0; i < len; i++) {
-                owned[i]._dispose();
-            }
-            owner._owned = null;
+    let owned = owner._owned;
+    if (owned !== null) {
+        let len = owned.length;
+        for (let i = 0; i < len; i++) {
+            owned[i]._dispose();
         }
+        owner._owned = null;
     }
     let cleanup = owner._cleanup;
     if (cleanup !== null) {
-        owner._cleanup = null;
         if (typeof cleanup === 'function') {
             cleanup();
         } else {
-            let len = cleanup.length;
-            for (let i = 0; i < len; i++) {
+            let count = cleanup.length;
+            for (let i = 0; i < count; i++) {
                 cleanup[i]();
             }
         }
+        owner._cleanup = null;
     }
     if (owner._recover !== null) {
         owner._recover = null;
@@ -2718,6 +2699,74 @@ function compute(fn, seed, opts, args) {
 }
 
 /**
+ * Stable compute. Two signatures:
+ *   derive(fn, seed?, args?)       — multi-dep, uses setup tracking
+ *   derive(dep, fn, seed?, args?)  — bound single-dep, skips setup
+ * @param {function|Sender} fnOrDep
+ * @param {*=} seedOrFn
+ * @param {*=} argsOrSeed
+ * @param {*=} args
+ * @returns {!Compute}
+ */
+function derive(fnOrDep, seedOrFn, argsOrSeed, args) {
+    let node;
+    if (typeof fnOrDep === 'function') {
+        node = new Compute(FLAG_STABLE | FLAG_SETUP, fnOrDep, null, seedOrFn, argsOrSeed);
+    } else {
+        node = new Compute(FLAG_STABLE | FLAG_BOUND, seedOrFn, fnOrDep, argsOrSeed, args);
+        node._dep1slot = subscribe(fnOrDep, node, 0);
+    }
+    startCompute(node);
+    return node;
+}
+
+/**
+ * Stable compute with FLAG_TRANSMIT. Two signatures:
+ *   transmit(fn, seed?, args?)       — multi-dep, uses setup tracking
+ *   transmit(dep, fn, seed?, args?)  — bound single-dep, skips setup
+ * @param {function|Sender} fnOrDep
+ * @param {*=} seedOrFn
+ * @param {*=} argsOrSeed
+ * @param {*=} args
+ * @returns {!Compute}
+ */
+function transmit(fnOrDep, seedOrFn, argsOrSeed, args) {
+    if (typeof fnOrDep === 'function') {
+        let node = new Compute(FLAG_STABLE | FLAG_SETUP | FLAG_TRANSMIT, fnOrDep, null, seedOrFn, argsOrSeed);
+        startCompute(node);
+        return node;
+    }
+    let node = new Compute(FLAG_STABLE | FLAG_BOUND | FLAG_TRANSMIT, seedOrFn, fnOrDep, argsOrSeed, args);
+    node._dep1slot = subscribe(fnOrDep, node, 0);
+    startCompute(node);
+    return node;
+}
+
+/**
+ * Async compute. Returns a promise whose resolved value becomes
+ * the node's settled value. Stable by default; pass OPT_DYNAMIC
+ * for dynamic dependency tracking.
+ * @template T,W
+ * @param {function(T,W): Promise<T>} fn
+ * @param {T=} seed
+ * @param {number=} opts
+ * @param {W=} args
+ * @returns {!Compute<T,null,null,W>}
+ */
+function task(fn, seed, opts, args) {
+    opts = 0 | opts;
+    let flag = FLAG_ASYNC | FLAG_SETUP | (opts & OPTIONS);
+    if (!(opts & OPT_DYNAMIC)) {
+        flag |= FLAG_STABLE;
+    }
+    let node = new Compute(flag, fn, null, seed, args);
+    if (!(flag & FLAG_DEFER)) {
+        startCompute(node);
+    }
+    return node;
+}
+
+/**
  * @template W
  * @param {function(): (function(): void | void)} fn
  * @param {number=} opts
@@ -2752,30 +2801,6 @@ function scope(fn, opts) {
 }
 
 /**
- * Async compute. Returns a promise whose resolved value becomes
- * the node's settled value. Stable by default; pass OPT_DYNAMIC
- * for dynamic dependency tracking.
- * @template T,W
- * @param {function(T,W): Promise<T>} fn
- * @param {T=} seed
- * @param {number=} opts
- * @param {W=} args
- * @returns {!Compute<T,null,null,W>}
- */
-function task(fn, seed, opts, args) {
-    opts = 0 | opts;
-    let flag = FLAG_ASYNC | FLAG_SETUP | (opts & OPTIONS);
-    if (!(opts & OPT_DYNAMIC)) {
-        flag |= FLAG_STABLE;
-    }
-    let node = new Compute(flag, fn, null, seed, args);
-    if (!(flag & FLAG_DEFER)) {
-        startCompute(node);
-    }
-    return node;
-}
-
-/**
  * Async effect. Returns a promise whose resolved value, if a
  * function, is registered as cleanup. Stable by default; pass
  * OPT_DYNAMIC for dynamic dependency tracking.
@@ -2793,37 +2818,6 @@ function spawn(fn, opts, args) {
     }
     let node = new Effect(flag, fn, null, args);
     startEffect(node);
-    return node;
-}
-
-/**
- * Stable compute. Tracks deps on first run, then never
- * re-tracks. Like compute() with implicit OPT_STABLE.
- * @template T,W
- * @param {function(T,W): T} fn
- * @param {T=} seed
- * @param {W=} args
- * @returns {!Compute<T,null,null,W>}
- */
-/**
- * Stable compute. Two signatures:
- *   derive(fn, seed?, args?)       — multi-dep, uses setup tracking
- *   derive(dep, fn, seed?, args?)  — bound single-dep, skips setup
- * @param {function|Sender} fnOrDep
- * @param {*=} seedOrFn
- * @param {*=} argsOrSeed
- * @param {*=} args
- * @returns {!Compute}
- */
-function derive(fnOrDep, seedOrFn, argsOrSeed, args) {
-    if (typeof fnOrDep === 'function') {
-        let node = new Compute(FLAG_STABLE | FLAG_SETUP, fnOrDep, null, seedOrFn, argsOrSeed);
-        startCompute(node);
-        return node;
-    }
-    let node = new Compute(FLAG_STABLE | FLAG_BOUND, seedOrFn, fnOrDep, argsOrSeed, args);
-    node._dep1slot = subscribe(fnOrDep, node, 0);
-    startCompute(node);
     return node;
 }
 
@@ -2846,28 +2840,6 @@ function watch(fnOrDep, fnOrArgs, args) {
     node._dep1slot = subscribe(fnOrDep, node, 0);
     node._owner = CLOCK._scope;
     startEffect(node);
-    return node;
-}
-
-/**
- * Stable compute with FLAG_TRANSMIT. Two signatures:
- *   transmit(fn, seed?, args?)       — multi-dep, uses setup tracking
- *   transmit(dep, fn, seed?, args?)  — bound single-dep, skips setup
- * @param {function|Sender} fnOrDep
- * @param {*=} seedOrFn
- * @param {*=} argsOrSeed
- * @param {*=} args
- * @returns {!Compute}
- */
-function transmit(fnOrDep, seedOrFn, argsOrSeed, args) {
-    if (typeof fnOrDep === 'function') {
-        let node = new Compute(FLAG_STABLE | FLAG_SETUP | FLAG_TRANSMIT, fnOrDep, null, seedOrFn, argsOrSeed);
-        startCompute(node);
-        return node;
-    }
-    let node = new Compute(FLAG_STABLE | FLAG_BOUND | FLAG_TRANSMIT, seedOrFn, fnOrDep, argsOrSeed, args);
-    node._dep1slot = subscribe(fnOrDep, node, 0);
-    startCompute(node);
     return node;
 }
 

@@ -29,7 +29,7 @@ function setupDeep() {
         });
         let i = 0;
         return () => {
-            S.freeze(() => { head(++i); });
+            head(++i);
         };
     });
 }
@@ -48,7 +48,7 @@ function setupBroad() {
         }
         let i = 0;
         return () => {
-            S.freeze(() => { head(++i); });
+            head(++i);
         };
     });
 }
@@ -69,7 +69,7 @@ function setupDiamond() {
         });
         let i = 0;
         return () => {
-            S.freeze(() => { head(++i); });
+            head(++i);
         };
     });
 }
@@ -93,7 +93,7 @@ function setupTriangle() {
         });
         let i = 0;
         return () => {
-            S.freeze(() => { head(++i); });
+            head(++i);
         };
     });
 }
@@ -115,7 +115,7 @@ function setupMux() {
         let i = 0;
         return () => {
             const idx = i % heads.length;
-            S.freeze(() => { heads[idx](++i); });
+            heads[idx](++i);
         };
     });
 }
@@ -139,7 +139,7 @@ function setupUnstable() {
         });
         let i = 0;
         return () => {
-            S.freeze(() => { head(++i); });
+            head(++i);
         };
     });
 }
@@ -159,7 +159,7 @@ function setupAvoidable() {
         });
         let i = 0;
         return () => {
-            S.freeze(() => { head(++i); });
+            head(++i);
         };
     });
 }
@@ -182,7 +182,7 @@ function setupRepeatedObservers() {
         });
         let i = 0;
         return () => {
-            S.freeze(() => { head(++i); });
+            head(++i);
         };
     });
 }
@@ -252,8 +252,14 @@ function setupMolWire() {
         let i = 0;
         return () => {
             i++;
-            S.freeze(() => { B(1); A(1 + i * 2); });
-            S.freeze(() => { A(2 + i * 2); B(2); });
+            S.freeze(() => {
+                B(1);
+                A(1 + i * 2);
+            });
+            S.freeze(() => {
+                A(2 + i * 2);
+                B(2);
+            });
         };
     });
 }

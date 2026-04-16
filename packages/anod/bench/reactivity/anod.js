@@ -25,7 +25,10 @@ function setupDeep() {
     const head = signal(0);
     let current = head;
     for (let i = 0; i < len; i++) {
-        current = transmit(current, (v) => { counter++; return v + 1; });
+        current = transmit(current, (v) => {
+            counter++;
+            return v + 1;
+        });
     }
     const tail = current;
     watch(tail, (v) => {
@@ -34,15 +37,21 @@ function setupDeep() {
     });
     let i = 0;
     return () => {
-        batch(() => { head.set(++i); });
+        head.set(++i);
     };
 }
 
 function setupBroad() {
     const head = signal(0);
     for (let i = 0; i < 50; i++) {
-        const current = derive(head, (v) => { counter++; return v + i; });
-        const current2 = derive(current, (v) => { counter++; return v + 1; });
+        const current = derive(head, (v) => {
+            counter++;
+            return v + i;
+        });
+        const current2 = derive(current, (v) => {
+            counter++;
+            return v + 1;
+        });
         watch(current2, (v) => {
             counter++;
             sink += v;
@@ -50,7 +59,7 @@ function setupBroad() {
     }
     let i = 0;
     return () => {
-        batch(() => { head.set(++i); });
+        head.set(++i);
     };
 }
 
@@ -59,15 +68,14 @@ function setupDiamond() {
     const head = signal(0);
     const branches = [];
     for (let i = 0; i < width; i++) {
-        branches.push(derive(head, (v) => { counter++; return v + 1; }));
+        branches.push(derive(head, (v) => {
+            counter++;
+            return v + 1;
+        }));
     }
     const sum = derive(c => {
         counter++;
-        let total = 0;
-        for (let i = 0; i < branches.length; i++) {
-            total += c.read(branches[i]);
-        }
-        return total;
+        return branches.reduce((a, b) => a + c.read(b), 0);
     });
     watch(sum, (v) => {
         counter++;
@@ -75,7 +83,7 @@ function setupDiamond() {
     });
     let i = 0;
     return () => {
-        batch(() => { head.set(++i); });
+        head.set(++i);
     };
 }
 
@@ -86,16 +94,15 @@ function setupTriangle() {
     const list = [];
     for (let i = 0; i < width - 1; i++) {
         list.push(current);
-        current = derive(current, (v) => { counter++; return v + 1; });
+        current = derive(current, (v) => {
+            counter++;
+            return v + 1;
+        });
     }
     list.push(current);
     const sum = derive(c => {
         counter++;
-        let total = 0;
-        for (let i = 0; i < list.length; i++) {
-            total += c.read(list[i]);
-        }
-        return total;
+        return list.reduce((a, b) => a + c.read(b), 0);
     });
     watch(sum, (v) => {
         counter++;
@@ -103,16 +110,25 @@ function setupTriangle() {
     });
     let i = 0;
     return () => {
-        batch(() => { head.set(++i); });
+        head.set(++i);
     };
 }
 
 function setupMux() {
     const heads = new Array(100).fill(null).map(() => signal(0));
-    const mux = derive(c => { counter++; return heads.map(h => c.read(h)); });
+    const mux = derive(c => {
+        counter++;
+        return heads.map(h => c.read(h));
+    });
     const split = heads
-        .map((_, index) => derive(mux, (v) => { counter++; return v[index]; }))
-        .map(x => derive(x, (v) => { counter++; return v + 1; }));
+        .map((_, index) => derive(mux, (v) => {
+            counter++;
+            return v[index];
+        }))
+        .map(x => derive(x, (v) => {
+            counter++;
+            return v + 1;
+        }));
     for (const x of split) {
         watch(x, (v) => {
             counter++;
@@ -122,14 +138,20 @@ function setupMux() {
     let i = 0;
     return () => {
         const idx = i % heads.length;
-        batch(() => { heads[idx].set(++i); });
+        heads[idx].set(++i);
     };
 }
 
 function setupUnstable() {
     const head = signal(0);
-    const double = derive(head, (v) => { counter++; return v * 2; });
-    const inverse = derive(head, (v) => { counter++; return -v; });
+    const double = derive(head, (v) => {
+        counter++;
+        return v * 2;
+    });
+    const inverse = derive(head, (v) => {
+        counter++;
+        return -v;
+    });
     const current = compute(c => {
         counter++;
         let result = 0;
@@ -144,24 +166,39 @@ function setupUnstable() {
     });
     let i = 0;
     return () => {
-        batch(() => { head.set(++i); });
+        head.set(++i);
     };
 }
 
 function setupAvoidable() {
     const head = signal(0);
-    const computed1 = derive(head, (v) => { counter++; return v; });
-    const computed2 = derive(computed1, (v) => { counter++; return 0; });
-    const computed3 = derive(computed2, (v) => { counter++; return v + 1; });
-    const computed4 = derive(computed3, (v) => { counter++; return v + 2; });
-    const computed5 = derive(computed4, (v) => { counter++; return v + 3; });
+    const computed1 = derive(head, (v) => {
+        counter++;
+        return v;
+    });
+    const computed2 = derive(computed1, (v) => {
+        counter++;
+        return 0;
+    });
+    const computed3 = derive(computed2, (v) => {
+        counter++;
+        return v + 1;
+    });
+    const computed4 = derive(computed3, (v) => {
+        counter++;
+        return v + 2;
+    });
+    const computed5 = derive(computed4, (v) => {
+        counter++;
+        return v + 3;
+    });
     watch(computed5, (v) => {
         counter++;
         sink += v;
     });
     let i = 0;
     return () => {
-        batch(() => { head.set(++i); });
+        head.set(++i);
     };
 }
 
@@ -182,7 +219,7 @@ function setupRepeatedObservers() {
     });
     let i = 0;
     return () => {
-        batch(() => { head.set(++i); });
+        head.set(++i);
     };
 }
 
@@ -199,10 +236,22 @@ function setupCellx(layers) {
     for (let i = layers; i > 0; i--) {
         const m = layer;
         const s = {
-            prop1: derive(m.prop2, (v) => { counter++; return v; }),
-            prop2: derive(c => { counter++; return c.read(m.prop1) - c.read(m.prop3); }),
-            prop3: derive(c => { counter++; return c.read(m.prop2) + c.read(m.prop4); }),
-            prop4: derive(m.prop3, (v) => { counter++; return v; }),
+            prop1: derive(m.prop2, (v) => {
+                counter++;
+                return v;
+            }),
+            prop2: derive(c => {
+                counter++;
+                return c.read(m.prop1) - c.read(m.prop3);
+            }),
+            prop3: derive(c => {
+                counter++;
+                return c.read(m.prop2) + c.read(m.prop4);
+            }),
+            prop4: derive(m.prop3, (v) => {
+                counter++;
+                return v;
+            }),
         };
         watch(s.prop1, (v) => { counter++; sink += v; });
         watch(s.prop2, (v) => { counter++; sink += v; });
@@ -237,25 +286,49 @@ function setupMolWire() {
     const numbers = Array.from({ length: 5 }, (_, i) => i);
     const A = signal(0);
     const B = signal(0);
-    const C = derive(c => { counter++; return (c.read(A) % 2) + (c.read(B) % 2); });
+    const C = derive(c => {
+        counter++;
+        return (c.read(A) % 2) + (c.read(B) % 2);
+    });
     const D = derive(c => {
         counter++;
         return numbers.map(i => ({ x: i + (c.read(A) % 2) - (c.read(B) % 2) }));
     });
-    const E = derive(c => { counter++; return hard(c.read(C) + c.read(A) + c.read(D)[0].x, 'E'); });
-    const F = compute(c => { counter++; return hard(c.read(D)[2].x || c.read(B), 'F'); });
+    const E = derive(c => {
+        counter++;
+        return hard(c.read(C) + c.read(A) + c.read(D)[0].x, 'E');
+    });
+    const F = compute(c => {
+        counter++;
+        return hard(c.read(D)[2].x || c.read(B), 'F');
+    });
     const G = compute(c => {
         counter++;
         return c.read(C) + (c.read(C) || c.read(E) % 2) + c.read(D)[4].x + c.read(F);
     });
-    watch(c => { counter++; sink += hard(c.read(G), 'H'); });
-    watch(c => { counter++; sink += c.read(G); });
-    watch(c => { counter++; sink += hard(c.read(F), 'J'); });
+    watch(c => {
+        counter++;
+        sink += hard(c.read(G), 'H');
+    });
+    watch(c => {
+        counter++;
+        sink += c.read(G);
+    });
+    watch(c => {
+        counter++;
+        sink += hard(c.read(F), 'J');
+    });
     let i = 0;
     return () => {
         i++;
-        batch(() => { B.set(1); A.set(1 + i * 2); });
-        batch(() => { A.set(2 + i * 2); B.set(2); });
+        batch(() => {
+            B.set(1);
+            A.set(1 + i * 2);
+        });
+        batch(() => {
+            A.set(2 + i * 2);
+            B.set(2);
+        });
     };
 }
 
@@ -275,7 +348,10 @@ function benchCreateComputations(count) {
     return () => {
         const src = signal(0);
         for (let i = 0; i < count; i++) {
-            const comp = derive(c => { counter++; return c.read(src); });
+            const comp = derive(c => {
+                counter++;
+                return c.read(src);
+            });
             watch(c => {
                 counter++;
                 sink += c.read(comp);
@@ -397,13 +473,11 @@ function makeDynGraph(width, totalLayers, staticFraction, nSources) {
  */
 function setupDynBuild(width, totalLayers, staticFraction, nSources) {
     return () => {
-        const { sources, layers } = makeDynGraph(width, totalLayers, staticFraction, nSources);
+        const { layers } = makeDynGraph(width, totalLayers, staticFraction, nSources);
         const leaves = layers[layers.length - 1];
-        let sum = 0;
         for (let r = 0; r < leaves.length; r++) {
-            sum += leaves[r].val();
+            sink += leaves[r].val();
         }
-        sink += sum;
     };
 }
 
@@ -488,16 +562,16 @@ group('$mol_wire', () => { bench('anod', setupMolWire()); });
 group('Create 1k signals', () => { bench('anod', benchCreateSignals(1_000)); });
 group('Create 1k computations', () => { bench('anod', benchCreateComputations(1_000)); });
 
-group('Dynamic build: simple component',  () => { bench('anod', setupDynBuild(10, 5, 1, 2)); });
-group('Dynamic build: large web app',    () => { bench('anod', setupDynBuild(1000, 12, 0.95, 4)); });
-group('Dynamic build: wide dense',       () => { bench('anod', setupDynBuild(1000, 5, 1, 25)); });
+group('Dynamic build: simple component', () => { bench('anod', setupDynBuild(10, 5, 1, 2)); });
+group('Dynamic build: large web app', () => { bench('anod', setupDynBuild(1000, 12, 0.95, 4)); });
+group('Dynamic build: wide dense', () => { bench('anod', setupDynBuild(1000, 5, 1, 25)); });
 group('Dynamic update: simple component', () => { bench('anod', setupDynUpdate(10, 5, 1, 2, 0.2)); });
 group('Dynamic update: dynamic component', () => { bench('anod', setupDynUpdate(10, 10, 0.75, 6, 0.2)); });
-group('Dynamic update: large web app',   () => { bench('anod', setupDynUpdate(1000, 12, 0.95, 4, 1)); });
-group('Dynamic update: wide dense',      () => { bench('anod', setupDynUpdate(1000, 5, 1, 25, 1)); });
-group('Dynamic update: deep',            () => { bench('anod', setupDynUpdate(5, 500, 1, 3, 1)); });
-group('Dynamic update: very dynamic',    () => { bench('anod', setupDynUpdate(100, 15, 0.5, 6, 1)); });
+group('Dynamic update: large web app', () => { bench('anod', setupDynUpdate(1000, 12, 0.95, 4, 1)); });
+group('Dynamic update: wide dense', () => { bench('anod', setupDynUpdate(1000, 5, 1, 25, 1)); });
+group('Dynamic update: deep', () => { bench('anod', setupDynUpdate(5, 500, 1, 3, 1)); });
+group('Dynamic update: very dynamic', () => { bench('anod', setupDynUpdate(100, 15, 0.5, 6, 1)); });
 
-await run();
+const results = await run();
 
 console.log(sink, counter);

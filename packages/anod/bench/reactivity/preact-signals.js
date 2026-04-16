@@ -31,7 +31,7 @@ function setupDeep() {
     });
     let i = 0;
     return () => {
-        batch(() => { head.value = ++i; });
+        head.value = ++i;
     };
 }
 
@@ -53,7 +53,7 @@ function setupBroad() {
     }
     let i = 0;
     return () => {
-        batch(() => { head.value = ++i; });
+        head.value = ++i;
     };
 }
 
@@ -77,7 +77,7 @@ function setupDiamond() {
     });
     let i = 0;
     return () => {
-        batch(() => { head.value = ++i; });
+        head.value = ++i;
     };
 }
 
@@ -105,7 +105,7 @@ function setupTriangle() {
     });
     let i = 0;
     return () => {
-        batch(() => { head.value = ++i; });
+        head.value = ++i;
     };
 }
 
@@ -133,7 +133,7 @@ function setupMux() {
     let i = 0;
     return () => {
         const idx = i % heads.length;
-        batch(() => { heads[idx].value = ++i; });
+        heads[idx].value = ++i;
     };
 }
 
@@ -161,7 +161,7 @@ function setupUnstable() {
     });
     let i = 0;
     return () => {
-        batch(() => { head.value = ++i; });
+        head.value = ++i;
     };
 }
 
@@ -194,7 +194,7 @@ function setupAvoidable() {
     });
     let i = 0;
     return () => {
-        batch(() => { head.value = ++i; });
+        head.value = ++i;
     };
 }
 
@@ -215,7 +215,7 @@ function setupRepeatedObservers() {
     });
     let i = 0;
     return () => {
-        batch(() => { head.value = ++i; });
+        head.value = ++i;
     };
 }
 
@@ -317,8 +317,14 @@ function setupMolWire() {
     let i = 0;
     return () => {
         i++;
-        batch(() => { B.value = 1; A.value = 1 + i * 2; });
-        batch(() => { A.value = 2 + i * 2; B.value = 2; });
+        batch(() => {
+            B.value = 1;
+            A.value = 1 + i * 2;
+        });
+        batch(() => {
+            A.value = 2 + i * 2;
+            B.value = 2;
+        });
     };
 }
 
