@@ -2209,16 +2209,16 @@ function start(clock) {
  */
 function subscribe(send, receive, depslot) {
     /** @type {number} */
-    let subslot = 0;
+    let subslot = -1;
     if (send._sub1 === null) {
         send._sub1 = receive;
         send._sub1slot = depslot;
-        /* subslot = 0 */
+        /* subslot = -1 */
     } else if (send._subs === null) {
-        subslot = 1;
+        subslot = 0;
         send._subs = [receive, depslot];
     } else {
-        subslot = (send._subs.length / 2) + 1;
+        subslot = send._subs.length;
         send._subs.push(receive, depslot);
     }
     return subslot;
@@ -2230,20 +2230,19 @@ function subscribe(send, receive, depslot) {
  * @returns {void}
  */
 function clearReceiver(send, slot) {
-    if (slot === 0) {
+    if (slot === -1) {
         send._sub1 = null;
     } else {
         let subs = send._subs;
         let lastSlot = /** @type {number} */(subs.pop());
         let lastNode = /** @type {Receiver} */(subs.pop());
-        let realIndex = (slot - 1) * 2;
-        if (realIndex !== subs.length) {
-            subs[realIndex] = lastNode;
-            subs[realIndex + 1] = lastSlot;
-            if (lastSlot === 0) {
+        if (slot !== subs.length) {
+            subs[slot] = lastNode;
+            subs[slot + 1] = lastSlot;
+            if (lastSlot === -1) {
                 lastNode._dep1slot = slot;
             } else {
-                lastNode._deps[(lastSlot - 1) * 2 + 1] = slot;
+                lastNode._deps[lastSlot + 1] = slot;
             }
         }
     }
@@ -2271,20 +2270,19 @@ function clearReceiver(send, slot) {
  * @returns {void}
  */
 function clearSender(receive, slot) {
-    if (slot === 0) {
+    if (slot === -1) {
         receive._dep1 = null;
     } else {
         let deps = receive._deps;
         let lastSlot = /** @type {number} */(deps.pop());
         let lastNode = /** @type {Sender} */(deps.pop());
-        let realIndex = (slot - 1) * 2;
-        if (realIndex !== deps.length) {
-            deps[realIndex] = lastNode;
-            deps[realIndex + 1] = lastSlot;
-            if (lastSlot === 0) {
+        if (slot !== deps.length) {
+            deps[slot] = lastNode;
+            deps[slot + 1] = lastSlot;
+            if (lastSlot === -1) {
                 lastNode._sub1slot = slot;
             } else {
-                lastNode._subs[(lastSlot - 1) * 2 + 1] = slot;
+                lastNode._subs[lastSlot + 1] = slot;
             }
         }
     }
@@ -2455,18 +2453,18 @@ function read(sender) {
 
 function connect(receiver, sender) {
     /** @type {number} */
-    let depslot = 0;
+    let depslot = -1;
     if (receiver._dep1 === null) {
         receiver._dep1 = sender;
     } else if (receiver._deps === null) {
-        depslot = 1;
+        depslot = 0;
     } else {
-        depslot = (receiver._deps.length / 2) + 1;
+        depslot = receiver._deps.length;
     }
     let subslot = subscribe(sender, receiver, depslot);
-    if (depslot === 0) {
+    if (depslot === -1) {
         receiver._dep1slot = subslot;
-    } else if (depslot === 1) {
+    } else if (depslot === 0) {
         receiver._deps = [sender, subslot];
     } else {
         receiver._deps.push(sender, subslot);
@@ -2506,7 +2504,7 @@ function pruneDeps(node, version, depCount) {
             if (ni < totalLen) {
                 /** Fill dep1 with a new dep */
                 node._dep1 = /** @type {Sender} */(deps[ni]);
-                node._dep1slot = subscribe(/** @type {Sender} */(deps[ni]), node, 0);
+                node._dep1slot = subscribe(/** @type {Sender} */(deps[ni]), node, -1);
                 ni += 2;
             } else {
                 node._dep1 = null;
@@ -2546,8 +2544,7 @@ function pruneDeps(node, version, depCount) {
         if (ni < totalLen) {
             /** Fill hole with next new dep */
             let newDep = /** @type {Sender} */(deps[ni]);
-            let depslot = i / 2 + 1;
-            let subslot = subscribe(newDep, node, depslot);
+            let subslot = subscribe(newDep, node, i);
             deps[i] = newDep;
             deps[i + 1] = subslot;
             ni += 2;
@@ -2566,11 +2563,10 @@ function pruneDeps(node, version, depCount) {
                     /** Move reused dep into the hole at i */
                     deps[i] = tDep;
                     deps[i + 1] = tSlot;
-                    let depslot = i / 2 + 1;
-                    if (tSlot === 0) {
-                        tDep._sub1slot = depslot;
+                    if (tSlot === -1) {
+                        tDep._sub1slot = i;
                     } else {
-                        tDep._subs[(tSlot - 1) * 2 + 1] = depslot;
+                        tDep._subs[tSlot + 1] = i;
                     }
                     found = 1;
                     break;
@@ -2591,8 +2587,7 @@ function pruneDeps(node, version, depCount) {
     /** Remaining new deps — subscribe at the end of the live region */
     while (ni < totalLen) {
         let dep = /** @type {Sender} */(deps[ni]);
-        let depslot = tail / 2 + 1;
-        let subslot = subscribe(dep, node, depslot);
+        let subslot = subscribe(dep, node, tail);
         deps[tail] = dep;
         deps[tail + 1] = subslot;
         tail += 2;
@@ -2608,10 +2603,10 @@ function pruneDeps(node, version, depCount) {
         let slot = /** @type {number} */(deps[1]);
         node._dep1 = dep;
         node._dep1slot = slot;
-        if (slot === 0) {
-            dep._sub1slot = 0;
+        if (slot === -1) {
+            dep._sub1slot = -1;
         } else {
-            dep._subs[(slot - 1) * 2 + 1] = 0;
+            dep._subs[slot + 1] = -1;
         }
         node._deps = null;
     } else {
@@ -2700,7 +2695,7 @@ function derive(fnOrDep, seedOrFn, argsOrSeed, args) {
         node = new Compute(FLAG_STABLE | FLAG_SETUP, fnOrDep, null, seedOrFn, argsOrSeed);
     } else {
         node = new Compute(FLAG_STABLE | FLAG_BOUND, seedOrFn, fnOrDep, argsOrSeed, args);
-        node._dep1slot = subscribe(fnOrDep, node, 0);
+        node._dep1slot = subscribe(fnOrDep, node, -1);
     }
     startCompute(node);
     return node;
@@ -2723,7 +2718,7 @@ function transmit(fnOrDep, seedOrFn, argsOrSeed, args) {
         return node;
     }
     let node = new Compute(FLAG_STABLE | FLAG_BOUND | FLAG_NOTIFY, seedOrFn, fnOrDep, argsOrSeed, args);
-    node._dep1slot = subscribe(fnOrDep, node, 0);
+    node._dep1slot = subscribe(fnOrDep, node, -1);
     startCompute(node);
     return node;
 }
@@ -2823,7 +2818,7 @@ function watch(fnOrDep, fnOrArgs, args) {
         return node;
     }
     let node = new Effect(FLAG_STABLE | FLAG_BOUND, fnOrArgs, fnOrDep, args);
-    node._dep1slot = subscribe(fnOrDep, node, 0);
+    node._dep1slot = subscribe(fnOrDep, node, -1);
     node._owner = CLOCK._scope;
     startEffect(node);
     return node;
