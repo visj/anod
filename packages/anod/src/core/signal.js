@@ -27,33 +27,37 @@ const CTX_PROMISE = 4;
 const CTX_ITERABLE = 8;
 const CTX_ASYNC = CTX_PROMISE | CTX_ITERABLE;
 const CTX_OWNER = 16;
-const FLAG_DEFER = 1;
-const FLAG_STABLE = 2;
-const FLAG_SETUP = 4;
-const FLAG_STALE = 8;
-const FLAG_TRANSMIT = 16;
-const FLAG_PENDING = 32;
-const FLAG_RUNNING = 64;
-const FLAG_DISPOSED = 128;
-const FLAG_LOADING = 256;
-const FLAG_ERROR = 512;
-const FLAG_RECOVER = 1024;
-const FLAG_BOUND = 2048;
-const FLAG_DERIVED = 4096;
-const FLAG_SCOPE = 8192;
-const FLAG_WEAK = 16384;
 
-const FLAG_SCHEDULED = 1 << 30;
+const FLAG_STALE = 1 << 0;
+const FLAG_PENDING = 1 << 1;
+const FLAG_SCHEDULED = 1 << 2;
+const FLAG_DISPOSED = 1 << 3;
 
-const FLAG_EQUAL = 0x40000;
-const FLAG_NOTEQUAL = 0x80000;
-const FLAG_INIT = 0x100000;
-const FLAG_ASYNC = 0x200000;
-const FLAG_STREAM = 0x400000;
+const FLAG_COMPUTE = 1 << 4;
+const FLAG_INIT = 1 << 5;
+const FLAG_SETUP = 1 << 6;
+const FLAG_RUNNING = 1 << 7;
+const FLAG_LOADING = 1 << 8;
+const FLAG_ERROR = 1 << 9;
+const FLAG_DEFER = 1 << 10;
+const FLAG_STABLE = 1 << 11;
+const FLAG_NOTIFY = 1 << 12;
+const FLAG_RECOVER = 1 << 13;
+const FLAG_BOUND = 1 << 14;
+const FLAG_DERIVED = 1 << 15;
+const FLAG_SCOPE = 1 << 16;
+const FLAG_WEAK = 1 << 17;
+
+
+const FLAG_EQUAL = 1 << 18;
+const FLAG_NOTEQUAL = 1 << 19;
+const FLAG_ASYNC = 1 << 20;
+const FLAG_STREAM = 1 << 21;
+
 const OPT_DEFER = FLAG_DEFER;
 const OPT_STABLE = FLAG_STABLE;
 const OPT_SETUP = FLAG_SETUP;
-const OPT_NOTIFY = FLAG_TRANSMIT;
+const OPT_NOTIFY = FLAG_NOTIFY;
 const OPT_WEAK = FLAG_WEAK;
 
 const OPT_DYNAMIC = 0x800000;
@@ -465,7 +469,7 @@ function _ctxTransmit(fn, seed, args) {
     if (owner === null) {
         throw new Error('Ownership required');
     }
-    let node = new Compute(FLAG_STABLE | FLAG_SETUP | FLAG_TRANSMIT | FLAG_TRANSMIT, fn, null, seed, args);
+    let node = new Compute(FLAG_STABLE | FLAG_SETUP | FLAG_NOTIFY | FLAG_NOTIFY, fn, null, seed, args);
     addOwned(owner, node);
     startCompute(node);
     return node;
@@ -938,7 +942,7 @@ function Compute(opts, fn, dep1, seed, args) {
     /**
      * @type {number}
      */
-    this._flag = FLAG_STALE | FLAG_INIT | opts;
+    this._flag = FLAG_COMPUTE | FLAG_INIT | FLAG_STALE | opts;
     /**
      * @type {T}
      */
@@ -1177,7 +1181,7 @@ function Compute(opts, fn, dep1, seed, args) {
             if (!(flag & FLAG_EQUAL)) {
                 this._ctime = time;
             }
-        } else if (flag & (FLAG_NOTEQUAL | FLAG_TRANSMIT)) {
+        } else if (flag & (FLAG_NOTEQUAL | FLAG_NOTIFY)) {
             this._ctime = time;
         }
     };
@@ -1274,15 +1278,14 @@ function Compute(opts, fn, dep1, seed, args) {
     };
 
     /**
-     * @param {number} time
      * @returns {void}
      */
-    ComputeProto._receive = function (time) {
-        if (this._flag & FLAG_TRANSMIT) {
+    ComputeProto._receive = function () {
+        if (this._flag & FLAG_NOTIFY) {
             COMPUTES[COMPUTES_COUNT++] = this;
-            notify(this, FLAG_STALE, time);
+            notify(this, FLAG_STALE);
         } else {
-            notify(this, FLAG_PENDING, time);
+            notify(this, FLAG_PENDING);
         }
     };
 
@@ -1840,28 +1843,17 @@ function Effect(opts, fn, dep1, args) {
     };
 
     /**
-     * @param {number} time
      * @returns {void}
      */
-    EffectProto._receive = function (time) {
-        if (this._flag & FLAG_SCOPE) {
+    EffectProto._receive = function () {
+        if (this._owned === null) {
+            EFFECTS[EFFECTS_COUNT++] = this;
+        } else {
             let level = this._level;
             let count = LEVELS[level];
             SCOPES[level][count] = this;
             LEVELS[level] = count + 1;
-            if (SCOPES_COUNT++ === 0) {
-                CLOCK._minlevel =
-                    CLOCK._maxlevel = level;
-            } else {
-                if (level < CLOCK._minlevel) {
-                    CLOCK._minlevel = level;
-                }
-                if (level > CLOCK._maxlevel) {
-                    CLOCK._maxlevel = level;
-                }
-            }
-        } else {
-            EFFECTS[EFFECTS_COUNT++] = this;
+            SCOPES_COUNT++;
         }
     };
 
@@ -2131,13 +2123,10 @@ function start(clock) {
                 COMPUTES_COUNT = 0;
             }
             if (SCOPES_COUNT > 0) {
-                let minlevel = clock._minlevel;
-                let maxlevel = clock._maxlevel;
-                let levels = LEVELS;
-                let scopes = SCOPES;
-                for (let i = minlevel; i <= maxlevel; i++) {
-                    let effects = scopes[i];
-                    let count = levels[i];
+                let levels = LEVELS.length;
+                for (let i = 0; i < levels; i++) {
+                    let count = LEVELS[i];
+                    let effects = SCOPES[i];
                     for (let j = 0; j < count; j++) {
                         let node = effects[j];
                         if ((node._flag & FLAG_STALE) || ((node._flag & FLAG_PENDING) && needsUpdate(node, time))) {
@@ -2158,11 +2147,9 @@ function start(clock) {
                         }
                         effects[j] = null;
                     }
-                    levels[i] = 0;
+                    LEVELS[i] = 0;
                 }
-                SCOPES_COUNT =
-                    clock._minlevel =
-                    clock._maxlevel = 0;
+                SCOPES_COUNT = 0;
             }
             if (EFFECTS_COUNT > 0) {
                 let i = 0;
@@ -2658,28 +2645,74 @@ function pruneDeps(node, version, depCount) {
 /**
  * @param {Sender} node
  * @param {number} flag
- * @param {number} time
  */
-function notify(node, flag, time) {
-    /** @type {Receiver} */
+function notify(node, flag) {
     let sub = node._sub1;
     if (sub !== null) {
-        let flags = sub._flag;
-        sub._flag |= flag;
-        if (!(flags & (FLAG_PENDING | FLAG_STALE))) {
-            sub._receive(time);
+        sub1: {
+            let flags = sub._flag;
+            if (flags & FLAG_STALE) break sub1;
+            if (flags & FLAG_PENDING) {
+                if (flag & FLAG_STALE) {
+                    sub._flag |= FLAG_STALE;
+                    if (flags & FLAG_COMPUTE && flags & FLAG_NOTIFY) {
+                        COMPUTES[COMPUTES_COUNT++] = sub;
+                    }
+                }
+                break sub1;
+            }
+            sub._flag |= flag;
+            if (flags & FLAG_COMPUTE) {
+                if (flags & FLAG_NOTIFY) {
+                    if (flag & FLAG_STALE && flags & FLAG_NOTIFY) {
+                        COMPUTES[COMPUTES_COUNT++] = sub;
+                    }
+                    notify(sub, FLAG_STALE);
+                } else {
+                    notify(sub, FLAG_PENDING);
+                }
+            } else if (sub._owned === null) {
+                EFFECTS[EFFECTS_COUNT++] = sub;
+            } else {
+                SCOPES_COUNT++;
+                let level = sub._level;
+                SCOPES[level][LEVELS[level]++] = sub;
+            }
         }
     }
-    /** @type {Array<Receiver | number> | null} */
+
     let subs = node._subs;
     if (subs !== null) {
         let count = subs.length;
         for (let i = 0; i < count; i += 2) {
             sub = /** @type {Receiver} */(subs[i]);
             let flags = sub._flag;
+            if (flags & FLAG_STALE) continue;
+            if (flags & FLAG_PENDING) {
+                if (flag & FLAG_STALE) {
+                    sub._flag |= FLAG_STALE;
+                    if (flags & FLAG_COMPUTE && flags & FLAG_NOTIFY) {
+                        COMPUTES[COMPUTES_COUNT++] = sub;
+                    }
+                }
+                continue;
+            }
             sub._flag |= flag;
-            if (!(flags & (FLAG_PENDING | FLAG_STALE))) {
-                sub._receive(time);
+            if (flags & FLAG_COMPUTE) {
+                if (flags & FLAG_NOTIFY) {
+                    if (flag & FLAG_STALE && flags & FLAG_NOTIFY) {
+                        COMPUTES[COMPUTES_COUNT++] = sub;
+                    }
+                    notify(sub, FLAG_STALE);
+                } else {
+                    notify(sub, FLAG_PENDING);
+                }
+            } else if (sub._owned === null) {
+                EFFECTS[EFFECTS_COUNT++] = sub;
+            } else {
+                SCOPES_COUNT++;
+                let level = sub._level;
+                SCOPES[level][LEVELS[level]++] = sub;
             }
         }
     }
@@ -2755,11 +2788,11 @@ function derive(fnOrDep, seedOrFn, argsOrSeed, args) {
  */
 function transmit(fnOrDep, seedOrFn, argsOrSeed, args) {
     if (typeof fnOrDep === 'function') {
-        let node = new Compute(FLAG_STABLE | FLAG_SETUP | FLAG_TRANSMIT, fnOrDep, null, seedOrFn, argsOrSeed);
+        let node = new Compute(FLAG_STABLE | FLAG_SETUP | FLAG_NOTIFY, fnOrDep, null, seedOrFn, argsOrSeed);
         startCompute(node);
         return node;
     }
-    let node = new Compute(FLAG_STABLE | FLAG_BOUND | FLAG_TRANSMIT, seedOrFn, fnOrDep, argsOrSeed, args);
+    let node = new Compute(FLAG_STABLE | FLAG_BOUND | FLAG_NOTIFY, seedOrFn, fnOrDep, argsOrSeed, args);
     node._dep1slot = subscribe(fnOrDep, node, 0);
     startCompute(node);
     return node;
@@ -2889,8 +2922,8 @@ export {
     STATE_START, STATE_IDLE, STATE_OWNER, STATE_SCOPE,
     FLAG_DEFER, FLAG_STABLE, FLAG_SETUP, FLAG_STALE, FLAG_PENDING,
     FLAG_RUNNING, FLAG_DISPOSED, FLAG_LOADING, FLAG_ERROR, FLAG_RECOVER,
-    FLAG_BOUND, FLAG_DERIVED, FLAG_SCOPE, FLAG_TRANSMIT as FLAG_NOTIFY, FLAG_EQUAL, FLAG_WEAK,
-    FLAG_INIT, FLAG_TRANSMIT,
+    FLAG_BOUND, FLAG_DERIVED, FLAG_SCOPE, FLAG_NOTIFY as FLAG_NOTIFY, FLAG_EQUAL, FLAG_WEAK,
+    FLAG_INIT, FLAG_NOTIFY as FLAG_TRANSMIT,
     OP_VALUE, OP_CALLBACK,
     register,
     CTX_EQUAL, CTX_NOTEQUAL, CTX_PROMISE, CTX_ITERABLE, CTX_ASYNC, CTX_OWNER,
