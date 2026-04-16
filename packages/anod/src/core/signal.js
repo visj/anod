@@ -97,15 +97,8 @@ var REUSED = 0;
 function clock() {
     let c = {
         _state: STATE_IDLE,
-        _time: 1,
-        _version: 1,
         _minlevel: 0,
         _maxlevel: 0,
-        _disposes: 0,
-        _signals: 0,
-        _computes: 0,
-        _scopes: 0,
-        _effects: 0,
         _scope: null
     };
     return /** @type {!Clock} */(c);
@@ -118,44 +111,52 @@ function clock() {
  */
 var CLOCK = clock();
 
-/**
- * Pre-allocated queues. Fixed initial capacity avoids
- * V8 backing store growth/shrink churn when arrays are
- * filled and then nulled out every transaction cycle.
- * @const {number}
- */
-var QUEUE_SIZE = 64;
+var TIME = 1;
+
+var IDLE = true;
+
+var VERSION = 1;
 
 /** @const @type {Array<Disposer>} */
-var DISPOSES = new Array(QUEUE_SIZE);
+var DISPOSES = [];
+
+var DISPOSES_COUNT = 0;
 
 /** @const @type {Array<number>} */
-var SIGNAL_OPS = new Array(QUEUE_SIZE);
+var SIGNAL_OPS = new Array(16);
 
 /**
  * @const
  * @type {Array<Signal>}
  */
-var SIGNALS = new Array(32);
+var SIGNALS = new Array(16);
 /**
  * @const
  * @type {Array}
  */
-var PAYLOADS = new Array(32);
+var PAYLOADS = new Array(16);
+
+var SIGNALS_COUNT = 0;
 
 /**
- * Compute queue for FLAG_TRANSMIT nodes. These are eagerly
- * re-evaluated during the transaction loop before effects.
- * @const @type {Array<Compute>}
+ * @const
+ * @type {Array<Compute>}
  */
-var COMPUTES = new Array(QUEUE_SIZE);
+var COMPUTES = new Array(256);
+
+var COMPUTES_COUNT = 0;
 
 /** @const @type {Array<number>} */
 var LEVELS = [0, 0, 0, 0];
 /** @const @type {Array<Array<Effect>>} */
 var SCOPES = [[], [], [], []];
+
+var SCOPES_COUNT = 0;
+
 /** @const @type {Array<Effect>} */
-var EFFECTS = new Array(QUEUE_SIZE);
+var EFFECTS = new Array(256);
+
+var EFFECTS_COUNT = 0;
 
 
 /**
@@ -204,7 +205,7 @@ export { isPrimitive, isNumber, isFunction, isSignal }
  * @returns {void}
  */
 function scheduleSignal(node, op, value) {
-    let index = CLOCK._signals++;
+    let index = SIGNALS_COUNT++;
     SIGNAL_OPS[index] = op;
     SIGNALS[index * 2] = node;
     SIGNALS[index * 2 + 1] = value;
@@ -216,10 +217,10 @@ function scheduleSignal(node, op, value) {
  */
 function dispose() {
     if (!(this._flag & FLAG_DISPOSED)) {
-        if (CLOCK._state & STATE_IDLE) {
+        if (IDLE) {
             this._dispose();
         } else {
-            DISPOSES[CLOCK._disposes++] = this;
+            DISPOSES[DISPOSES_COUNT++] = this;
         }
     }
 }
@@ -791,12 +792,15 @@ function startRoot(root, fn) {
     CLOCK._state |= STATE_OWNER;
     ctx._node = root;
     ctx._state = CTX_OWNER;
+    let idle = IDLE;
+    IDLE = true;
     try {
         let cleanup = fn(ctx);
         if (typeof cleanup === 'function') {
             addCleanup(root, cleanup);
         }
     } finally {
+        IDLE = idle;
         ctx._node = prevNode;
         ctx._state = prevCtxState;
         CLOCK._state = state;
@@ -882,13 +886,13 @@ function Signal(value, opts) {
      */
     SignalProto.set = function (value) {
         if (this._value !== value) {
-            if (CLOCK._state & STATE_IDLE) {
+            if (IDLE) {
                 this._value = value;
-                notify(this, FLAG_STALE, CLOCK._time + 1);
+                notify(this, FLAG_STALE, TIME + 1);
                 start(CLOCK);
             } else {
                 this._flag |= FLAG_SCHEDULED;
-                let index = CLOCK._signals++;
+                let index = SIGNALS_COUNT++;
                 SIGNALS[index] = this;
                 PAYLOADS[index] = value;
             }
@@ -976,7 +980,6 @@ function Compute(opts, fn, dep1, seed, args) {
      */
     this._time = 0;
     /**
-     * Change time: stamped when this compute's value changes.
      * @type {number}
      */
     this._ctime = 0;
@@ -1029,25 +1032,26 @@ function Compute(opts, fn, dep1, seed, args) {
             throw new Error('Circular dependency');
         }
         if (flag & (FLAG_STALE | FLAG_PENDING)) {
-            if (CLOCK._state & STATE_IDLE) {
-                CLOCK._state &= RESET;
+            if (IDLE) {
+                IDLE = false;
                 try {
+                    TRANSACTION = VERSION + 2;
                     if (flag & FLAG_STALE) {
-                        this._update(CLOCK._time);
+                        this._update(TIME);
                     } else {
-                        checkRun(this, CLOCK._time);
+                        checkRun(this, TIME);
                     }
-                    if (CLOCK._signals > 0 || CLOCK._disposes > 0) {
+                    if (SIGNALS_COUNT > 0 || DISPOSES_COUNT > 0) {
                         start(CLOCK);
                     }
                 } finally {
-                    CLOCK._state = STATE_IDLE;
+                    IDLE = true;
                 }
             } else {
                 if (flag & FLAG_STALE) {
-                    this._update(CLOCK._time);
+                    this._update(TIME);
                 } else {
-                    checkRun(this, CLOCK._time);
+                    checkRun(this, TIME);
                 }
             }
         }
@@ -1094,13 +1098,15 @@ function Compute(opts, fn, dep1, seed, args) {
                     : this._fn(this, this._value, this._args);
                 this._flag &= ~FLAG_ERROR;
             } catch (err) {
-                value = err;
-                this._flag |= FLAG_ERROR;
+                this._value = err;
+                this._flag = flag & ~(FLAG_RUNNING | FLAG_STALE | FLAG_PENDING | FLAG_INIT | FLAG_SETUP) | FLAG_ERROR;
+                this._time = this._ctime = time;
+                return;
             }
         } else {
             /** Setup or dynamic: bump version for dep tracking */
             let prevVersion = this._version;
-            let version = CLOCK._version += 2;
+            let version = VERSION += 2;
             this._version = version;
             let saveStart = VCOUNT;
             let depCount = 0;
@@ -1113,9 +1119,10 @@ function Compute(opts, fn, dep1, seed, args) {
                 REUSED = 0;
                 let stamp = version - 1;
                 if (dep1 !== null) {
-                    let v = dep1._version;
-                    if (v > TRANSACTION) {
-                        vstackSave(dep1, v);
+                    let depver = dep1._version;
+                    if (depver > TRANSACTION) {
+                        VSTACK[VCOUNT++] = dep1;
+                        VSTACK[VCOUNT++] = depver;
                     }
                     dep1._version = stamp;
                     depCount = 1;
@@ -1125,9 +1132,10 @@ function Compute(opts, fn, dep1, seed, args) {
                     depsLen = deps.length;
                     for (let i = 0; i < depsLen; i += 2) {
                         let dep = /** @type {Sender} */(deps[i]);
-                        let v = dep._version;
-                        if (v > TRANSACTION) {
-                            vstackSave(dep, v);
+                        let depver = dep._version;
+                        if (depver > TRANSACTION) {
+                            VSTACK[VCOUNT++] = dep;
+                            VSTACK[VCOUNT++] = depver;
                         }
                         dep._version = stamp;
                     }
@@ -1194,7 +1202,7 @@ function Compute(opts, fn, dep1, seed, args) {
             }
         } else {
             let prevVersion = this._version;
-            let version = CLOCK._version += 2;
+            let version = VERSION += 2;
             this._version = version;
             let saveStart = VCOUNT;
             let depCount = 0;
@@ -1271,7 +1279,7 @@ function Compute(opts, fn, dep1, seed, args) {
      */
     ComputeProto._receive = function (time) {
         if (this._flag & FLAG_TRANSMIT) {
-            COMPUTES[CLOCK._computes++] = this;
+            COMPUTES[COMPUTES_COUNT++] = this;
             notify(this, FLAG_STALE, time);
         } else {
             notify(this, FLAG_PENDING, time);
@@ -1322,17 +1330,22 @@ function Compute(opts, fn, dep1, seed, args) {
  * @returns {void}
  */
 function startCompute(node) {
-    let clock = CLOCK;
-    let state = clock._state;
-    try {
-        TRANSACTION = clock._version;
-        node._update(clock._time);
-        if (clock._signals > 0 || clock._disposes > 0) {
-            start(clock);
+    if (IDLE) {
+        IDLE = false;
+        let clock = CLOCK;
+        try {
+            TRANSACTION = VERSION + 2;
+            node._update(TIME);
+            if (SIGNALS_COUNT > 0 || DISPOSES_COUNT > 0) {
+                start(clock);
+            }
+        } finally {
+            IDLE = true;
         }
-    } finally {
-        clock._state = state;
+    } else {
+        node._update(TIME);
     }
+
 }
 
 /**
@@ -1496,7 +1509,7 @@ function settle(node, value) {
 
     if (value !== node._value || (node._flag & FLAG_ERROR)) {
         node._value = value;
-        let time = CLOCK._time + 1;
+        let time = TIME + 1;
         node._ctime = time;
         if (unbound(node)) {
             node._fn = node._args = null;
@@ -1520,6 +1533,10 @@ function Effect(opts, fn, dep1, args) {
      * @type {number}
      */
     this._flag = FLAG_INIT | (0 | opts);
+    /**
+     * @type {number}
+     */
+    this._version = 0;
     /**
      * @type {(function(W): (function(): void | void)) | (function(U,W): (function(): void | void)) | (function(U,V,W): (function(): void | void)) | null}
      */
@@ -1553,10 +1570,6 @@ function Effect(opts, fn, dep1, args) {
      */
     this._level = 0;
     /**
-     * @type {W | undefined}
-     */
-    this._args = args;
-    /**
      * @type {Owner | null}
      */
     this._owner = null;
@@ -1565,9 +1578,9 @@ function Effect(opts, fn, dep1, args) {
      */
     this._recover = null;
     /**
-     * @type {number}
+     * @type {W | undefined}
      */
-    this._version = 0;
+    this._args = args;
 }
 
 {
@@ -1649,7 +1662,7 @@ function Effect(opts, fn, dep1, args) {
         } else {
             /** Setup or dynamic: bump version for dep tracking */
             let prevVersion = this._version;
-            let version = CLOCK._version += 2;
+            let version = VERSION += 2;
             this._version = version;
             let saveStart = VCOUNT;
             let depCount = 0;
@@ -1743,7 +1756,7 @@ function Effect(opts, fn, dep1, args) {
             }
         } else {
             let prevVersion = this._version;
-            let version = CLOCK._version += 2;
+            let version = VERSION += 2;
             this._version = version;
             let saveStart = VCOUNT;
             let depCount = 0;
@@ -1836,7 +1849,7 @@ function Effect(opts, fn, dep1, args) {
             let count = LEVELS[level];
             SCOPES[level][count] = this;
             LEVELS[level] = count + 1;
-            if (CLOCK._scopes++ === 0) {
+            if (SCOPES_COUNT++ === 0) {
                 CLOCK._minlevel =
                     CLOCK._maxlevel = level;
             } else {
@@ -1848,7 +1861,7 @@ function Effect(opts, fn, dep1, args) {
                 }
             }
         } else {
-            EFFECTS[CLOCK._effects++] = this;
+            EFFECTS[EFFECTS_COUNT++] = this;
         }
     };
 
@@ -1910,21 +1923,33 @@ function Effect(opts, fn, dep1, args) {
  */
 function startEffect(node) {
     let clock = CLOCK;
-    let state = clock._state;
-    try {
-        TRANSACTION = clock._version;
-        node._update(clock._time);
-        if (clock._signals > 0 || clock._disposes > 0) {
-            start(clock);
+    if (IDLE) {
+        IDLE = false;
+        try {
+            TRANSACTION = VERSION + 2;
+            node._update(TIME);
+            if (SIGNALS_COUNT > 0 || DISPOSES_COUNT > 0) {
+                start(clock);
+            }
+        } catch (err) {
+            let recovered = tryRecover(node, err);
+            node._dispose();
+            if (!recovered) {
+                throw err;
+            }
+        } finally {
+            IDLE = true;
         }
-    } catch (err) {
-        let recovered = tryRecover(node, err);
-        node._dispose();
-        if (!recovered) {
-            throw err;
+    } else {
+        try {
+            node._update(TIME);
+        } catch (err) {
+            let recovered = tryRecover(node, err);
+            node._dispose();
+            if (!recovered) {
+                throw err;
+            }
         }
-    } finally {
-        clock._state = state;
     }
 }
 
@@ -2074,38 +2099,38 @@ function start(clock) {
     let error = null;
     /** @type {boolean} */
     let thrown = false;
-    clock._state = STATE_START;
+    IDLE = false;
     try {
         do {
-            time = ++clock._time;
-            if (clock._disposes > 0) {
-                let count = CLOCK._disposes;
+            time = ++TIME;
+            if (DISPOSES_COUNT > 0) {
+                let count = DISPOSES_COUNT;
                 for (let i = 0; i < count; i++) {
                     DISPOSES[i]._dispose();
                     DISPOSES[i] = null;
                 }
-                clock._disposes = 0;
+                DISPOSES_COUNT = 0;
             }
-            if (clock._signals > 0) {
-                let count = clock._signals;
+            if (SIGNALS_COUNT > 0) {
+                let count = SIGNALS_COUNT;
                 for (let i = 0; i < count; i++) {
                     SIGNALS[i]._update(PAYLOADS[i], time);
                     SIGNALS[i] = PAYLOADS[i] = null;
                 }
-                clock._signals = 0;
+                SIGNALS_COUNT = 0;
             }
-            if (clock._computes > 0) {
-                for (let i = 0; i < clock._computes; i++) {
+            if (COMPUTES_COUNT > 0) {
+                for (let i = 0; i < COMPUTES_COUNT; i++) {
                     let node = COMPUTES[i];
                     if (node._flag & FLAG_STALE) {
-                        TRANSACTION = clock._version;
+                        TRANSACTION = VERSION + 2;
                         node._update(time);
                     }
                     COMPUTES[i] = null;
                 }
-                clock._computes = 0;
+                COMPUTES_COUNT = 0;
             }
-            if (clock._scopes > 0) {
+            if (SCOPES_COUNT > 0) {
                 let minlevel = clock._minlevel;
                 let maxlevel = clock._maxlevel;
                 let levels = LEVELS;
@@ -2116,7 +2141,7 @@ function start(clock) {
                     for (let j = 0; j < count; j++) {
                         let node = effects[j];
                         if ((node._flag & FLAG_STALE) || ((node._flag & FLAG_PENDING) && needsUpdate(node, time))) {
-                            TRANSACTION = clock._version;
+                            TRANSACTION = VERSION + 2;
                             try {
                                 node._update(time);
                             } catch (err) {
@@ -2135,17 +2160,17 @@ function start(clock) {
                     }
                     levels[i] = 0;
                 }
-                clock._scopes =
+                SCOPES_COUNT =
                     clock._minlevel =
                     clock._maxlevel = 0;
             }
-            if (clock._effects > 0) {
+            if (EFFECTS_COUNT > 0) {
                 let i = 0;
-                let count = clock._effects;
+                let count = EFFECTS_COUNT;
                 while (i < count) {
                     try {
                         for (; i < count; i++) {
-                            TRANSACTION = clock._version;
+                            TRANSACTION = VERSION + 2;
                             checkRun(EFFECTS[i], time);
                             EFFECTS[i] = null;
                         }
@@ -2161,7 +2186,7 @@ function start(clock) {
                         }
                     }
                 }
-                clock._effects = 0;
+                EFFECTS_COUNT = 0;
             }
             if (cycle++ === 1e5) {
                 error = new Error('Runaway cycle');
@@ -2170,23 +2195,23 @@ function start(clock) {
             }
         } while (
             !thrown &&
-            (clock._signals > 0 ||
-                clock._disposes > 0)
+            (SIGNALS_COUNT > 0 ||
+                DISPOSES_COUNT > 0)
         );
     } finally {
-        clock._state = STATE_IDLE;
-        if (clock._scopes > 0) {
+        IDLE = true;
+        if (SCOPES_COUNT > 0) {
             let min = clock._minlevel;
             let max = clock._maxlevel;
             while (min < max) {
                 LEVELS[min++] = 0;
             }
         }
-        clock._disposes =
-            clock._signals =
-            clock._computes =
-            clock._effects =
-            clock._scopes =
+        DISPOSES_COUNT =
+            SIGNALS_COUNT =
+            COMPUTES_COUNT =
+            EFFECTS_COUNT =
+            SCOPES_COUNT =
             clock._minlevel =
             clock._maxlevel = 0;
         if (thrown) {
@@ -2340,8 +2365,8 @@ function clearSubs(send) {
 function clearOwned(owner) {
     let owned = owner._owned;
     if (owned !== null) {
-        let len = owned.length;
-        for (let i = 0; i < len; i++) {
+        let count = owned.length;
+        for (let i = 0; i < count; i++) {
             owned[i]._dispose();
         }
         owner._owned = null;
@@ -2639,10 +2664,9 @@ function notify(node, flag, time) {
     /** @type {Receiver} */
     let sub = node._sub1;
     if (sub !== null) {
-        if (sub._flag & (FLAG_PENDING | FLAG_STALE)) {
-            sub._flag |= flag;
-        } else {
-            sub._flag |= flag;
+        let flags = sub._flag;
+        sub._flag |= flag;
+        if (!(flags & (FLAG_PENDING | FLAG_STALE))) {
             sub._receive(time);
         }
     }
@@ -2652,10 +2676,9 @@ function notify(node, flag, time) {
         let count = subs.length;
         for (let i = 0; i < count; i += 2) {
             sub = /** @type {Receiver} */(subs[i]);
-            if (sub._flag & (FLAG_PENDING | FLAG_STALE)) {
-                sub._flag |= flag;
-            } else {
-                sub._flag |= flag;
+            let flags = sub._flag;
+            sub._flag |= flag;
+            if (!(flags & (FLAG_PENDING | FLAG_STALE))) {
                 sub._receive(time);
             }
         }
@@ -2848,14 +2871,13 @@ function watch(fnOrDep, fnOrArgs, args) {
  * @returns {void}
  */
 function batch(fn) {
-    let clock = CLOCK;
-    if (clock._state & STATE_IDLE) {
-        clock._state = STATE_START;
+    if (IDLE) {
+        IDLE = false;
         try {
             fn();
-            start(clock);
+            start(CLOCK);
         } finally {
-            clock._state = STATE_IDLE;
+            IDLE = true;
         }
     } else {
         fn();
