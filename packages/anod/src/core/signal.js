@@ -2646,73 +2646,26 @@ function pruneDeps(node, version, depCount) {
  * @param {Sender} node
  * @param {number} flag
  */
-function notify(node, flag) {
+function notify(node, flag, time) {
+    /** @type {Receiver} */
     let sub = node._sub1;
     if (sub !== null) {
-        sub1: {
-            let flags = sub._flag;
-            if (flags & FLAG_STALE) break sub1;
-            if (flags & FLAG_PENDING) {
-                if (flag & FLAG_STALE) {
-                    sub._flag |= FLAG_STALE;
-                    if (flags & FLAG_COMPUTE && flags & FLAG_NOTIFY) {
-                        COMPUTES[COMPUTES_COUNT++] = sub;
-                    }
-                }
-                break sub1;
-            }
-            sub._flag |= flag;
-            if (flags & FLAG_COMPUTE) {
-                if (flags & FLAG_NOTIFY) {
-                    if (flag & FLAG_STALE && flags & FLAG_NOTIFY) {
-                        COMPUTES[COMPUTES_COUNT++] = sub;
-                    }
-                    notify(sub, FLAG_STALE);
-                } else {
-                    notify(sub, FLAG_PENDING);
-                }
-            } else if (sub._owned === null) {
-                EFFECTS[EFFECTS_COUNT++] = sub;
-            } else {
-                SCOPES_COUNT++;
-                let level = sub._level;
-                SCOPES[level][LEVELS[level]++] = sub;
-            }
+        let flags = sub._flag;
+        sub._flag |= flag;
+        if (!(flags & (FLAG_PENDING | FLAG_STALE))) {
+            sub._receive(time);
         }
     }
-
+    /** @type {Array<Receiver | number> | null} */
     let subs = node._subs;
     if (subs !== null) {
         let count = subs.length;
         for (let i = 0; i < count; i += 2) {
             sub = /** @type {Receiver} */(subs[i]);
             let flags = sub._flag;
-            if (flags & FLAG_STALE) continue;
-            if (flags & FLAG_PENDING) {
-                if (flag & FLAG_STALE) {
-                    sub._flag |= FLAG_STALE;
-                    if (flags & FLAG_COMPUTE && flags & FLAG_NOTIFY) {
-                        COMPUTES[COMPUTES_COUNT++] = sub;
-                    }
-                }
-                continue;
-            }
             sub._flag |= flag;
-            if (flags & FLAG_COMPUTE) {
-                if (flags & FLAG_NOTIFY) {
-                    if (flag & FLAG_STALE && flags & FLAG_NOTIFY) {
-                        COMPUTES[COMPUTES_COUNT++] = sub;
-                    }
-                    notify(sub, FLAG_STALE);
-                } else {
-                    notify(sub, FLAG_PENDING);
-                }
-            } else if (sub._owned === null) {
-                EFFECTS[EFFECTS_COUNT++] = sub;
-            } else {
-                SCOPES_COUNT++;
-                let level = sub._level;
-                SCOPES[level][LEVELS[level]++] = sub;
+            if (!(flags & (FLAG_PENDING | FLAG_STALE))) {
+                sub._receive(time);
             }
         }
     }
