@@ -1,6 +1,7 @@
-import { bench, group, run } from 'mitata';
+import { bench, run } from 'mitata';
 import { EXPECTED } from './expected.js';
 import { createState, createMemo, createEffect, batch } from '@zeix/cause-effect';
+import { saveRun } from './save-run.js';
 
 let sink = 0;
 let counter = 0;
@@ -549,29 +550,29 @@ validate('dynUpdateVeryDynamic', () => setupDynUpdate(100, 15, 0.5, 6, 1));
 
 /* === Run === */
 
-group('Kairo: deep propagation', () => { bench('cause-effect', setupDeep()); });
-group('Kairo: broad propagation', () => { bench('cause-effect', setupBroad()); });
-group('Kairo: diamond', () => { bench('cause-effect', setupDiamond()); });
-group('Kairo: triangle', () => { bench('cause-effect', setupTriangle()); });
-group('Kairo: mux', () => { bench('cause-effect', setupMux()); });
-group('Kairo: unstable', () => { bench('cause-effect', setupUnstable()); });
-group('Kairo: avoidable propagation', () => { bench('cause-effect', setupAvoidable()); });
-group('Kairo: repeated observers', () => { bench('cause-effect', setupRepeatedObservers()); });
-group('CellX 10 layers', () => { bench('cause-effect', setupCellx(10)); });
-group('$mol_wire', () => { bench('cause-effect', setupMolWire()); });
-group('Create 1k signals', () => { bench('cause-effect', benchCreateSignals(1_000)); });
-group('Create 1k computations', () => { bench('cause-effect', benchCreateComputations(1_000)); });
+bench('Kairo: deep propagation', setupDeep());
+bench('Kairo: broad propagation', setupBroad());
+bench('Kairo: diamond', setupDiamond());
+bench('Kairo: triangle', setupTriangle());
+bench('Kairo: mux', setupMux());
+bench('Kairo: unstable', setupUnstable());
+bench('Kairo: avoidable propagation', setupAvoidable());
+bench('Kairo: repeated observers', setupRepeatedObservers());
+bench('CellX 10 layers', setupCellx(10));
+bench('$mol_wire', setupMolWire());
+bench('Create 1k signals', benchCreateSignals(1_000));
+bench('Create 1k computations', benchCreateComputations(1_000));
 
-group('Dynamic build: simple component', () => { bench('cause-effect', setupDynBuild(10, 5, 1, 2)); });
-group('Dynamic build: large web app', () => { bench('cause-effect', setupDynBuild(1000, 12, 0.95, 4)); });
-group('Dynamic build: wide dense', () => { bench('cause-effect', setupDynBuild(1000, 5, 1, 25)); });
-group('Dynamic update: simple component', () => { bench('cause-effect', setupDynUpdate(10, 5, 1, 2, 0.2)); });
-group('Dynamic update: dynamic component', () => { bench('cause-effect', setupDynUpdate(10, 10, 0.75, 6, 0.2)); });
-group('Dynamic update: large web app', () => { bench('cause-effect', setupDynUpdate(1000, 12, 0.95, 4, 1)); });
-group('Dynamic update: wide dense', () => { bench('cause-effect', setupDynUpdate(1000, 5, 1, 25, 1)); });
-group('Dynamic update: deep', () => { bench('cause-effect', setupDynUpdate(5, 500, 1, 3, 1)); });
-group('Dynamic update: very dynamic', () => { bench('cause-effect', setupDynUpdate(100, 15, 0.5, 6, 1)); });
+bench('Dynamic build: simple component', setupDynBuild(10, 5, 1, 2));
+bench('Dynamic build: large web app', setupDynBuild(1000, 12, 0.95, 4));
+bench('Dynamic build: wide dense', setupDynBuild(1000, 5, 1, 25));
+bench('Dynamic update: simple component', setupDynUpdate(10, 5, 1, 2, 0.2));
+bench('Dynamic update: dynamic component', setupDynUpdate(10, 10, 0.75, 6, 0.2));
+bench('Dynamic update: large web app', setupDynUpdate(1000, 12, 0.95, 4, 1));
+bench('Dynamic update: wide dense', setupDynUpdate(1000, 5, 1, 25, 1));
+bench('Dynamic update: deep', setupDynUpdate(5, 500, 1, 3, 1));
+bench('Dynamic update: very dynamic', setupDynUpdate(100, 15, 0.5, 6, 1));
 
-await run();
+const results = await run();
 
-console.log(sink, counter);
+saveRun('cause-effect', results);

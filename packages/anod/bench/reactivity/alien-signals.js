@@ -1,6 +1,7 @@
-import { bench, group, run } from 'mitata';
+import { bench, run } from 'mitata';
 import { EXPECTED } from './expected.js';
 import { signal, computed, effect, startBatch, endBatch } from 'alien-signals';
+import { saveRun } from './save-run.js';
 
 let sink = 0;
 let counter = 0;
@@ -557,29 +558,29 @@ validate('dynUpdateVeryDynamic', () => setupDynUpdate(100, 15, 0.5, 6, 1));
 
 /* === Run === */
 
-group('Kairo: deep propagation', () => { bench('alien-signals', setupDeep()); });
-group('Kairo: broad propagation', () => { bench('alien-signals', setupBroad()); });
-group('Kairo: diamond', () => { bench('alien-signals', setupDiamond()); });
-group('Kairo: triangle', () => { bench('alien-signals', setupTriangle()); });
-group('Kairo: mux', () => { bench('alien-signals', setupMux()); });
-group('Kairo: unstable', () => { bench('alien-signals', setupUnstable()); });
-group('Kairo: avoidable propagation', () => { bench('alien-signals', setupAvoidable()); });
-group('Kairo: repeated observers', () => { bench('alien-signals', setupRepeatedObservers()); });
-group('CellX 10 layers', () => { bench('alien-signals', setupCellx(10)); });
-group('$mol_wire', () => { bench('alien-signals', setupMolWire()); });
-group('Create 1k signals', () => { bench('alien-signals', benchCreateSignals(1_000)); });
-group('Create 1k computations', () => { bench('alien-signals', benchCreateComputations(1_000)); });
+bench('Kairo: deep propagation', setupDeep());
+bench('Kairo: broad propagation', setupBroad());
+bench('Kairo: diamond', setupDiamond());
+bench('Kairo: triangle', setupTriangle());
+bench('Kairo: mux', setupMux());
+bench('Kairo: unstable', setupUnstable());
+bench('Kairo: avoidable propagation', setupAvoidable());
+bench('Kairo: repeated observers', setupRepeatedObservers());
+bench('CellX 10 layers', setupCellx(10));
+bench('$mol_wire', setupMolWire());
+bench('Create 1k signals', benchCreateSignals(1_000));
+bench('Create 1k computations', benchCreateComputations(1_000));
 
-group('Dynamic build: simple component', () => { bench('alien-signals', setupDynBuild(10, 5, 1, 2)); });
-group('Dynamic build: large web app', () => { bench('alien-signals', setupDynBuild(1000, 12, 0.95, 4)); });
-group('Dynamic build: wide dense', () => { bench('alien-signals', setupDynBuild(1000, 5, 1, 25)); });
-group('Dynamic update: simple component', () => { bench('alien-signals', setupDynUpdate(10, 5, 1, 2, 0.2)); });
-group('Dynamic update: dynamic component', () => { bench('alien-signals', setupDynUpdate(10, 10, 0.75, 6, 0.2)); });
-group('Dynamic update: large web app', () => { bench('alien-signals', setupDynUpdate(1000, 12, 0.95, 4, 1)); });
-group('Dynamic update: wide dense', () => { bench('alien-signals', setupDynUpdate(1000, 5, 1, 25, 1)); });
-group('Dynamic update: deep', () => { bench('alien-signals', setupDynUpdate(5, 500, 1, 3, 1)); });
-group('Dynamic update: very dynamic', () => { bench('alien-signals', setupDynUpdate(100, 15, 0.5, 6, 1)); });
+bench('Dynamic build: simple component', setupDynBuild(10, 5, 1, 2));
+bench('Dynamic build: large web app', setupDynBuild(1000, 12, 0.95, 4));
+bench('Dynamic build: wide dense', setupDynBuild(1000, 5, 1, 25));
+bench('Dynamic update: simple component', setupDynUpdate(10, 5, 1, 2, 0.2));
+bench('Dynamic update: dynamic component', setupDynUpdate(10, 10, 0.75, 6, 0.2));
+bench('Dynamic update: large web app', setupDynUpdate(1000, 12, 0.95, 4, 1));
+bench('Dynamic update: wide dense', setupDynUpdate(1000, 5, 1, 25, 1));
+bench('Dynamic update: deep', setupDynUpdate(5, 500, 1, 3, 1));
+bench('Dynamic update: very dynamic', setupDynUpdate(100, 15, 0.5, 6, 1));
 
-await run();
+const results = await run();
 
-console.log(sink, counter);
+saveRun('alien-signals', results);
