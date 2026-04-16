@@ -4,7 +4,7 @@ import {
 } from 'anod';
 
 import {
-    CLOCK, STATE_IDLE,
+    IDLE,
     FLAG_STALE, FLAG_INIT, FLAG_BOUND,
     register, notify, scheduleSignal, subscribe, startEffect,
     Reader, Subscriber,
@@ -1306,7 +1306,7 @@ SignalProto.values = ComputeProto.values = function () {
  * @returns {void}
  */
 SignalProto.copyWithin = function (target, start, end) {
-    if (CLOCK._state & STATE_IDLE) {
+    if (IDLE) {
         this._value.copyWithin(target, start, end);
         this._mod = 0;
         notify(this);
@@ -1325,7 +1325,7 @@ SignalProto.copyWithin = function (target, start, end) {
  * @returns {void}
  */
 SignalProto.fill = function (value, start, end) {
-    if (CLOCK._state & STATE_IDLE) {
+    if (IDLE) {
         this._value.fill(value, start, end);
         this._mod = 0;
         notify(this);
@@ -1345,7 +1345,7 @@ SignalProto.fill = function (value, start, end) {
  * @returns {void}
  */
 SignalProto.pop = function () {
-    if (CLOCK._state & STATE_IDLE) {
+    if (IDLE) {
         this._value.pop();
         this._mod = encodeMod(MUT_DEL, this._value.length, 1);
         notify(this);
@@ -1366,7 +1366,7 @@ SignalProto.push = function (...items) {
     if (len > 0) {
         let arr = this._value;
         let pos = arr.length;
-        if (CLOCK._state & STATE_IDLE) {
+        if (IDLE) {
             if (len === 1) {
                 arr.push(items[0]);
             } else {
@@ -1391,7 +1391,7 @@ SignalProto.push = function (...items) {
  * @returns {void}
  */
 SignalProto.reverse = function () {
-    if (CLOCK._state & STATE_IDLE) {
+    if (IDLE) {
         this._value.reverse();
         this._mod = encodeMod(MUT_SORT, 0, 0);
         notify(this);
@@ -1407,7 +1407,7 @@ SignalProto.reverse = function () {
  * @returns {void}
  */
 SignalProto.shift = function () {
-    if (CLOCK._state & STATE_IDLE) {
+    if (IDLE) {
         this._value.shift();
         this._mod = encodeMod(MUT_DEL, 0, 1);
         notify(this);
@@ -1424,7 +1424,7 @@ SignalProto.shift = function () {
  * @returns {void}
  */
 SignalProto.sort = function (compareFn) {
-    if (CLOCK._state & STATE_IDLE) {
+    if (IDLE) {
         this._value.sort(compareFn);
         this._mod = encodeMod(MUT_SORT, 0, 0);
         notify(this);
@@ -1443,7 +1443,7 @@ SignalProto.sort = function (compareFn) {
  * @returns {void}
  */
 SignalProto.splice = function (start, deleteCount, ...items) {
-    if (CLOCK._state & STATE_IDLE) {
+    if (IDLE) {
         let arr = this._value;
         let pos = start < 0 ? Math.max(0, arr.length + start) : Math.min(start, arr.length);
         if (items.length === 0) {
@@ -1475,7 +1475,7 @@ SignalProto.splice = function (start, deleteCount, ...items) {
 SignalProto.unshift = function (...items) {
     let len = items.length;
     if (len > 0) {
-        if (CLOCK._state & STATE_IDLE) {
+        if (IDLE) {
             if (len === 1) {
                 this._value.unshift(items[0]);
             } else {

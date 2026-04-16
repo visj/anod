@@ -60,28 +60,6 @@ Receiver.prototype._time;
 /** @package @param {number} time @returns {void} */
 Receiver.prototype._setStale = function (time) { };
 
-/** @interface */
-function Clock() { }
-/** @type {number} */
-Clock.prototype._state;
-/** @type {number} */
-Clock.prototype._time;
-/** @type {number} */
-Clock.prototype._version;
-/** @type {number} */
-Clock.prototype._minlevel;
-/** @type {number} */
-Clock.prototype._maxlevel;
-/** @type {number} */
-Clock.prototype._disposes;
-/** @type {number} */
-Clock.prototype._signals;
-/** @type {number} */
-Clock.prototype._scopes;
-/** @type {number} */
-Clock.prototype._effects;
-/** @type {Owner | null} */
-Clock.prototype._scope;
 
 /**
  * @interface
@@ -141,4 +119,4 @@ IEffect.prototype.error = function () { };
 /** @public @returns {boolean} */
 IEffect.prototype.loading = function () { };
 
-export { Disposer, Owner, Sender, Receiver, Clock, ISignal, ICompute, IEffect };
+export { Disposer, Owner, Sender, Receiver, ISignal, ICompute, IEffect };
