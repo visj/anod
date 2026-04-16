@@ -2227,9 +2227,6 @@ function subscribe(send, receive, depslot) {
         subslot = (send._subs.length / 2) + 1;
         send._subs.push(receive, depslot);
     }
-    if (!(send._flag & FLAG_DERIVED) && (receive.t === TYPE_COMPUTE)) {
-        send._flag |= FLAG_DERIVED;
-    }
     return subslot;
 }
 
@@ -2458,29 +2455,10 @@ function read(sender) {
         VSTACK[VCOUNT++] = sender;
         VSTACK[VCOUNT++] = stamp;
     }
-
-    /** New dep (or cold sender): stamp and subscribe */
     sender._version = version;
 
     if (flag & FLAG_SETUP) {
-        /**
-         * SETUP path: subscribe directly, same as original Reader code.
-         */
-        /** @type {number} */
-        let depslot = 0;
-        if (this._dep1 === null) {
-            this._dep1 = sender;
-        } else if (this._deps === null) {
-            depslot = 1;
-        } else {
-            depslot = (this._deps.length / 2) + 1;
-        }
-        let subslot = subscribe(sender, this, depslot);
-        switch (depslot) {
-            case 0: this._dep1slot = subslot; break;
-            case 1: this._deps = [sender, subslot]; break;
-            default: this._deps.push(sender, subslot);
-        }
+        connect(this, sender);
     } else {
         /**
          * DYNAMIC path: always push new dep to _deps with slot 0.
@@ -2494,6 +2472,26 @@ function read(sender) {
     }
 
     return value;
+}
+
+function connect(receiver, sender) {
+    /** @type {number} */
+    let depslot = 0;
+    if (receiver._dep1 === null) {
+        receiver._dep1 = sender;
+    } else if (receiver._deps === null) {
+        depslot = 1;
+    } else {
+        depslot = (receiver._deps.length / 2) + 1;
+    }
+    let subslot = subscribe(sender, receiver, depslot);
+    if (depslot === 0) {
+        receiver._dep1slot = subslot;
+    } else if (depslot === 1) {
+        receiver._deps = [sender, subslot];
+    } else {
+        receiver._deps.push(sender, subslot);
+    }
 }
 
 // ─── pruneDeps ─────────────────────────────────────────────────────────────
