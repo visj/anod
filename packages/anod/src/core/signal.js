@@ -1300,8 +1300,10 @@ function needsUpdate(node, time) {
     if (dep !== null) {
         let df = dep._flag;
         if (df & FLAG_STALE) {
+            TRANSACTION = VERSION;
             /** @type {Compute} */(dep)._update(time);
         } else if (df & FLAG_PENDING) {
+            TRANSACTION = VERSION;
             checkRun(/** @type {Compute} */(dep), time);
         }
         if (dep._ctime > lastRun) {
@@ -1315,8 +1317,10 @@ function needsUpdate(node, time) {
             dep = /** @type {Sender} */(deps[i]);
             let df = dep._flag;
             if (df & FLAG_STALE) {
+                TRANSACTION = VERSION;
                 /** @type {Compute} */(dep)._update(time);
             } else if (df & FLAG_PENDING) {
+                TRANSACTION = VERSION;
                 checkRun(/** @type {Compute} */(dep), time);
             }
             if (dep._ctime > lastRun) {
@@ -1348,11 +1352,6 @@ function needsUpdate(node, time) {
  * @returns {void}
  */
 function checkRun(node, time) {
-    if (node._flag & FLAG_STALE) {
-        node._update(time);
-        return;
-    }
-
     let base = CTOP;
     let dep = node._dep1;
 
@@ -2192,8 +2191,8 @@ function start() {
                     for (let j = 0; j < count; j++) {
                         let node = effects[j];
                         if ((node._flag & FLAG_STALE) || ((node._flag & FLAG_PENDING) && needsUpdate(node, time))) {
-                            TRANSACTION = VERSION;
                             try {
+                                TRANSACTION = VERSION;
                                 node._update(time);
                             } catch (err) {
                                 let recovered = tryRecover(node, err);
