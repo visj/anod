@@ -892,7 +892,7 @@ function Signal(value, opts) {
         if (this._value !== value) {
             if (IDLE) {
                 this._value = value;
-                notify(this, FLAG_STALE, TIME + 1);
+                notify(this, FLAG_STALE);
                 start(CLOCK);
             } else {
                 this._flag |= FLAG_SCHEDULED;
@@ -912,7 +912,7 @@ function Signal(value, opts) {
         this._value = value;
         if (this._flag & FLAG_SCHEDULED) {
             this._flag &= ~FLAG_SCHEDULED;
-            notify(this, FLAG_STALE, time);
+            notify(this, FLAG_STALE);
         }
     };
 
@@ -1517,7 +1517,7 @@ function settle(node, value) {
         if (unbound(node)) {
             node._fn = node._args = null;
         }
-        notify(node, FLAG_STALE, time);
+        notify(node, FLAG_STALE);
         start(CLOCK);
     }
 }
@@ -2100,7 +2100,7 @@ function start(clock) {
             if (SIGNALS_COUNT > 0) {
                 let count = SIGNALS_COUNT;
                 for (let i = 0; i < count; i++) {
-                    SIGNALS[i]._update(PAYLOADS[i], time);
+                    SIGNALS[i]._update(PAYLOADS[i]);
                     SIGNALS[i] = PAYLOADS[i] = null;
                 }
                 SIGNALS_COUNT = 0;
@@ -2618,14 +2618,14 @@ function pruneDeps(node, version, depCount) {
  * @param {Sender} node
  * @param {number} flag
  */
-function notify(node, flag, time) {
+function notify(node, flag) {
     /** @type {Receiver} */
     let sub = node._sub1;
     if (sub !== null) {
         let flags = sub._flag;
         sub._flag |= flag;
         if (!(flags & (FLAG_PENDING | FLAG_STALE))) {
-            sub._receive(time);
+            sub._receive();
         }
     }
     /** @type {Array<Receiver | number> | null} */
@@ -2637,7 +2637,7 @@ function notify(node, flag, time) {
             let flags = sub._flag;
             sub._flag |= flag;
             if (!(flags & (FLAG_PENDING | FLAG_STALE))) {
-                sub._receive(time);
+                sub._receive();
             }
         }
     }
