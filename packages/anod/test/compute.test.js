@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { signal, compute, Signal, Compute } from "../";
+import { signal, compute, effect, root, batch, Signal, Compute } from "../";
 
 describe("compute", () => {
     test("returns initial value of wrapped function", () => {
@@ -168,6 +168,183 @@ describe("compute", () => {
             s1.set(1);
             c6.val();
             expect(count).toBe(1); // "Converging nodes should only trigger the sink once"
+        });
+    });
+
+    describe("writable (set on compute)", () => {
+        test("set overrides the derived value and val() returns it", () => {
+            const s1 = signal(5);
+            const c1 = compute((c) => c.read(s1) * 2);
+            expect(c1.val()).toBe(10);
+
+            c1.set(99);
+            expect(c1.val()).toBe(99);
+        });
+
+        test("set does not re-run the compute's fn", () => {
+            const s1 = signal(1);
+            let runs = 0;
+            const c1 = compute((c) => {
+                runs++;
+                return c.read(s1);
+            });
+            expect(c1.val()).toBe(1);
+            expect(runs).toBe(1);
+
+            c1.set(42);
+            expect(c1.val()).toBe(42);
+            expect(runs).toBe(1);
+        });
+
+        test("setting the same value is a no-op (no notification)", () => {
+            const s1 = signal(3);
+            const c1 = compute((c) => c.read(s1));
+            let downstream = 0;
+            const c2 = compute((c) => {
+                downstream++;
+                return c.read(c1);
+            });
+            expect(c2.val()).toBe(3);
+            expect(downstream).toBe(1);
+
+            c1.set(3);
+            c2.val();
+            expect(downstream).toBe(1);
+        });
+
+        test("set propagates to downstream computes", () => {
+            const s1 = signal(1);
+            const c1 = compute((c) => c.read(s1));
+            const c2 = compute((c) => c.read(c1) + 10);
+            expect(c2.val()).toBe(11);
+
+            c1.set(100);
+            expect(c2.val()).toBe(110);
+        });
+
+        test("set propagates to downstream effects", () => {
+            root(() => {
+                const s1 = signal(1);
+                const c1 = compute((c) => c.read(s1));
+                let observed;
+                effect((e) => {
+                    observed = e.read(c1);
+                });
+                expect(observed).toBe(1);
+
+                c1.set(7);
+                expect(observed).toBe(7);
+            });
+        });
+
+        test("upstream change after set re-runs the fn and clobbers the override", () => {
+            const s1 = signal(1);
+            const c1 = compute((c) => c.read(s1) * 10);
+            expect(c1.val()).toBe(10);
+
+            c1.set(999);
+            expect(c1.val()).toBe(999);
+
+            s1.set(3);
+            expect(c1.val()).toBe(30);
+        });
+
+        test("batched sets coalesce and fire subs once", () => {
+            const s1 = signal(1);
+            const c1 = compute((c) => c.read(s1));
+            let runs = 0;
+            const c2 = compute((c) => {
+                runs++;
+                return c.read(c1);
+            });
+            expect(c2.val()).toBe(1);
+            expect(runs).toBe(1);
+
+            batch(() => {
+                c1.set(2);
+                c1.set(3);
+                c1.set(4);
+            });
+            expect(c2.val()).toBe(4);
+            expect(runs).toBe(2);
+        });
+
+        describe("form field defaulted from server data", () => {
+            test("tracks the source until user edits, then holds the edit", () => {
+                const serverValue = signal("alice");
+                /** Derived initial value for the input; user can overwrite. */
+                const draft = compute((c) => c.read(serverValue));
+                expect(draft.val()).toBe("alice");
+
+                /** User types — overwrite the derived value. */
+                draft.set("alice the great");
+                expect(draft.val()).toBe("alice the great");
+
+                /** Another field change from the server arrives for an
+                 *  unrelated key — shouldn't trample the user's edit
+                 *  because `serverValue` didn't change. */
+                const unrelated = signal(0);
+                unrelated.set(1);
+                expect(draft.val()).toBe("alice the great");
+
+                /** The server sends an authoritative overwrite. The
+                 *  derived value recomputes, replacing the user's draft. */
+                serverValue.set("bob");
+                expect(draft.val()).toBe("bob");
+            });
+        });
+
+        describe("optimistic local state", () => {
+            test("local set shows immediately; later server value replaces", () => {
+                const serverCount = signal(0);
+                const displayed = compute((c) => c.read(serverCount));
+                let rendered = null;
+
+                root(() => {
+                    effect((e) => {
+                        rendered = e.read(displayed);
+                    });
+                });
+                expect(rendered).toBe(0);
+
+                /** Optimistic local increment while the server round-trip
+                 *  is in flight. */
+                displayed.set(1);
+                expect(rendered).toBe(1);
+
+                /** Server returns the real count; derived fn re-runs and
+                 *  the authoritative value wins. */
+                serverCount.set(5);
+                expect(rendered).toBe(5);
+            });
+        });
+
+        test("set on a compute that was STALE still propagates the new value", () => {
+            const s1 = signal(1);
+            const c1 = compute((c) => c.read(s1));
+            expect(c1.val()).toBe(1);
+
+            /** Mark STALE by setting upstream, but don't read c1 yet. */
+            s1.set(2);
+            /** Overwrite before the lazy re-run would have seen s1=2. */
+            c1.set(50);
+            expect(c1.val()).toBe(50);
+        });
+
+        test("set on an initialized compute triggers stale notifications synchronously", () => {
+            const s1 = signal(1);
+            const c1 = compute((c) => c.read(s1));
+            let seen = [];
+            root(() => {
+                effect((e) => {
+                    seen.push(e.read(c1));
+                });
+            });
+            expect(seen).toEqual([1]);
+
+            c1.set(2);
+            c1.set(3);
+            expect(seen).toEqual([1, 2, 3]);
         });
     });
 });

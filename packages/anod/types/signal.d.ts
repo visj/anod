@@ -127,7 +127,9 @@ export interface ISignal<T> extends IReadonlySignal<T, Type.SIGNAL> {
     set(value: T): void;
 }
 
-export interface ICompute<T> extends IReadonlySignal<T, Type.COMPUTE>, IAwaitable { }
+export interface ICompute<T> extends IReadonlySignal<T, Type.COMPUTE>, IAwaitable {
+    set(value: T): void;
+}
 
 export interface IEffect extends IDispose<Type.EFFECT> { }
 
