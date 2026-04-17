@@ -12,7 +12,7 @@ const FLAG_DISPOSED = 1 << 3;
 const FLAG_COMPUTE = 1 << 4;
 const FLAG_INIT = 1 << 5;
 const FLAG_SETUP = 1 << 6;
-const FLAG_RUNNING = 1 << 7;
+
 const FLAG_LOADING = 1 << 8;
 const FLAG_ERROR = 1 << 9;
 const FLAG_DEFER = 1 << 10;
@@ -733,11 +733,9 @@ function _ownSpawn(fnOrDep, a2, a3, a4) {
             if (IDLE) {
                 IDLE = false;
                 try {
-                    TRANSACTION = VERSION;
-                    if (flag & FLAG_STALE) {
+                    if (flag & FLAG_STALE || needsUpdate(this, TIME)) {
+                        TRANSACTION = VERSION;
                         this._update(TIME);
-                    } else {
-                        checkRun(this, TIME);
                     }
                     if (SENDERS_COUNT > 0 || DISPOSES_COUNT > 0) {
                         start();
@@ -837,7 +835,15 @@ function _ownSpawn(fnOrDep, a2, a3, a4) {
     ComputeProto._update = function (time) {
         let flag = this._flag;
         this._time = time;
-        this._flag = (flag & ~(FLAG_STALE | FLAG_INIT | FLAG_LOADING | FLAG_EQUAL | FLAG_NOTEQUAL)) | FLAG_RUNNING;
+        /** Pre-fn flag clear. FLAG_RUNNING was a lifecycle bit that
+         *  nothing reads — dropped. The EQUAL/NOTEQUAL clear here is
+         *  what lets `c.equal()` in the fn body produce a clean fresh
+         *  result even without being called (no c.equal()-left-over
+         *  from prior run). STALE/INIT/LOADING are cleared for the
+         *  same reason: the fn should see the node as "currently
+         *  running", not as stale/init/loading from whatever state
+         *  triggered this update. */
+        this._flag = flag & ~(FLAG_STALE | FLAG_INIT | FLAG_LOADING | FLAG_EQUAL | FLAG_NOTEQUAL);
         if (flag & FLAG_ASYNC) {
             return this._updateAsync(time);
         }
@@ -849,10 +855,9 @@ function _ownSpawn(fnOrDep, a2, a3, a4) {
                 value = (flag & FLAG_BOUND)
                     ? this._fn(this._dep1.val(), this._value, this._args)
                     : this._fn(this, this._value, this._args);
-                this._flag &= ~FLAG_ERROR;
             } catch (err) {
                 this._value = err;
-                this._flag = flag & ~(FLAG_RUNNING | FLAG_STALE | FLAG_PENDING | FLAG_INIT | FLAG_SETUP) | FLAG_ERROR;
+                this._flag = (this._flag & ~(FLAG_STALE | FLAG_PENDING | FLAG_INIT | FLAG_SETUP)) | FLAG_ERROR;
                 this._ctime = time;
                 return;
             }
@@ -878,10 +883,9 @@ function _ownSpawn(fnOrDep, a2, a3, a4) {
 
             try {
                 value = this._fn(this, this._value, this._args);
-                this._flag &= ~FLAG_ERROR;
             } catch (err) {
                 this._value = err;
-                this._flag = flag & ~(FLAG_RUNNING | FLAG_STALE | FLAG_PENDING | FLAG_INIT | FLAG_SETUP) | FLAG_ERROR;
+                this._flag = (this._flag & ~(FLAG_STALE | FLAG_PENDING | FLAG_INIT | FLAG_SETUP)) | FLAG_ERROR;
                 this._ctime = time;
                 return;
             } finally {
@@ -912,13 +916,19 @@ function _ownSpawn(fnOrDep, a2, a3, a4) {
                 this._version = prevVersion;
             }
         }
-        flag = this._flag &= ~(FLAG_RUNNING | FLAG_STALE | FLAG_PENDING | FLAG_INIT | FLAG_SETUP);
+        /** Single post-fn flag write: clears the transient STALE/PENDING/
+         *  INIT/SETUP bits AND any stale ERROR from a prior run (no
+         *  separate `this._flag &= ~FLAG_ERROR` needed — fn reached here
+         *  without throwing, so ERROR should be cleared). `flag` is
+         *  re-read to pick up any EQUAL/NOTEQUAL bits the fn set via
+         *  `c.equal()`; those feed the ctime check below. */
+        flag = this._flag &= ~(FLAG_ERROR | FLAG_STALE | FLAG_PENDING | FLAG_INIT | FLAG_SETUP);
         if (value !== this._value) {
             this._value = value;
             if (!(flag & FLAG_EQUAL)) {
                 this._ctime = time;
             }
-        } else if (flag & (FLAG_NOTEQUAL)) {
+        } else if (flag & FLAG_NOTEQUAL) {
             this._ctime = time;
         }
     };
@@ -991,12 +1001,12 @@ function _ownSpawn(fnOrDep, a2, a3, a4) {
                 this._flag = flag & ~FLAG_ERROR | (reader._flag & (FLAG_STABLE | FLAG_EQUAL | FLAG_NOTEQUAL));
             } catch (err) {
                 this._value = err;
-                this._flag = flag & ~(FLAG_RUNNING | FLAG_STALE | FLAG_PENDING | FLAG_INIT | FLAG_SETUP) | FLAG_ERROR;
+                this._flag = flag & ~(FLAG_STALE | FLAG_PENDING | FLAG_INIT | FLAG_SETUP) | FLAG_ERROR;
                 this._ctime = time;
                 return;
             }
         }
-        this._flag &= ~(FLAG_RUNNING | FLAG_STALE | FLAG_PENDING | FLAG_INIT | FLAG_SETUP);
+        this._flag &= ~(FLAG_STALE | FLAG_PENDING | FLAG_INIT | FLAG_SETUP);
         let kind = asyncKind(value);
         if (kind === ASYNC_SYNC) {
             flag = this._flag;
@@ -1041,7 +1051,6 @@ function _ownSpawn(fnOrDep, a2, a3, a4) {
         let flag = this._flag;
 
         this._time = time;
-        this._flag = flag & ~(FLAG_LOADING) | FLAG_RUNNING;
         if (!(flag & FLAG_SETUP)) {
             if (this._cleanup !== null) {
                 clearCleanup(this);
@@ -1052,8 +1061,12 @@ function _ownSpawn(fnOrDep, a2, a3, a4) {
             this._recover = null;
         }
 
-        /** Async nodes delegate after pre-exec cleanup. */
+        /** Async nodes delegate after pre-exec cleanup. The LOADING
+         *  bit only exists on async effects, so clearing it before the
+         *  sync fn runs would be dead work — confine the clear to the
+         *  async branch. */
         if (flag & FLAG_ASYNC) {
+            this._flag = flag & ~FLAG_LOADING;
             return this._updateAsync(time);
         }
         /** @type {(function(): void) | null | undefined} */
@@ -1066,7 +1079,7 @@ function _ownSpawn(fnOrDep, a2, a3, a4) {
                     ? this._fn(this._dep1.val(), this._args)
                     : this._fn(this, this._args);
             } finally {
-                this._flag &= ~(FLAG_RUNNING | FLAG_STALE | FLAG_PENDING);
+                this._flag &= ~(FLAG_STALE | FLAG_PENDING);
             }
         } else {
             /** Setup or dynamic: bump version for dep tracking */
@@ -1113,7 +1126,7 @@ function _ownSpawn(fnOrDep, a2, a3, a4) {
                     VCOUNT = saveStart;
                 }
                 this._version = prevVersion;
-                this._flag &= ~(FLAG_RUNNING | FLAG_STALE | FLAG_PENDING | FLAG_INIT | FLAG_SETUP);
+                this._flag &= ~(FLAG_STALE | FLAG_PENDING | FLAG_INIT | FLAG_SETUP);
             }
         }
 
@@ -1135,7 +1148,7 @@ function _ownSpawn(fnOrDep, a2, a3, a4) {
                 value = this._fn(this._dep1.val(), this._args);
             } finally {
                 this._time = time;
-                this._flag &= ~(FLAG_RUNNING | FLAG_STALE | FLAG_PENDING);
+                this._flag &= ~(FLAG_STALE | FLAG_PENDING);
             }
         } else {
             /** Dynamic async — _args is always {_reader, _args}. See
@@ -1171,7 +1184,7 @@ function _ownSpawn(fnOrDep, a2, a3, a4) {
                 value = this._fn(reader, context._args);
                 this._flag = flag | (reader._flag & (FLAG_STABLE));
             } finally {
-                this._flag &= ~(FLAG_RUNNING | FLAG_STALE | FLAG_PENDING | FLAG_INIT | FLAG_SETUP);
+                this._flag &= ~(FLAG_STALE | FLAG_PENDING | FLAG_INIT | FLAG_SETUP);
             }
         }
 
@@ -1708,11 +1721,14 @@ function patchDeps(node, version, depCount) {
  */
 function sweep(stamp, dep1, deps) {
     let depCount = 0;
+    let vstack = VSTACK;
+    let vcount = VCOUNT;
+    let transaction = TRANSACTION;
     if (dep1 !== null) {
         let depver = dep1._version;
-        if (depver > TRANSACTION) {
-            VSTACK[VCOUNT++] = dep1;
-            VSTACK[VCOUNT++] = depver;
+        if (depver > transaction) {
+            vstack[vcount++] = dep1;
+            vstack[vcount++] = depver;
         }
         dep1._version = stamp;
         depCount = 1;
@@ -1722,14 +1738,15 @@ function sweep(stamp, dep1, deps) {
         for (let i = 0; i < count; i += 2) {
             let dep = /** @type {Sender} */(deps[i]);
             let depver = dep._version;
-            if (depver > TRANSACTION) {
-                VSTACK[VCOUNT++] = dep;
-                VSTACK[VCOUNT++] = depver;
+            if (depver > transaction) {
+                vstack[vcount++] = dep;
+                vstack[vcount++] = depver;
             }
             dep._version = stamp;
         }
         depCount += count >> 1;
     }
+    VCOUNT = vcount;
     return depCount;
 }
 
@@ -1935,11 +1952,13 @@ function checkRun(node, time) {
         while (CTOP > base) {
             CTOP--;
             let parent = CSTACK[CTOP];
-            let idx = CINDEX[CTOP];
             /**
              * `node` is always the child that the parent was scanning
              * when it pushed — no need to look it up from parent._dep1
-             * or parent._deps[idx].
+             * or parent._deps[idx]. The common deep-propagation case
+             * falls into the cascade branch below, which doesn't need
+             * the pushed index — defer the `CINDEX[CTOP]` read until
+             * we actually enter the "had no change" branch.
              */
             if (node._ctime > parent._time) {
                 /** Child changed — update parent and keep cascading */
@@ -1948,6 +1967,7 @@ function checkRun(node, time) {
                 continue;
             }
             /** Child unchanged — check if parent has more deps to scan */
+            let idx = CINDEX[CTOP];
             if (idx === -1) {
                 if (parent._deps !== null) {
                     /** Has deps array — resume scanning in main loop */
@@ -2646,7 +2666,7 @@ function batch(fn) {
 
 export {
     FLAG_DEFER, FLAG_STABLE, FLAG_SETUP,
-    FLAG_STALE, FLAG_PENDING, FLAG_RUNNING,
+    FLAG_STALE, FLAG_PENDING,
     FLAG_DISPOSED, FLAG_LOADING, FLAG_ERROR,
     FLAG_BOUND, FLAG_DERIVED, FLAG_EQUAL,
     FLAG_WEAK, FLAG_INIT, FLAG_ASYNC,
