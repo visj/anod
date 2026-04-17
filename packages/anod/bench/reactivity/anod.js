@@ -237,19 +237,19 @@ function setupCellx(layers) {
     for (let i = layers; i > 0; i--) {
         const m = layer;
         const s = {
-            prop1: derive(m.prop2, (v) => {
+            prop1: transmit(m.prop2, (v) => {
                 counter++;
                 return v;
             }),
-            prop2: derive(() => {
+            prop2: transmit(() => {
                 counter++;
                 return m.prop1.val() - m.prop3.val();
             }),
-            prop3: derive(() => {
+            prop3: transmit(() => {
                 counter++;
                 return m.prop2.val() + m.prop4.val();
             }),
-            prop4: derive(m.prop3, (v) => {
+            prop4: transmit(m.prop3, (v) => {
                 counter++;
                 return v;
             }),

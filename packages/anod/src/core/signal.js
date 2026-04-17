@@ -1265,6 +1265,53 @@ function checkRun(node, time) {
 }
 
 /**
+ * Pull-based evaluation. Recursively pulls deps, then only
+ * runs this compute if a dep's value actually changed (_ctime).
+ * @param {Compute | Effect} node
+ * @param {number} time
+ * @returns {void}
+ */
+// function checkRun(node, time) {
+//     if (node._flag & FLAG_STALE) {
+//         node._update(time);
+//         return;
+//     }
+
+//     let lastRun = node._time;
+//     let dep = node._dep1;
+//     if (dep !== null) {
+//         if (dep._flag & FLAG_STALE) {
+//             dep._update(time);
+//         } else if (dep._flag & FLAG_PENDING) {
+//             checkRun(dep, time);
+//         }
+//         if (dep._ctime > lastRun) {
+//             node._update(time);
+//             return;
+//         }
+//     }
+//     let deps = node._deps;
+//     if (deps !== null) {
+//         let count = deps.length;
+//         for (let i = 0; i < count; i += 2) {
+//             dep = /** @type {Sender} */(deps[i]);
+//             if (dep._flag & FLAG_STALE) {
+//                 dep._update(time);
+//             } else if (dep._flag & FLAG_PENDING) {
+//                 checkRun(dep, time);
+//             }
+//             if (dep._ctime > lastRun) {
+//                 node._update(time);
+//                 return;
+//             }
+//         }
+//     }
+//     /** No dep changed -- clear flags without re-executing */
+//     node._time = time;
+//     node._flag &= ~(FLAG_STALE | FLAG_PENDING);
+// }
+
+/**
  * @template T
  * @param {WeakRef<!Compute<T>>} ref
  * @param {IThenable<T>} promise
