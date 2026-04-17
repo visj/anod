@@ -1481,7 +1481,8 @@ function Effect(opts, fn, dep1, args) {
         let value;
         let prevRunning = RUNNING;
         let prevState = STATE;
-        let ownBit = (flag & FLAG_SCOPE) !== 0 ? STATE_OWN : 0;
+        /** Branchless: FLAG_SCOPE (1<<16) >> 15 == STATE_OWN (1<<1) when set. */
+        let ownBit = (flag >> 15) & STATE_OWN;
         RUNNING = this;
 
         if ((flag & (FLAG_STABLE | FLAG_SETUP)) === FLAG_STABLE) {
@@ -1605,7 +1606,8 @@ function Effect(opts, fn, dep1, args) {
         let value;
         let prevRunning = RUNNING;
         let prevState = STATE;
-        let ownBit = (flag & FLAG_SCOPE) !== 0 ? STATE_OWN : 0;
+        /** Branchless: FLAG_SCOPE (1<<16) >> 15 == STATE_OWN (1<<1) when set. */
+        let ownBit = (flag >> 15) & STATE_OWN;
         RUNNING = this;
 
         if ((flag & (FLAG_STABLE | FLAG_SETUP)) === FLAG_STABLE) {
@@ -2466,13 +2468,51 @@ function notify(node, flag) {
 }
 
 /**
+ * Cold-path adoption helper for computes. Only called when STATE_OWN
+ * is active — kept out of the hot factory body so V8 can compile
+ * `compute()` etc. assuming RUNNING is never read.
+ * @param {!Compute | !Root} node
+ * @returns {void}
+ */
+function adoptCompute(node) {
+    addOwned(/** @type {Owner} */(RUNNING), /** @type {Receiver} */(node));
+}
+
+/**
+ * Cold-path adoption helper for effects — also records `_owner` on
+ * the node for recovery walk-up.
+ * @param {!Effect} node
+ * @returns {void}
+ */
+function adoptEffect(node) {
+    let owner = /** @type {Owner} */(RUNNING);
+    addOwned(owner, node);
+    node._owner = owner;
+}
+
+/**
+ * Cold-path adoption helper for scope effects — adopts and, when the
+ * owner is a receiver, establishes a level for topological scheduling.
+ * @param {!Effect} node
+ * @returns {void}
+ */
+function adoptScope(node) {
+    let owner = /** @type {Owner} */(RUNNING);
+    addOwned(owner, node);
+    node._owner = owner;
+    if (owner.t & TYPEFLAG_RECEIVE) {
+        setScope(node, /** @type {Effect} */(owner));
+    }
+}
+
+/**
  * @param {function(): ((function(): void) | void)} fn
  * @returns {Root}
  */
 function root(fn) {
     let node = new Root();
-    if ((STATE & STATE_OWN) !== 0) {
-        addOwned(/** @type {Owner} */(RUNNING), node);
+    if (STATE & STATE_OWN) {
+        adoptCompute(node);
     }
     startRoot(node, fn);
     return node;
@@ -2498,8 +2538,8 @@ function signal(value) {
 function compute(fn, seed, opts, args) {
     let flag = FLAG_SETUP | ((0 | opts) & OPTIONS);
     let node = new Compute(flag, fn, null, seed, args);
-    if ((STATE & STATE_OWN) !== 0) {
-        addOwned(/** @type {Owner} */(RUNNING), node);
+    if (STATE & STATE_OWN) {
+        adoptCompute(node);
     }
     if (!(flag & FLAG_DEFER)) {
         startCompute(node);
@@ -2525,8 +2565,8 @@ function derive(fnOrDep, seedOrFn, argsOrSeed, args) {
         node = new Compute(FLAG_STABLE | FLAG_BOUND, seedOrFn, fnOrDep, argsOrSeed, args);
         node._dep1slot = subscribe(fnOrDep, node, -1);
     }
-    if ((STATE & STATE_OWN) !== 0) {
-        addOwned(/** @type {Owner} */(RUNNING), node);
+    if (STATE & STATE_OWN) {
+        adoptCompute(node);
     }
     startCompute(node);
     return node;
@@ -2550,8 +2590,8 @@ function transmit(fnOrDep, seedOrFn, argsOrSeed, args) {
         node = new Compute(FLAG_STABLE | FLAG_BOUND | FLAG_NOTIFY, seedOrFn, fnOrDep, argsOrSeed, args);
         node._dep1slot = subscribe(fnOrDep, node, -1);
     }
-    if ((STATE & STATE_OWN) !== 0) {
-        addOwned(/** @type {Owner} */(RUNNING), node);
+    if (STATE & STATE_OWN) {
+        adoptCompute(node);
     }
     startCompute(node);
     return node;
@@ -2575,8 +2615,8 @@ function task(fn, seed, opts, args) {
         flag |= FLAG_STABLE;
     }
     let node = new Compute(flag, fn, null, seed, args);
-    if ((STATE & STATE_OWN) !== 0) {
-        addOwned(/** @type {Owner} */(RUNNING), node);
+    if (STATE & STATE_OWN) {
+        adoptCompute(node);
     }
     if (!(flag & FLAG_DEFER)) {
         startCompute(node);
@@ -2594,10 +2634,8 @@ function task(fn, seed, opts, args) {
 function effect(fn, opts, args) {
     let flag = FLAG_SETUP | ((0 | opts) & OPTIONS);
     let node = new Effect(flag, fn, null, args);
-    if ((STATE & STATE_OWN) !== 0) {
-        let owner = /** @type {Owner} */(RUNNING);
-        addOwned(owner, node);
-        node._owner = owner;
+    if (STATE & STATE_OWN) {
+        adoptEffect(node);
     }
     startEffect(node);
     return node;
@@ -2618,13 +2656,8 @@ function scope(fn, opts) {
     }
     let node = new Effect(flag, fn, null);
     node._owned = [];
-    if ((STATE & STATE_OWN) !== 0) {
-        let owner = /** @type {Owner} */(RUNNING);
-        addOwned(owner, node);
-        node._owner = owner;
-        if (owner.t & TYPEFLAG_RECEIVE) {
-            setScope(node, /** @type {Effect} */(owner));
-        }
+    if (STATE & STATE_OWN) {
+        adoptScope(node);
     }
     startEffect(node);
     return node;
@@ -2647,10 +2680,8 @@ function spawn(fn, opts, args) {
         flag |= FLAG_STABLE;
     }
     let node = new Effect(flag, fn, null, args);
-    if ((STATE & STATE_OWN) !== 0) {
-        let owner = /** @type {Owner} */(RUNNING);
-        addOwned(owner, node);
-        node._owner = owner;
+    if (STATE & STATE_OWN) {
+        adoptEffect(node);
     }
     startEffect(node);
     return node;
@@ -2673,10 +2704,8 @@ function watch(fnOrDep, fnOrArgs, args) {
         node = new Effect(FLAG_STABLE | FLAG_BOUND, fnOrArgs, fnOrDep, args);
         node._dep1slot = subscribe(fnOrDep, node, -1);
     }
-    if ((STATE & STATE_OWN) !== 0) {
-        let owner = /** @type {Owner} */(RUNNING);
-        addOwned(owner, node);
-        node._owner = owner;
+    if (STATE & STATE_OWN) {
+        adoptEffect(node);
     }
     startEffect(node);
     return node;
