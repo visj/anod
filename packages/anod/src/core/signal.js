@@ -1,32 +1,6 @@
 import { Anod } from "./api.js";
 import { Disposer, Owner, Sender, Receiver, ISignal, ICompute, IEffect } from "./types.js";
 
-/** @const {number} */ const OP_VALUE = 1 << 30;
-/** @const {number} */ const OP_CALLBACK = 1 << 29;
-
-/** @const {Array<function(Signal, *): void>} */
-var CALLBACKS = [];
-
-/**
- * Registers a callback for deferred signal operations.
- * Returns an op value (callback index | OP_CALLBACK flag) that can be
- * passed to scheduleSignal. When the transaction loop processes the
- * entry, it calls CALLBACKS[op & ~OP_CALLBACK](signal, payload).
- * @param {function(Signal, *): void} fn
- * @returns {number}
- */
-function register(fn) {
-    let index = CALLBACKS.length;
-    CALLBACKS[index] = fn;
-    return index | OP_CALLBACK;
-}
-
-const CTX_EQUAL = 1;
-const CTX_NOTEQUAL = 2;
-const CTX_PROMISE = 4;
-const CTX_ITERABLE = 8;
-const CTX_ASYNC = CTX_PROMISE | CTX_ITERABLE;
-
 const FLAG_STALE = 1 << 0;
 const FLAG_PENDING = 1 << 1;
 const FLAG_SCHEDULED = 1 << 2;
@@ -59,16 +33,6 @@ const OPT_WEAK = FLAG_WEAK;
 const OPT_DYNAMIC = 0x800000;
 
 const OPTIONS = OPT_DEFER | OPT_STABLE | OPT_SETUP | OPT_WEAK | FLAG_ASYNC | FLAG_STREAM;
-
-
-const TYPEFLAG_MASK = 7;
-const TYPEFLAG_SEND = 8;
-const TYPEFLAG_RECEIVE = 16;
-const TYPEFLAG_OWNER = 32;
-const TYPE_ROOT = 1 | TYPEFLAG_OWNER;
-const TYPE_SIGNAL = 2 | TYPEFLAG_SEND;
-const TYPE_COMPUTE = 3 | TYPEFLAG_SEND | TYPEFLAG_RECEIVE;
-const TYPE_EFFECT = 4 | TYPEFLAG_OWNER | TYPEFLAG_RECEIVE;
 
 /**
  * @type {number}
@@ -119,24 +83,25 @@ var DCOUNT = 0;
  */
 var DBASE = 0;
 
-/** @type {number} */
-var MINLEVEL = 0;
-/** @type {number} */
-var MAXLEVEL = 0;
-
+/**
+ * @type {number}
+ */
 var TIME = 1;
 
+/**
+ * @type {boolean}
+ */
 var IDLE = true;
 
+/**
+ * @type {number}
+ */
 var VERSION = 1;
 
 /** @const @type {Array<Disposer>} */
 var DISPOSES = [];
 
 var DISPOSES_COUNT = 0;
-
-/** @const @type {Array<number>} */
-var SIGNAL_OPS = [];
 
 /**
  * @const
@@ -169,59 +134,6 @@ var SCOPES_COUNT = 0;
 var EFFECTS = [];
 
 var EFFECTS_COUNT = 0;
-
-
-/**
- *
- * @param {*} value
- * @returns {boolean}
- */
-function isSignal(value) {
-    return value !== null && typeof value === 'object' && (/** @type {Anod} */(value).t & TYPEFLAG_SEND) !== 0;
-}
-
-/**
- * @param {*} value
- * @returns {boolean}
- */
-function isNumber(value) {
-    return typeof value === 'number';
-}
-
-/**
- * @param {*} value
- * @returns {boolean}
- */
-function isPrimitive(value) {
-    if (value === null) {
-        return true;
-    }
-    let type = typeof value;
-    return type !== 'object' && type !== 'function';
-}
-
-/**
- * @param {*} value
- * @returns {boolean}
- */
-function isFunction(value) {
-    return typeof value === 'function';
-}
-
-export { isPrimitive, isNumber, isFunction, isSignal }
-
-/**
- * @param {Signal} node
- * @param {number} op
- * @param {*} value
- * @returns {void}
- */
-function scheduleSignal(node, op, value) {
-    let index = SIGNALS_COUNT++;
-    SIGNAL_OPS[index] = op;
-    SIGNALS[index * 2] = node;
-    SIGNALS[index * 2 + 1] = value;
-}
 
 /**
  * @this {Disposer}
@@ -613,12 +525,6 @@ var RootProto = Root.prototype;
 RootProto._owner = null;
 
 /**
- * @const
- * @type {number}
- */
-RootProto.t = TYPE_ROOT;
-
-/**
  * @public
  * @this {!Root}
  * @returns {void}
@@ -727,12 +633,6 @@ function Signal(value, opts) {
 {
     /** @const */
     let SignalProto = Signal.prototype;
-
-    /**
-     * @const
-     * @type {number}
-     */
-    SignalProto.t = TYPE_SIGNAL;
 
     /**
      * @type {number}
@@ -869,12 +769,6 @@ function Compute(opts, fn, dep1, seed, args) {
     let ComputeProto = Compute.prototype;
 
     /**
-     * @const
-     * @type {number}
-     */
-    ComputeProto.t = TYPE_COMPUTE;
-
-    /**
      * @public
      * @this {!Compute<T,U,V,W>}
      * @returns {void}
@@ -947,16 +841,12 @@ function Compute(opts, fn, dep1, seed, args) {
     };
 
     /**
-     * Unified update method. Two top-level branches:
-     * 1. Stable/bound — simple try/catch, no version tracking
-     * 2. Setup/dynamic — version bump, optional prescan, VSTACK restore
-     * Async nodes delegate to _updateAsync before branching.
      * @param {number} time
      */
     ComputeProto._update = function (time) {
         let flag = this._flag;
+        this._time = time;
         this._flag = (flag & ~(FLAG_STALE | FLAG_INIT | FLAG_EQUAL | FLAG_NOTEQUAL)) | FLAG_RUNNING;
-
         if (flag & (FLAG_ASYNC | FLAG_STREAM)) {
             return this._updateAsync(time);
         }
@@ -972,7 +862,7 @@ function Compute(opts, fn, dep1, seed, args) {
             } catch (err) {
                 this._value = err;
                 this._flag = flag & ~(FLAG_RUNNING | FLAG_STALE | FLAG_PENDING | FLAG_INIT | FLAG_SETUP) | FLAG_ERROR;
-                this._time = this._ctime = time;
+                this._ctime = time;
                 return;
             }
         } else {
@@ -983,83 +873,58 @@ function Compute(opts, fn, dep1, seed, args) {
             let saveStart = VCOUNT;
             let depsLen = 0;
             let depCount = 0;
-            let prevReused = REUSED;
-
-            /** Save DSTACK base for setup — deps are batched in DSTACK
-             *  and sliced to exact-capacity _deps after fn returns. */
-            let prevDBase = DBASE;
+            let prevDBase;
+            let prevReused;
             if (flag & FLAG_SETUP) {
+                prevDBase = DBASE;
                 DBASE = DCOUNT;
-            }
-
-            if (!(flag & FLAG_SETUP)) {
-                /** Dynamic: prescan existing deps with version - 1 */
+            } else {
+                prevReused = REUSED;
                 REUSED = 0;
-                let dep1 = this._dep1;
-                let stamp = version - 1;
-                if (dep1 !== null) {
-                    let depver = dep1._version;
-                    if (depver > TRANSACTION) {
-                        VSTACK[VCOUNT++] = dep1;
-                        VSTACK[VCOUNT++] = depver;
-                    }
-                    dep1._version = stamp;
-                    depCount = 1;
-                }
-                let deps = this._deps;
-                if (deps !== null) {
-                    depsLen = deps.length;
-                    for (let i = 0; i < depsLen; i += 2) {
-                        let dep = /** @type {Sender} */(deps[i]);
-                        let depver = dep._version;
-                        if (depver > TRANSACTION) {
-                            VSTACK[VCOUNT++] = dep;
-                            VSTACK[VCOUNT++] = depver;
-                        }
-                        dep._version = stamp;
-                    }
-                    depCount += depsLen >> 1;
-                }
+                depCount = sweep(version - 1, this._dep1, this._deps);
+                depsLen = this._deps !== null ? this._deps.length : 0;
             }
 
             try {
                 value = this._fn(this, this._value, this._args);
                 this._flag &= ~FLAG_ERROR;
             } catch (err) {
-                value = err;
-                this._flag |= FLAG_ERROR;
-            }
-
-            /** Reconcile deps (dynamic only) */
-            if (!(flag & FLAG_SETUP) && (REUSED !== depCount || (this._deps !== null ? this._deps.length : 0) !== depsLen)) {
-                pruneDeps(this, version, depCount);
-            }
-
-            /** Create exact-capacity _deps from DSTACK (setup only) */
-            if (DCOUNT > DBASE) {
-                this._deps = DSTACK.slice(DBASE, DCOUNT);
-                DCOUNT = DBASE;
-            }
-            DBASE = prevDBase;
-
-            REUSED = prevReused;
-            /** Restore saved version tags from VSTACK (both setup and dynamic) */
-            if (VCOUNT > saveStart) {
-                for (let i = VCOUNT - 2; i >= saveStart; i -= 2) {
-                    VSTACK[i]._version = VSTACK[i + 1];
+                this._value = err;
+                this._flag = flag & ~(FLAG_RUNNING | FLAG_STALE | FLAG_PENDING | FLAG_INIT | FLAG_SETUP) | FLAG_ERROR;
+                this._ctime = time;
+                return;
+            } finally {
+                if (flag & FLAG_SETUP) {
+                    /** Create exact-capacity _deps from DSTACK (setup only) */
+                    if (DCOUNT > DBASE) {
+                        this._deps = DSTACK.slice(DBASE, DCOUNT);
+                        DCOUNT = DBASE;
+                    }
+                    DBASE = prevDBase;
+                } else {
+                    /** Reconcile deps (dynamic only) */
+                    if ((REUSED !== depCount || (this._deps !== null ? this._deps.length : 0) !== depsLen)) {
+                        pruneDeps(this, version, depCount);
+                    }
+                    REUSED = prevReused;
                 }
-                VCOUNT = saveStart;
+
+                /** Restore saved version tags from VSTACK (both setup and dynamic) */
+                if (VCOUNT > saveStart) {
+                    let count = VCOUNT;
+                    let stack = VSTACK;
+                    for (let i = saveStart; i < count; i += 2) {
+                        stack[i]._version = stack[i + 1];
+                    }
+                    VCOUNT = saveStart;
+                }
+                this._version = prevVersion;
             }
-            this._version = prevVersion;
         }
 
         flag = this._flag;
         this._flag &= ~(FLAG_RUNNING | FLAG_STALE | FLAG_PENDING | FLAG_INIT | FLAG_SETUP);
-        this._time = time;
-        if (flag & FLAG_ERROR) {
-            this._value = value;
-            this._ctime = time;
-        } else if (value !== this._value) {
+        if (value !== this._value) {
             this._value = value;
             if (!(flag & FLAG_EQUAL)) {
                 this._ctime = time;
@@ -1148,8 +1013,10 @@ function Compute(opts, fn, dep1, seed, args) {
             DBASE = prevDBase;
             REUSED = prevReused;
             if (VCOUNT > saveStart) {
-                for (let i = VCOUNT - 2; i >= saveStart; i -= 2) {
-                    VSTACK[i]._version = VSTACK[i + 1];
+                let count = VCOUNT;
+                let stack = VSTACK;
+                for (let i = saveStart; i < count; i += 2) {
+                    stack[i]._version = stack[i + 1];
                 }
                 VCOUNT = saveStart;
             }
@@ -1158,7 +1025,6 @@ function Compute(opts, fn, dep1, seed, args) {
 
         flag = this._flag;
         this._flag &= ~(FLAG_RUNNING | FLAG_STALE | FLAG_PENDING | FLAG_INIT | FLAG_SETUP);
-        this._time = time;
         if (flag & FLAG_ERROR) {
             this._value = value;
             this._ctime = time;
@@ -1237,11 +1103,11 @@ function needsUpdate(node, time) {
     let lastRun = node._time;
     let dep = node._dep1;
     if (dep !== null) {
-        let df = dep._flag;
-        if (df & FLAG_STALE) {
+        let flag = dep._flag;
+        if (flag & FLAG_STALE) {
             TRANSACTION = VERSION;
-            /** @type {Compute} */(dep)._update(time);
-        } else if (df & FLAG_PENDING) {
+                /** @type {Compute} */(dep)._update(time);
+        } else if (flag & FLAG_PENDING) {
             TRANSACTION = VERSION;
             checkRun(/** @type {Compute} */(dep), time);
         }
@@ -1254,11 +1120,11 @@ function needsUpdate(node, time) {
         let len = deps.length;
         for (let i = 0; i < len; i += 2) {
             dep = /** @type {Sender} */(deps[i]);
-            let df = dep._flag;
-            if (df & FLAG_STALE) {
+            let flag = dep._flag;
+            if (flag & FLAG_STALE) {
                 TRANSACTION = VERSION;
-                /** @type {Compute} */(dep)._update(time);
-            } else if (df & FLAG_PENDING) {
+                    /** @type {Compute} */(dep)._update(time);
+            } else if (flag & FLAG_PENDING) {
                 TRANSACTION = VERSION;
                 checkRun(/** @type {Compute} */(dep), time);
             }
@@ -1325,10 +1191,10 @@ function checkRun(node, time) {
                 /** Fresh entry: start scanning from dep1 */
                 dep = node._dep1;
                 if (dep !== null) {
-                    let df = dep._flag;
-                    if (df & FLAG_STALE) {
+                    let flag = dep._flag;
+                    if (flag & FLAG_STALE) {
                         dep._update(time);
-                    } else if (df & FLAG_PENDING) {
+                    } else if (flag & FLAG_PENDING) {
                         /** Descend into dep1 — push current node, resume later */
                         CSTACK[CTOP] = node;
                         CINDEX[CTOP] = -1;
@@ -1363,10 +1229,10 @@ function checkRun(node, time) {
                 let count = deps.length;
                 for (; i < count; i += 2) {
                     dep = /** @type {Sender} */(deps[i]);
-                    let df = dep._flag;
-                    if (df & FLAG_STALE) {
+                    let flag = dep._flag;
+                    if (flag & FLAG_STALE) {
                         dep._update(time);
-                    } else if (df & FLAG_PENDING) {
+                    } else if (flag & FLAG_PENDING) {
                         /** Descend into deps[i] — push current node */
                         CSTACK[CTOP] = node;
                         CINDEX[CTOP] = i;
@@ -1567,8 +1433,6 @@ function Effect(opts, fn, dep1, owner, args) {
     this._cleanup = null;
     /**
      * @type {Array<Receiver> | null}
-     * Lazy — populated only if this effect becomes an owner via one of
-     * the ownership methods (compute/effect/derive/...) on its prototype.
      */
     this._owned = null;
     /**
@@ -1592,13 +1456,6 @@ function Effect(opts, fn, dep1, owner, args) {
 {
     /** @const */
     let EffectProto = Effect.prototype;
-
-    /**
-     * @const
-     * @type {number}
-     */
-    EffectProto.t = TYPE_EFFECT;
-
 
     /**
      * @public
@@ -1632,9 +1489,8 @@ function Effect(opts, fn, dep1, owner, args) {
     EffectProto._update = function (time) {
         let flag = this._flag;
 
-        /** Pre-execution cleanup for non-setup runs. Cleanup fns, owned
-         *  children, and recover handlers are tracked on orthogonal slots —
-         *  each is cleared only if present (common case: all null). */
+        this._time = time;
+        this._flag |= FLAG_RUNNING;
         if (!(flag & FLAG_SETUP)) {
             if (this._cleanup !== null) {
                 clearCleanup(this);
@@ -1642,29 +1498,23 @@ function Effect(opts, fn, dep1, owner, args) {
             if (this._owned !== null) {
                 clearOwned(this);
             }
-            if (this._recover !== null) {
-                this._recover = null;
-                this._flag = flag = (flag & ~FLAG_RECOVER);
-            }
+            this._recover = null;
         }
 
         /** Async nodes delegate after pre-exec cleanup. */
         if (flag & (FLAG_ASYNC | FLAG_STREAM)) {
             return this._updateAsync(time);
         }
-
         /** @type {(function(): void) | null | undefined} */
         let value;
 
         if ((flag & (FLAG_STABLE | FLAG_SETUP)) === FLAG_STABLE) {
             /** Stable or bound: no version tracking, no dep management */
-            this._flag |= FLAG_RUNNING;
             try {
                 value = (flag & FLAG_BOUND)
                     ? this._fn(this._dep1.val(), this._args)
                     : this._fn(this, this._args);
             } finally {
-                this._time = time;
                 this._flag &= ~(FLAG_RUNNING | FLAG_STALE | FLAG_PENDING);
             }
         } else {
@@ -1674,71 +1524,44 @@ function Effect(opts, fn, dep1, owner, args) {
             this._version = version;
             let saveStart = VCOUNT;
             let depCount = 0;
-            let dep1 = this._dep1;
             let depsLen = 0;
-            let prevReused = REUSED;
-
-            /** Save DSTACK base for setup */
-            let prevDBase = DBASE;
+            let prevDBase;
+            let prevReused;
             if (flag & FLAG_SETUP) {
+                prevDBase = DBASE
                 DBASE = DCOUNT;
-            }
-
-            if (!(flag & FLAG_SETUP)) {
-                /** Dynamic: prescan existing deps with version - 1 */
-                this._flag |= FLAG_RUNNING;
+            } else {
+                prevReused = REUSED
                 REUSED = 0;
-                let stamp = version - 1;
-                if (dep1 !== null) {
-                    let depver = dep1._version;
-                    if (depver > TRANSACTION) {
-                        VSTACK[VCOUNT++] = dep1;
-                        VSTACK[VCOUNT++] = depver;
-                    }
-                    dep1._version = stamp;
-                    depCount = 1;
-                }
-                let deps = this._deps;
-                if (deps !== null) {
-                    depsLen = deps.length;
-                    for (let i = 0; i < depsLen; i += 2) {
-                        let dep = /** @type {Sender} */(deps[i]);
-                        let depver = dep._version;
-                        if (depver > TRANSACTION) {
-                            VSTACK[VCOUNT++] = dep;
-                            VSTACK[VCOUNT++] = depver;
-                        }
-                        dep._version = stamp;
-                    }
-                    depCount += depsLen >> 1;
-                }
+                depCount = sweep(version - 1, this._dep1, this._deps);
+                depsLen = this._deps !== null ? this._deps.length : 0;
             }
 
             try {
                 value = this._fn(this, this._args);
             } finally {
-                /** Reconcile deps (dynamic only) */
-                if (!(flag & FLAG_SETUP) && (REUSED !== depCount || (this._deps !== null ? this._deps.length : 0) !== depsLen)) {
-                    pruneDeps(this, version, depCount);
+                if (flag & FLAG_SETUP) {
+                    if (DCOUNT > DBASE) {
+                        this._deps = DSTACK.slice(DBASE, DCOUNT);
+                        DCOUNT = DBASE;
+                    }
+                    DBASE = prevDBase;
+                } else {
+                    if ((REUSED !== depCount || (this._deps !== null ? this._deps.length : 0) !== depsLen)) {
+                        pruneDeps(this, version, depCount);
+                    }
+                    REUSED = prevReused;
                 }
-
-                /** Create exact-capacity _deps from DSTACK (setup only) */
-                if (DCOUNT > DBASE) {
-                    this._deps = DSTACK.slice(DBASE, DCOUNT);
-                    DCOUNT = DBASE;
-                }
-                DBASE = prevDBase;
-
-                REUSED = prevReused;
                 /** Restore saved version tags from VSTACK (both setup and dynamic) */
                 if (VCOUNT > saveStart) {
-                    for (let i = VCOUNT - 2; i >= saveStart; i -= 2) {
-                        VSTACK[i]._version = VSTACK[i + 1];
+                    let count = VCOUNT;
+                    let stack = VSTACK;
+                    for (let i = saveStart; i < count; i += 2) {
+                        stack[i]._version = stack[i + 1];
                     }
                     VCOUNT = saveStart;
                 }
                 this._version = prevVersion;
-                this._time = time;
                 this._flag &= ~(FLAG_RUNNING | FLAG_STALE | FLAG_PENDING | FLAG_INIT | FLAG_SETUP);
             }
         }
@@ -1824,8 +1647,10 @@ function Effect(opts, fn, dep1, owner, args) {
                 DBASE = prevDBase;
                 REUSED = prevReused;
                 if (VCOUNT > saveStart) {
-                    for (let i = VCOUNT - 2; i >= saveStart; i -= 2) {
-                        VSTACK[i]._version = VSTACK[i + 1];
+                    let count = VCOUNT;
+                    let stack = VSTACK;
+                    for (let i = saveStart; i < count; i += 2) {
+                        stack[i]._version = stack[i + 1];
                     }
                     VCOUNT = saveStart;
                 }
@@ -2165,19 +1990,10 @@ function start() {
         );
     } finally {
         IDLE = true;
-        if (SCOPES_COUNT > 0) {
-            let min = MINLEVEL;
-            let max = MAXLEVEL;
-            while (min < max) {
-                LEVELS[min++] = 0;
-            }
-        }
         DISPOSES_COUNT =
             SIGNALS_COUNT =
             EFFECTS_COUNT =
-            SCOPES_COUNT =
-            MINLEVEL =
-            MAXLEVEL = 0;
+            SCOPES_COUNT = 0;
         if (thrown) {
             throw error;
         }
@@ -2601,6 +2417,38 @@ function pruneDeps(node, version, depCount) {
 }
 
 /**
+ * @param {number} stamp
+ * @param {Receiver | null} dep1 
+ * @param {Array<Receiver> | null} deps 
+ */
+function sweep(stamp, dep1, deps) {
+    let depCount = 0;
+    if (dep1 !== null) {
+        let depver = dep1._version;
+        if (depver > TRANSACTION) {
+            VSTACK[VCOUNT++] = dep1;
+            VSTACK[VCOUNT++] = depver;
+        }
+        dep1._version = stamp;
+        depCount = 1;
+    }
+    if (deps !== null) {
+        let count = deps.length;
+        for (let i = 0; i < count; i += 2) {
+            let dep = /** @type {Sender} */(deps[i]);
+            let depver = dep._version;
+            if (depver > TRANSACTION) {
+                VSTACK[VCOUNT++] = dep;
+                VSTACK[VCOUNT++] = depver;
+            }
+            dep._version = stamp;
+        }
+        depCount += count >> 1;
+    }
+    return depCount;
+}
+
+/**
  * @param {Sender} node
  * @param {number} flag
  */
@@ -2787,16 +2635,10 @@ export {
     FLAG_RUNNING, FLAG_DISPOSED, FLAG_LOADING, FLAG_ERROR, FLAG_RECOVER,
     FLAG_BOUND, FLAG_DERIVED, FLAG_EQUAL, FLAG_WEAK,
     FLAG_INIT,
-    OP_VALUE, OP_CALLBACK,
-    register,
-    CTX_EQUAL, CTX_NOTEQUAL, CTX_PROMISE, CTX_ITERABLE, CTX_ASYNC,
     FLAG_ASYNC, FLAG_STREAM,
     OPT_DEFER, OPT_STABLE, OPT_SETUP, OPT_WEAK, OPT_DYNAMIC,
-    TYPE_ROOT, TYPE_SIGNAL, TYPE_COMPUTE, TYPE_EFFECT,
-    TYPEFLAG_MASK, TYPEFLAG_SEND, TYPEFLAG_RECEIVE, TYPEFLAG_OWNER,
     OPTIONS,
     IDLE,
-    scheduleSignal,
     subscribe,
     startEffect,
 }

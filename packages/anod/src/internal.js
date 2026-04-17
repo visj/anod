@@ -3,18 +3,9 @@ export {
     FLAG_RUNNING, FLAG_DISPOSED, FLAG_LOADING, FLAG_ERROR, FLAG_RECOVER,
     FLAG_BOUND, FLAG_DERIVED, FLAG_EQUAL, FLAG_WEAK,
     FLAG_INIT,
-    OP_VALUE, OP_CALLBACK,
-    register,
-    CTX_EQUAL, CTX_NOTEQUAL, CTX_PROMISE, CTX_ITERABLE, CTX_ASYNC,
     OPT_DEFER, OPT_STABLE, OPT_SETUP, OPT_WEAK,
-    TYPE_ROOT, TYPE_SIGNAL, TYPE_COMPUTE, TYPE_EFFECT,
-    TYPEFLAG_SEND,
     OPTIONS,
     IDLE,
-    scheduleSignal,
     subscribe,
     startEffect,
-    isPrimitive,
-    isFunction,
-    isSignal
 } from "./core/signal.js";
