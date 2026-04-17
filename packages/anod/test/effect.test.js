@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { root, signal, compute, effect, scope, batch } from "../src/core/signal.js";
+import { root, signal, compute, effect, scope, batch, cleanup } from "../src/core/signal.js";
 
 describe("effect", () => {
     describe("modifies signals", () => {
@@ -8,8 +8,8 @@ describe("effect", () => {
             const s2 = signal(0);
             let v1;
 
-            effect((e) => {
-                if (e.read(s1)) {
+            effect(() => {
+                if (s1.val()) {
                     s2.set(1);
                     v1 = s2.val();
                     s1.set(false);
@@ -24,8 +24,8 @@ describe("effect", () => {
         test("throws when continually setting a direct dependency", () => {
             const s1 = signal(1);
             expect(() => {
-                effect((e) => {
-                    e.read(s1);
+                effect(() => {
+                    s1.val();
                     s1.set(s1.val() + 1); // Triggers runaway cycle
                 });
             }).toThrow(); // "Should throw runaway cycle"
@@ -33,13 +33,13 @@ describe("effect", () => {
 
         test("throws when continually setting an indirect dependency", () => {
             const s1 = signal(1);
-            const c1 = compute((c) => c.read(s1));
-            const c2 = compute((c) => c.read(c1));
-            const c3 = compute((c) => c.read(c2));
+            const c1 = compute(() => s1.val());
+            const c2 = compute(() => c1.val());
+            const c3 = compute(() => c2.val());
 
             expect(() => {
-                effect((e) => {
-                    e.read(c3);
+                effect(() => {
+                    c3.val();
                     s1.set(s1.val() + 1); // Triggers runaway cycle
                 });
             }).toThrow(); // "Should throw runaway cycle through computes"
@@ -49,10 +49,10 @@ describe("effect", () => {
             const s1 = signal(false);
             const s2 = signal(1);
 
-            effect((e) => {
-                if (e.read(s1)) throw new Error("Intentional Error");
+            effect(() => {
+                if (s1.val()) throw new Error("Intentional Error");
             });
-            effect((e) => { e.read(s2); });
+            effect(() => { s2.val(); });
 
             expect(() => {
                 batch(() => {
@@ -69,23 +69,23 @@ describe("effect", () => {
         let seq = "";
         const s1 = signal(0);
         const s2 = signal(0);
-        const c1 = compute((c) => { seq += "c1"; return c.read(s1); });
+        const c1 = compute(() => { seq += "c1"; return s1.val(); });
 
-        effect((e) => {
+        effect(() => {
             seq += "e1";
-            s2.set(e.read(s1));
+            s2.set(s1.val());
         });
 
-        const c2 = compute((c) => { seq += "c2"; return c.read(s2); });
+        const c2 = compute(() => { seq += "c2"; return s2.val(); });
 
-        effect((e) => {
-            seq += "e2s2{" + e.read(s2) + "}";
-            e.read(c1);
+        effect(() => {
+            seq += "e2s2{" + s2.val() + "}";
+            c1.val();
         });
 
-        effect((e) => {
-            seq += "e3s2{" + e.read(s2) + "}";
-            e.read(c2);
+        effect(() => {
+            seq += "e3s2{" + s2.val() + "}";
+            c2.val();
         });
         seq = "";
         s1.set(1);
@@ -97,9 +97,9 @@ describe("effect", () => {
             const s1 = signal(1);
             let count = 0;
 
-            effect((e) => {
-                e.read(s1);
-                e.cleanup(() => { count++; });
+            effect(() => {
+                s1.val();
+                cleanup(() => { count++; });
             });
 
             expect(count).toBe(0);
@@ -111,10 +111,10 @@ describe("effect", () => {
             const s1 = signal(1);
             let calls = 0;
 
-            scope((s) => {
-                s.read(s1);
-                s.effect((e) => {
-                    e.cleanup(() => { calls++; });
+            scope(() => {
+                s1.val();
+                effect(() => {
+                    cleanup(() => { calls++; });
                 });
             });
 
@@ -127,10 +127,10 @@ describe("effect", () => {
             const s1 = signal(1);
             let calls = 0;
 
-            const r1 = root((r) => {
-                r.effect((e) => {
-                    e.read(s1);
-                    e.cleanup(() => { calls++; });
+            const r1 = root(() => {
+                effect(() => {
+                    s1.val();
+                    cleanup(() => { calls++; });
                 });
 
                 expect(calls).toBe(0);

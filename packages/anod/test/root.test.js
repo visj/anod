@@ -3,16 +3,16 @@ import { root, signal, compute, effect } from "../src/index.js";
 
 describe("root", () => {
     test("allows subcomputations to escape their parents via nested scope", () => {
-        root((r) => {
+        root(() => {
             const s1 = signal(0);
             const s2 = signal(0);
             let count = 0;
 
-            r.effect((e) => {
-                e.read(s1);
-                root((r2) => {
-                    r2.effect((e2) => {
-                        e2.read(s2);
+            effect(() => {
+                s1.val();
+                root(() => {
+                    effect(() => {
+                        s2.val();
                         count++;
                     });
                 });
@@ -30,9 +30,9 @@ describe("root", () => {
     });
 
     test("does not batch updates within scope", () => {
-        root((r) => {
+        root(() => {
             const s1 = signal(1);
-            const c1 = r.compute((c) => c.read(s1));
+            const c1 = compute(() => s1.val());
 
             expect(c1.val()).toBe(1);
             s1.set(2);

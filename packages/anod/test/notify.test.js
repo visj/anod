@@ -1,17 +1,17 @@
 import { describe, test, expect } from "bun:test";
-import { root, signal, compute, effect, batch, OPT_NOTIFY } from "../";
+import { root, signal, compute, effect, batch, equal, OPT_NOTIFY } from "../";
 
 describe("equal()", () => {
     test("equal(true) suppresses notification when value changes", () => {
         const s1 = signal(1);
         let runs = 0;
-        const c1 = compute((c) => {
-            c.equal(true);
-            return c.read(s1);
+        const c1 = compute(() => {
+            equal(true);
+            return s1.val();
         });
-        const c2 = compute((c) => {
+        const c2 = compute(() => {
             runs++;
-            return c.read(c1);
+            return c1.val();
         });
 
         runs = 0;
@@ -24,14 +24,14 @@ describe("equal()", () => {
     test("equal(false) forces notification when value stays the same", () => {
         const s1 = signal(1);
         let runs = 0;
-        const c1 = compute((c) => {
-            c.equal(false);
-            c.read(s1);
+        const c1 = compute(() => {
+            equal(false);
+            s1.val();
             return 42;
         });
-        const c2 = compute((c) => {
+        const c2 = compute(() => {
             runs++;
-            return c.read(c1);
+            return c1.val();
         });
 
         expect(c1.val()).toBe(42);
@@ -45,14 +45,14 @@ describe("equal()", () => {
     test("equal(false) forces notification on effects", () => {
         const s1 = signal(1);
         let runs = 0;
-        const c1 = compute((c) => {
-            c.equal(false);
-            c.read(s1);
+        const c1 = compute(() => {
+            equal(false);
+            s1.val();
             return 42;
         });
-        effect((e) => {
+        effect(() => {
             runs++;
-            e.read(c1);
+            c1.val();
         });
 
         runs = 0;
@@ -63,13 +63,13 @@ describe("equal()", () => {
     test("default behavior: no notification when value stays the same", () => {
         const s1 = signal(1);
         let runs = 0;
-        const c1 = compute((c) => {
-            c.read(s1);
+        const c1 = compute(() => {
+            s1.val();
             return 42;
         });
-        const c2 = compute((c) => {
+        const c2 = compute(() => {
             runs++;
-            return c.read(c1);
+            return c1.val();
         });
 
         runs = 0;
@@ -82,12 +82,12 @@ describe("equal()", () => {
     test("default behavior: notifies when value changes", () => {
         const s1 = signal(1);
         let runs = 0;
-        const c1 = compute((c) => {
-            return c.read(s1) * 2;
+        const c1 = compute(() => {
+            return s1.val() * 2;
         });
-        const c2 = compute((c) => {
+        const c2 = compute(() => {
             runs++;
-            return c.read(c1);
+            return c1.val();
         });
 
         runs = 0;
@@ -100,15 +100,15 @@ describe("equal()", () => {
     test("equal(true) then equal(false) uses last call", () => {
         const s1 = signal(1);
         let runs = 0;
-        const c1 = compute((c) => {
-            c.equal(true);
-            c.equal(false);
-            c.read(s1);
+        const c1 = compute(() => {
+            equal(true);
+            equal(false);
+            s1.val();
             return 42;
         });
-        const c2 = compute((c) => {
+        const c2 = compute(() => {
             runs++;
-            return c.read(c1);
+            return c1.val();
         });
 
         runs = 0;
@@ -121,14 +121,14 @@ describe("equal()", () => {
     test("equal(false) then equal(true) uses last call", () => {
         const s1 = signal(1);
         let runs = 0;
-        const c1 = compute((c) => {
-            c.equal(false);
-            c.equal(true);
-            return c.read(s1);
+        const c1 = compute(() => {
+            equal(false);
+            equal(true);
+            return s1.val();
         });
-        const c2 = compute((c) => {
+        const c2 = compute(() => {
             runs++;
-            return c.read(c1);
+            return c1.val();
         });
 
         runs = 0;
@@ -142,16 +142,16 @@ describe("equal()", () => {
         const s1 = signal(1);
         let forceNotify = false;
         let runs = 0;
-        const c1 = compute((c) => {
+        const c1 = compute(() => {
             if (forceNotify) {
-                c.equal(false);
+                equal(false);
             }
-            c.read(s1);
+            s1.val();
             return 42;
         });
-        const c2 = compute((c) => {
+        const c2 = compute(() => {
             runs++;
-            return c.read(c1);
+            return c1.val();
         });
 
         runs = 0;
@@ -180,13 +180,13 @@ describe("OPT_NOTIFY", () => {
     test("always-notify compute triggers downstream even when value stays the same", () => {
         const s1 = signal(1);
         let runs = 0;
-        const c1 = compute((c) => {
-            c.read(s1);
+        const c1 = compute(() => {
+            s1.val();
             return 42;
         }, undefined, OPT_NOTIFY);
-        const c2 = compute((c) => {
+        const c2 = compute(() => {
             runs++;
-            return c.read(c1);
+            return c1.val();
         });
 
         runs = 0;
@@ -199,13 +199,13 @@ describe("OPT_NOTIFY", () => {
     test("always-notify compute notifies stale instead of pending", () => {
         const s1 = signal(1);
         let order = "";
-        const c1 = compute((c) => {
+        const c1 = compute(() => {
             order += "c1";
-            return c.read(s1);
+            return s1.val();
         }, undefined, OPT_NOTIFY);
-        const c2 = compute((c) => {
+        const c2 = compute(() => {
             order += "c2";
-            return c.read(c1);
+            return c1.val();
         });
 
         order = "";
@@ -217,14 +217,14 @@ describe("OPT_NOTIFY", () => {
     test("OPT_NOTIFY ignores equal(true) calls", () => {
         const s1 = signal(1);
         let runs = 0;
-        const c1 = compute((c) => {
-            c.equal(true);
-            c.read(s1);
+        const c1 = compute(() => {
+            equal(true);
+            s1.val();
             return 42;
         }, undefined, OPT_NOTIFY);
-        const c2 = compute((c) => {
+        const c2 = compute(() => {
             runs++;
-            return c.read(c1);
+            return c1.val();
         });
 
         runs = 0;
@@ -240,13 +240,13 @@ describe("OPT_NOTIFY", () => {
     test("OPT_NOTIFY works with compute()", () => {
         const s1 = signal(1);
         let runs = 0;
-        const c1 = compute((c) => {
-            c.read(s1);
+        const c1 = compute(() => {
+            s1.val();
             return 42;
         }, undefined, OPT_NOTIFY);
-        const c2 = compute((c) => {
+        const c2 = compute(() => {
             runs++;
-            return c.read(c1);
+            return c1.val();
         });
 
         runs = 0;
@@ -259,13 +259,13 @@ describe("OPT_NOTIFY", () => {
     test("OPT_NOTIFY triggers effects", () => {
         const s1 = signal(1);
         let runs = 0;
-        const c1 = compute((c) => {
-            c.read(s1);
+        const c1 = compute(() => {
+            s1.val();
             return 42;
         }, undefined, OPT_NOTIFY);
-        effect((e) => {
+        effect(() => {
             runs++;
-            e.read(c1);
+            c1.val();
         });
 
         runs = 0;
@@ -277,13 +277,13 @@ describe("OPT_NOTIFY", () => {
     test("OPT_NOTIFY preserves across multiple updates", () => {
         const s1 = signal(1);
         let runs = 0;
-        const c1 = compute((c) => {
-            c.read(s1);
+        const c1 = compute(() => {
+            s1.val();
             return 42;
         }, undefined, OPT_NOTIFY);
-        const c2 = compute((c) => {
+        const c2 = compute(() => {
             runs++;
-            return c.read(c1);
+            return c1.val();
         });
 
         runs = 0;
@@ -305,18 +305,18 @@ describe("OPT_NOTIFY", () => {
     test("OPT_NOTIFY in a diamond dependency", () => {
         const s1 = signal(1);
         let runs = 0;
-        const c1 = compute((c) => {
-            return c.read(s1);
+        const c1 = compute(() => {
+            return s1.val();
         }, undefined, OPT_NOTIFY);
-        const c2 = compute((c) => {
-            return c.read(c1) + 1;
+        const c2 = compute(() => {
+            return c1.val() + 1;
         });
-        const c3 = compute((c) => {
-            return c.read(c1) + 2;
+        const c3 = compute(() => {
+            return c1.val() + 2;
         });
-        const c4 = compute((c) => {
+        const c4 = compute(() => {
             runs++;
-            return c.read(c2) + c.read(c3);
+            return c2.val() + c3.val();
         });
 
         expect(c4.val()).toBe(1 + 1 + 1 + 2);
@@ -334,19 +334,19 @@ describe("OPT_NOTIFY", () => {
     test("OPT_NOTIFY in a diamond where value stays the same", () => {
         const s1 = signal(1);
         let runs = 0;
-        const c1 = compute((c) => {
-            c.read(s1);
+        const c1 = compute(() => {
+            s1.val();
             return 42;
         }, undefined, OPT_NOTIFY);
-        const c2 = compute((c) => {
-            return c.read(c1) + 1;
+        const c2 = compute(() => {
+            return c1.val() + 1;
         });
-        const c3 = compute((c) => {
-            return c.read(c1) + 2;
+        const c3 = compute(() => {
+            return c1.val() + 2;
         });
-        const c4 = compute((c) => {
+        const c4 = compute(() => {
             runs++;
-            return c.read(c2) + c.read(c3);
+            return c2.val() + c3.val();
         });
 
         runs = 0;
@@ -363,13 +363,13 @@ describe("OPT_NOTIFY", () => {
     test("OPT_NOTIFY with batch", () => {
         const s1 = signal(1);
         let runs = 0;
-        const c1 = compute((c) => {
-            c.read(s1);
+        const c1 = compute(() => {
+            s1.val();
             return 42;
         }, undefined, OPT_NOTIFY);
-        effect((e) => {
+        effect(() => {
             runs++;
-            e.read(c1);
+            c1.val();
         });
 
         runs = 0;

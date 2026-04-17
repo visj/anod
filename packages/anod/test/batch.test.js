@@ -13,7 +13,7 @@ describe("batch", () => {
 
     test("stops propagation within batch scope", () => {
         const s1 = signal(1);
-        const c1 = compute((c) => c.read(s1));
+        const c1 = compute(() => s1.val());
 
         batch(() => {
             s1.set(2);

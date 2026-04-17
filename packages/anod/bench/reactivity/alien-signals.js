@@ -575,10 +575,6 @@ bench('Create 1k computations', benchCreateComputations(1_000));
 bench('Dynamic build: simple component', setupDynBuild(10, 5, 1, 2));
 bench('Dynamic build: large web app', setupDynBuild(1000, 12, 0.95, 4));
 
-for (let i = 1; i < 25; i++) {
-    bench(`Dynamic build: large web app ${i} sources`, setupDynBuild(1000, 12, 0.95, i));
-}
-
 bench('Dynamic build: wide dense', setupDynBuild(1000, 5, 1, 25));
 bench('Dynamic update: simple component', setupDynUpdate(10, 5, 1, 2, 0.2));
 bench('Dynamic update: dynamic component', setupDynUpdate(10, 10, 0.75, 6, 0.2));

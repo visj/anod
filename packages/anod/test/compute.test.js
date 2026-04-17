@@ -21,9 +21,9 @@ describe("compute", () => {
         test("updates when data is set", () => {
             const s1 = signal(1);
             let count = 0;
-            const c1 = compute((c) => {
+            const c1 = compute(() => {
                 count++;
-                return c.read(s1);
+                return s1.val();
             });
 
             s1.set(2);
@@ -34,9 +34,9 @@ describe("compute", () => {
         test("does not update when data is merely read", () => {
             const s1 = signal(1);
             let count = 0;
-            compute((c) => {
+            compute(() => {
                 count++;
-                return c.read(s1);
+                return s1.val();
             });
 
             s1.val();
@@ -50,9 +50,9 @@ describe("compute", () => {
         const s3 = signal(2);
         let count = 0;
 
-        const c1 = compute((c) => {
+        const c1 = compute(() => {
             count++;
-            return c.read(s1) ? c.read(s2) : c.read(s3);
+            return s1.val() ? s2.val() : s3.val();
         });
 
         c1.val();
@@ -112,14 +112,14 @@ describe("compute", () => {
         let countOne = 0;
         let countTwo = 0;
 
-        const c1 = compute((c) => {
+        const c1 = compute(() => {
             countOne++;
-            return c.read(s1);
+            return s1.val();
         });
 
-        const c2 = compute((c) => {
+        const c2 = compute(() => {
             countTwo++;
-            return c.read(c1);
+            return c1.val();
         });
 
         test("does not cause re-evaluation prematurely", () => {
@@ -138,7 +138,7 @@ describe("compute", () => {
     describe("with circular dependencies", () => {
         test("throws when cycle created by modifying a branch", () => {
             const s1 = signal(1);
-            var c1 = compute((c) => c.read(s1) > 1 ? c1.val() : c.read(s1));
+            var c1 = compute(() => s1.val() > 1 ? c1.val() : s1.val());
             c1.val();
             expect(() => {
                 s1.set(2);
@@ -152,9 +152,9 @@ describe("compute", () => {
             let order = "";
             const s1 = signal(0);
 
-            const c1 = compute((c) => { order += "c1"; return c.read(s1); });
-            const c2 = compute((c) => { order += "c2"; return c.read(s1); });
-            const c3 = compute((c) => { c.read(c1); c.read(c2); order += "c3"; });
+            const c1 = compute(() => { order += "c1"; return s1.val(); });
+            const c2 = compute(() => { order += "c2"; return s1.val(); });
+            const c3 = compute(() => { c1.val(); c2.val(); order += "c3"; });
 
             order = "";
             s1.set(1);
@@ -164,16 +164,16 @@ describe("compute", () => {
 
         test("only propagates once with linear convergences", () => {
             const s1 = signal(0);
-            const c1 = compute((c) => c.read(s1));
-            const c2 = compute((c) => c.read(s1));
-            const c3 = compute((c) => c.read(s1));
-            const c4 = compute((c) => c.read(s1));
-            const c5 = compute((c) => c.read(s1));
+            const c1 = compute(() => s1.val());
+            const c2 = compute(() => s1.val());
+            const c3 = compute(() => s1.val());
+            const c4 = compute(() => s1.val());
+            const c5 = compute(() => s1.val());
 
             let count = 0;
-            const c6 = compute((c) => {
+            const c6 = compute(() => {
                 count++;
-                return (c.read(c1)) + (c.read(c2)) + (c.read(c3)) + (c.read(c4)) + (c.read(c5));
+                return (c1.val()) + (c2.val()) + (c3.val()) + (c4.val()) + (c5.val());
             });
 
             count = 0;

@@ -11,6 +11,9 @@ import {
     spawn,
     scope,
     batch,
+    cleanup,
+    recover,
+    equal,
     OPT_NOTIFY,
     OPT_DYNAMIC,
     FLAG_STREAM,
@@ -23,8 +26,8 @@ describe("edge cases", () => {
     describe("effect error does not corrupt ctx", () => {
         test("effect throwing during creation does not corrupt outer compute", () => {
             const s1 = signal(1);
-            const c1 = compute((c) => {
-                let val = c.read(s1);
+            const c1 = compute(() => {
+                let val = s1.val();
                 if (val > 1) {
                     try {
                         effect(() => { throw new Error("inner boom"); });
@@ -45,18 +48,18 @@ describe("edge cases", () => {
             const s2 = signal(0);
             let outerRuns = 0;
 
-            const r = root((r) => {
-                r.recover(() => true);
+            const r = root(() => {
+                recover(() => true);
 
-                r.effect((e) => {
+                effect(() => {
                     outerRuns++;
-                    e.read(s1);
+                    s1.val();
                     if (s1.val() === 1) {
                         try {
                             effect(() => { throw new Error("inner"); });
                         } catch (_) { }
                     }
-                    e.read(s2);
+                    s2.val();
                 });
             });
 
@@ -73,12 +76,12 @@ describe("edge cases", () => {
             const s1 = signal(0);
             let outerRuns = 0;
 
-            const r = root((r) => {
-                r.recover(() => true);
+            const r = root(() => {
+                recover(() => true);
 
-                r.effect((e) => {
+                effect(() => {
                     outerRuns++;
-                    e.read(s1);
+                    s1.val();
                     if (s1.val() === 1) {
                         /** No try/catch — error propagates, outer effect is disposed */
                         effect(() => { throw new Error("inner"); });
@@ -97,8 +100,8 @@ describe("edge cases", () => {
 
         test("effect throwing during creation inside compute does not corrupt compute", () => {
             const s1 = signal(1);
-            const c1 = compute((c) => {
-                let val = c.read(s1);
+            const c1 = compute(() => {
+                let val = s1.val();
                 if (val > 1) {
                     try {
                         effect(() => { throw new Error("boom"); });
@@ -118,15 +121,15 @@ describe("edge cases", () => {
             const s1 = signal(0);
             let parentRuns = 0;
 
-            const r = root((r) => {
-                r.recover(() => true);
+            const r = root(() => {
+                recover(() => true);
 
-                r.scope((s) => {
+                scope(() => {
                     parentRuns++;
-                    s.read(s1);
+                    s1.val();
 
                     if (s1.val() === 1) {
-                        s.scope(() => {
+                        scope(() => {
                             throw new Error("inner scope");
                         });
                     }
@@ -147,17 +150,17 @@ describe("edge cases", () => {
             const s1 = signal(0);
             let secondRan = false;
 
-            const r = root((r) => {
-                r.recover(() => true);
+            const r = root(() => {
+                recover(() => true);
 
-                r.effect((e) => {
-                    if (e.read(s1) > 0) {
+                effect(() => {
+                    if (s1.val() > 0) {
                         throw new Error("first");
                     }
                 });
 
-                r.effect((e) => {
-                    e.read(s1);
+                effect(() => {
+                    s1.val();
                     secondRan = true;
                 });
             });
@@ -172,17 +175,17 @@ describe("edge cases", () => {
             const s1 = signal(0);
             let siblingRuns = 0;
 
-            const r = root((r) => {
-                r.recover(() => true);
+            const r = root(() => {
+                recover(() => true);
 
-                r.scope((s) => {
-                    if (s.read(s1) > 0) {
+                scope(() => {
+                    if (s1.val() > 0) {
                         throw new Error("scope boom");
                     }
                 });
 
-                r.scope((s) => {
-                    s.read(s1);
+                scope(() => {
+                    s1.val();
                     siblingRuns++;
                 });
             });
@@ -200,9 +203,9 @@ describe("edge cases", () => {
             const s2 = signal(10);
             let runs = 0;
 
-            const d = derive((c) => {
+            const d = derive(() => {
                 runs++;
-                return c.read(s1) + c.read(s2);
+                return s1.val() + s2.val();
             });
 
             expect(d.val()).toBe(11);
@@ -221,9 +224,9 @@ describe("edge cases", () => {
             const s1 = signal(1);
             let runs = 0;
 
-            const d = derive((c) => {
+            const d = derive(() => {
                 runs++;
-                c.read(s1);
+                s1.val();
                 return 42;
             });
 
@@ -242,7 +245,7 @@ describe("edge cases", () => {
             const s1 = signal(1);
             let last = 0;
 
-            watch((c) => { last = c.read(s1); });
+            watch(() => { last = s1.val(); });
 
             expect(last).toBe(1);
             s1.set(2);
@@ -253,9 +256,9 @@ describe("edge cases", () => {
             const s1 = signal(1);
             let cleanups = 0;
 
-            watch((c) => {
-                c.read(s1);
-                c.cleanup(() => { cleanups++; });
+            watch(() => {
+                s1.val();
+                cleanup(() => { cleanups++; });
             });
 
             expect(cleanups).toBe(0);
@@ -269,14 +272,14 @@ describe("edge cases", () => {
             const s1 = signal(1);
             let runs = 0;
 
-            const t = transmit((c) => {
-                c.read(s1);
+            const t = transmit(() => {
+                s1.val();
                 return 42;
             });
 
-            effect((e) => {
+            effect(() => {
                 runs++;
-                e.read(t);
+                t.val();
             });
 
             expect(runs).toBe(1);
@@ -289,8 +292,8 @@ describe("edge cases", () => {
             const s1 = signal(1);
             let computeRuns = 0;
 
-            const t = transmit((c) => {
-                c.read(s1);
+            const t = transmit(() => {
+                s1.val();
                 return 42;
             });
 
@@ -299,12 +302,12 @@ describe("edge cases", () => {
              * (not PENDING), meaning it will re-execute without
              * needing to check if the dep actually changed.
              */
-            const c1 = derive((c) => {
+            const c1 = derive(() => {
                 computeRuns++;
-                return c.read(t) + 1;
+                return t.val() + 1;
             });
 
-            effect((e) => { e.read(c1); });
+            effect(() => { c1.val(); });
 
             expect(computeRuns).toBe(1);
             s1.set(2);
@@ -318,9 +321,9 @@ describe("edge cases", () => {
             const s2 = signal(10);
             let runs = 0;
 
-            const t = task((c) => {
+            const t = task(() => {
                 runs++;
-                return Promise.resolve(c.read(s1) + c.read(s2));
+                return Promise.resolve(s1.val() + s2.val());
             }, 0);
 
             expect(runs).toBe(1);
@@ -328,7 +331,7 @@ describe("edge cases", () => {
         });
 
         test("settles to resolved value", async () => {
-            const t = task((c) => Promise.resolve(42), 0);
+            const t = task(() => Promise.resolve(42), 0);
 
             expect(t.val()).toBe(0);
             expect(t.loading()).toBe(true);
@@ -340,10 +343,10 @@ describe("edge cases", () => {
         });
 
         test("notifies downstream on settle", async () => {
-            const t = task((c) => Promise.resolve(42), 0);
+            const t = task(() => Promise.resolve(42), 0);
             let received = 0;
 
-            effect((e) => { received = e.read(t); });
+            effect(() => { received = t.val(); });
 
             expect(received).toBe(0);
             await tick();
@@ -351,7 +354,7 @@ describe("edge cases", () => {
         });
 
         test("sets error flag on rejection", async () => {
-            const t = task((c) => Promise.reject(new Error("fail")), 0);
+            const t = task(() => Promise.reject(new Error("fail")), 0);
 
             await tick();
 
@@ -361,7 +364,7 @@ describe("edge cases", () => {
 
         test("re-evaluates when dep changes", async () => {
             const s1 = signal(1);
-            const t = task((c) => Promise.resolve(c.read(s1) * 10), 0);
+            const t = task(() => Promise.resolve(s1.val() * 10), 0);
 
             await tick();
             expect(t.val()).toBe(10);
@@ -378,9 +381,9 @@ describe("edge cases", () => {
             const s3 = signal("b");
             let runs = 0;
 
-            const t = task((c) => {
+            const t = task(() => {
                 runs++;
-                return Promise.resolve(c.read(s1) ? c.read(s2) : c.read(s3));
+                return Promise.resolve(s1.val() ? s2.val() : s3.val());
             }, "", OPT_DYNAMIC);
 
             await tick();
@@ -413,7 +416,7 @@ describe("edge cases", () => {
         test("runs async effect", async () => {
             let ran = false;
 
-            spawn((c) => {
+            spawn(() => {
                 return new Promise((resolve) => {
                     ran = true;
                     resolve();
@@ -428,9 +431,9 @@ describe("edge cases", () => {
             let cleaned = false;
             const s1 = signal(0);
 
-            const r = root((r) => {
-                r.spawn((c) => {
-                    c.read(s1);
+            const r = root(() => {
+                spawn(() => {
+                    s1.val();
                     return Promise.resolve(() => { cleaned = false; });
                 });
             });
@@ -446,10 +449,10 @@ describe("edge cases", () => {
             const s2 = signal(2);
             let runs = 0;
 
-            spawn((c) => {
+            spawn(() => {
                 runs++;
-                c.read(s1);
-                c.read(s2);
+                s1.val();
+                s2.val();
                 return Promise.resolve();
             });
 
@@ -462,8 +465,8 @@ describe("edge cases", () => {
 
             /** We can't easily check loading on Effect from outside,
              *  but we verify the effect doesn't crash */
-            spawn((c) => {
-                c.read(s1);
+            spawn(() => {
+                s1.val();
                 return new Promise((r) => setTimeout(r, 100));
             });
         });
@@ -475,10 +478,10 @@ describe("edge cases", () => {
             const s2 = signal(10);
             let runs = 0;
 
-            scope((c) => {
+            scope(() => {
                 runs++;
-                c.read(s1);
-                c.read(s2);
+                s1.val();
+                s2.val();
             });
 
             expect(runs).toBe(1);
@@ -496,12 +499,12 @@ describe("edge cases", () => {
             const s3 = signal(0);
             let runs = 0;
 
-            scope((c) => {
+            scope(() => {
                 runs++;
-                if (c.read(s1)) {
-                    c.read(s2);
+                if (s1.val()) {
+                    s2.val();
                 } else {
-                    c.read(s3);
+                    s3.val();
                 }
             }, OPT_DYNAMIC);
 
@@ -527,14 +530,14 @@ describe("edge cases", () => {
     describe("diamond dependency", () => {
         test("effect runs once for diamond update", () => {
             const s1 = signal(0);
-            const c1 = derive((c) => c.read(s1) + 1);
-            const c2 = derive((c) => c.read(s1) + 10);
+            const c1 = derive(() => s1.val() + 1);
+            const c2 = derive(() => s1.val() + 10);
             let runs = 0;
 
-            effect((e) => {
+            effect(() => {
                 runs++;
-                e.read(c1);
-                e.read(c2);
+                c1.val();
+                c2.val();
             });
 
             expect(runs).toBe(1);
@@ -544,9 +547,9 @@ describe("edge cases", () => {
 
         test("compute evaluates correctly in diamond", () => {
             const s1 = signal(1);
-            const left = derive((c) => c.read(s1) * 2);
-            const right = derive((c) => c.read(s1) * 3);
-            const sum = derive((c) => c.read(left) + c.read(right));
+            const left = derive(() => s1.val() * 2);
+            const right = derive(() => s1.val() * 3);
+            const sum = derive(() => left.val() + right.val());
 
             expect(sum.val()).toBe(5);
             s1.set(2);
@@ -557,14 +560,14 @@ describe("edge cases", () => {
 
         test("deep diamond with pending/stale split", () => {
             const s1 = signal(0);
-            const a = derive((c) => c.read(s1) + 1);
-            const b = derive((c) => c.read(a) + 1);
-            const c1 = derive((c) => c.read(a) + c.read(b));
+            const a = derive(() => s1.val() + 1);
+            const b = derive(() => a.val() + 1);
+            const c1 = derive(() => a.val() + b.val());
             let runs = 0;
 
-            effect((e) => {
+            effect(() => {
                 runs++;
-                e.read(c1);
+                c1.val();
             });
 
             expect(runs).toBe(1);
@@ -581,10 +584,10 @@ describe("edge cases", () => {
             let c2Runs = 0;
 
             /** c1 absorbs: always returns 0 regardless of s1 */
-            const c1 = derive((c) => { c1Runs++; c.read(s1); return 0; });
-            const c2 = derive((c) => { c2Runs++; return c.read(c1) + 1; });
+            const c1 = derive(() => { c1Runs++; s1.val(); return 0; });
+            const c2 = derive(() => { c2Runs++; return c1.val() + 1; });
 
-            effect((e) => { e.read(c2); });
+            effect(() => { c2.val(); });
 
             expect(c1Runs).toBe(1);
             expect(c2Runs).toBe(1);
@@ -597,13 +600,13 @@ describe("edge cases", () => {
 
         test("deep chain avoids unnecessary work", () => {
             const s1 = signal(0);
-            const c1 = derive((c) => { c.read(s1); return 0; });
-            const c2 = derive((c) => c.read(c1) + 1);
-            const c3 = derive((c) => c.read(c2) + 1);
-            const c4 = derive((c) => c.read(c3) + 1);
+            const c1 = derive(() => { s1.val(); return 0; });
+            const c2 = derive(() => c1.val() + 1);
+            const c3 = derive(() => c2.val() + 1);
+            const c4 = derive(() => c3.val() + 1);
             let runs = 0;
 
-            effect((e) => { runs++; e.read(c4); });
+            effect(() => { runs++; c4.val(); });
 
             expect(runs).toBe(1);
             s1.set(1);
@@ -618,10 +621,10 @@ describe("edge cases", () => {
             const s2 = signal(0);
             let runs = 0;
 
-            effect((e) => {
+            effect(() => {
                 runs++;
-                e.read(s1);
-                e.read(s2);
+                s1.val();
+                s2.val();
             });
 
             expect(runs).toBe(1);
@@ -636,7 +639,7 @@ describe("edge cases", () => {
             const s1 = signal(0);
             let runs = 0;
 
-            effect((e) => { runs++; e.read(s1); });
+            effect(() => { runs++; s1.val(); });
 
             expect(runs).toBe(1);
             batch(() => {
@@ -666,7 +669,7 @@ describe("edge cases", () => {
     describe("dispose", () => {
         test("disposed compute returns last value", () => {
             const s1 = signal(1);
-            const c1 = derive((c) => c.read(s1) * 2);
+            const c1 = derive(() => s1.val() * 2);
 
             expect(c1.val()).toBe(2);
             c1.dispose();
@@ -678,7 +681,7 @@ describe("edge cases", () => {
             const s1 = signal(0);
             let runs = 0;
 
-            const e1 = effect((e) => { runs++; e.read(s1); });
+            const e1 = effect(() => { runs++; s1.val(); });
 
             expect(runs).toBe(1);
             e1.dispose();
@@ -690,9 +693,9 @@ describe("edge cases", () => {
             const s1 = signal(0);
             let runs = 0;
 
-            const r = root((r) => {
-                r.effect((e) => { runs++; e.read(s1); });
-                r.effect((e) => { runs++; e.read(s1); });
+            const r = root(() => {
+                effect(() => { runs++; s1.val(); });
+                effect(() => { runs++; s1.val(); });
             });
 
             expect(runs).toBe(2);
@@ -711,10 +714,10 @@ describe("edge cases", () => {
     describe("circular dependency", () => {
         test("compute reading itself via signal indirection throws", () => {
             const s1 = signal(0);
-            const c1 = compute((c) => {
-                let v = c.read(s1);
+            const c1 = compute(() => {
+                let v = s1.val();
                 if (v > 0) {
-                    return c.read(c1);
+                    return c1.val();
                 }
                 return v;
             });
@@ -732,12 +735,12 @@ describe("edge cases", () => {
             const s3 = signal("b");
             let runs = 0;
 
-            const c1 = compute((c) => {
+            const c1 = compute(() => {
                 runs++;
-                return c.read(s1) ? c.read(s2) : c.read(s3);
+                return s1.val() ? s2.val() : s3.val();
             });
 
-            effect((e) => { e.read(c1); });
+            effect(() => { c1.val(); });
 
             expect(runs).toBe(1);
             expect(c1.val()).toBe("a");
@@ -763,12 +766,12 @@ describe("edge cases", () => {
             const s1 = signal(0);
             let runs = 0;
 
-            const c1 = compute((c) => {
-                c.equal(true);
-                return c.read(s1);
+            const c1 = compute(() => {
+                equal(true);
+                return s1.val();
             });
 
-            effect((e) => { runs++; e.read(c1); });
+            effect(() => { runs++; c1.val(); });
 
             expect(runs).toBe(1);
             s1.set(1);
@@ -780,13 +783,13 @@ describe("edge cases", () => {
             const s1 = signal(0);
             let runs = 0;
 
-            const c1 = compute((c) => {
-                c.equal(false);
-                c.read(s1);
+            const c1 = compute(() => {
+                equal(false);
+                s1.val();
                 return 42;
             });
 
-            effect((e) => { runs++; e.read(c1); });
+            effect(() => { runs++; c1.val(); });
 
             expect(runs).toBe(1);
             s1.set(1);
@@ -804,11 +807,11 @@ describe("edge cases", () => {
                 return() { return Promise.resolve({ done: true }); }
             };
 
-            const c1 = compute((c) => iter, undefined, FLAG_STREAM);
+            const c1 = compute(() => iter, undefined, FLAG_STREAM);
             const values = [];
 
-            effect((e) => {
-                const v = e.read(c1);
+            effect(() => {
+                const v = c1.val();
                 if (!c1.loading()) {
                     values.push(v);
                 }
@@ -829,12 +832,12 @@ describe("edge cases", () => {
             const s1 = signal(1);
             let runs = 0;
 
-            const c1 = compute((c) => {
-                c.read(s1);
+            const c1 = compute(() => {
+                s1.val();
                 return 42;
             }, undefined, OPT_NOTIFY);
 
-            effect((e) => { runs++; e.read(c1); });
+            effect(() => { runs++; c1.val(); });
 
             expect(runs).toBe(1);
             s1.set(2);
@@ -845,7 +848,7 @@ describe("edge cases", () => {
     describe("seed value", () => {
         test("compute receives seed as prev on first run", () => {
             let received;
-            const c1 = compute((c, prev) => {
+            const c1 = compute((prev) => {
                 received = prev;
                 return prev + 1;
             }, 10);
@@ -856,7 +859,7 @@ describe("edge cases", () => {
 
         test("derive receives seed", () => {
             let received;
-            const d = derive((c, prev) => {
+            const d = derive((prev) => {
                 received = prev;
                 return 42;
             }, 99);
@@ -872,12 +875,12 @@ describe("edge cases", () => {
             const s2 = signal(0);
             let s2val = 0;
 
-            effect((e) => {
-                s2.set(e.read(s1) * 10);
+            effect(() => {
+                s2.set(s1.val() * 10);
             });
 
-            effect((e) => {
-                s2val = e.read(s2);
+            effect(() => {
+                s2val = s2.val();
             });
 
             expect(s2val).toBe(0);
@@ -890,11 +893,11 @@ describe("edge cases", () => {
         test("error in compute is caught when effect reads it", () => {
             let caught = null;
 
-            const r = root((r) => {
-                r.recover((err) => { caught = err; return true; });
+            const r = root(() => {
+                recover((err) => { caught = err; return true; });
 
-                const c1 = r.compute(() => { throw new Error("compute err"); });
-                r.effect((e) => { e.read(c1); });
+                const c1 = compute(() => { throw new Error("compute err"); });
+                effect(() => { c1.val(); });
             });
 
             expect(caught).toBeInstanceOf(Error);
@@ -919,7 +922,7 @@ describe("edge cases", () => {
             let current = head;
             for (let i = 0; i < 50; i++) {
                 const prev = current;
-                current = derive((c) => c.read(prev) + 1);
+                current = derive(() => prev.val() + 1);
             }
 
             expect(current.val()).toBe(50);
@@ -934,7 +937,7 @@ describe("edge cases", () => {
             let total = 0;
 
             for (let i = 0; i < 50; i++) {
-                effect((e) => { total += e.read(s1); });
+                effect(() => { total += s1.val(); });
             }
 
             expect(total).toBe(0);
@@ -949,9 +952,9 @@ describe("edge cases", () => {
             const s1 = signal(1);
             const s2 = signal(2);
 
-            const c1 = derive((c) => c.read(s1) + c.read(s2));
-            const c2 = derive((c) => c.read(c1) * 2);
-            const c3 = derive((c) => c.read(c1) + c.read(c2));
+            const c1 = derive(() => s1.val() + s2.val());
+            const c2 = derive(() => c1.val() * 2);
+            const c3 = derive(() => c1.val() + c2.val());
 
             expect(c3.val()).toBe(9);
             s1.set(3);
