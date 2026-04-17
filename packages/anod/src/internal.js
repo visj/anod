@@ -14,7 +14,6 @@ export {
     scheduleSignal,
     subscribe,
     startEffect,
-    Reader,
     isPrimitive,
     isFunction,
     isSignal

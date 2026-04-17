@@ -8,7 +8,6 @@ import {
     effect,
     watch,
     spawn,
-    scope,
     batch,
     OPT_DYNAMIC,
     FLAG_STREAM,
@@ -119,12 +118,12 @@ describe("edge cases", () => {
             const r = root((r) => {
                 r.recover(() => true);
 
-                r.scope((s) => {
+                r.effect((e) => {
                     parentRuns++;
-                    s.read(s1);
+                    e.read(s1);
 
                     if (s1.val() === 1) {
-                        s.scope(() => {
+                        e.effect(() => {
                             throw new Error("inner scope");
                         });
                     }
@@ -173,14 +172,14 @@ describe("edge cases", () => {
             const r = root((r) => {
                 r.recover(() => true);
 
-                r.scope((s) => {
-                    if (s.read(s1) > 0) {
+                r.effect((e) => {
+                    if (e.read(s1) > 0) {
                         throw new Error("scope boom");
                     }
                 });
 
-                r.scope((s) => {
-                    s.read(s1);
+                r.effect((e) => {
+                    e.read(s1);
                     siblingRuns++;
                 });
             });
@@ -425,10 +424,12 @@ describe("edge cases", () => {
             const s2 = signal(10);
             let runs = 0;
 
-            scope((c) => {
-                runs++;
-                c.read(s1);
-                c.read(s2);
+            root((r) => {
+                r.effect((e) => {
+                    runs++;
+                    e.read(s1);
+                    e.read(s2);
+                });
             });
 
             expect(runs).toBe(1);
@@ -446,14 +447,16 @@ describe("edge cases", () => {
             const s3 = signal(0);
             let runs = 0;
 
-            scope((c) => {
-                runs++;
-                if (c.read(s1)) {
-                    c.read(s2);
-                } else {
-                    c.read(s3);
-                }
-            }, OPT_DYNAMIC);
+            root((r) => {
+                r.effect((e) => {
+                    runs++;
+                    if (e.read(s1)) {
+                        e.read(s2);
+                    } else {
+                        e.read(s3);
+                    }
+                }, OPT_DYNAMIC);
+            });
 
             expect(runs).toBe(1);
 

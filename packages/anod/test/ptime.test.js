@@ -5,7 +5,6 @@ import {
     derive,
     effect,
     watch,
-    scope,
     batch,
 } from "../";
 

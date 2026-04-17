@@ -22,6 +22,5 @@ export {
     effect,
     watch,
     spawn,
-    scope,
     batch
 } from "./core/signal.js";

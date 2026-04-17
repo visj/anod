@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { root, signal, compute, effect, scope, batch } from "../";
+import { root, signal, compute, effect, batch } from "../";
 
 describe("recover", () => {
     describe("root recovery", () => {
@@ -134,13 +134,13 @@ describe("recover", () => {
                     return true;
                 });
 
-                r.scope((s) => {
-                    s.recover(() => {
+                r.effect((e) => {
+                    e.recover(() => {
                         innerCalled = true;
                         return true;
                     });
 
-                    s.effect(() => {
+                    e.effect(() => {
                         throw new Error("inner error");
                     });
                 });
@@ -161,13 +161,13 @@ describe("recover", () => {
                     return true;
                 });
 
-                r.scope((s) => {
-                    s.recover(() => {
+                r.effect((e) => {
+                    e.recover(() => {
                         innerCalled = true;
                         return false;
                     });
 
-                    s.effect(() => {
+                    e.effect(() => {
                         throw new Error("bubble up");
                     });
                 });
@@ -274,17 +274,17 @@ describe("recover", () => {
             let recoveredVersion = -1;
 
             const r1 = root((r) => {
-                r.scope((s) => {
-                    let version = s.read(s1);
+                r.effect((e) => {
+                    let version = e.read(s1);
                     handlerVersion = version;
 
-                    s.recover((err) => {
+                    e.recover((err) => {
                         recoveredVersion = version;
                         return true;
                     });
 
                     if (version > 1) {
-                        s.effect(() => {
+                        e.effect(() => {
                             throw new Error("fail");
                         });
                     }

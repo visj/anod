@@ -26,7 +26,6 @@ const CTX_NOTEQUAL = 2;
 const CTX_PROMISE = 4;
 const CTX_ITERABLE = 8;
 const CTX_ASYNC = CTX_PROMISE | CTX_ITERABLE;
-const CTX_OWNER = 16;
 
 const FLAG_STALE = 1 << 0;
 const FLAG_PENDING = 1 << 1;
@@ -124,8 +123,6 @@ var DBASE = 0;
 var MINLEVEL = 0;
 /** @type {number} */
 var MAXLEVEL = 0;
-/** @type {Owner | null} */
-var SCOPE = null;
 
 var TIME = 1;
 
@@ -150,7 +147,7 @@ var SIGNALS = [];
  * @const
  * @type {Array}
  */
-var SIGNAL_VALS = [];
+var PAYLOADS = [];
 var SIGNALS_COUNT = 0;
 
 /**
@@ -257,48 +254,18 @@ function loading() {
 }
 
 
-// ─── Reader / Subscriber ───────────────────────────────────────────────────
-// Reader and Subscriber still exist as exported constructors for backward
-// compatibility with anod-list, which extends their prototypes with
-// _source() and _getMod(). In the new architecture the node itself is
-// passed as the first argument to fn(), so Reader/Subscriber are only
-// used as the context bridge for list.js.
-//
-// Reader is used for stable/bound/SETUP paths. Subscriber is aliased
-// to the same constructor for API compatibility.
+// ─── Shared node methods ───────────────────────────────────────────────────
+// These implementations are installed on both Compute and Effect prototypes
+// so user callbacks can invoke them on the node itself (e.g. `c.equal(true)`
+// inside a compute, `e.cleanup(fn)` inside an effect). Ownership-creating
+// methods live further down on the Root and Effect prototypes — since the
+// callback is passed the node (Root or Effect) directly, `this` inside a
+// prototype method is the owner, no global state needed.
 
 /**
- * Lightweight execution context. In the new architecture, the node
- * itself is the primary execution context. Reader wraps the node
- * reference for backward compat with anod-list.
- * @constructor
- */
-function Reader() {
-    /** @type {Receiver | null} */
-    this._node = null;
-    /** @type {number} */
-    this._state = 0;
-    /** @type {number} */
-    this._version = 0;
-}
-
-/** @const */
-var ReaderProto = Reader.prototype;
-
-/**
- * Reader.read delegates to the node's _read method.
- * @template T
- * @param {!Sender<T>} sender
- * @returns {T}
- */
-ReaderProto.read = function (sender) {
-    return read.call(this._node, sender);
-};
-
-/**
- * Shared method: declares that this compute's output is
- * semantically equal to its previous value. Sets FLAG_EQUAL
- * or FLAG_NOTEQUAL directly on the node's _flag.
+ * Declares the current compute's output semantically equal (or not)
+ * to its previous value.
+ * @this {Receiver}
  * @param {boolean=} eq
  * @returns {void}
  */
@@ -311,8 +278,8 @@ function _equal(eq) {
 }
 
 /**
- * Shared method: marks the current node as stable (no more
- * dynamic dep tracking on subsequent runs).
+ * Marks the current node stable — no dynamic dep tracking on subsequent runs.
+ * @this {Receiver}
  * @returns {void}
  */
 function _stable() {
@@ -320,8 +287,8 @@ function _stable() {
 }
 
 /**
- * Shared method: registers a cleanup function on the current node.
- * Only valid when the node is an Owner (Effect/Scope).
+ * Registers a cleanup fn on the current node. Valid on any Effect or Root.
+ * @this {Owner}
  * @param {function(): void} fn
  * @returns {void}
  */
@@ -330,8 +297,8 @@ function _cleanup(fn) {
 }
 
 /**
- * Shared method: registers a recover handler on the current node.
- * Only valid when the node is an Owner (Effect/Scope).
+ * Registers a recover handler on the current node. Valid on any Effect or Root.
+ * @this {Owner}
  * @param {function(*): boolean} fn
  * @returns {void}
  */
@@ -339,57 +306,30 @@ function _recover(fn) {
     addRecover(this, fn);
 }
 
-/**
- * Reader/Subscriber equal/stable delegate to _node for compat with
- * anod-list which creates Reader/Subscriber instances.
- */
-function _ctxEqual(eq) {
-    if (eq === false) {
-        this._node._flag = (this._node._flag | FLAG_NOTEQUAL) & ~FLAG_EQUAL;
-    } else {
-        this._node._flag = (this._node._flag | FLAG_EQUAL) & ~FLAG_NOTEQUAL;
-    }
-}
-function _ctxStable() {
-    this._node._flag |= FLAG_STABLE;
-}
-function _ctxError() {
-    return (this._node._flag & FLAG_ERROR) !== 0;
-}
-function _ctxLoading() {
-    return (this._node._flag & FLAG_LOADING) !== 0;
-}
-function _ctxCleanup(fn) {
-    addCleanup(this._node, fn);
-}
-function _ctxRecover(fn) {
-    addRecover(this._node, fn);
-}
-
-ReaderProto.equal = _ctxEqual;
-ReaderProto.stable = _ctxStable;
-ReaderProto.error = _ctxError;
-ReaderProto.loading = _ctxLoading;
-ReaderProto.cleanup = _ctxCleanup;
-ReaderProto.recover = _ctxRecover;
+// ─── Ownership methods installed on Root & Effect prototypes ───────────────
+// `this` is the owner (Root or Effect). Created nodes are appended to
+// `this._owned` (lazily allocated as an array). Compute-creating methods are
+// shared verbatim between Root and Effect; Effect-creating methods split
+// (see _effEffect/_rootEffect below) because the child's topological level
+// depends on whether the owner is an Effect (level+1) or a Root (level 0).
 
 /**
- * Creates an owned Compute node. Only valid inside a Root or Scope.
+ * @this {Owner}
  * @template T,W
  * @param {function(T,W): T} fn
  * @param {T=} seed
  * @param {number=} opts
  * @param {W=} args
- * @returns {!Compute<T,null,null,W>}
+ * @returns {Compute<T,W>}
  */
-function _ctxCompute(fn, seed, opts, args) {
-    let owner = SCOPE;
-    if (owner === null) {
-        throw new Error('Ownership required');
-    }
+function _ownCompute(fn, seed, opts, args) {
     let flag = FLAG_SETUP | ((0 | opts) & OPTIONS);
     let node = new Compute(flag, fn, null, seed, args);
-    addOwned(owner, node);
+    if (this._owned === null) {
+        this._owned = [node];
+    } else {
+        this._owned.push(node);
+    }
     if (!(flag & FLAG_DEFER)) {
         startCompute(node);
     }
@@ -397,94 +337,34 @@ function _ctxCompute(fn, seed, opts, args) {
 }
 
 /**
- * Creates an owned stable Compute node. Only valid inside a Root or Scope.
- * @template T,W
- * @param {function(T,W): T} fn
- * @param {T=} seed
- * @param {W=} args
- * @returns {!Compute<T,null,null,W>}
+ * Stable compute owned by this node.
+ * @this {Owner}
+ * @param {function|Sender} fnOrDep
+ * @param {*=} seedOrFn
+ * @param {*=} argsOrSeed
+ * @param {*=} args
+ * @returns {!Compute}
  */
-function _ctxDerive(fn, seed, args) {
-    let owner = SCOPE;
-    if (owner === null) {
-        throw new Error('Ownership required');
+function _ownDerive(fnOrDep, seedOrFn, argsOrSeed, args) {
+    let node;
+    if (typeof fnOrDep === 'function') {
+        node = new Compute(FLAG_STABLE | FLAG_SETUP, fnOrDep, null, seedOrFn, argsOrSeed);
+    } else {
+        node = new Compute(FLAG_STABLE | FLAG_BOUND, seedOrFn, fnOrDep, argsOrSeed, args);
+        node._dep1slot = subscribe(fnOrDep, node, -1);
     }
-    let node = new Compute(FLAG_STABLE | FLAG_SETUP, fn, null, seed, args);
-    addOwned(owner, node);
+    if (this._owned === null) {
+        this._owned = [node];
+    } else {
+        this._owned.push(node);
+    }
     startCompute(node);
     return node;
 }
 
 /**
- * Creates an owned Effect node. Only valid inside a Root or Scope.
- * @template W
- * @param {function(W): (function(): void | void)} fn
- * @param {number=} opts
- * @param {W=} args
- * @returns {!Effect<null,null,W>}
- */
-function _ctxEffect(fn, opts, args) {
-    let owner = SCOPE;
-    if (owner === null) {
-        throw new Error('Ownership required');
-    }
-    let flag = FLAG_SETUP | ((0 | opts) & OPTIONS);
-    let node = new Effect(flag, fn, null, args);
-    node._owner = owner;
-    addOwned(owner, node);
-    startEffect(node);
-    return node;
-}
-
-/**
- * Creates an owned stable Effect node. Only valid inside a Root or Scope.
- * @template W
- * @param {function(W): (function(): void | void)} fn
- * @param {W=} args
- * @returns {!Effect<null,null,W>}
- */
-function _ctxWatch(fn, args) {
-    let owner = SCOPE;
-    if (owner === null) {
-        throw new Error('Ownership required');
-    }
-    let node = new Effect(FLAG_STABLE | FLAG_SETUP, fn, null, args);
-    node._owner = owner;
-    addOwned(owner, node);
-    startEffect(node);
-    return node;
-}
-
-/**
- * Creates an owned Scope (Effect with _owned). Only valid inside a Root or Scope.
- * @param {function(): (function(): void | void)} fn
- * @param {number=} opts
- * @returns {!Effect}
- */
-function _ctxScope(fn, opts) {
-    let owner = SCOPE;
-    if (owner === null) {
-        throw new Error('Ownership required');
-    }
-    opts = 0 | opts;
-    let flag = FLAG_SETUP | (opts & OPTIONS);
-    if (!(opts & OPT_DYNAMIC)) {
-        flag |= FLAG_STABLE;
-    }
-    let node = new Effect(flag, fn, null);
-    node._owner = owner;
-    node._owned = [];
-    addOwned(owner, node);
-    /** Only call setScope for scope Effects (Root has no _level) */
-    if (owner.t & TYPEFLAG_RECEIVE) {
-        setScope(node, owner);
-    }
-    startEffect(node);
-    return node;
-}
-
-/**
- * Creates an owned async Compute. Only valid inside a Root or Scope.
+ * Async compute owned by this node.
+ * @this {Owner}
  * @template T,W
  * @param {function(T,W): Promise<T>} fn
  * @param {T=} seed
@@ -492,18 +372,18 @@ function _ctxScope(fn, opts) {
  * @param {W=} args
  * @returns {!Compute<T,null,null,W>}
  */
-function _ctxTask(fn, seed, opts, args) {
-    let owner = SCOPE;
-    if (owner === null) {
-        throw new Error('Ownership required');
-    }
+function _ownTask(fn, seed, opts, args) {
     opts = 0 | opts;
     let flag = FLAG_ASYNC | FLAG_SETUP | (opts & OPTIONS);
     if (!(opts & OPT_DYNAMIC)) {
         flag |= FLAG_STABLE;
     }
     let node = new Compute(flag, fn, null, seed, args);
-    addOwned(owner, node);
+    if (this._owned === null) {
+        this._owned = [node];
+    } else {
+        this._owned.push(node);
+    }
     if (!(flag & FLAG_DEFER)) {
         startCompute(node);
     }
@@ -511,135 +391,195 @@ function _ctxTask(fn, seed, opts, args) {
 }
 
 /**
- * Creates an owned async Effect. Only valid inside a Root or Scope.
- * @template W
- * @param {function(W): Promise<(function(): void) | void>} fn
- * @param {number=} opts
- * @param {W=} args
- * @returns {!Effect<null,null,W>}
- */
-function _ctxSpawn(fn, opts, args) {
-    let owner = SCOPE;
-    if (owner === null) {
-        throw new Error('Ownership required');
-    }
-    opts = 0 | opts;
-    let flag = FLAG_ASYNC | FLAG_SETUP | (opts & OPTIONS);
-    if (!(opts & OPT_DYNAMIC)) {
-        flag |= FLAG_STABLE;
-    }
-    let node = new Effect(flag, fn, null, args);
-    node._owner = owner;
-    addOwned(owner, node);
-    startEffect(node);
-    return node;
-}
-
-/**
- * Creates an owned Root. Only valid inside a Root or Scope.
- * @param {function(): ((function(): void) | void)} fn
+ * A nested Root owned by this node. The Root still escapes reactive
+ * tracking, but is tied to this owner for disposal.
+ * @this {Owner}
+ * @param {function(!Root): ((function(): void) | void)} fn
  * @returns {!Root}
  */
-function _ctxRoot(fn) {
-    let owner = SCOPE;
-    if (owner === null) {
-        throw new Error('Ownership required');
-    }
+function _ownRoot(fn) {
     let node = new Root();
-    addOwned(owner, node);
+    if (this._owned === null) {
+        this._owned = [node];
+    } else {
+        this._owned.push(node);
+    }
     startRoot(node, fn);
     return node;
 }
 
 /**
- * Creates an owned Signal. Only valid inside a Root or Scope.
+ * Unowned signal — signals don't participate in ownership chains. Exposed
+ * on the Root/Effect prototypes purely for call-site symmetry.
  * @template T
  * @param {T} value
  * @returns {!Signal<T>}
  */
-function _ctxSignal(value) {
-    let owner = SCOPE;
-    if (owner === null) {
-        throw new Error('Ownership required');
-    }
+function _ownSignal(value) {
     return new Signal(value);
 }
 
 /**
- * Ctx methods on Reader/Subscriber delegate to SCOPE
- * through the _node for ownership checks. For backward compat
- * with anod-list, these use `this._node` as the context check.
+ * Effect owned by a Root — child level stays at the default 0 because
+ * Root is the topological root of its scheduling tree.
+ * @this {!Root}
+ * @template W
+ * @param {function(!Effect, W): (function(): void | void)} fn
+ * @param {number=} opts
+ * @param {W=} args
+ * @returns {!Effect<null,null,W>}
  */
-function _rdrCtxCompute(fn, seed, opts, args) {
-    if (!(this._state & CTX_OWNER)) {
-        throw new Error('Ownership required');
+function _rootEffect(fn, opts, args) {
+    let flag = FLAG_SETUP | ((0 | opts) & OPTIONS);
+    let node = new Effect(flag, fn, null, this, args);
+    if (this._owned === null) {
+        this._owned = [node];
+    } else {
+        this._owned.push(node);
     }
-    return _ctxCompute.call(null, fn, seed, opts, args);
+    startEffect(node);
+    return node;
 }
-function _rdrCtxDerive(fn, seed, args) {
-    if (!(this._state & CTX_OWNER)) {
-        throw new Error('Ownership required');
-    }
-    return _ctxDerive.call(null, fn, seed, args);
-}
-function _rdrCtxEffect(fn, opts, args) {
-    if (!(this._state & CTX_OWNER)) {
-        throw new Error('Ownership required');
-    }
-    return _ctxEffect.call(null, fn, opts, args);
-}
-function _rdrCtxWatch(fn, args) {
-    if (!(this._state & CTX_OWNER)) {
-        throw new Error('Ownership required');
-    }
-    return _ctxWatch.call(null, fn, args);
-}
-function _rdrCtxScope(fn, opts) {
-    if (!(this._state & CTX_OWNER)) {
-        throw new Error('Ownership required');
-    }
-    return _ctxScope.call(null, fn, opts);
-}
-function _rdrCtxTask(fn, seed, opts, args) {
-    if (!(this._state & CTX_OWNER)) {
-        throw new Error('Ownership required');
-    }
-    return _ctxTask.call(null, fn, seed, opts, args);
-}
-function _rdrCtxSpawn(fn, opts, args) {
-    if (!(this._state & CTX_OWNER)) {
-        throw new Error('Ownership required');
-    }
-    return _ctxSpawn.call(null, fn, opts, args);
-}
-function _rdrCtxRoot(fn) {
-    if (!(this._state & CTX_OWNER)) {
-        throw new Error('Ownership required');
-    }
-    return _ctxRoot.call(null, fn);
-}
-function _rdrCtxSignal(value) {
-    if (!(this._state & CTX_OWNER)) {
-        throw new Error('Ownership required');
-    }
-    return _ctxSignal.call(null, value);
-}
-
-ReaderProto.compute = _rdrCtxCompute;
-ReaderProto.derive = _rdrCtxDerive;
-ReaderProto.effect = _rdrCtxEffect;
-ReaderProto.watch = _rdrCtxWatch;
-ReaderProto.scope = _rdrCtxScope;
-ReaderProto.task = _rdrCtxTask;
-ReaderProto.spawn = _rdrCtxSpawn;
-ReaderProto.root = _rdrCtxRoot;
-ReaderProto.signal = _rdrCtxSignal;
 
 /**
- * Reader singleton used by startRoot for the ownership context.
- * @type {Reader}
+ * Watch owned by a Root.
+ * @this {!Root}
+ * @param {function|Sender} fnOrDep
+ * @param {*=} fnOrArgs
+ * @param {*=} args
+ * @returns {!Effect}
  */
-var READER = new Reader();
+function _rootWatch(fnOrDep, fnOrArgs, args) {
+    let node;
+    if (typeof fnOrDep === 'function') {
+        node = new Effect(FLAG_STABLE | FLAG_SETUP, fnOrDep, null, this, fnOrArgs);
+    } else {
+        node = new Effect(FLAG_STABLE | FLAG_BOUND, fnOrArgs, fnOrDep, this, args);
+        node._dep1slot = subscribe(fnOrDep, node, -1);
+    }
+    if (this._owned === null) {
+        this._owned = [node];
+    } else {
+        this._owned.push(node);
+    }
+    startEffect(node);
+    return node;
+}
+
+/**
+ * Async effect owned by a Root.
+ * @this {!Root}
+ * @template W
+ * @param {function(!Effect, W): Promise<(function(): void) | void>} fn
+ * @param {number=} opts
+ * @param {W=} args
+ * @returns {!Effect<null,null,W>}
+ */
+function _rootSpawn(fn, opts, args) {
+    let opts_ = 0 | opts;
+    let flag = FLAG_ASYNC | FLAG_SETUP | (opts_ & OPTIONS);
+    if (!(opts_ & OPT_DYNAMIC)) {
+        flag |= FLAG_STABLE;
+    }
+    let node = new Effect(flag, fn, null, this, args);
+    if (this._owned === null) {
+        this._owned = [node];
+    } else {
+        this._owned.push(node);
+    }
+    startEffect(node);
+    return node;
+}
+
+/**
+ * Effect owned by another Effect — child level = parent._level + 1 so the
+ * start() loop processes parents before children.
+ * @this {!Effect}
+ * @template W
+ * @param {function(!Effect, W): (function(): void | void)} fn
+ * @param {number=} opts
+ * @param {W=} args
+ * @returns {!Effect<null,null,W>}
+ */
+function _effEffect(fn, opts, args) {
+    let flag = FLAG_SETUP | ((0 | opts) & OPTIONS);
+    let node = new Effect(flag, fn, null, this, args);
+    let level = this._level + 1;
+    node._level = level;
+    if (level >= LEVELS.length) {
+        LEVELS.push(0);
+        SCOPES.push([]);
+    }
+    if (this._owned === null) {
+        this._owned = [node];
+    } else {
+        this._owned.push(node);
+    }
+    startEffect(node);
+    return node;
+}
+
+/**
+ * Watch owned by an Effect.
+ * @this {!Effect}
+ * @param {function|Sender} fnOrDep
+ * @param {*=} fnOrArgs
+ * @param {*=} args
+ * @returns {!Effect}
+ */
+function _effWatch(fnOrDep, fnOrArgs, args) {
+    let node;
+    if (typeof fnOrDep === 'function') {
+        node = new Effect(FLAG_STABLE | FLAG_SETUP, fnOrDep, null, this, fnOrArgs);
+    } else {
+        node = new Effect(FLAG_STABLE | FLAG_BOUND, fnOrArgs, fnOrDep, this, args);
+        node._dep1slot = subscribe(fnOrDep, node, -1);
+    }
+    let level = this._level + 1;
+    node._level = level;
+    if (level >= LEVELS.length) {
+        LEVELS.push(0);
+        SCOPES.push([]);
+    }
+    if (this._owned === null) {
+        this._owned = [node];
+    } else {
+        this._owned.push(node);
+    }
+    startEffect(node);
+    return node;
+}
+
+/**
+ * Async effect owned by another Effect.
+ * @this {!Effect}
+ * @template W
+ * @param {function(!Effect, W): Promise<(function(): void) | void>} fn
+ * @param {number=} opts
+ * @param {W=} args
+ * @returns {!Effect<null,null,W>}
+ */
+function _effSpawn(fn, opts, args) {
+    let opts_ = 0 | opts;
+    let flag = FLAG_ASYNC | FLAG_SETUP | (opts_ & OPTIONS);
+    if (!(opts_ & OPT_DYNAMIC)) {
+        flag |= FLAG_STABLE;
+    }
+    let node = new Effect(flag, fn, null, this, args);
+    let level = this._level + 1;
+    node._level = level;
+    if (level >= LEVELS.length) {
+        LEVELS.push(0);
+        SCOPES.push([]);
+    }
+    if (this._owned === null) {
+        this._owned = [node];
+    } else {
+        this._owned.push(node);
+    }
+    startEffect(node);
+    return node;
+}
 
 /**
  * @constructor
@@ -707,38 +647,46 @@ RootProto.recover = function (fn) { addRecover(this, fn); };
  */
 RootProto._dispose = function () {
     this._flag = FLAG_DISPOSED;
-    clearOwned(this);
-    this._cleanup =
-        this._owned =
+    if (this._cleanup !== null) {
+        clearCleanup(this);
+    }
+    if (this._owned !== null) {
+        clearOwned(this);
+    }
+    this._owned =
         this._recover = null;
 };
 
 /**
+ * Ownership methods on Root — shared with Effect for compute-creators,
+ * distinct for effect-creators (root's children always start at level 0).
+ */
+RootProto.compute = _ownCompute;
+RootProto.derive = _ownDerive;
+RootProto.task = _ownTask;
+RootProto.signal = _ownSignal;
+RootProto.root = _ownRoot;
+RootProto.effect = _rootEffect;
+RootProto.watch = _rootWatch;
+RootProto.spawn = _rootSpawn;
+
+/**
+ * Runs `fn` with the root node itself as the argument. Prototype methods
+ * on Root (compute/effect/derive/etc.) use `this` (the root) as the owner.
  * @param {Root} root
- * @param {function(): ((function(): void) | void)} fn
+ * @param {function(!Root): ((function(): void) | void)} fn
  * @returns {void}
  */
 function startRoot(root, fn) {
-    let prevScope = SCOPE;
-    /** @type {Reader} */
-    let ctx = READER;
-    let prevNode = ctx._node;
-    let prevCtxState = ctx._state;
-    SCOPE = root;
-    ctx._node = root;
-    ctx._state = CTX_OWNER;
     let idle = IDLE;
     IDLE = true;
     try {
-        let cleanup = fn(ctx);
+        let cleanup = fn(root);
         if (typeof cleanup === 'function') {
             addCleanup(root, cleanup);
         }
     } finally {
         IDLE = idle;
-        ctx._node = prevNode;
-        ctx._state = prevCtxState;
-        SCOPE = prevScope;
     }
 }
 
@@ -822,7 +770,7 @@ function Signal(value, opts) {
                 this._flag |= FLAG_SCHEDULED;
                 let index = SIGNALS_COUNT++;
                 SIGNALS[index] = this;
-                SIGNAL_VALS[index] = value;
+                PAYLOADS[index] = value;
             }
         }
     };
@@ -1258,20 +1206,6 @@ function Compute(opts, fn, dep1, seed, args) {
      * @returns {void}
      */
     ComputeProto.stable = _stable;
-
-    /**
-     * Registers a cleanup function. Only valid on Owner nodes.
-     * @param {function(): void} fn
-     * @returns {void}
-     */
-    ComputeProto.cleanup = _cleanup;
-
-    /**
-     * Registers a recover handler. Only valid on Owner nodes.
-     * @param {function(*): boolean} fn
-     * @returns {void}
-     */
-    ComputeProto.recover = _recover;
 }
 
 /**
@@ -1597,10 +1531,11 @@ function settle(node, value) {
  * @param {number} opts
  * @param {(function(W): (function(): void | void)) | (function(U,W): (function(): void | void))} fn
  * @param {Sender<U> | null} dep1
+ * @param {Owner | null} owner - parent owner, null for top-level effects
  * @param {W=} args
  * @implements {IEffect}
  */
-function Effect(opts, fn, dep1, args) {
+function Effect(opts, fn, dep1, owner, args) {
     /**
      * @type {number}
      */
@@ -1635,6 +1570,8 @@ function Effect(opts, fn, dep1, args) {
     this._cleanup = null;
     /**
      * @type {Array<Receiver> | null}
+     * Lazy — populated only if this effect becomes an owner via one of
+     * the ownership methods (compute/effect/derive/...) on its prototype.
      */
     this._owned = null;
     /**
@@ -1644,7 +1581,7 @@ function Effect(opts, fn, dep1, args) {
     /**
      * @type {Owner | null}
      */
-    this._owner = null;
+    this._owner = owner;
     /**
      * @type {(function(*): boolean) | Array<(function(*): boolean)> | null}
      */
@@ -1697,25 +1634,30 @@ function Effect(opts, fn, dep1, args) {
      */
     EffectProto._update = function (time) {
         let flag = this._flag;
-        let owned = this._owned;
 
-        /** Pre-execution cleanup for non-setup runs */
-        if (!(flag & FLAG_SETUP) && (owned !== null || this._cleanup !== null)) {
-            clearOwned(this);
+        /** Pre-execution cleanup for non-setup runs. Cleanup fns, owned
+         *  children, and recover handlers are tracked on orthogonal slots —
+         *  each is cleared only if present (common case: all null). */
+        if (!(flag & FLAG_SETUP)) {
+            if (this._cleanup !== null) {
+                clearCleanup(this);
+            }
+            if (this._owned !== null) {
+                clearOwned(this);
+            }
+            if (this._recover !== null) {
+                this._recover = null;
+                this._flag = flag = (flag & ~FLAG_RECOVER);
+            }
         }
 
-        /** Async nodes delegate before modifying scope state */
+        /** Async nodes delegate after pre-exec cleanup. */
         if (flag & (FLAG_ASYNC | FLAG_STREAM)) {
             return this._updateAsync(time);
         }
 
         /** @type {(function(): void) | null | undefined} */
         let value;
-        let prevScope;
-        if (owned !== null) {
-            prevScope = SCOPE;
-            SCOPE = this;
-        }
 
         if ((flag & (FLAG_STABLE | FLAG_SETUP)) === FLAG_STABLE) {
             /** Stable or bound: no version tracking, no dep management */
@@ -1727,9 +1669,6 @@ function Effect(opts, fn, dep1, args) {
             } finally {
                 this._time = time;
                 this._flag &= ~(FLAG_RUNNING | FLAG_STALE | FLAG_PENDING);
-                if (owned !== null) {
-                    SCOPE = prevScope;
-                }
             }
         } else {
             /** Setup or dynamic: bump version for dep tracking */
@@ -1804,9 +1743,6 @@ function Effect(opts, fn, dep1, args) {
                 this._version = prevVersion;
                 this._time = time;
                 this._flag &= ~(FLAG_RUNNING | FLAG_STALE | FLAG_PENDING | FLAG_INIT | FLAG_SETUP);
-                if (owned !== null) {
-                    SCOPE = prevScope;
-                }
             }
         }
 
@@ -1822,13 +1758,7 @@ function Effect(opts, fn, dep1, args) {
      */
     EffectProto._updateAsync = function (time) {
         let flag = this._flag;
-        let owned = this._owned;
         let value;
-        let prevScope;
-        if (owned !== null) {
-            prevScope = SCOPE;
-            SCOPE = this;
-        }
 
         if ((flag & (FLAG_STABLE | FLAG_SETUP)) === FLAG_STABLE) {
             this._flag |= FLAG_RUNNING;
@@ -1839,9 +1769,6 @@ function Effect(opts, fn, dep1, args) {
             } finally {
                 this._time = time;
                 this._flag &= ~(FLAG_RUNNING | FLAG_STALE | FLAG_PENDING);
-                if (owned !== null) {
-                    SCOPE = prevScope;
-                }
             }
         } else {
             let prevVersion = this._version;
@@ -1908,9 +1835,6 @@ function Effect(opts, fn, dep1, args) {
                 this._version = prevVersion;
                 this._time = time;
                 this._flag &= ~(FLAG_RUNNING | FLAG_STALE | FLAG_PENDING | FLAG_INIT | FLAG_SETUP);
-                if (owned !== null) {
-                    SCOPE = prevScope;
-                }
             }
         }
 
@@ -1929,12 +1853,17 @@ function Effect(opts, fn, dep1, args) {
     EffectProto._dispose = function () {
         this._flag = FLAG_DISPOSED;
         clearDeps(this);
-        clearOwned(this);
+        if (this._cleanup !== null) {
+            clearCleanup(this);
+        }
+        if (this._owned !== null) {
+            clearOwned(this);
+        }
         this._fn =
             this._args =
             this._owned =
-            this._cleanup =
-            this._owner = null;
+            this._owner =
+            this._recover = null;
     };
 
     /**
@@ -1988,17 +1917,20 @@ function Effect(opts, fn, dep1, args) {
     EffectProto.recover = _recover;
 
     /**
-     * Ownership context methods on Effect.
+     * Ownership methods on Effect — install the shared implementations.
+     * The Compute-creating methods (compute/derive/task) are identical on
+     * Root; Effect-creating methods (effect/watch/spawn) differ because the
+     * child's topological level = parent._level + 1 for Effect owners,
+     * and 0 for Root owners.
      */
-    EffectProto.compute = _ctxCompute;
-    EffectProto.derive = _ctxDerive;
-    EffectProto.effect = _ctxEffect;
-    EffectProto.watch = _ctxWatch;
-    EffectProto.scope = _ctxScope;
-    EffectProto.task = _ctxTask;
-    EffectProto.spawn = _ctxSpawn;
-    EffectProto.root = _ctxRoot;
-    EffectProto.signal = _ctxSignal;
+    EffectProto.compute = _ownCompute;
+    EffectProto.derive = _ownDerive;
+    EffectProto.task = _ownTask;
+    EffectProto.signal = _ownSignal;
+    EffectProto.root = _ownRoot;
+    EffectProto.effect = _effEffect;
+    EffectProto.watch = _effWatch;
+    EffectProto.spawn = _effSpawn;
 }
 
 
@@ -2142,36 +2074,6 @@ function addRecover(node, fn) {
 }
 
 /**
- * @param {Owner} node
- * @param {Receiver} child
- * @returns {void}
- */
-function addOwned(node, child) {
-    if (node._owned === null) {
-        node._owned = [child];
-    } else {
-        node._owned.push(child);
-    }
-}
-
-/**
- * @param {Owner} node
- * @param {Owner} owner
- * @returns {void}
- */
-function setScope(node, owner) {
-    let level = owner._level + 1;
-    node._level = level;
-    if (level > 3) {
-        let depth = LEVELS.length;
-        if (level >= depth) {
-            LEVELS[depth] = 0;
-            SCOPES[depth] = [];
-        }
-    }
-}
-
-/**
  * @returns {void}
  */
 function start() {
@@ -2198,22 +2100,10 @@ function start() {
             if (SIGNALS_COUNT > 0) {
                 let count = SIGNALS_COUNT;
                 for (let i = 0; i < count; i++) {
-                    SIGNALS[i]._assign(SIGNAL_VALS[i]);
-                    SIGNALS[i] = SIGNAL_VALS[i] = null;
+                    SIGNALS[i]._assign(PAYLOADS[i]);
+                    SIGNALS[i] = PAYLOADS[i] = null;
                 }
                 SIGNALS_COUNT = 0;
-            }
-            if (COMPUTES_COUNT > 0) {
-                let count = COMPUTES_COUNT;
-                for (let i = 0; i < count; i++) {
-                    let node = COMPUTES[i];
-                    if (node._flag & FLAG_STALE) {
-                        TRANSACTION = VERSION;
-                        node._update(time);
-                    }
-                    COMPUTES[i] = null;
-                }
-                COMPUTES_COUNT = 0;
             }
             if (SCOPES_COUNT > 0) {
                 let levels = LEVELS.length;
@@ -2287,7 +2177,6 @@ function start() {
         }
         DISPOSES_COUNT =
             SIGNALS_COUNT =
-            COMPUTES_COUNT =
             EFFECTS_COUNT =
             SCOPES_COUNT =
             MINLEVEL =
@@ -2425,28 +2314,38 @@ function clearSubs(send) {
 }
 
 /**
+ * Runs and clears any registered cleanup fns. Called before re-running an
+ * effect, and on disposal. Cheap when `_cleanup` is null (common) — caller
+ * is expected to guard via the null check before invoking.
+ * @param {Owner} owner
+ * @returns {void}
+ */
+function clearCleanup(owner) {
+    let cleanup = owner._cleanup;
+    if (typeof cleanup === 'function') {
+        cleanup();
+        owner._cleanup = null;
+    } else {
+        /** array form */
+        let count = /** @type {!Array} */(cleanup).length;
+        while (count-- > 0) {
+            /** @type {!Array} */(cleanup).pop()();
+        }
+    }
+}
+
+/**
+ * Disposes all owned children. Called before re-running an owner effect
+ * and on disposal. Only call when `_owned !== null` — owned is lazy and
+ * only allocated when an effect or root actually adopts children.
  * @param {Owner} owner
  * @returns {void}
  */
 function clearOwned(owner) {
     let owned = owner._owned;
-    if (owned !== null) {
-        let count = owned.length;
-        while (count-- > 0) {
-            owned.pop()._dispose();
-        }
-    }
-    let cleanup = owner._cleanup;
-    if (cleanup !== null) {
-        if (typeof cleanup === 'function') {
-            cleanup();
-            owner._cleanup = null;
-        } else {
-            let count = cleanup.length;
-            while (count-- > 0) {
-                cleanup.pop()();
-            }
-        }
+    let count = /** @type {!Array} */(owned).length;
+    while (count-- > 0) {
+        /** @type {!Array} */(owned).pop()._dispose();
     }
     owner._recover = null;
 }
@@ -2505,13 +2404,14 @@ function read(sender) {
     if ((flag & (FLAG_STABLE | FLAG_SETUP)) === FLAG_STABLE) {
         return sender.val();
     }
-    if (this._version === sender._version) {
-        return sender._value;
-    }
     let value = sender.val();
 
     let version = this._version;
     let stamp = sender._version;
+
+    if (version === stamp) {
+        return value;
+    }
 
     sender._version = version;
 
@@ -2815,35 +2715,14 @@ function task(fn, seed, opts, args) {
 
 /**
  * @template W
- * @param {function(): (function(): void | void)} fn
+ * @param {function(!Effect, W): (function(): void | void)} fn
  * @param {number=} opts
  * @param {W=} args
  * @returns {Effect<null,null,W>}
  */
 function effect(fn, opts, args) {
     let flag = FLAG_SETUP | ((0 | opts) & OPTIONS);
-    let node = new Effect(flag, fn, null, args);
-    startEffect(node);
-    return node;
-}
-
-/**
- * @param {function(): (function(): void | void)} fn
- * @param {number=} opts
- * @returns {Effect}
- */
-function scope(fn, opts) {
-    opts = 0 | opts;
-    let flag = FLAG_SETUP | (opts & OPTIONS);
-    if (!(opts & OPT_DYNAMIC)) {
-        flag |= FLAG_STABLE;
-    }
-    let node = new Effect(flag, fn, null);
-    node._owned = [];
-    let owner = SCOPE;
-    if (owner !== null && (owner.t & TYPEFLAG_RECEIVE)) {
-        setScope(node, owner);
-    }
+    let node = new Effect(flag, fn, null, null, args);
     startEffect(node);
     return node;
 }
@@ -2853,7 +2732,7 @@ function scope(fn, opts) {
  * function, is registered as cleanup. Stable by default; pass
  * OPT_DYNAMIC for dynamic dependency tracking.
  * @template W
- * @param {function(W): Promise<(function(): void) | void>} fn
+ * @param {function(!Effect, W): Promise<(function(): void) | void>} fn
  * @param {number=} opts
  * @param {W=} args
  * @returns {!Effect<null,null,W>}
@@ -2864,7 +2743,7 @@ function spawn(fn, opts, args) {
     if (!(opts & OPT_DYNAMIC)) {
         flag |= FLAG_STABLE;
     }
-    let node = new Effect(flag, fn, null, args);
+    let node = new Effect(flag, fn, null, null, args);
     startEffect(node);
     return node;
 }
@@ -2880,13 +2759,12 @@ function spawn(fn, opts, args) {
  */
 function watch(fnOrDep, fnOrArgs, args) {
     if (typeof fnOrDep === 'function') {
-        let node = new Effect(FLAG_STABLE | FLAG_SETUP, fnOrDep, null, fnOrArgs);
+        let node = new Effect(FLAG_STABLE | FLAG_SETUP, fnOrDep, null, null, fnOrArgs);
         startEffect(node);
         return node;
     }
-    let node = new Effect(FLAG_STABLE | FLAG_BOUND, fnOrArgs, fnOrDep, args);
+    let node = new Effect(FLAG_STABLE | FLAG_BOUND, fnOrArgs, fnOrDep, null, args);
     node._dep1slot = subscribe(fnOrDep, node, -1);
-    node._owner = SCOPE;
     startEffect(node);
     return node;
 }
@@ -2916,7 +2794,7 @@ export {
     FLAG_INIT,
     OP_VALUE, OP_CALLBACK,
     register,
-    CTX_EQUAL, CTX_NOTEQUAL, CTX_PROMISE, CTX_ITERABLE, CTX_ASYNC, CTX_OWNER,
+    CTX_EQUAL, CTX_NOTEQUAL, CTX_PROMISE, CTX_ITERABLE, CTX_ASYNC,
     FLAG_ASYNC, FLAG_STREAM,
     OPT_DEFER, OPT_STABLE, OPT_SETUP, OPT_WEAK, OPT_DYNAMIC,
     TYPE_ROOT, TYPE_SIGNAL, TYPE_COMPUTE, TYPE_EFFECT,
@@ -2933,7 +2811,6 @@ export {
     Signal,
     Compute,
     Effect,
-    Reader,
     root,
     signal,
     compute,
@@ -2942,6 +2819,5 @@ export {
     effect,
     watch,
     spawn,
-    scope,
     batch
 }

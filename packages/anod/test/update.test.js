@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { root, signal, compute, effect, scope } from "../";
+import { root, signal, compute, effect } from "../";
 
 describe("update", () => {
     test("does not register a dependency on the subcomputation", () => {
@@ -8,9 +8,9 @@ describe("update", () => {
             let outerCount = 0;
             let innerCount = 0;
 
-            r.scope((s) => {
+            r.effect((ef) => {
                 outerCount++;
-                s.effect((e) => {
+                ef.effect((e) => {
                     innerCount++;
                     e.read(s1);
                 });
@@ -58,13 +58,15 @@ describe("update", () => {
                 return c.read(s1) === 0;
             });
 
-            scope((s) => {
-                s.read(c1);
-                order += "e1";
-                s.effect((e) => {
-                    order += "e2";
-                    e.read(s2);
-                    e.cleanup(() => { order += "cl1"; });
+            root((r) => {
+                r.effect((ef) => {
+                    ef.read(c1);
+                    order += "e1";
+                    ef.effect((e) => {
+                        order += "e2";
+                        e.read(s2);
+                        e.cleanup(() => { order += "cl1"; });
+                    });
                 });
             });
 
