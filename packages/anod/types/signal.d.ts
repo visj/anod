@@ -72,9 +72,6 @@ export interface IReader extends IReceiver {
     derive<U>(fn: (c: IReader, prev: Resolve<U>) => U, seed?: Resolve<U>): ICompute<Resolve<U>>;
     derive<U, W>(fn: (c: IReader, prev: Resolve<U>, args: W) => U, seed?: Resolve<U>, args?: W): ICompute<Resolve<U>>;
 
-    transmit<U>(fn: (c: IReader, prev: Resolve<U>) => U, seed?: Resolve<U>): ICompute<Resolve<U>>;
-    transmit<U, W>(fn: (c: IReader, prev: Resolve<U>, args: W) => U, seed?: Resolve<U>, args?: W): ICompute<Resolve<U>>;
-
     effect(fn: (c: IReader) => (() => void) | void, opts?: number): IEffect;
     effect<W>(fn: (c: IReader, args: W) => void | (() => void), opts?: number, args?: W): IEffect;
 

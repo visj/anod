@@ -1,6 +1,6 @@
 /**
  * Reference benchmark using only compute() and effect() — the "dumb" API
- * that matches what other frameworks expose. No derive/transmit/watch/bound
+ * that matches what other frameworks expose. No derive/watch/bound
  * optimizations. This measures anod's baseline performance when used the
  * same way as alien-signals, preact-signals, etc.
  */
@@ -10,8 +10,7 @@ import {
     batch,
     compute,
     effect,
-    signal,
-    transmit,
+    signal
 } from '../../dist/index.mjs';
 import { saveRun } from './save-run.js';
 
@@ -421,7 +420,7 @@ function removeElems(src, rmCount, rand) {
 
 /**
  * Build a rectangular reactive dependency graph.
- * All nodes use compute() — no derive/transmit optimizations.
+ * All nodes use compute() — no derive optimizations.
  * @param {number} width
  * @param {number} totalLayers
  * @param {number} staticFraction - fraction of static nodes [0, 1]

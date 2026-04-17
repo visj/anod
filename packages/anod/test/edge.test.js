@@ -4,14 +4,12 @@ import {
     signal,
     compute,
     derive,
-    transmit,
     task,
     effect,
     watch,
     spawn,
     scope,
     batch,
-    OPT_NOTIFY,
     OPT_DYNAMIC,
     FLAG_STREAM,
 } from "../";
@@ -261,54 +259,6 @@ describe("edge cases", () => {
             expect(cleanups).toBe(0);
             s1.set(2);
             expect(cleanups).toBe(1);
-        });
-    });
-
-    describe("transmit", () => {
-        test("always notifies downstream even when value unchanged", () => {
-            const s1 = signal(1);
-            let runs = 0;
-
-            const t = transmit((c) => {
-                c.read(s1);
-                return 42;
-            });
-
-            effect((e) => {
-                runs++;
-                e.read(t);
-            });
-
-            expect(runs).toBe(1);
-            s1.set(2);
-            /** transmit returned 42 both times, but downstream still runs */
-            expect(runs).toBe(2);
-        });
-
-        test("propagates STALE not PENDING to subscribers", () => {
-            const s1 = signal(1);
-            let computeRuns = 0;
-
-            const t = transmit((c) => {
-                c.read(s1);
-                return 42;
-            });
-
-            /**
-             * A compute downstream of a transmit should get STALE
-             * (not PENDING), meaning it will re-execute without
-             * needing to check if the dep actually changed.
-             */
-            const c1 = derive((c) => {
-                computeRuns++;
-                return c.read(t) + 1;
-            });
-
-            effect((e) => { e.read(c1); });
-
-            expect(computeRuns).toBe(1);
-            s1.set(2);
-            expect(computeRuns).toBe(2);
         });
     });
 
@@ -821,24 +771,6 @@ describe("edge cases", () => {
             resolvers[1]({ value: 20, done: false });
             await tick();
             expect(values).toEqual([10, 20]);
-        });
-    });
-
-    describe("OPT_NOTIFY via compute", () => {
-        test("compute with OPT_NOTIFY always propagates", () => {
-            const s1 = signal(1);
-            let runs = 0;
-
-            const c1 = compute((c) => {
-                c.read(s1);
-                return 42;
-            }, undefined, OPT_NOTIFY);
-
-            effect((e) => { runs++; e.read(c1); });
-
-            expect(runs).toBe(1);
-            s1.set(2);
-            expect(runs).toBe(2);
         });
     });
 

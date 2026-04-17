@@ -3,12 +3,10 @@ import {
     signal,
     compute,
     derive,
-    transmit,
     effect,
     watch,
     scope,
     batch,
-    OPT_NOTIFY,
 } from "../";
 
 /**
@@ -364,51 +362,6 @@ describe("ptime guard: correct usage patterns", () => {
             });
             expect(effectRuns).toBe(1);
             expect(c.val()).toBe(3);
-        });
-    });
-
-    describe("OPT_NOTIFY (transmit)", () => {
-
-        test("transmit always notifies stale downstream", () => {
-            const s = signal(0);
-            const t = transmit((r) => {
-                r.read(s);
-                return 42;
-            });
-            const c = compute((r) => r.read(t) + 1);
-
-            let effectRuns = 0;
-            effect((e) => {
-                effectRuns++;
-                e.read(c);
-            });
-            effectRuns = 0;
-
-            s.set(1);
-            /**
-             * t returns 42 (same), but NOTIFY → c gets STALE.
-             * c returns 43 (same) → effect skips.
-             */
-            expect(effectRuns).toBe(0);
-
-            s.set(2);
-            expect(effectRuns).toBe(0);
-        });
-
-        test("transmit with value change propagates normally", () => {
-            const s = signal(0);
-            const t = transmit((r) => r.read(s) + 1);
-
-            let effectRuns = 0;
-            effect((e) => {
-                effectRuns++;
-                e.read(t);
-            });
-            effectRuns = 0;
-
-            s.set(1);
-            expect(effectRuns).toBe(1);
-            expect(t.val()).toBe(2);
         });
     });
 

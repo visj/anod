@@ -41,7 +41,6 @@ const FLAG_LOADING = 1 << 8;
 const FLAG_ERROR = 1 << 9;
 const FLAG_DEFER = 1 << 10;
 const FLAG_STABLE = 1 << 11;
-const FLAG_NOTIFY = 1 << 12;
 const FLAG_RECOVER = 1 << 13;
 const FLAG_BOUND = 1 << 14;
 const FLAG_DERIVED = 1 << 15;
@@ -56,12 +55,11 @@ const FLAG_STREAM = 1 << 21;
 const OPT_DEFER = FLAG_DEFER;
 const OPT_STABLE = FLAG_STABLE;
 const OPT_SETUP = FLAG_SETUP;
-const OPT_NOTIFY = FLAG_NOTIFY;
 const OPT_WEAK = FLAG_WEAK;
 
 const OPT_DYNAMIC = 0x800000;
 
-const OPTIONS = OPT_DEFER | OPT_STABLE | OPT_SETUP | OPT_NOTIFY | OPT_WEAK | FLAG_ASYNC | FLAG_STREAM;
+const OPTIONS = OPT_DEFER | OPT_STABLE | OPT_SETUP | OPT_WEAK | FLAG_ASYNC | FLAG_STREAM;
 
 
 const TYPEFLAG_MASK = 7;
@@ -152,8 +150,7 @@ var SIGNALS = [];
  * @const
  * @type {Array}
  */
-var PAYLOADS = [];
-
+var SIGNAL_VALS = [];
 var SIGNALS_COUNT = 0;
 
 /**
@@ -419,25 +416,6 @@ function _ctxDerive(fn, seed, args) {
 }
 
 /**
- * Creates an owned stable Compute with OPT_NOTIFY. Only valid inside a Root or Scope.
- * @template T,W
- * @param {function(T,W): T} fn
- * @param {T=} seed
- * @param {W=} args
- * @returns {!Compute<T,null,null,W>}
- */
-function _ctxTransmit(fn, seed, args) {
-    let owner = SCOPE;
-    if (owner === null) {
-        throw new Error('Ownership required');
-    }
-    let node = new Compute(FLAG_STABLE | FLAG_SETUP | FLAG_NOTIFY | FLAG_NOTIFY, fn, null, seed, args);
-    addOwned(owner, node);
-    startCompute(node);
-    return node;
-}
-
-/**
  * Creates an owned Effect node. Only valid inside a Root or Scope.
  * @template W
  * @param {function(W): (function(): void | void)} fn
@@ -604,12 +582,6 @@ function _rdrCtxDerive(fn, seed, args) {
     }
     return _ctxDerive.call(null, fn, seed, args);
 }
-function _rdrCtxTransmit(fn, seed, args) {
-    if (!(this._state & CTX_OWNER)) {
-        throw new Error('Ownership required');
-    }
-    return _ctxTransmit.call(null, fn, seed, args);
-}
 function _rdrCtxEffect(fn, opts, args) {
     if (!(this._state & CTX_OWNER)) {
         throw new Error('Ownership required');
@@ -655,7 +627,6 @@ function _rdrCtxSignal(value) {
 
 ReaderProto.compute = _rdrCtxCompute;
 ReaderProto.derive = _rdrCtxDerive;
-ReaderProto.transmit = _rdrCtxTransmit;
 ReaderProto.effect = _rdrCtxEffect;
 ReaderProto.watch = _rdrCtxWatch;
 ReaderProto.scope = _rdrCtxScope;
@@ -851,7 +822,7 @@ function Signal(value, opts) {
                 this._flag |= FLAG_SCHEDULED;
                 let index = SIGNALS_COUNT++;
                 SIGNALS[index] = this;
-                PAYLOADS[index] = value;
+                SIGNAL_VALS[index] = value;
             }
         }
     };
@@ -859,9 +830,8 @@ function Signal(value, opts) {
     /**
      * 
      * @param {T} value 
-     * @param {number} time
      */
-    SignalProto._update = function (value, time) {
+    SignalProto._assign = function (value) {
         this._value = value;
         if (this._flag & FLAG_SCHEDULED) {
             this._flag &= ~FLAG_SCHEDULED;
@@ -1149,7 +1119,7 @@ function Compute(opts, fn, dep1, seed, args) {
             if (!(flag & FLAG_EQUAL)) {
                 this._ctime = time;
             }
-        } else if (flag & (FLAG_NOTEQUAL | FLAG_NOTIFY)) {
+        } else if (flag & (FLAG_NOTEQUAL)) {
             this._ctime = time;
         }
     };
@@ -1258,15 +1228,11 @@ function Compute(opts, fn, dep1, seed, args) {
     };
 
     /**
+     * @this {Compute}
      * @returns {void}
      */
     ComputeProto._receive = function () {
-        if (this._flag & FLAG_NOTIFY) {
-            COMPUTES[COMPUTES_COUNT++] = this;
-            notify(this, FLAG_STALE);
-        } else {
-            notify(this, FLAG_PENDING);
-        }
+        notify(this, FLAG_PENDING);
     };
 
     /**
@@ -1414,7 +1380,7 @@ function checkRun(node, time) {
     let resumeFrom = -2;
 
     outer:
-    for (;;) {
+    for (; ;) {
         let lastRun = node._time;
         let i;
 
@@ -2026,7 +1992,6 @@ function Effect(opts, fn, dep1, args) {
      */
     EffectProto.compute = _ctxCompute;
     EffectProto.derive = _ctxDerive;
-    EffectProto.transmit = _ctxTransmit;
     EffectProto.effect = _ctxEffect;
     EffectProto.watch = _ctxWatch;
     EffectProto.scope = _ctxScope;
@@ -2233,13 +2198,14 @@ function start() {
             if (SIGNALS_COUNT > 0) {
                 let count = SIGNALS_COUNT;
                 for (let i = 0; i < count; i++) {
-                    SIGNALS[i]._update(PAYLOADS[i]);
-                    SIGNALS[i] = PAYLOADS[i] = null;
+                    SIGNALS[i]._assign(SIGNAL_VALS[i]);
+                    SIGNALS[i] = SIGNAL_VALS[i] = null;
                 }
                 SIGNALS_COUNT = 0;
             }
             if (COMPUTES_COUNT > 0) {
-                for (let i = 0; i < COMPUTES_COUNT; i++) {
+                let count = COMPUTES_COUNT;
+                for (let i = 0; i < count; i++) {
                     let node = COMPUTES[i];
                     if (node._flag & FLAG_STALE) {
                         TRANSACTION = VERSION;
@@ -2543,9 +2509,9 @@ function read(sender) {
 
     let version = this._version;
     let stamp = sender._version;
-    
+
     sender._version = version;
-    
+
     if (version === stamp) {
         return value;
     }
@@ -2807,9 +2773,6 @@ function compute(fn, seed, opts, args) {
 }
 
 /**
- * Stable compute. Two signatures:
- *   derive(fn, seed?, args?)       — multi-dep, uses setup tracking
- *   derive(dep, fn, seed?, args?)  — bound single-dep, skips setup
  * @param {function|Sender} fnOrDep
  * @param {*=} seedOrFn
  * @param {*=} argsOrSeed
@@ -2824,28 +2787,6 @@ function derive(fnOrDep, seedOrFn, argsOrSeed, args) {
         node = new Compute(FLAG_STABLE | FLAG_BOUND, seedOrFn, fnOrDep, argsOrSeed, args);
         node._dep1slot = subscribe(fnOrDep, node, -1);
     }
-    startCompute(node);
-    return node;
-}
-
-/**
- * Stable compute with FLAG_TRANSMIT. Two signatures:
- *   transmit(fn, seed?, args?)       — multi-dep, uses setup tracking
- *   transmit(dep, fn, seed?, args?)  — bound single-dep, skips setup
- * @param {function|Sender} fnOrDep
- * @param {*=} seedOrFn
- * @param {*=} argsOrSeed
- * @param {*=} args
- * @returns {!Compute}
- */
-function transmit(fnOrDep, seedOrFn, argsOrSeed, args) {
-    if (typeof fnOrDep === 'function') {
-        let node = new Compute(FLAG_STABLE | FLAG_SETUP | FLAG_NOTIFY, fnOrDep, null, seedOrFn, argsOrSeed);
-        startCompute(node);
-        return node;
-    }
-    let node = new Compute(FLAG_STABLE | FLAG_BOUND | FLAG_NOTIFY, seedOrFn, fnOrDep, argsOrSeed, args);
-    node._dep1slot = subscribe(fnOrDep, node, -1);
     startCompute(node);
     return node;
 }
@@ -2973,13 +2914,13 @@ function batch(fn) {
 export {
     FLAG_DEFER, FLAG_STABLE, FLAG_SETUP, FLAG_STALE, FLAG_PENDING,
     FLAG_RUNNING, FLAG_DISPOSED, FLAG_LOADING, FLAG_ERROR, FLAG_RECOVER,
-    FLAG_BOUND, FLAG_DERIVED, FLAG_NOTIFY as FLAG_NOTIFY, FLAG_EQUAL, FLAG_WEAK,
-    FLAG_INIT, FLAG_NOTIFY as FLAG_TRANSMIT,
+    FLAG_BOUND, FLAG_DERIVED, FLAG_EQUAL, FLAG_WEAK,
+    FLAG_INIT,
     OP_VALUE, OP_CALLBACK,
     register,
     CTX_EQUAL, CTX_NOTEQUAL, CTX_PROMISE, CTX_ITERABLE, CTX_ASYNC, CTX_OWNER,
     FLAG_ASYNC, FLAG_STREAM,
-    OPT_DEFER, OPT_STABLE, OPT_SETUP, OPT_NOTIFY, OPT_WEAK, OPT_DYNAMIC,
+    OPT_DEFER, OPT_STABLE, OPT_SETUP, OPT_WEAK, OPT_DYNAMIC,
     TYPE_ROOT, TYPE_SIGNAL, TYPE_COMPUTE, TYPE_EFFECT,
     TYPEFLAG_MASK, TYPEFLAG_SEND, TYPEFLAG_RECEIVE, TYPEFLAG_OWNER,
     OPTIONS,
@@ -2999,7 +2940,6 @@ export {
     signal,
     compute,
     derive,
-    transmit,
     task,
     effect,
     watch,
