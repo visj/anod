@@ -486,6 +486,19 @@ function setupDynBuild(width, totalLayers, staticFraction, nSources) {
         for (let r = 0; r < leaves.length; r++) {
             sink += leaves[r].val();
         }
+        // let subCounts = new Map();
+        // let depCounts = new Map();
+        // layers[0].forEach(c => {
+        //     let subLength = c._subs !== null ? c._subs.length : 0;
+        //     let depLength = c._deps !== null ? c._deps.length : 0;
+        //     let existingSubLength = subCounts.get(subLength) || 0;
+        //     subCounts.set(subLength, existingSubLength + 1);
+        //     let existingDepLength = depCounts.get(depLength) || 0;
+        //     depCounts.set(depLength, existingDepLength + 1);
+        // });
+        // console.log("subs", subCounts);
+        // console.log("deps", depCounts);
+        return layers;
     };
 }
 
@@ -567,7 +580,13 @@ bench('Create 1k signals', benchCreateSignals(1_000));
 bench('Create 1k computations', benchCreateComputations(1_000));
 
 bench('Dynamic build: simple component', setupDynBuild(10, 5, 1, 2));
+
 bench('Dynamic build: large web app', setupDynBuild(1000, 12, 0.95, 4));
+
+for (let i = 1; i < 25; i++) {
+    bench(`Dynamic build: large web app ${i} sources`, setupDynBuild(1000, 12, 0.95, i));
+}
+
 bench('Dynamic build: wide dense', setupDynBuild(1000, 5, 1, 25));
 bench('Dynamic update: simple component', setupDynUpdate(10, 5, 1, 2, 0.2));
 bench('Dynamic update: dynamic component', setupDynUpdate(10, 10, 0.75, 6, 0.2));

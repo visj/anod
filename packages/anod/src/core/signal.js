@@ -105,6 +105,23 @@ var CINDEX = new Array(1024);
  */
 var CTOP = 0;
 
+/**
+ * Pre-allocated stack for batching deps during setup execution.
+ * During FLAG_SETUP _update, deps are written here as [sender, subslot]
+ * pairs. After the fn returns, _deps is created via slice() with
+ * exact capacity — avoiding V8's push-based over-allocation.
+ * @type {Array<Sender | number>}
+ */
+var DSTACK = new Array(1024);
+/** @type {number} Tail pointer into DSTACK */
+var DCOUNT = 0;
+/**
+ * Base pointer for the current node's deps region in DSTACK.
+ * Saved/restored for nesting (compute A's fn triggers compute B's setup).
+ * @type {number}
+ */
+var DBASE = 0;
+
 /** @type {number} */
 var MINLEVEL = 0;
 /** @type {number} */
@@ -1052,7 +1069,14 @@ function Compute(opts, fn, dep1, seed, args) {
             let depsLen = 0;
             let depCount = 0;
             let prevReused = REUSED;
-            
+
+            /** Save DSTACK base for setup — deps are batched in DSTACK
+             *  and sliced to exact-capacity _deps after fn returns. */
+            let prevDBase = DBASE;
+            if (flag & FLAG_SETUP) {
+                DBASE = DCOUNT;
+            }
+
             if (!(flag & FLAG_SETUP)) {
                 /** Dynamic: prescan existing deps with version - 1 */
                 REUSED = 0;
@@ -1095,6 +1119,14 @@ function Compute(opts, fn, dep1, seed, args) {
             if (!(flag & FLAG_SETUP) && (REUSED !== depCount || (this._deps !== null ? this._deps.length : 0) !== depsLen)) {
                 pruneDeps(this, version, depCount);
             }
+
+            /** Create exact-capacity _deps from DSTACK (setup only) */
+            if (DCOUNT > DBASE) {
+                this._deps = DSTACK.slice(DBASE, DCOUNT);
+                DCOUNT = DBASE;
+            }
+            DBASE = prevDBase;
+
             REUSED = prevReused;
             /** Restore saved version tags from VSTACK (both setup and dynamic) */
             if (VCOUNT > saveStart) {
@@ -1150,6 +1182,11 @@ function Compute(opts, fn, dep1, seed, args) {
             let depsLen = 0;
             let prevReused = REUSED;
 
+            let prevDBase = DBASE;
+            if (flag & FLAG_SETUP) {
+                DBASE = DCOUNT;
+            }
+
             if (!(flag & FLAG_SETUP)) {
                 REUSED = 0;
                 let stamp = version - 1;
@@ -1189,6 +1226,11 @@ function Compute(opts, fn, dep1, seed, args) {
             if (!(flag & FLAG_SETUP) && (REUSED !== depCount || (this._deps !== null ? this._deps.length : 0) !== depsLen)) {
                 pruneDeps(this, version, depCount);
             }
+            if (DCOUNT > DBASE) {
+                this._deps = DSTACK.slice(DBASE, DCOUNT);
+                DCOUNT = DBASE;
+            }
+            DBASE = prevDBase;
             REUSED = prevReused;
             if (VCOUNT > saveStart) {
                 for (let i = VCOUNT - 2; i >= saveStart; i -= 2) {
@@ -1734,6 +1776,12 @@ function Effect(opts, fn, dep1, args) {
             let depsLen = 0;
             let prevReused = REUSED;
 
+            /** Save DSTACK base for setup */
+            let prevDBase = DBASE;
+            if (flag & FLAG_SETUP) {
+                DBASE = DCOUNT;
+            }
+
             if (!(flag & FLAG_SETUP)) {
                 /** Dynamic: prescan existing deps with version - 1 */
                 this._flag |= FLAG_RUNNING;
@@ -1771,6 +1819,14 @@ function Effect(opts, fn, dep1, args) {
                 if (!(flag & FLAG_SETUP) && (REUSED !== depCount || (this._deps !== null ? this._deps.length : 0) !== depsLen)) {
                     pruneDeps(this, version, depCount);
                 }
+
+                /** Create exact-capacity _deps from DSTACK (setup only) */
+                if (DCOUNT > DBASE) {
+                    this._deps = DSTACK.slice(DBASE, DCOUNT);
+                    DCOUNT = DBASE;
+                }
+                DBASE = prevDBase;
+
                 REUSED = prevReused;
                 /** Restore saved version tags from VSTACK (both setup and dynamic) */
                 if (VCOUNT > saveStart) {
@@ -1831,6 +1887,11 @@ function Effect(opts, fn, dep1, args) {
             let depsLen = 0;
             let prevReused = REUSED;
 
+            let prevDBase = DBASE;
+            if (flag & FLAG_SETUP) {
+                DBASE = DCOUNT;
+            }
+
             if (!(flag & FLAG_SETUP)) {
                 this._flag |= FLAG_RUNNING;
                 REUSED = 0;
@@ -1866,6 +1927,11 @@ function Effect(opts, fn, dep1, args) {
                 if (!(flag & FLAG_SETUP) && (REUSED !== depCount || (this._deps !== null ? this._deps.length : 0) !== depsLen)) {
                     pruneDeps(this, version, depCount);
                 }
+                if (DCOUNT > DBASE) {
+                    this._deps = DSTACK.slice(DBASE, DCOUNT);
+                    DCOUNT = DBASE;
+                }
+                DBASE = prevDBase;
                 REUSED = prevReused;
                 if (VCOUNT > saveStart) {
                     for (let i = VCOUNT - 2; i >= saveStart; i -= 2) {
@@ -2471,18 +2537,18 @@ function unbound(node) {
 function read(sender) {
     let flag = this._flag;
     let value = sender.val();
-
-    if (
-        (flag & (FLAG_STABLE | FLAG_SETUP)) === FLAG_STABLE || 
-        (this._version === sender._version)
-    ) {
+    if ((flag & (FLAG_STABLE | FLAG_SETUP)) === FLAG_STABLE) {
         return value;
     }
 
     let version = this._version;
     let stamp = sender._version;
-
+    
     sender._version = version;
+    
+    if (version === stamp) {
+        return value;
+    }
 
     /** Reuse: was our dep last run, visited again this run — O(1) */
     if (stamp === version - 1) {
@@ -2512,23 +2578,23 @@ function read(sender) {
     return value;
 }
 
+/**
+ * Setup-mode dependency connection. Writes deps to DSTACK instead
+ * of creating/growing _deps arrays directly. After the fn returns,
+ * _update slices DSTACK to create an exact-capacity _deps array.
+ * @param {Receiver} receiver
+ * @param {Sender} sender
+ */
 function connect(receiver, sender) {
-    /** @type {number} */
-    let depslot = -1;
     if (receiver._dep1 === null) {
+        let subslot = subscribe(sender, receiver, -1);
         receiver._dep1 = sender;
-    } else if (receiver._deps === null) {
-        depslot = 0;
-    } else {
-        depslot = receiver._deps.length;
-    }
-    let subslot = subscribe(sender, receiver, depslot);
-    if (depslot === -1) {
         receiver._dep1slot = subslot;
-    } else if (depslot === 0) {
-        receiver._deps = [sender, subslot];
     } else {
-        receiver._deps.push(sender, subslot);
+        let depslot = DCOUNT - DBASE;
+        let subslot = subscribe(sender, receiver, depslot);
+        DSTACK[DCOUNT++] = sender;
+        DSTACK[DCOUNT++] = subslot;
     }
 }
 
