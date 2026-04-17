@@ -2502,19 +2502,18 @@ function unbound(node) {
  */
 function read(sender) {
     let flag = this._flag;
-    let value = sender.val();
     if ((flag & (FLAG_STABLE | FLAG_SETUP)) === FLAG_STABLE) {
-        return value;
+        return sender.val();
     }
+    if (this._version === sender._version) {
+        return sender._value;
+    }
+    let value = sender.val();
 
     let version = this._version;
     let stamp = sender._version;
 
     sender._version = version;
-
-    if (version === stamp) {
-        return value;
-    }
 
     /** Reuse: was our dep last run, visited again this run — O(1) */
     if (stamp === version - 1) {
@@ -2540,7 +2539,6 @@ function read(sender) {
             this._deps.push(sender, 0);
         }
     }
-
     return value;
 }
 
