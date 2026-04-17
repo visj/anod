@@ -4,12 +4,12 @@ import { root, signal, compute, effect, batch, OPT_WEAK } from "../";
 describe("OPT_WEAK", () => {
     test("releases value when last subscriber disposes", () => {
         const s1 = signal({ data: "large" });
-        const c1 = compute(() => {
-            return s1.val();
+        const c1 = compute((c) => {
+            return c.read(s1);
         }, undefined, OPT_WEAK);
 
-        const e1 = effect(() => {
-            c1.val();
+        const e1 = effect((e) => {
+            e.read(c1);
         });
 
         /** While subscribed, value is retained */
@@ -23,13 +23,13 @@ describe("OPT_WEAK", () => {
     test("recomputes fresh after value is released", () => {
         let runs = 0;
         const s1 = signal(1);
-        const c1 = compute(() => {
+        const c1 = compute((c) => {
             runs++;
-            return s1.val();
+            return c.read(s1);
         }, undefined, OPT_WEAK);
 
-        const e1 = effect(() => {
-            c1.val();
+        const e1 = effect((e) => {
+            e.read(c1);
         });
 
         expect(c1.val()).toBe(1);
@@ -46,16 +46,16 @@ describe("OPT_WEAK", () => {
     test("retains value while at least one subscriber exists", () => {
         let runs = 0;
         const s1 = signal(1);
-        const c1 = compute(() => {
+        const c1 = compute((c) => {
             runs++;
-            return s1.val();
+            return c.read(s1);
         }, undefined, OPT_WEAK);
 
-        const e1 = effect(() => {
-            c1.val();
+        const e1 = effect((e) => {
+            e.read(c1);
         });
-        const e2 = effect(() => {
-            c1.val();
+        const e2 = effect((e) => {
+            e.read(c1);
         });
 
         runs = 0;
@@ -72,16 +72,16 @@ describe("OPT_WEAK", () => {
     test("releases only when all subscribers are gone", () => {
         let runs = 0;
         const s1 = signal(1);
-        const c1 = compute(() => {
+        const c1 = compute((c) => {
             runs++;
-            return s1.val();
+            return c.read(s1);
         }, undefined, OPT_WEAK);
 
-        const e1 = effect(() => {
-            c1.val();
+        const e1 = effect((e) => {
+            e.read(c1);
         });
-        const e2 = effect(() => {
-            c1.val();
+        const e2 = effect((e) => {
+            e.read(c1);
         });
 
         runs = 0;
@@ -96,13 +96,13 @@ describe("OPT_WEAK", () => {
     test("works with weak compute", () => {
         let runs = 0;
         const s1 = signal(1);
-        const c1 = compute(() => {
+        const c1 = compute((c) => {
             runs++;
-            return s1.val() * 2;
+            return c.read(s1) * 2;
         }, undefined, OPT_WEAK);
 
-        const e1 = effect(() => {
-            c1.val();
+        const e1 = effect((e) => {
+            e.read(c1);
         });
 
         expect(c1.val()).toBe(2);
@@ -118,14 +118,14 @@ describe("OPT_WEAK", () => {
     test("re-subscribing after release works correctly", () => {
         let runs = 0;
         const s1 = signal(1);
-        const c1 = compute(() => {
+        const c1 = compute((c) => {
             runs++;
-            return s1.val();
+            return c.read(s1);
         }, undefined, OPT_WEAK);
 
         /** First subscriber */
-        const e1 = effect(() => {
-            c1.val();
+        const e1 = effect((e) => {
+            e.read(c1);
         });
 
         runs = 0;
@@ -133,8 +133,8 @@ describe("OPT_WEAK", () => {
 
         /** New subscriber created after release */
         let effectVal = 0;
-        const e2 = effect(() => {
-            effectVal = c1.val();
+        const e2 = effect((e) => {
+            effectVal = e.read(c1);
         });
 
         expect(effectVal).toBe(1);
@@ -159,18 +159,18 @@ describe("OPT_WEAK", () => {
         let runs = 0;
         const s1 = signal(1);
         const s2 = signal(true);
-        const weak1 = compute(() => {
+        const weak1 = compute((c) => {
             runs++;
-            return s1.val();
+            return c.read(s1);
         }, undefined, OPT_WEAK);
 
         /**
          * This compute conditionally reads weak1.  When the
          * condition flips, pruneDeps will unsubscribe from weak1.
          */
-        const c2 = compute(() => {
-            if (s2.val()) {
-                return weak1.val();
+        const c2 = compute((c) => {
+            if (c.read(s2)) {
+                return c.read(weak1);
             }
             return 0;
         });
@@ -190,13 +190,13 @@ describe("OPT_WEAK", () => {
     test("updates correctly when source changes while released", () => {
         let runs = 0;
         const s1 = signal(1);
-        const c1 = compute(() => {
+        const c1 = compute((c) => {
             runs++;
-            return s1.val();
+            return c.read(s1);
         }, undefined, OPT_WEAK);
 
-        const e1 = effect(() => {
-            c1.val();
+        const e1 = effect((e) => {
+            e.read(c1);
         });
 
         runs = 0;
@@ -213,13 +213,13 @@ describe("OPT_WEAK", () => {
     test("non-weak compute does NOT release value when unsubscribed", () => {
         let runs = 0;
         const s1 = signal(1);
-        const c1 = compute(() => {
+        const c1 = compute((c) => {
             runs++;
-            return s1.val();
+            return c.read(s1);
         });
 
-        const e1 = effect(() => {
-            c1.val();
+        const e1 = effect((e) => {
+            e.read(c1);
         });
 
         runs = 0;
@@ -233,16 +233,16 @@ describe("OPT_WEAK", () => {
     test("weak compute in a chain retains while intermediate subscribes", () => {
         let runs1 = 0;
         const s1 = signal(1);
-        const c1 = compute(() => {
+        const c1 = compute((c) => {
             runs1++;
-            return s1.val();
+            return c.read(s1);
         }, undefined, OPT_WEAK);
-        const c2 = compute(() => {
-            return c1.val() * 2;
+        const c2 = compute((c) => {
+            return c.read(c1) * 2;
         });
 
-        const e1 = effect(() => {
-            c2.val();
+        const e1 = effect((e) => {
+            e.read(c2);
         });
 
         expect(c2.val()).toBe(2);
@@ -260,16 +260,16 @@ describe("OPT_WEAK", () => {
     test("weak compute in a chain releases when intermediate disposes", () => {
         let runs1 = 0;
         const s1 = signal(1);
-        const c1 = compute(() => {
+        const c1 = compute((c) => {
             runs1++;
-            return s1.val();
+            return c.read(s1);
         }, undefined, OPT_WEAK);
-        const c2 = compute(() => {
-            return c1.val() * 2;
+        const c2 = compute((c) => {
+            return c.read(c1) * 2;
         });
 
-        const e1 = effect(() => {
-            c2.val();
+        const e1 = effect((e) => {
+            e.read(c2);
         });
 
         expect(c2.val()).toBe(2);
@@ -287,14 +287,14 @@ describe("OPT_WEAK", () => {
     test("OPT_WEAK with batch", () => {
         let runs = 0;
         const s1 = signal(1);
-        const c1 = compute(() => {
+        const c1 = compute((c) => {
             runs++;
-            return s1.val();
+            return c.read(s1);
         }, undefined, OPT_WEAK);
 
         let effectVal = 0;
-        const e1 = effect(() => {
-            effectVal = c1.val();
+        const e1 = effect((e) => {
+            effectVal = e.read(c1);
         });
 
         runs = 0;

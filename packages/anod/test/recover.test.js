@@ -1,18 +1,18 @@
 import { describe, test, expect } from "bun:test";
-import { root, signal, compute, effect, scope, batch, recover } from "../";
+import { root, signal, compute, effect, scope, batch } from "../";
 
 describe("recover", () => {
     describe("root recovery", () => {
         test("swallows error when recover returns true", () => {
             let recovered = null;
 
-            const r1 = root(() => {
-                recover((err) => {
+            const r1 = root((r) => {
+                r.recover((err) => {
                     recovered = err;
                     return true;
                 });
 
-                effect(() => {
+                r.effect(() => {
                     throw new Error("boom");
                 });
             });
@@ -26,13 +26,13 @@ describe("recover", () => {
             let recovered = null;
 
             expect(() => {
-                root(() => {
-                    recover((err) => {
+                root((r) => {
+                    r.recover((err) => {
                         recovered = err;
                         return false;
                     });
 
-                    effect(() => {
+                    r.effect(() => {
                         throw new Error("boom");
                     });
                 });
@@ -43,8 +43,8 @@ describe("recover", () => {
 
         test("propagates error when no recover is registered", () => {
             expect(() => {
-                root(() => {
-                    effect(() => {
+                root((r) => {
+                    r.effect(() => {
                         throw new Error("unhandled");
                     });
                 });
@@ -56,17 +56,17 @@ describe("recover", () => {
         test("stops bubbling when first handler returns true", () => {
             let calls = [];
 
-            const r1 = root(() => {
-                recover((err) => {
+            const r1 = root((r) => {
+                r.recover((err) => {
                     calls.push("first");
                     return true;
                 });
-                recover((err) => {
+                r.recover((err) => {
                     calls.push("second");
                     return true;
                 });
 
-                effect(() => {
+                r.effect(() => {
                     throw new Error("boom");
                 });
             });
@@ -78,17 +78,17 @@ describe("recover", () => {
         test("tries second handler when first returns false", () => {
             let calls = [];
 
-            const r1 = root(() => {
-                recover((err) => {
+            const r1 = root((r) => {
+                r.recover((err) => {
                     calls.push("first");
                     return false;
                 });
-                recover((err) => {
+                r.recover((err) => {
                     calls.push("second");
                     return true;
                 });
 
-                effect(() => {
+                r.effect(() => {
                     throw new Error("boom");
                 });
             });
@@ -102,18 +102,18 @@ describe("recover", () => {
         test("recovers when effect reads errored compute", () => {
             let recovered = null;
 
-            const r1 = root(() => {
-                recover((err) => {
+            const r1 = root((r) => {
+                r.recover((err) => {
                     recovered = err;
                     return true;
                 });
 
-                const c1 = compute(() => {
+                const c1 = r.compute(() => {
                     throw new Error("compute error");
                 });
 
-                effect(() => {
-                    c1.val();
+                r.effect((e) => {
+                    e.read(c1);
                 });
             });
 
@@ -128,19 +128,19 @@ describe("recover", () => {
             let innerCalled = false;
             let outerCalled = false;
 
-            const r1 = root(() => {
-                recover(() => {
+            const r1 = root((r) => {
+                r.recover(() => {
                     outerCalled = true;
                     return true;
                 });
 
-                scope(() => {
-                    recover(() => {
+                r.scope((s) => {
+                    s.recover(() => {
                         innerCalled = true;
                         return true;
                     });
 
-                    effect(() => {
+                    s.effect(() => {
                         throw new Error("inner error");
                     });
                 });
@@ -155,19 +155,19 @@ describe("recover", () => {
             let innerCalled = false;
             let outerCalled = false;
 
-            const r1 = root(() => {
-                recover(() => {
+            const r1 = root((r) => {
+                r.recover(() => {
                     outerCalled = true;
                     return true;
                 });
 
-                scope(() => {
-                    recover(() => {
+                r.scope((s) => {
+                    s.recover(() => {
                         innerCalled = true;
                         return false;
                     });
 
-                    effect(() => {
+                    s.effect(() => {
                         throw new Error("bubble up");
                     });
                 });
@@ -184,12 +184,12 @@ describe("recover", () => {
             const s1 = signal(0);
             let runs = 0;
 
-            const r1 = root(() => {
-                recover(() => true);
+            const r1 = root((r) => {
+                r.recover(() => true);
 
-                effect(() => {
+                r.effect((e) => {
                     runs++;
-                    if (s1.val() > 0) {
+                    if (e.read(s1) > 0) {
                         throw new Error("boom");
                     }
                 });
@@ -212,20 +212,20 @@ describe("recover", () => {
             let recovered = null;
             let s2val = 0;
 
-            const r1 = root(() => {
-                recover((err) => {
+            const r1 = root((r) => {
+                r.recover((err) => {
                     recovered = err;
                     return true;
                 });
 
-                effect(() => {
-                    if (s1.val()) {
+                r.effect((e) => {
+                    if (e.read(s1)) {
                         throw new Error("batch error");
                     }
                 });
 
-                effect(() => {
-                    s2val = s2.val();
+                r.effect((e) => {
+                    s2val = e.read(s2);
                 });
             });
 
@@ -246,14 +246,14 @@ describe("recover", () => {
             const s1 = signal(false);
             let recovered = null;
 
-            const r1 = root(() => {
-                recover((err) => {
+            const r1 = root((r) => {
+                r.recover((err) => {
                     recovered = err;
                     return true;
                 });
 
-                effect(() => {
-                    if (s1.val()) {
+                r.effect((e) => {
+                    if (e.read(s1)) {
                         throw new Error("triggered");
                     }
                 });
@@ -273,18 +273,18 @@ describe("recover", () => {
             let handlerVersion = 0;
             let recoveredVersion = -1;
 
-            const r1 = root(() => {
-                scope(() => {
-                    let version = s1.val();
+            const r1 = root((r) => {
+                r.scope((s) => {
+                    let version = s.read(s1);
                     handlerVersion = version;
 
-                    recover((err) => {
+                    s.recover((err) => {
                         recoveredVersion = version;
                         return true;
                     });
 
                     if (version > 1) {
-                        effect(() => {
+                        s.effect(() => {
                             throw new Error("fail");
                         });
                     }
@@ -305,8 +305,8 @@ describe("recover", () => {
             const s1 = signal(0);
             let recovered = false;
 
-            const r1 = root(() => {
-                recover(() => {
+            const r1 = root((r) => {
+                r.recover(() => {
                     recovered = true;
                     return true;
                 });
@@ -317,8 +317,8 @@ describe("recover", () => {
             // We verify by checking that creating effects outside the disposed root
             // that throw will not be caught
             expect(() => {
-                root(() => {
-                    effect(() => {
+                root((r) => {
+                    r.effect(() => {
                         throw new Error("after dispose");
                     });
                 });

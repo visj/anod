@@ -15,7 +15,6 @@ export {
     Signal,
     Compute,
     Effect,
-    Reader,
     root,
     signal,
     compute,
@@ -26,10 +25,5 @@ export {
     watch,
     spawn,
     scope,
-    batch,
-    reader,
-    equal,
-    stable,
-    cleanup,
-    recover
+    batch
 } from "./core/signal.js";

@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { signal, compute, effect, task, reader, FLAG_STREAM } from "../";
+import { signal, compute, effect, task, FLAG_STREAM } from "../";
 
 const tick = () => Promise.resolve();
 
@@ -7,7 +7,7 @@ describe("async", () => {
     describe("promise", () => {
         test("is loading while the promise is pending", async () => {
             let resolve;
-            const c1 = task(() => { return new Promise(r => { resolve = r; }); });
+            const c1 = task((c) => { return new Promise(r => { resolve = r; }); });
 
             expect(c1.loading()).toBe(true);
 
@@ -19,7 +19,7 @@ describe("async", () => {
 
         test("returns seed value while loading", async () => {
             let resolve;
-            const c1 = task(() => { return new Promise(r => { resolve = r; }); }, 0);
+            const c1 = task((c) => { return new Promise(r => { resolve = r; }); }, 0);
 
             expect(c1.val()).toBe(0);
             expect(c1.loading()).toBe(true);
@@ -32,7 +32,7 @@ describe("async", () => {
         });
 
         test("settles to the resolved value", async () => {
-            const c1 = task(() => { return Promise.resolve(42); });
+            const c1 = task((c) => { return Promise.resolve(42); });
 
             expect(c1.loading()).toBe(true);
             await tick();
@@ -43,7 +43,7 @@ describe("async", () => {
         });
 
         test("sets error flag on rejection", async () => {
-            const c1 = task(() => { return Promise.reject(new Error("async error")); });
+            const c1 = task((c) => { return Promise.reject(new Error("async error")); });
 
             await tick();
 
@@ -52,7 +52,7 @@ describe("async", () => {
         });
 
         test("rethrows the error when read after rejection", async () => {
-            const c1 = task(() => { return Promise.reject(new Error("async error")); });
+            const c1 = task((c) => { return Promise.reject(new Error("async error")); });
 
             await tick();
 
@@ -61,8 +61,8 @@ describe("async", () => {
 
         test("clears error on subsequent successful resolution", async () => {
             const s1 = signal(true);
-            const c1 = task(() => {
-                return s1.val()
+            const c1 = task((c) => {
+                return c.read(s1)
                     ? Promise.reject(new Error("fail"))
                     : Promise.resolve(42);
             });
@@ -79,10 +79,10 @@ describe("async", () => {
         });
 
         test("notifies downstream effect when promise settles", async () => {
-            const c1 = task(() => { return Promise.resolve(42); });
+            const c1 = task((c) => { return Promise.resolve(42); });
             let received = void 0;
 
-            effect(() => { received = c1.val(); });
+            effect((e) => { received = e.read(c1); });
 
             expect(received).toBeUndefined(); // seed while loading
             await tick();
@@ -94,8 +94,8 @@ describe("async", () => {
             const resolvers = [];
             const s1 = signal(0);
 
-            const c1 = task(() => {
-                const v = s1.val();
+            const c1 = task((c) => {
+                const v = c.read(s1);
                 return new Promise(r => { resolvers[v] = r; });
             });
 
@@ -126,7 +126,7 @@ describe("async", () => {
                 next() { return new Promise(r => { resolver = r; }); }
             };
 
-            const c1 = compute(() => { return iter; }, undefined, FLAG_STREAM);
+            const c1 = compute((c) => { return iter; }, undefined, FLAG_STREAM);
 
             expect(c1.loading()).toBe(true);
             expect(c1.val()).toBeUndefined();
@@ -143,13 +143,13 @@ describe("async", () => {
                 return() { return Promise.resolve({ done: true }); }
             };
 
-            const c1 = compute(() => { return iter; }, undefined, FLAG_STREAM);
+            const c1 = compute((c) => { return iter; }, undefined, FLAG_STREAM);
             const values = [];
 
             // Always call c1.val() so the effect subscribes to c1 as a dependency;
             // without this, c1 is never tracked and the effect won't re-run on settle.
-            effect(() => {
-                const v = c1.val();
+            effect((e) => {
+                const v = e.read(c1);
                 if (!c1.loading()) {
                     values.push(v);
                 }
@@ -177,7 +177,7 @@ describe("async", () => {
                 return() { return Promise.resolve({ done: true }); }
             };
 
-            const c1 = compute(() => { return iter; }, undefined, FLAG_STREAM);
+            const c1 = compute((c) => { return iter; }, undefined, FLAG_STREAM);
 
             expect(c1.loading()).toBe(true);
 
@@ -193,7 +193,7 @@ describe("async", () => {
                 throw new Error("iterator error");
             }
 
-            const c1 = compute(() => { return failing(); }, undefined, FLAG_STREAM);
+            const c1 = compute((c) => { return failing(); }, undefined, FLAG_STREAM);
 
             await tick();
 
@@ -216,8 +216,8 @@ describe("async", () => {
             };
 
             const s1 = signal(true);
-            const c1 = compute(() => {
-                if (s1.val()) {
+            const c1 = compute((c) => {
+                if (c.read(s1)) {
                     return staleIter;
                 }
                 return (async function*() { yield 99; })();
@@ -239,40 +239,5 @@ describe("async", () => {
             expect(returnCalled).toBe(true);
             expect(c1.val()).toBe(99); // value unchanged by the stale yield
         });
-    });
-
-    test("reader() returns a handle that can read a signal later", async () => {
-        const s1 = signal(42);
-        const keepAlive = signal(0);
-        /** @type {any} */
-        let captured;
-        task(async () => {
-            captured = reader();
-            keepAlive.val(); // bind a dep so the node isn't unbound-disposed
-            return 1;
-        });
-        await tick();
-        await tick();
-        expect(captured.read(s1)).toBe(42);
-    });
-
-    test("reader() is disposed on the owning node's next update", async () => {
-        const s1 = signal(0);
-        /** @type {any} */
-        let captured;
-        const c1 = task(async () => {
-            captured = reader();
-            s1.val();
-            return 1;
-        });
-        await tick();
-        await tick();
-        /** Changing s1 marks c1 stale; pulling c1.val() triggers the next
-         *  _update, which disposes the old reader before the new fn runs. */
-        s1.set(1);
-        c1.val();
-        await tick();
-        await tick();
-        expect(() => captured.read(s1)).toThrow('Reader disposed');
     });
 });

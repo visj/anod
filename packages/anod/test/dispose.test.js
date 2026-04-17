@@ -8,12 +8,12 @@ describe("dispose", () => {
             let s1;
             let c1;
 
-            const r1 = root(() => {
+            const r1 = root((r) => {
                 count = 0;
                 s1 = signal(0);
-                c1 = compute(() => {
+                c1 = r.compute((c) => {
                     count++;
-                    return s1.val();
+                    return c.read(s1);
                 });
 
                 expect(c1.val()).toBe(0);
@@ -34,19 +34,19 @@ describe("dispose", () => {
 
     describe("computations", () => {
         test("persists through cycle when manually disposed", () => {
-            scope(() => {
+            scope((s) => {
                 const s1 = signal(0);
-                const c1 = compute(() => s1.val());
+                const c1 = s.compute((c) => c.read(s1));
                 let count = 0;
 
-                effect(() => {
-                    effect(() => {
-                        if (s1.val() > 0) {
+                s.effect((e) => {
+                    effect((e2) => {
+                        if (e2.read(s1) > 0) {
                             c1.dispose();
                         }
                     });
-                    effect(() => {
-                        count += (c1.val() || 0);
+                    effect((e3) => {
+                        count += (e3.read(c1) || 0);
                     });
                 });
 

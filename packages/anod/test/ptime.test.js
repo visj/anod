@@ -33,14 +33,14 @@ describe("ptime guard: correct usage patterns", () => {
              */
             const s_gate = signal(true);
             const s_data = signal(0);
-            const c = compute(() => s_data.val() + 1);
+            const c = compute((r) => r.read(s_data) + 1);
 
             let effectRuns = 0;
             let lastVal = -1;
-            effect(() => {
+            effect((e) => {
                 effectRuns++;
-                if (s_gate.val()) {
-                    lastVal = c.val();
+                if (e.read(s_gate)) {
+                    lastVal = e.read(c);
                 } else {
                     lastVal = -1;
                 }
@@ -72,13 +72,13 @@ describe("ptime guard: correct usage patterns", () => {
 
         test("dynamic effect always pulls compute when reading it", () => {
             const s = signal(0);
-            const c = compute(() => s.val() + 1);
+            const c = compute((r) => r.read(s) + 1);
 
             let effectRuns = 0;
             let lastVal = 0;
-            effect(() => {
+            effect((e) => {
                 effectRuns++;
-                lastVal = c.val();
+                lastVal = e.read(c);
             });
             expect(effectRuns).toBe(1);
             expect(lastVal).toBe(1);
@@ -97,13 +97,13 @@ describe("ptime guard: correct usage patterns", () => {
 
         test("watch always reads all deps — compute is always pulled", () => {
             const s = signal(0);
-            const c = derive(() => s.val() + 1);
+            const c = derive((r) => r.read(s) + 1);
 
             let effectRuns = 0;
             let lastVal = 0;
-            watch(() => {
+            watch((w) => {
                 effectRuns++;
-                lastVal = c.val();
+                lastVal = w.read(c);
             });
             expect(effectRuns).toBe(1);
             expect(lastVal).toBe(1);
@@ -120,14 +120,14 @@ describe("ptime guard: correct usage patterns", () => {
         test("watch with two deps always pulls both", () => {
             const s1 = signal(0);
             const s2 = signal(10);
-            const c1 = derive(() => s1.val() + 1);
-            const c2 = derive(() => s2.val() + 1);
+            const c1 = derive((r) => r.read(s1) + 1);
+            const c2 = derive((r) => r.read(s2) + 1);
 
             let effectRuns = 0;
             let lastVal = 0;
-            watch(() => {
+            watch((w) => {
                 effectRuns++;
-                lastVal = c1.val() + c2.val();
+                lastVal = w.read(c1) + w.read(c2);
             });
             expect(effectRuns).toBe(1);
             expect(lastVal).toBe(12);
@@ -146,14 +146,14 @@ describe("ptime guard: correct usage patterns", () => {
 
         test("diamond: both arms stale in same round", () => {
             const s = signal(0);
-            const left = derive(() => s.val() + 1);
-            const right = derive(() => s.val() * 10);
-            const join = derive(() => left.val() + right.val());
+            const left = derive((r) => r.read(s) + 1);
+            const right = derive((r) => r.read(s) * 10);
+            const join = derive((r) => r.read(left) + r.read(right));
 
             let effectRuns = 0;
-            effect(() => {
+            effect((e) => {
                 effectRuns++;
-                join.val();
+                e.read(join);
             });
             expect(effectRuns).toBe(1);
             expect(join.val()).toBe(1);
@@ -169,14 +169,14 @@ describe("ptime guard: correct usage patterns", () => {
 
         test("deep diamond with pending/stale split", () => {
             const s = signal(0);
-            const a = derive(() => s.val() + 1);
-            const b = derive(() => a.val() + 1);
-            const c = derive(() => a.val() + b.val());
+            const a = derive((r) => r.read(s) + 1);
+            const b = derive((r) => r.read(a) + 1);
+            const c = derive((r) => r.read(a) + r.read(b));
 
             let effectRuns = 0;
-            effect(() => {
+            effect((e) => {
                 effectRuns++;
-                c.val();
+                e.read(c);
             });
             expect(effectRuns).toBe(1);
             expect(c.val()).toBe(3);
@@ -203,13 +203,13 @@ describe("ptime guard: correct usage patterns", () => {
              */
             const s1 = signal(0);
             const s2 = signal(0);
-            const c = compute(() => s1.val() + s2.val());
+            const c = compute((r) => r.read(s1) + r.read(s2));
 
             let effectRuns = 0;
             let lastVal = 0;
-            effect(() => {
+            effect((e) => {
                 effectRuns++;
-                lastVal = c.val();
+                lastVal = e.read(c);
                 if (lastVal === 1 && s2.val() === 0) {
                     s2.set(10);
                 }
@@ -228,16 +228,16 @@ describe("ptime guard: correct usage patterns", () => {
 
         test("chain: effect writes signal feeding another effect", () => {
             const s = signal(0);
-            const c = compute(() => s.val() + 1);
+            const c = compute((r) => r.read(s) + 1);
             const s_out = signal(-1);
 
-            effect(() => {
-                s_out.set(c.val());
+            effect((e) => {
+                s_out.set(e.read(c));
             });
 
             let lastOut = 0;
-            effect(() => {
-                lastOut = s_out.val();
+            effect((e) => {
+                lastOut = e.read(s_out);
             });
             expect(lastOut).toBe(1);
 
@@ -255,20 +255,20 @@ describe("ptime guard: correct usage patterns", () => {
             const s = signal(0);
             let c1Runs = 0;
             let c2Runs = 0;
-            const c1 = compute(() => {
+            const c1 = compute((r) => {
                 c1Runs++;
-                s.val();
+                r.read(s);
                 return 0;
             });
-            const c2 = compute(() => {
+            const c2 = compute((r) => {
                 c2Runs++;
-                return c1.val() + 1;
+                return r.read(c1) + 1;
             });
 
             let effectRuns = 0;
-            effect(() => {
+            effect((e) => {
                 effectRuns++;
-                c2.val();
+                e.read(c2);
             });
 
             c1Runs = 0;
@@ -292,7 +292,7 @@ describe("ptime guard: correct usage patterns", () => {
 
         test("compute with no subscribers: val() always returns correct value", () => {
             const s = signal(0);
-            const c = compute(() => s.val() + 1);
+            const c = compute((r) => r.read(s) + 1);
             expect(c.val()).toBe(1);
 
             s.set(1);
@@ -304,7 +304,7 @@ describe("ptime guard: correct usage patterns", () => {
 
         test("compute gains subscriber after being stale — subscriber sees current value", () => {
             const s = signal(0);
-            const c = compute(() => s.val() + 1);
+            const c = compute((r) => r.read(s) + 1);
             expect(c.val()).toBe(1);
 
             /** c gets STALE, no subscriber to pull it */
@@ -313,8 +313,8 @@ describe("ptime guard: correct usage patterns", () => {
 
             /** Now subscribe — effect creation reads c.val() → clears flags */
             let lastVal = 0;
-            effect(() => {
-                lastVal = c.val();
+            effect((e) => {
+                lastVal = e.read(c);
             });
             expect(lastVal).toBe(3);
 
@@ -329,12 +329,12 @@ describe("ptime guard: correct usage patterns", () => {
         test("batch: two signals feeding same compute", () => {
             const s1 = signal(0);
             const s2 = signal(0);
-            const c = compute(() => s1.val() + s2.val());
+            const c = compute((r) => r.read(s1) + r.read(s2));
 
             let effectRuns = 0;
-            effect(() => {
+            effect((e) => {
                 effectRuns++;
-                c.val();
+                e.read(c);
             });
             effectRuns = 0;
 
@@ -349,12 +349,12 @@ describe("ptime guard: correct usage patterns", () => {
 
         test("batch: same signal set twice, compute runs once", () => {
             const s = signal(0);
-            const c = compute(() => s.val() + 1);
+            const c = compute((r) => r.read(s) + 1);
 
             let effectRuns = 0;
-            effect(() => {
+            effect((e) => {
                 effectRuns++;
-                c.val();
+                e.read(c);
             });
             effectRuns = 0;
 
@@ -371,16 +371,16 @@ describe("ptime guard: correct usage patterns", () => {
 
         test("transmit always notifies stale downstream", () => {
             const s = signal(0);
-            const t = transmit(() => {
-                s.val();
+            const t = transmit((r) => {
+                r.read(s);
                 return 42;
             });
-            const c = compute(() => t.val() + 1);
+            const c = compute((r) => r.read(t) + 1);
 
             let effectRuns = 0;
-            effect(() => {
+            effect((e) => {
                 effectRuns++;
-                c.val();
+                e.read(c);
             });
             effectRuns = 0;
 
@@ -397,12 +397,12 @@ describe("ptime guard: correct usage patterns", () => {
 
         test("transmit with value change propagates normally", () => {
             const s = signal(0);
-            const t = transmit(() => s.val() + 1);
+            const t = transmit((r) => r.read(s) + 1);
 
             let effectRuns = 0;
-            effect(() => {
+            effect((e) => {
                 effectRuns++;
-                t.val();
+                e.read(t);
             });
             effectRuns = 0;
 
@@ -419,13 +419,13 @@ describe("ptime guard: correct usage patterns", () => {
             let current = head;
             for (let i = 0; i < 20; i++) {
                 let prev = current;
-                current = derive(() => prev.val() + 1);
+                current = derive((r) => r.read(prev) + 1);
             }
 
             let effectRuns = 0;
-            effect(() => {
+            effect((e) => {
                 effectRuns++;
-                current.val();
+                e.read(current);
             });
             effectRuns = 0;
 
@@ -441,19 +441,19 @@ describe("ptime guard: correct usage patterns", () => {
         test("deep absorb chain: only first node runs", () => {
             const head = signal(0);
             let c1Runs = 0;
-            const c1 = compute(() => {
+            const c1 = compute((r) => {
                 c1Runs++;
-                head.val();
+                r.read(head);
                 return 0;
             });
-            const c2 = derive(() => c1.val() + 1);
-            const c3 = derive(() => c2.val() + 1);
-            const c4 = derive(() => c3.val() + 1);
+            const c2 = derive((r) => r.read(c1) + 1);
+            const c3 = derive((r) => r.read(c2) + 1);
+            const c4 = derive((r) => r.read(c3) + 1);
 
             let effectRuns = 0;
-            effect(() => {
+            effect((e) => {
                 effectRuns++;
-                c4.val();
+                e.read(c4);
             });
             c1Runs = 0;
             effectRuns = 0;

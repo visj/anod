@@ -7,7 +7,7 @@ import {
     compute,
     signal,
     transmit
-} from '../../dist/index.mjs';
+} from '../../src/index.js';
 import { saveRun } from './save-run.js';
 
 let sink = 0;
@@ -74,9 +74,9 @@ function setupDiamond() {
             return v + 1;
         }));
     }
-    const sum = derive(() => {
+    const sum = derive(c => {
         counter++;
-        return branches.reduce((a, b) => a + b.val(), 0);
+        return branches.reduce((a, b) => a + c.read(b), 0);
     });
     watch(sum, (v) => {
         counter++;
@@ -101,9 +101,9 @@ function setupTriangle() {
         });
     }
     list.push(current);
-    const sum = derive(() => {
+    const sum = derive(c => {
         counter++;
-        return list.reduce((a, b) => a + b.val(), 0);
+        return list.reduce((a, b) => a + c.read(b), 0);
     });
     watch(sum, (v) => {
         counter++;
@@ -117,9 +117,9 @@ function setupTriangle() {
 
 function setupMux() {
     const heads = new Array(100).fill(null).map(() => signal(0));
-    const mux = derive(() => {
+    const mux = derive(c => {
         counter++;
-        return heads.map(h => h.val());
+        return heads.map(h => c.read(h));
     });
     const split = heads
         .map((_, index) => derive(mux, (v) => {
@@ -153,11 +153,11 @@ function setupUnstable() {
         counter++;
         return -v;
     });
-    const current = compute(() => {
+    const current = compute(c => {
         counter++;
         let result = 0;
         for (let i = 0; i < 20; i++) {
-            result += head.val() % 2 ? double.val() : inverse.val();
+            result += c.read(head) % 2 ? c.read(double) : c.read(inverse);
         }
         return result;
     });
@@ -206,11 +206,11 @@ function setupAvoidable() {
 function setupRepeatedObservers() {
     const size = 30;
     const head = signal(0);
-    const current = derive(() => {
+    const current = derive(c => {
         counter++;
         let result = 0;
         for (let i = 0; i < size; i++) {
-            result += head.val();
+            result += c.read(head);
         }
         return result;
     });
@@ -237,19 +237,19 @@ function setupCellx(layers) {
     for (let i = layers; i > 0; i--) {
         const m = layer;
         const s = {
-            prop1: transmit(m.prop2, (v) => {
+            prop1: derive(m.prop2, (v) => {
                 counter++;
                 return v;
             }),
-            prop2: transmit(() => {
+            prop2: derive(c => {
                 counter++;
-                return m.prop1.val() - m.prop3.val();
+                return c.read(m.prop1) - c.read(m.prop3);
             }),
-            prop3: transmit(() => {
+            prop3: derive(c => {
                 counter++;
-                return m.prop2.val() + m.prop4.val();
+                return c.read(m.prop2) + c.read(m.prop4);
             }),
-            prop4: transmit(m.prop3, (v) => {
+            prop4: derive(m.prop3, (v) => {
                 counter++;
                 return v;
             }),
@@ -287,37 +287,37 @@ function setupMolWire() {
     const numbers = Array.from({ length: 5 }, (_, i) => i);
     const A = signal(0);
     const B = signal(0);
-    const C = derive(() => {
+    const C = derive(c => {
         counter++;
-        return (A.val() % 2) + (B.val() % 2);
+        return (c.read(A) % 2) + (c.read(B) % 2);
     });
-    const D = derive(() => {
+    const D = derive(c => {
         counter++;
-        return numbers.map(i => ({ x: i + (A.val() % 2) - (B.val() % 2) }));
+        return numbers.map(i => ({ x: i + (c.read(A) % 2) - (c.read(B) % 2) }));
     });
-    const E = derive(() => {
+    const E = derive(c => {
         counter++;
-        return hard(C.val() + A.val() + D.val()[0].x, 'E');
+        return hard(c.read(C) + c.read(A) + c.read(D)[0].x, 'E');
     });
-    const F = compute(() => {
+    const F = compute(c => {
         counter++;
-        return hard(D.val()[2].x || B.val(), 'F');
+        return hard(c.read(D)[2].x || c.read(B), 'F');
     });
-    const G = compute(() => {
+    const G = compute(c => {
         counter++;
-        return C.val() + (C.val() || E.val() % 2) + D.val()[4].x + F.val();
+        return c.read(C) + (c.read(C) || c.read(E) % 2) + c.read(D)[4].x + c.read(F);
     });
-    watch(() => {
+    watch(c => {
         counter++;
-        sink += hard(G.val(), 'H');
+        sink += hard(c.read(G), 'H');
     });
-    watch(() => {
+    watch(c => {
         counter++;
-        sink += G.val();
+        sink += c.read(G);
     });
-    watch(() => {
+    watch(c => {
         counter++;
-        sink += hard(F.val(), 'J');
+        sink += hard(c.read(F), 'J');
     });
     let i = 0;
     return () => {
@@ -349,13 +349,13 @@ function benchCreateComputations(count) {
     return () => {
         const src = signal(0);
         for (let i = 0; i < count; i++) {
-            const comp = derive(() => {
+            const comp = derive(c => {
                 counter++;
-                return src.val();
+                return c.read(src);
             });
-            watch(() => {
+            watch(c => {
                 counter++;
-                sink += comp.val();
+                sink += c.read(comp);
             });
         }
     };
@@ -435,27 +435,27 @@ function makeDynGraph(width, totalLayers, staticFraction, nSources) {
                 mySources[s] = prevRow[(myDex + s) % width];
             }
             if (random() < staticFraction) {
-                row[myDex] = derive(() => {
+                row[myDex] = derive(c => {
                     counter++;
                     let sum = 0;
                     for (let s = 0; s < mySources.length; s++) {
-                        sum += mySources[s].val();
+                        sum += c.read(mySources[s]);
                     }
                     return sum;
                 });
             } else {
                 const first = mySources[0];
                 const tail = mySources.slice(1);
-                row[myDex] = compute(() => {
+                row[myDex] = compute(c => {
                     counter++;
-                    let sum = first.val();
+                    let sum = c.read(first);
                     const shouldDrop = sum & 0x1;
                     const dropDex = sum % tail.length;
                     for (let i = 0; i < tail.length; i++) {
                         if (shouldDrop && i === dropDex) {
                             continue;
                         }
-                        sum += tail[i].val();
+                        sum += c.read(tail[i]);
                     }
                     return sum;
                 });

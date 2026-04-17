@@ -1,0 +1,238 @@
+[bailout (kind: deopt-eager, reason: wrong map): begin. deoptimizing 0x1c1bb54d08e1 <JSFunction next (sfi = 0x2573f3308e79)>, 0x1a3b75d81f11 <Code MAGLEV>, opt id 2, bytecode offset 3, deopt exit 0, FP to SP delta 32, caller SP 0x00016efae538, pc 0x000126e853f4]
+[bailout (kind: deopt-eager, reason: exit from OSR'd inner loop): begin. deoptimizing 0x1c1bb54f7251 <JSFunction makeDynGraph (sfi = 0x47f59240e19)>, 0x34546f908629 <Code MAGLEV>, opt id 29, bytecode offset 387, deopt exit 46, FP to SP delta 240, caller SP 0x00016efad858, pc 0x000126eeee3c]
+[bailout (kind: deopt-eager, reason: exit from OSR'd inner loop): begin. deoptimizing 0x1c1bb54f7251 <JSFunction makeDynGraph (sfi = 0x47f59240e19)>, 0x34546f908629 <Code MAGLEV>, opt id 29, bytecode offset 387, deopt exit 46, FP to SP delta 240, caller SP 0x00016efad858, pc 0x000126eeee3c]
+[bailout (kind: deopt-eager, reason: exit from OSR'd inner loop): begin. deoptimizing 0x1c1bb54f7251 <JSFunction makeDynGraph (sfi = 0x47f59240e19)>, 0x34546f908629 <Code MAGLEV>, opt id 29, bytecode offset 387, deopt exit 46, FP to SP delta 240, caller SP 0x00016efad858, pc 0x000126eeee3c]
+[bailout (kind: deopt-eager, reason: exit from OSR'd inner loop): begin. deoptimizing 0x1c1bb54f7251 <JSFunction makeDynGraph (sfi = 0x47f59240e19)>, 0x34546f908629 <Code MAGLEV>, opt id 29, bytecode offset 387, deopt exit 46, FP to SP delta 240, caller SP 0x00016efad858, pc 0x000126eeee3c]
+[bailout (kind: deopt-eager, reason: exit from OSR'd inner loop): begin. deoptimizing 0x1c1bb54f7251 <JSFunction makeDynGraph (sfi = 0x47f59240e19)>, 0x34546f908629 <Code MAGLEV>, opt id 29, bytecode offset 387, deopt exit 46, FP to SP delta 240, caller SP 0x00016efad858, pc 0x000126eeee3c]
+[bailout (kind: deopt-eager, reason: exit from OSR'd inner loop): begin. deoptimizing 0x1c1bb54f7251 <JSFunction makeDynGraph (sfi = 0x47f59240e19)>, 0x34546f908629 <Code MAGLEV>, opt id 29, bytecode offset 387, deopt exit 46, FP to SP delta 240, caller SP 0x00016efad858, pc 0x000126eeee3c]
+[bailout (kind: deopt-eager, reason: exit from OSR'd inner loop): begin. deoptimizing 0x1c1bb54f7251 <JSFunction makeDynGraph (sfi = 0x47f59240e19)>, 0x34546f908629 <Code MAGLEV>, opt id 29, bytecode offset 387, deopt exit 46, FP to SP delta 240, caller SP 0x00016efad858, pc 0x000126eeee3c]
+[bailout (kind: deopt-eager, reason: exit from OSR'd inner loop): begin. deoptimizing 0x1c1bb54f7251 <JSFunction makeDynGraph (sfi = 0x47f59240e19)>, 0x34546f908629 <Code MAGLEV>, opt id 29, bytecode offset 387, deopt exit 46, FP to SP delta 240, caller SP 0x00016efad858, pc 0x000126eeee3c]
+[bailout (kind: deopt-eager, reason: overflow): begin. deoptimizing 0x088eca2594a9 <JSFunction (sfi = 0x2262b609d2d1)>, 0x34546f906459 <Code MAGLEV>, opt id 27, bytecode offset 49, deopt exit 10, FP to SP delta 96, caller SP 0x00016efad5b0, pc 0x000126eec524]
+[bailout (kind: deopt-eager, reason: overflow): begin. deoptimizing 0x088eca25cd11 <JSFunction (sfi = 0x2262b609d319)>, 0x34546f908e89 <Code MAGLEV>, opt id 34, bytecode offset 91, deopt exit 12, FP to SP delta 112, caller SP 0x00016efad640, pc 0x000126eef7ac]
+[bailout (kind: deopt-eager, reason: exit from OSR'd inner loop): begin. deoptimizing 0x1c1bb54f7251 <JSFunction makeDynGraph (sfi = 0x47f59240e19)>, 0x34546f908629 <Code MAGLEV>, opt id 29, bytecode offset 387, deopt exit 46, FP to SP delta 240, caller SP 0x00016efad858, pc 0x000126eeee3c]
+[bailout (kind: deopt-eager, reason: exit from OSR'd inner loop): begin. deoptimizing 0x1c1bb54f7251 <JSFunction makeDynGraph (sfi = 0x47f59240e19)>, 0x34546f908629 <Code MAGLEV>, opt id 29, bytecode offset 387, deopt exit 46, FP to SP delta 240, caller SP 0x00016efad798, pc 0x000126eeee3c]
+[bailout (kind: deopt-eager, reason: exit from OSR'd inner loop): begin. deoptimizing 0x1c1bb54f7251 <JSFunction makeDynGraph (sfi = 0x47f59240e19)>, 0x34546f908629 <Code MAGLEV>, opt id 29, bytecode offset 387, deopt exit 46, FP to SP delta 240, caller SP 0x00016efad798, pc 0x000126eeee3c]
+[bailout (kind: deopt-eager, reason: exit from OSR'd inner loop): begin. deoptimizing 0x1c1bb54f7251 <JSFunction makeDynGraph (sfi = 0x47f59240e19)>, 0x34546f908629 <Code MAGLEV>, opt id 29, bytecode offset 387, deopt exit 46, FP to SP delta 240, caller SP 0x00016efad798, pc 0x000126eeee3c]
+[bailout (kind: deopt-eager, reason: exit from OSR'd inner loop): begin. deoptimizing 0x1c1bb54f7251 <JSFunction makeDynGraph (sfi = 0x47f59240e19)>, 0x34546f908629 <Code MAGLEV>, opt id 29, bytecode offset 387, deopt exit 46, FP to SP delta 240, caller SP 0x00016efad798, pc 0x000126eeee3c]
+[bailout (kind: deopt-eager, reason: Insufficient type feedback for binary operation): begin. deoptimizing 0x2262b6091e89 <JSFunction ComputeProto.val (sfi = 0x47f5925dfa1)>, 0x34546f90a8a1 <Code TURBOFAN_JS>, opt id 35, bytecode offset 70, deopt exit 5, FP to SP delta 64, caller SP 0x00016efad868, pc 0x000126ef0e18]
+[bailout (kind: deopt-eager, reason: exit from OSR'd inner loop): begin. deoptimizing 0x1c1bb54f7251 <JSFunction makeDynGraph (sfi = 0x47f59240e19)>, 0x34546f908629 <Code MAGLEV>, opt id 29, bytecode offset 387, deopt exit 46, FP to SP delta 240, caller SP 0x00016efad798, pc 0x000126eeee3c]
+[bailout (kind: deopt-eager, reason: exit from OSR'd inner loop): begin. deoptimizing 0x1c1bb54f7251 <JSFunction makeDynGraph (sfi = 0x47f59240e19)>, 0x34546f908629 <Code MAGLEV>, opt id 29, bytecode offset 387, deopt exit 46, FP to SP delta 240, caller SP 0x00016efad798, pc 0x000126eeee3c]
+[bailout (kind: deopt-eager, reason: exit from OSR'd inner loop): begin. deoptimizing 0x1c1bb54f7251 <JSFunction makeDynGraph (sfi = 0x47f59240e19)>, 0x34546f908629 <Code MAGLEV>, opt id 29, bytecode offset 387, deopt exit 46, FP to SP delta 240, caller SP 0x00016efad798, pc 0x000126eeee3c]
+[bailout (kind: deopt-eager, reason: exit from OSR'd inner loop): begin. deoptimizing 0x1c1bb54f7251 <JSFunction makeDynGraph (sfi = 0x47f59240e19)>, 0x34546f908629 <Code MAGLEV>, opt id 29, bytecode offset 387, deopt exit 46, FP to SP delta 240, caller SP 0x00016efad798, pc 0x000126eeee3c]
+[bailout (kind: deopt-eager, reason: exit from OSR'd inner loop): begin. deoptimizing 0x1c1bb54f7251 <JSFunction makeDynGraph (sfi = 0x47f59240e19)>, 0x34546f908629 <Code MAGLEV>, opt id 29, bytecode offset 387, deopt exit 46, FP to SP delta 240, caller SP 0x00016efad798, pc 0x000126eeee3c]
+[bailout (kind: deopt-eager, reason: exit from OSR'd inner loop): begin. deoptimizing 0x1c1bb54f7251 <JSFunction makeDynGraph (sfi = 0x47f59240e19)>, 0x34546f908629 <Code MAGLEV>, opt id 29, bytecode offset 387, deopt exit 46, FP to SP delta 240, caller SP 0x00016efad798, pc 0x000126eeee3c]
+[bailout (kind: deopt-eager, reason: exit from OSR'd inner loop): begin. deoptimizing 0x1c1bb54f7251 <JSFunction makeDynGraph (sfi = 0x47f59240e19)>, 0x34546f908629 <Code MAGLEV>, opt id 29, bytecode offset 387, deopt exit 46, FP to SP delta 240, caller SP 0x00016efad798, pc 0x000126eeee3c]
+[bailout (kind: deopt-eager, reason: exit from OSR'd inner loop): begin. deoptimizing 0x1c1bb54f7251 <JSFunction makeDynGraph (sfi = 0x47f59240e19)>, 0x34546f908629 <Code MAGLEV>, opt id 29, bytecode offset 387, deopt exit 46, FP to SP delta 240, caller SP 0x00016efad798, pc 0x000126eeee3c]
+[bailout (kind: deopt-eager, reason: exit from OSR'd inner loop): begin. deoptimizing 0x1c1bb54f7251 <JSFunction makeDynGraph (sfi = 0x47f59240e19)>, 0x34546f908629 <Code MAGLEV>, opt id 29, bytecode offset 387, deopt exit 46, FP to SP delta 240, caller SP 0x00016efad798, pc 0x000126eeee3c]
+[bailout (kind: deopt-eager, reason: wrong map): begin. deoptimizing 0x2262b6091f09 <JSFunction ComputeProto._update (sfi = 0x47f5925e0a9)>, 0x34546f905d59 <Code MAGLEV>, opt id 26, bytecode offset 461, deopt exit 34, FP to SP delta 192, caller SP 0x00016efad180, pc 0x000126eebc54]
+[bailout (kind: deopt-lazy, reason: (unknown)): begin. deoptimizing 0x2262b6091f09 <JSFunction ComputeProto._update (sfi = 0x47f5925e0a9)>, 0x34546f905d59 <Code MAGLEV>, opt id 26, bytecode offset 203, deopt exit 89, FP to SP delta 192, caller SP 0x00016efad3e0, pc 0x000126eebd30]
+[bailout (kind: deopt-lazy, reason: (unknown)): begin. deoptimizing 0x2262b6091f09 <JSFunction ComputeProto._update (sfi = 0x47f5925e0a9)>, 0x34546f905d59 <Code MAGLEV>, opt id 26, bytecode offset 203, deopt exit 89, FP to SP delta 192, caller SP 0x00016efad710, pc 0x000126eebd30]
+[bailout (kind: deopt-eager, reason: Insufficient type feedback for binary operation): begin. deoptimizing 0x2e4989168299 <JSFunction read (sfi = 0x47f5925da71)>, 0x292cd85c1b09 <Code MAGLEV>, opt id 14, bytecode offset 104, deopt exit 14, FP to SP delta 64, caller SP 0x00016eface90, pc 0x000126e91f4c]
+[bailout (kind: deopt-lazy, reason: (unknown)): begin. deoptimizing 0x2e4989168299 <JSFunction read (sfi = 0x47f5925da71)>, 0x292cd85c1b09 <Code MAGLEV>, opt id 14, bytecode offset 10, deopt exit 16, FP to SP delta 64, caller SP 0x00016efad200, pc 0x000126e91f54]
+[bailout (kind: deopt-lazy, reason: (unknown)): begin. deoptimizing 0x2e4989168299 <JSFunction read (sfi = 0x47f5925da71)>, 0x292cd85c1b09 <Code MAGLEV>, opt id 14, bytecode offset 10, deopt exit 16, FP to SP delta 64, caller SP 0x00016efad570, pc 0x000126e91f54]
+[bailout (kind: deopt-eager, reason: exit from OSR'd inner loop): begin. deoptimizing 0x1c1bb54f7251 <JSFunction makeDynGraph (sfi = 0x47f59240e19)>, 0x34546f908629 <Code MAGLEV>, opt id 29, bytecode offset 387, deopt exit 46, FP to SP delta 240, caller SP 0x00016efad798, pc 0x000126eeee3c]
+[bailout (kind: deopt-eager, reason: exit from OSR'd inner loop): begin. deoptimizing 0x1c1bb54f7251 <JSFunction makeDynGraph (sfi = 0x47f59240e19)>, 0x34546f908629 <Code MAGLEV>, opt id 29, bytecode offset 387, deopt exit 46, FP to SP delta 240, caller SP 0x00016efad798, pc 0x000126eeee3c]
+[bailout (kind: deopt-eager, reason: exit from OSR'd inner loop): begin. deoptimizing 0x1c1bb54f7251 <JSFunction makeDynGraph (sfi = 0x47f59240e19)>, 0x34546f908629 <Code MAGLEV>, opt id 29, bytecode offset 387, deopt exit 46, FP to SP delta 240, caller SP 0x00016efad798, pc 0x000126eeee3c]
+[bailout (kind: deopt-eager, reason: exit from OSR'd inner loop): begin. deoptimizing 0x1c1bb54f7251 <JSFunction makeDynGraph (sfi = 0x47f59240e19)>, 0x34546f908629 <Code MAGLEV>, opt id 29, bytecode offset 387, deopt exit 46, FP to SP delta 240, caller SP 0x00016efad798, pc 0x000126eeee3c]
+[bailout (kind: deopt-eager, reason: exit from OSR'd inner loop): begin. deoptimizing 0x1c1bb54f7251 <JSFunction makeDynGraph (sfi = 0x47f59240e19)>, 0x34546f908629 <Code MAGLEV>, opt id 29, bytecode offset 387, deopt exit 46, FP to SP delta 240, caller SP 0x00016efad798, pc 0x000126eeee3c]
+[bailout (kind: deopt-eager, reason: exit from OSR'd inner loop): begin. deoptimizing 0x1c1bb54f7251 <JSFunction makeDynGraph (sfi = 0x47f59240e19)>, 0x34546f908629 <Code MAGLEV>, opt id 29, bytecode offset 387, deopt exit 46, FP to SP delta 240, caller SP 0x00016efad798, pc 0x000126eeee3c]
+[bailout (kind: deopt-eager, reason: exit from OSR'd inner loop): begin. deoptimizing 0x1c1bb54f7251 <JSFunction makeDynGraph (sfi = 0x47f59240e19)>, 0x34546f908629 <Code MAGLEV>, opt id 29, bytecode offset 387, deopt exit 46, FP to SP delta 240, caller SP 0x00016efad798, pc 0x000126eeee3c]
+[bailout (kind: deopt-eager, reason: exit from OSR'd inner loop): begin. deoptimizing 0x1c1bb54f7251 <JSFunction makeDynGraph (sfi = 0x47f59240e19)>, 0x34546f908629 <Code MAGLEV>, opt id 29, bytecode offset 387, deopt exit 46, FP to SP delta 240, caller SP 0x00016efad798, pc 0x000126eeee3c]
+[bailout (kind: deopt-eager, reason: prepare for on stack replacement (OSR)): begin. deoptimizing 0x1c1bb54f7251 <JSFunction makeDynGraph (sfi = 0x47f59240e19)>, 0x34546f908629 <Code MAGLEV>, opt id 29, bytecode offset 362, deopt exit 52, FP to SP delta 240, caller SP 0x00016efad798, pc 0x000126eeee54]
+[bailout (kind: deopt-eager, reason: overflow): begin. deoptimizing 0x0a69617533e1 <JSFunction (sfi = 0x2262b609d2d1)>, 0x34546f90e521 <Code TURBOFAN_JS>, opt id 36, bytecode offset 49, deopt exit 42, FP to SP delta 144, caller SP 0x00016efad500, pc 0x000126ef3d24]
+[bailout (kind: deopt-eager, reason: not a Smi): begin. deoptimizing 0x36ea7ec91381 <JSFunction (sfi = 0x2262b609d319)>, 0x2f78143d0df1 <Code MAGLEV>, opt id 41, bytecode offset 28, deopt exit 3, FP to SP delta 112, caller SP 0x00016efad590, pc 0x000126e9cef0]
+[bailout (kind: deopt-eager, reason: Insufficient type feedback for unary operation): begin. deoptimizing 0x2e4989168299 <JSFunction read (sfi = 0x47f5925da71)>, 0x36cdac98a479 <Code TURBOFAN_JS>, opt id 32, bytecode offset 104, deopt exit 37, FP to SP delta 112, caller SP 0x00016efad2d0, pc 0x000126ef2960]
+[bailout (kind: deopt-lazy, reason: (unknown)): begin. deoptimizing 0x2e4989168299 <JSFunction read (sfi = 0x47f5925da71)>, 0x36cdac98a479 <Code TURBOFAN_JS>, opt id 32, bytecode offset 183, deopt exit 47, FP to SP delta 112, caller SP 0x00016efad5b0, pc 0x000126ef2988]
+[bailout (kind: deopt-eager, reason: overflow): begin. deoptimizing 0x35bb566cd671 <JSFunction (sfi = 0x2262b609d2d1)>, 0x2f78143d41d1 <Code TURBOFAN_JS>, opt id 48, bytecode offset 49, deopt exit 55, FP to SP delta 160, caller SP 0x00016efad670, pc 0x000126e9e7d8]
+[bailout (kind: deopt-eager, reason: prepare for on stack replacement (OSR)): begin. deoptimizing 0x3e3c1297e6d1 <JSFunction (sfi = 0x1c35731a1d89)>, 0x0dc2fa8c0869 <Code MAGLEV>, opt id 62, bytecode offset 143, deopt exit 15, FP to SP delta 160, caller SP 0x00016efae718, pc 0x000126ee8540]
+[bailout (kind: deopt-eager, reason: out of bounds): begin. deoptimizing 0x3e3c1297e6d1 <JSFunction (sfi = 0x1c35731a1d89)>, 0x2f78143e3e79 <Code TURBOFAN_JS>, opt id 63, bytecode offset 113, deopt exit 7, FP to SP delta 224, caller SP 0x00016efae718, pc 0x000126ef04f8]
+[bailout (kind: deopt-eager, reason: prepare for on stack replacement (OSR)): begin. deoptimizing 0x3e3c1297e6d1 <JSFunction (sfi = 0x1c35731a1d89)>, 0x0dc2fa8c17b9 <Code MAGLEV>, opt id 66, bytecode offset 143, deopt exit 17, FP to SP delta 160, caller SP 0x00016efae718, pc 0x000126ef55f0]
+[bailout (kind: deopt-eager, reason: Insufficient type feedback for generic named access): begin. deoptimizing 0x3e3c1297e6d1 <JSFunction (sfi = 0x1c35731a1d89)>, 0x2f78143e4c29 <Code TURBOFAN_JS>, opt id 67, bytecode offset 152, deopt exit 13, FP to SP delta 256, caller SP 0x00016efae718, pc 0x000126ef0cb0]
+[bailout (kind: deopt-eager, reason: Insufficient type feedback for compare operation): begin. deoptimizing 0x3a82c2501121 <JSFunction (sfi = 0x2feda5224519)>, 0x2f78143e3a29 <Code MAGLEV>, opt id 74, bytecode offset 46, deopt exit 12, FP to SP delta 160, caller SP 0x00016efae718, pc 0x000126f51d1c]
+[bailout (kind: deopt-eager, reason: prepare for on stack replacement (OSR)): begin. deoptimizing 0x3a82c2501121 <JSFunction (sfi = 0x2feda5224519)>, 0x2f78143e5ea9 <Code MAGLEV>, opt id 75, bytecode offset 134, deopt exit 15, FP to SP delta 160, caller SP 0x00016efae718, pc 0x000126e807d8]
+[bailout (kind: deopt-eager, reason: Insufficient type feedback for generic named access): begin. deoptimizing 0x3a82c2501121 <JSFunction (sfi = 0x2feda5224519)>, 0x2f78143e4929 <Code TURBOFAN_JS>, opt id 76, bytecode offset 143, deopt exit 13, FP to SP delta 224, caller SP 0x00016efae718, pc 0x000126f52510]
+[bailout (kind: deopt-eager, reason: Insufficient type feedback for generic named access): begin. deoptimizing 0x1158ccca7f61 <JSFunction (sfi = 0x88eca243191)>, 0x2f78143e4159 <Code MAGLEV>, opt id 83, bytecode offset 289, deopt exit 22, FP to SP delta 224, caller SP 0x00016efae718, pc 0x000126f1407c]
+[marking dependent code 0x2f78143e4159 <Code MAGLEV> (0x088eca243191 <SharedFunctionInfo>) (opt id 83) for deoptimization, reason: dependent prototype chain changed]
+[bailout (kind: deopt-eager, reason: Insufficient type feedback for generic keyed access): begin. deoptimizing 0x1158cccaacd9 <JSFunction (sfi = 0x3d0925733c19)>, 0x2f78143e7519 <Code MAGLEV>, opt id 112, bytecode offset 235, deopt exit 12, FP to SP delta 160, caller SP 0x00016efae520, pc 0x000126f1647c]
+[bailout (kind: deopt-eager, reason: prepare for on stack replacement (OSR)): begin. deoptimizing 0x1158ccca8201 <JSFunction (sfi = 0x1c1bb54f8679)>, 0x2f78143e60b1 <Code MAGLEV>, opt id 111, bytecode offset 31, deopt exit 6, FP to SP delta 160, caller SP 0x00016efae630, pc 0x000126f14764]
+[bailout (kind: deopt-eager, reason: Insufficient type feedback for compare operation): begin. deoptimizing 0x1158cccaacd9 <JSFunction (sfi = 0x3d0925733c19)>, 0x2f78143e3b41 <Code MAGLEV>, opt id 114, bytecode offset 52, deopt exit 19, FP to SP delta 192, caller SP 0x00016efae500, pc 0x000126e81fe0]
+[bailout (kind: deopt-eager, reason: Insufficient type feedback for generic named access): begin. deoptimizing 0x1158cccaacd9 <JSFunction (sfi = 0x3d0925733c19)>, 0x2f78143ea0d9 <Code TURBOFAN_JS>, opt id 116, bytecode offset 271, deopt exit 0, FP to SP delta 112, caller SP 0x00016efae500, pc 0x000126f17e7c]
+[bailout (kind: deopt-eager, reason: Insufficient type feedback for compare operation): begin. deoptimizing 0x175e191e9f39 <JSFunction normalizeString (sfi = 0x1059e0016a91)>, 0x2f78143c3241 <Code MAGLEV>, opt id 4, bytecode offset 255, deopt exit 27, FP to SP delta 128, caller SP 0x00016efad118, pc 0x000126f00b30]
+clk: ~3.15 GHz
+cpu: Apple M1 Pro
+runtime: node 25.9.0 (arm64-darwin)
+
+benchmark                        avg (min … max) p75 / p99    (min … top 1%)
+------------------------------------------------ -------------------------------
+[bailout (kind: deopt-eager, reason: prepare for on stack replacement (OSR)): begin. deoptimizing 0x2feda5200d59 <JSFunction (sfi = 0x88eca251df1)>, 0x0dc2fa8e0e51 <Code MAGLEV>, opt id 137, bytecode offset 358, deopt exit 171, FP to SP delta 240, caller SP 0x00016efae718, pc 0x000126f53c38]
+[bailout (kind: deopt-eager, reason: Insufficient type feedback for generic named access): begin. deoptimizing 0x2feda5200d59 <JSFunction (sfi = 0x88eca251df1)>, 0x0dc2fa8e41e1 <Code TURBOFAN_JS>, opt id 138, bytecode offset 371, deopt exit 90, FP to SP delta 368, caller SP 0x00016efae718, pc 0x000126f56134]
+[marking dependent code 0x0dc2fa8e0e51 <Code MAGLEV> (0x088eca251df1 <SharedFunctionInfo>) (opt id 137) for deoptimization, reason: dependent prototype chain changed]
+Kairo: deep propagation             1.59 µs/iter   1.60 µs       ▅  ▃  █        
+                             (1.54 µs … 1.64 µs)   1.64 µs      ▃█▆██▅██        
+                         ( 16.15  b … 192.16  b)  18.92  b ▃▁▄▄██████████▆▄▃▁▃▄▄
+                       5.92 ipc (  0.00% stalls)  99.91% L1 data cache
+               5.06k cycles  29.95k instructions  39.03% retired LD/ST ( 11.69k)
+[bailout (kind: deopt-eager, reason: prepare for on stack replacement (OSR)): begin. deoptimizing 0x2feda5200429 <JSFunction (sfi = 0x88eca251df1)>, 0x0dc2fa8e0ed9 <Code MAGLEV>, opt id 149, bytecode offset 358, deopt exit 173, FP to SP delta 240, caller SP 0x00016efae718, pc 0x000126f1d7f8]
+[bailout (kind: deopt-eager, reason: Insufficient type feedback for generic named access): begin. deoptimizing 0x2feda5200429 <JSFunction (sfi = 0x88eca251df1)>, 0x0dc2fa8e6ae1 <Code TURBOFAN_JS>, opt id 150, bytecode offset 371, deopt exit 90, FP to SP delta 368, caller SP 0x00016efae718, pc 0x000126f53874]
+
+Kairo: broad propagation            3.50 µs/iter   3.52 µs       █    ██        
+                             (3.45 µs … 3.58 µs)   3.56 µs  ▅    ██  ▅██▅       
+                         (800.15  b … 808.12  b) 800.51  b ▅█▁█▅▁█████████▅█▁▁▁▅
+                       7.18 ipc (  0.23% stalls)  99.83% L1 data cache
+              11.17k cycles  80.22k instructions  39.44% retired LD/ST ( 31.64k)
+[bailout (kind: deopt-eager, reason: prepare for on stack replacement (OSR)): begin. deoptimizing 0x2feda520bec1 <JSFunction (sfi = 0x88eca251df1)>, 0x0dc2fa8e3119 <Code MAGLEV>, opt id 162, bytecode offset 358, deopt exit 173, FP to SP delta 240, caller SP 0x00016efae718, pc 0x000126f1f058]
+[bailout (kind: deopt-eager, reason: not a Smi): begin. deoptimizing 0x3a82c252a969 <JSFunction getHeapStatistics (sfi = 0x88eca245f41)>, 0x279daf5c3a89 <Code MAGLEV>, opt id 164, bytecode offset 180, deopt exit 14, FP to SP delta 32, caller SP 0x00016efae558, pc 0x000126efa844]
+[marking dependent code 0x0dc2fa8e3119 <Code MAGLEV> (0x088eca251df1 <SharedFunctionInfo>) (opt id 162) for deoptimization, reason: dependent prototype chain changed]
+[bailout (kind: deopt-eager, reason: wrong map): begin. deoptimizing 0x2feda520bec1 <JSFunction (sfi = 0x88eca251df1)>, 0x279daf5c3341 <Code TURBOFAN_JS>, opt id 163, bytecode offset 9, deopt exit 88, FP to SP delta 368, caller SP 0x00016efae718, pc 0x000126f2154c]
+[bailout (kind: deopt-eager, reason: prepare for on stack replacement (OSR)): begin. deoptimizing 0x2feda520bec1 <JSFunction (sfi = 0x88eca251df1)>, 0x279daf5c8ca9 <Code MAGLEV>, opt id 165, bytecode offset 358, deopt exit 173, FP to SP delta 240, caller SP 0x00016efae718, pc 0x000126f25f58]
+[bailout (kind: deopt-eager, reason: Insufficient type feedback for generic named access): begin. deoptimizing 0x2feda520bec1 <JSFunction (sfi = 0x88eca251df1)>, 0x279daf5cc1a1 <Code TURBOFAN_JS>, opt id 166, bytecode offset 371, deopt exit 92, FP to SP delta 368, caller SP 0x00016efae718, pc 0x000126f2850c]
+
+Kairo: diamond                    186.50 ns/iter 189.05 ns    █                 
+                         (178.69 ns … 251.24 ns) 220.99 ns ▂▂▆█▃ ▂              
+                         ( 31.05  b … 407.21  b) 114.47  b █████▇█▅▃▂▂▂▁▁▁▁▁▁▁▁▁
+                       7.51 ipc (  0.67% stalls)  99.88% L1 data cache
+              589.88 cycles   4.43k instructions  39.46% retired LD/ST (  1.75k)
+[bailout (kind: deopt-eager, reason: prepare for on stack replacement (OSR)): begin. deoptimizing 0x2feda520fc51 <JSFunction (sfi = 0x88eca251df1)>, 0x279daf5c4b59 <Code MAGLEV>, opt id 181, bytecode offset 358, deopt exit 173, FP to SP delta 240, caller SP 0x00016efae718, pc 0x000126f21538]
+[bailout (kind: deopt-eager, reason: Insufficient type feedback for generic named access): begin. deoptimizing 0x2feda520fc51 <JSFunction (sfi = 0x88eca251df1)>, 0x279daf5c7031 <Code TURBOFAN_JS>, opt id 182, bytecode offset 371, deopt exit 92, FP to SP delta 368, caller SP 0x00016efae718, pc 0x000126f23aec]
+
+Kairo: triangle                   341.44 ns/iter 345.63 ns █                    
+                         (332.66 ns … 414.47 ns) 394.99 ns █                    
+                         ( 49.12  b … 423.15  b) 114.17  b ███▇█▇▃▄▂▂▂▁▁▁▁▁▁▁▁▁▁
+                       7.37 ipc (  0.41% stalls)  99.91% L1 data cache
+               1.09k cycles   8.03k instructions  38.14% retired LD/ST (  3.06k)
+[bailout (kind: deopt-eager, reason: wrong map): begin. deoptimizing 0x307a284b1df1 <JSFunction (sfi = 0x88eca27b639)>, 0x0dc2fa8e2239 <Code TURBOFAN_JS>, opt id 189, bytecode offset 14, deopt exit 3, FP to SP delta 64, caller SP 0x00016efae310, pc 0x000126f25d10]
+[bailout (kind: deopt-eager, reason: prepare for on stack replacement (OSR)): begin. deoptimizing 0x2feda5213129 <JSFunction (sfi = 0x88eca251df1)>, 0x279daf5c53a9 <Code MAGLEV>, opt id 199, bytecode offset 358, deopt exit 177, FP to SP delta 240, caller SP 0x00016efae718, pc 0x000126f2d3b8]
+[bailout (kind: deopt-eager, reason: Insufficient type feedback for generic named access): begin. deoptimizing 0x2feda5213129 <JSFunction (sfi = 0x88eca251df1)>, 0x0dc2fa8e8741 <Code TURBOFAN_JS>, opt id 200, bytecode offset 371, deopt exit 63, FP to SP delta 368, caller SP 0x00016efae718, pc 0x000126f216e0]
+
+Kairo: mux                          5.02 µs/iter   5.01 µs  █                   
+                             (4.95 µs … 5.35 µs)   5.33 µs  █▄                  
+                         (960.29  b … 968.81  b) 961.15  b ▅██▅▆▁▃▃▁▁▁▁▁▁▃▁▁▁▁▁▃
+                       7.48 ipc (  0.25% stalls)  99.83% L1 data cache
+              16.21k cycles 121.21k instructions  36.81% retired LD/ST ( 44.62k)
+[bailout (kind: deopt-eager, reason: prepare for on stack replacement (OSR)): begin. deoptimizing 0x2feda52128f9 <JSFunction (sfi = 0x88eca251df1)>, 0x0dc2fa8eb1a1 <Code MAGLEV>, opt id 216, bytecode offset 358, deopt exit 173, FP to SP delta 240, caller SP 0x00016efae718, pc 0x000126f323d8]
+[bailout (kind: deopt-eager, reason: Insufficient type feedback for generic named access): begin. deoptimizing 0x2feda52128f9 <JSFunction (sfi = 0x88eca251df1)>, 0x0dc2fa8ee699 <Code TURBOFAN_JS>, opt id 217, bytecode offset 371, deopt exit 92, FP to SP delta 368, caller SP 0x00016efae718, pc 0x000126f3498c]
+
+Kairo: unstable                   341.43 ns/iter 341.87 ns  █                   
+                         (336.46 ns … 393.92 ns) 379.92 ns ▇█                   
+                         ( 39.93  b … 545.19  b) 209.85  b ██▅▄▂▃▂▂▃▂▁▁▁▁▁▁▁▁▁▁▁
+                       7.01 ipc (  0.27% stalls)  99.63% L1 data cache
+               1.10k cycles   7.73k instructions  36.65% retired LD/ST (  2.83k)
+[bailout (kind: deopt-eager, reason: prepare for on stack replacement (OSR)): begin. deoptimizing 0x2feda52162b1 <JSFunction (sfi = 0x88eca251df1)>, 0x0dc2fa8eab29 <Code MAGLEV>, opt id 226, bytecode offset 358, deopt exit 173, FP to SP delta 240, caller SP 0x00016efae718, pc 0x000126f63a38]
+[bailout (kind: deopt-eager, reason: Insufficient type feedback for generic named access): begin. deoptimizing 0x2feda52162b1 <JSFunction (sfi = 0x88eca251df1)>, 0x0dc2fa8ed001 <Code TURBOFAN_JS>, opt id 227, bytecode offset 371, deopt exit 92, FP to SP delta 368, caller SP 0x00016efae718, pc 0x000126f39fac]
+
+Kairo: avoidable propagation       83.78 ns/iter  83.49 ns █                    
+                           (82.69 ns … 99.24 ns)  93.23 ns █                    
+                         (  0.10  b … 144.13  b)   0.66  b █▄▅▂▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+                       7.68 ipc (  0.00% stalls) 100.00% L1 data cache
+              271.27 cycles   2.08k instructions  35.92% retired LD/ST ( 748.20)
+[bailout (kind: deopt-eager, reason: prepare for on stack replacement (OSR)): begin. deoptimizing 0x2feda521d679 <JSFunction (sfi = 0x88eca251df1)>, 0x0dc2fa8eb911 <Code MAGLEV>, opt id 236, bytecode offset 358, deopt exit 173, FP to SP delta 240, caller SP 0x00016efae718, pc 0x000126f63a38]
+[bailout (kind: deopt-eager, reason: Insufficient type feedback for generic named access): begin. deoptimizing 0x2feda521d679 <JSFunction (sfi = 0x88eca251df1)>, 0x0dc2fa8efbd1 <Code TURBOFAN_JS>, opt id 237, bytecode offset 371, deopt exit 92, FP to SP delta 368, caller SP 0x00016efae718, pc 0x000126f3b86c]
+
+Kairo: repeated observers         133.02 ns/iter 132.27 ns █                    
+                         (131.42 ns … 211.63 ns) 146.49 ns █▇                   
+                         ( 15.11  b … 263.13  b)  16.86  b ██▃▂▁▂▂▂▂▂▁▁▁▁▁▁▁▁▁▁▁
+                       7.49 ipc (  0.11% stalls)  99.98% L1 data cache
+              430.47 cycles   3.22k instructions  34.32% retired LD/ST (  1.11k)
+[bailout (kind: deopt-eager, reason: prepare for on stack replacement (OSR)): begin. deoptimizing 0x2feda5221fa1 <JSFunction (sfi = 0x88eca251df1)>, 0x0dc2fa8f97e9 <Code MAGLEV>, opt id 272, bytecode offset 358, deopt exit 112, FP to SP delta 224, caller SP 0x00016efae718, pc 0x000126f63d6c]
+[bailout (kind: deopt-eager, reason: Insufficient type feedback for generic named access): begin. deoptimizing 0x2feda5221fa1 <JSFunction (sfi = 0x88eca251df1)>, 0x0dc2fa8fb801 <Code TURBOFAN_JS>, opt id 273, bytecode offset 371, deopt exit 28, FP to SP delta 432, caller SP 0x00016efae718, pc 0x000126f65494]
+
+CellX 10 layers                     3.67 µs/iter   3.69 µs            ██▄       
+                             (3.62 µs … 3.71 µs)   3.71 µs            ████▅ ▅  ▅
+                         (  1.26 kb …   1.31 kb)   1.30 kb ▅▅█▁▅▅▅▅▁▁▁█████▅█▅██
+                       6.84 ipc (  0.23% stalls)  99.91% L1 data cache
+              11.69k cycles  79.96k instructions  39.63% retired LD/ST ( 31.69k)
+[bailout (kind: deopt-eager, reason: wrong feedback cell): begin. deoptimizing 0x2e4989151f09 <JSFunction batch (sfi = 0x47f5925caf9)>, 0x0dc2fa8e7389 <Code MAGLEV>, opt id 254, bytecode offset 14, deopt exit 1, FP to SP delta 32, caller SP 0x00016efae500, pc 0x000126f3a2e0]
+[bailout (kind: deopt-eager, reason: wrong map): begin. deoptimizing 0x307a2849fe69 <JSFunction (sfi = 0x88eca27ea39)>, 0x0dc2fa8e91a1 <Code MAGLEV>, opt id 286, bytecode offset 71, deopt exit 6, FP to SP delta 80, caller SP 0x00016efae0c0, pc 0x000126f62ef4]
+[bailout (kind: deopt-eager, reason: wrong map): begin. deoptimizing 0x307a2849fdb9 <JSFunction (sfi = 0x88eca27eac9)>, 0x0dc2fa8f9c71 <Code TURBOFAN_JS>, opt id 289, bytecode offset 83, deopt exit 13, FP to SP delta 144, caller SP 0x00016efae320, pc 0x000126f663f8]
+[bailout (kind: deopt-eager, reason: wrong map): begin. deoptimizing 0x307a2849fe31 <JSFunction (sfi = 0x88eca27ea81)>, 0x0dc2fa8fbcb1 <Code TURBOFAN_JS>, opt id 290, bytecode offset 37, deopt exit 53, FP to SP delta 144, caller SP 0x00016efae040, pc 0x000126f67c88]
+
+$mol_wire                          47.05 µs/iter  47.18 µs             █        
+                           (46.62 µs … 47.33 µs)  47.25 µs             █        
+                         (864.18  b … 889.34  b) 869.07  b █▁▁▁▁▁▁▁██▁▁█▁█▁▁████
+                       5.38 ipc (  0.01% stalls)  99.99% L1 data cache
+             151.63k cycles 816.41k instructions  36.07% retired LD/ST (294.47k)
+[bailout (kind: deopt-eager, reason: prepare for on stack replacement (OSR)): begin. deoptimizing 0x2feda52288b9 <JSFunction (sfi = 0x88eca251df1)>, 0x0dc2fa8fac59 <Code MAGLEV>, opt id 306, bytecode offset 358, deopt exit 165, FP to SP delta 240, caller SP 0x00016efae718, pc 0x000126f78d80]
+[bailout (kind: deopt-eager, reason: Insufficient type feedback for generic named access): begin. deoptimizing 0x2feda52288b9 <JSFunction (sfi = 0x88eca251df1)>, 0x279daf5d9df1 <Code TURBOFAN_JS>, opt id 308, bytecode offset 371, deopt exit 54, FP to SP delta 368, caller SP 0x00016efae718, pc 0x000126f7b1a4]
+
+Create 1k signals                   5.20 µs/iter   5.11 µs   █           █      
+                            (4.84 µs … 10.76 µs)   5.22 µs ▂▇█         ▂▇█▇     
+                         (  2.55 kb …   2.56 kb)   2.55 kb ███▆▆▁▁▁▁▆▁▁████▁▁▁▁▆
+                       4.75 ipc ( 21.27% stalls)  89.03% L1 data cache
+              17.83k cycles  84.70k instructions  38.78% retired LD/ST ( 32.85k)
+[bailout (kind: deopt-eager, reason: prepare for on stack replacement (OSR)): begin. deoptimizing 0x3a1fd4002781 <JSFunction (sfi = 0x88eca253641)>, 0x279daf5ddf51 <Code MAGLEV>, opt id 325, bytecode offset 315, deopt exit 60, FP to SP delta 240, caller SP 0x00016efae718, pc 0x000126f7a0e4]
+[bailout (kind: deopt-eager, reason: Insufficient type feedback for generic named access): begin. deoptimizing 0x3a1fd4002781 <JSFunction (sfi = 0x88eca253641)>, 0x279daf5dfd31 <Code TURBOFAN_JS>, opt id 326, bytecode offset 324, deopt exit 24, FP to SP delta 416, caller SP 0x00016efae718, pc 0x000126f7b24c]
+
+Create 1k computations             73.37 µs/iter  71.46 µs  █                   
+                          (69.96 µs … 329.33 µs) 103.17 µs ▂█                   
+                         (120.55 kb … 864.43 kb) 465.34 kb ██▃▂▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+                       6.39 ipc (  5.82% stalls)  98.28% L1 data cache
+             240.84k cycles   1.54M instructions  43.72% retired LD/ST (672.70k)
+[bailout (kind: deopt-eager, reason: prepare for on stack replacement (OSR)): begin. deoptimizing 0x37b449958f51 <JSFunction (sfi = 0x88eca251df1)>, 0x279daf5e21f1 <Code MAGLEV>, opt id 336, bytecode offset 358, deopt exit 160, FP to SP delta 240, caller SP 0x00016efae718, pc 0x000126ea15dc]
+[bailout (kind: deopt-eager, reason: Insufficient type feedback for generic named access): begin. deoptimizing 0x37b449958f51 <JSFunction (sfi = 0x88eca251df1)>, 0x279daf5e5741 <Code TURBOFAN_JS>, opt id 337, bytecode offset 371, deopt exit 6, FP to SP delta 384, caller SP 0x00016efae718, pc 0x000126f7d994]
+
+Dynamic build: simple component     3.63 µs/iter   3.64 µs    ▄▄█▄              
+                             (3.59 µs … 3.72 µs)   3.70 µs  ▅ ████ ▅██          
+                         (  2.98 kb …   3.06 kb)   2.99 kb ▅█▅████▁███▁▁▁▅█▅▁▅▁▅
+                       5.89 ipc (  4.69% stalls)  98.47% L1 data cache
+              11.74k cycles  69.13k instructions  38.03% retired LD/ST ( 26.29k)
+
+Dynamic build: large web app        1.54 ms/iter   1.50 ms █                    
+                             (1.41 ms … 2.27 ms)   2.21 ms █▄▆                  
+                         (  6.45 mb …   7.88 mb)   7.39 mb ███▃▃▁▁▁▁▁▁▁▁▁▁▁▁▁▂▅▂
+                       5.96 ipc (  3.53% stalls)  97.62% L1 data cache
+               4.97M cycles  29.62M instructions  36.11% retired LD/ST ( 10.70M)
+
+Dynamic build: wide dense           2.07 ms/iter   2.06 ms  █                   
+                             (1.96 ms … 2.51 ms)   2.50 ms  █▆▂                 
+                         (  6.29 mb …   6.30 mb)   6.29 mb ▇███▇▄▄▁▁▁▁▁▂▁▁▁▁▂▃▂▂
+                       6.40 ipc (  3.55% stalls)  98.28% L1 data cache
+               6.62M cycles  42.36M instructions  33.16% retired LD/ST ( 14.05M)
+[bailout (kind: deopt-eager, reason: prepare for on stack replacement (OSR)): begin. deoptimizing 0x2031ed5bff11 <JSFunction (sfi = 0x88eca251df1)>, 0x279daf5e2541 <Code MAGLEV>, opt id 348, bytecode offset 358, deopt exit 40, FP to SP delta 224, caller SP 0x00016efae718, pc 0x000126e9ff4c]
+[bailout (kind: deopt-eager, reason: Insufficient type feedback for generic named access): begin. deoptimizing 0x2031ed5bff11 <JSFunction (sfi = 0x88eca251df1)>, 0x279daf5e6359 <Code TURBOFAN_JS>, opt id 349, bytecode offset 371, deopt exit 49, FP to SP delta 368, caller SP 0x00016efae718, pc 0x000126ea2928]
+
+Dynamic update: simple component  259.64 ns/iter 261.05 ns      █▂              
+                         (253.77 ns … 279.60 ns) 272.36 ns  ▅  ▃██▃             
+                         (  9.11  b … 344.11  b)  33.57  b ▄█▇██████▇▅▄▃▂▂▂▃▃▂▂▂
+                       6.89 ipc (  0.06% stalls)  99.91% L1 data cache
+              827.23 cycles   5.70k instructions  37.42% retired LD/ST (  2.13k)
+[bailout (kind: deopt-eager, reason: wrong map): begin. deoptimizing 0x2e4989171a09 <JSFunction pruneDeps (sfi = 0x47f5925db01)>, 0x279daf5c6201 <Code TURBOFAN_JS>, opt id 210, bytecode offset 163, deopt exit 13, FP to SP delta 144, caller SP 0x00016efadf50, pc 0x000126f2db60]
+[bailout (kind: deopt-eager, reason: prepare for on stack replacement (OSR)): begin. deoptimizing 0x37b449957ae1 <JSFunction (sfi = 0x88eca251df1)>, 0x279daf5e2541 <Code MAGLEV>, opt id 353, bytecode offset 358, deopt exit 40, FP to SP delta 224, caller SP 0x00016efae718, pc 0x000126f7ebec]
+[bailout (kind: deopt-eager, reason: Insufficient type feedback for generic named access): begin. deoptimizing 0x37b449957ae1 <JSFunction (sfi = 0x88eca251df1)>, 0x279daf5e6359 <Code TURBOFAN_JS>, opt id 354, bytecode offset 371, deopt exit 49, FP to SP delta 368, caller SP 0x00016efae718, pc 0x000126ea12e8]
+
+Dynamic update: dynamic component   6.99 µs/iter   7.02 µs          ██          
+                             (6.92 µs … 7.10 µs)   7.06 µs   █      ██         █
+                         (264.01  b … 880.15  b) 714.12  b █▁█████████▁▁▁▁█▁██▁█
+                       6.36 ipc (  0.08% stalls)  99.92% L1 data cache
+              22.45k cycles 142.74k instructions  33.93% retired LD/ST ( 48.43k)
+
+Dynamic update: large web app      26.66 µs/iter  26.90 µs █                 █  
+                           (26.26 µs … 27.02 µs)  26.99 µs █  ▅ ▅  ▅ ▅  ▅ ▅  █ ▅
+                         (460.69  b …   1.71 kb)   1.31 kb █▁▁█▁█▁▁█▁█▁▁█▁█▁▁█▁█
+                       5.46 ipc (  2.72% stalls)  96.07% L1 data cache
+              85.74k cycles 468.45k instructions  37.90% retired LD/ST (177.53k)
+
+Dynamic update: wide dense         63.78 µs/iter  64.01 µs                   █  
+                           (62.68 µs … 64.15 µs)  64.12 µs                ▂  █  
+                         (  1.15 kb …  15.63 kb)   2.46 kb ▆▁▁▁▆▁▁▁▁▁▁▁▁▁▁█▁▁█▆▆
+                       6.26 ipc (  1.85% stalls)  96.33% L1 data cache
+             205.58k cycles   1.29M instructions  34.55% retired LD/ST (444.90k)
+[bailout (kind: deopt-eager, reason: prepare for on stack replacement (OSR)): begin. deoptimizing 0x215a35382509 <JSFunction (sfi = 0x88eca253641)>, 0x279daf5e3361 <Code MAGLEV>, opt id 358, bytecode offset 315, deopt exit 66, FP to SP delta 224, caller SP 0x00016efae718, pc 0x000126ea8604]
+[bailout (kind: deopt-eager, reason: Insufficient type feedback for generic named access): begin. deoptimizing 0x215a35382509 <JSFunction (sfi = 0x88eca253641)>, 0x279daf5e5381 <Code TURBOFAN_JS>, opt id 359, bytecode offset 324, deopt exit 31, FP to SP delta 416, caller SP 0x00016efae718, pc 0x000126e9fa38]
+
+Dynamic update: deep              156.73 µs/iter 156.79 µs  █                   
+                         (152.00 µs … 298.17 µs) 191.88 µs ██▄                  
+                         ( 38.09 kb … 382.56 kb)  39.13 kb ███▇▃▂▁▁▂▂▂▂▂▁▁▁▁▁▁▁▁
+                       5.70 ipc (  4.47% stalls)  95.22% L1 data cache
+             509.25k cycles   2.90M instructions  37.02% retired LD/ST (  1.07M)
+[bailout (kind: deopt-eager, reason: Insufficient type feedback for generic named access): begin. deoptimizing 0x2e4989167e19 <JSFunction checkRun (sfi = 0x47f5925d561)>, 0x2f78143d39c9 <Code TURBOFAN_JS>, opt id 143, bytecode offset 428, deopt exit 65, FP to SP delta 144, caller SP 0x00016efae038, pc 0x000126f518d0]
+[bailout (kind: deopt-lazy, reason: (unknown)): begin. deoptimizing 0x2e4989167e19 <JSFunction checkRun (sfi = 0x47f5925d561)>, 0x2f78143d39c9 <Code TURBOFAN_JS>, opt id 143, bytecode offset 200, deopt exit 86, FP to SP delta 144, caller SP 0x00016efae2e8, pc 0x000126f51924]
+[bailout (kind: deopt-lazy, reason: (unknown)): begin. deoptimizing 0x2e4989167e19 <JSFunction checkRun (sfi = 0x47f5925d561)>, 0x2f78143d39c9 <Code TURBOFAN_JS>, opt id 143, bytecode offset 513, deopt exit 89, FP to SP delta 144, caller SP 0x00016efae578, pc 0x000126f51930]
+[bailout (kind: deopt-eager, reason: prepare for on stack replacement (OSR)): begin. deoptimizing 0x08c439fc3bc9 <JSFunction (sfi = 0x88eca253641)>, 0x279daf5e9b81 <Code MAGLEV>, opt id 365, bytecode offset 315, deopt exit 66, FP to SP delta 224, caller SP 0x00016efae718, pc 0x000126eae0a4]
+[bailout (kind: deopt-eager, reason: Insufficient type feedback for generic named access): begin. deoptimizing 0x08c439fc3bc9 <JSFunction (sfi = 0x88eca253641)>, 0x279daf5ebba1 <Code TURBOFAN_JS>, opt id 366, bytecode offset 324, deopt exit 31, FP to SP delta 416, caller SP 0x00016efae718, pc 0x000126e9fa38]
+
+Dynamic update: very dynamic       76.48 µs/iter  76.79 µs    █                 
+                          (71.08 µs … 298.17 µs)  99.08 µs   ▅█▄                
+                         ( 12.80 kb … 309.93 kb)  19.88 kb ▁▆███▆▄▂▂▁▁▁▁▁▁▁▁▁▁▁▁
+                       4.67 ipc (  2.42% stalls)  96.07% L1 data cache
+             249.94k cycles   1.17M instructions  33.07% retired LD/ST (385.74k)
+Saved run to /Users/visj/Projects/anod/packages/anod/bench/reactivity/runs/anod-2026-04-17.json
