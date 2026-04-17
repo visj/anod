@@ -1,11 +1,13 @@
 import { Anod } from "./api.js";
 import { Disposer, Owner, Sender, Receiver, ISignal, ICompute, IEffect } from "./types.js";
 
+/* Sender flags */
 const FLAG_STALE = 1 << 0;
 const FLAG_PENDING = 1 << 1;
 const FLAG_SCHEDULED = 1 << 2;
 const FLAG_DISPOSED = 1 << 3;
 
+/* Receiver flags */
 const FLAG_COMPUTE = 1 << 4;
 const FLAG_INIT = 1 << 5;
 const FLAG_SETUP = 1 << 6;
@@ -14,23 +16,21 @@ const FLAG_LOADING = 1 << 8;
 const FLAG_ERROR = 1 << 9;
 const FLAG_DEFER = 1 << 10;
 const FLAG_STABLE = 1 << 11;
-const FLAG_RECOVER = 1 << 13;
+
 const FLAG_BOUND = 1 << 14;
 const FLAG_DERIVED = 1 << 15;
 const FLAG_WEAK = 1 << 17;
-
 const FLAG_EQUAL = 1 << 18;
 const FLAG_NOTEQUAL = 1 << 19;
 const FLAG_ASYNC = 1 << 20;
 
+/* Option flags */
 const OPT_DEFER = FLAG_DEFER;
 const OPT_STABLE = FLAG_STABLE;
 const OPT_SETUP = FLAG_SETUP;
 const OPT_WEAK = FLAG_WEAK;
 
-const OPT_DYNAMIC = 0x800000;
-
-const OPTIONS = OPT_DEFER | OPT_STABLE | OPT_SETUP | OPT_WEAK | FLAG_ASYNC;
+const OPTIONS = OPT_DEFER | OPT_STABLE | OPT_SETUP | OPT_WEAK;
 
 /**
  * @type {number}
@@ -198,12 +198,24 @@ function _stable() {
 
 /**
  * Registers a cleanup fn on the current node. Valid on any Effect or Root.
+ * Stored compactly: `_cleanup` holds a single function when there's one
+ * registration, graduating to an array on the second. Internal callsites
+ * (async resolvers, effect update, startRoot return value) call the same
+ * prototype method through the node — no separate `addCleanup(node, fn)`
+ * helper needed.
  * @this {Owner}
  * @param {function(): void} fn
  * @returns {void}
  */
 function _cleanup(fn) {
-    addCleanup(this, fn);
+    let cleanup = this._cleanup;
+    if (cleanup === null) {
+        this._cleanup = fn;
+    } else if (typeof cleanup === 'function') {
+        this._cleanup = [cleanup, fn];
+    } else {
+        cleanup.push(fn);
+    }
 }
 
 /**
@@ -213,15 +225,88 @@ function _cleanup(fn) {
  * @returns {void}
  */
 function _recover(fn) {
-    addRecover(this, fn);
+    let recover = this._recover;
+    if (recover === null) {
+        this._recover = fn;
+    } else if (typeof recover === 'function') {
+        this._recover = [recover, fn];
+    } else {
+        recover.push(fn);
+    }
 }
 
+// ─── Reader (async dynamic tracking context) ───────────────────────────────
+// A Reader is a per-run handle given to the fn of a dynamic async Compute/
+// Effect. It allows `.read(sig)` before and after `await`. On each run, a
+// fresh Reader is minted; the old one is marked FLAG_DISPOSED so any in-
+// flight callback that tries to `.read()` will throw — the throw bubbles
+// to the promise's .catch, where the out-of-time guard in resolvePromise/
+// resolveIterator safely ignores it.
+//
+// The Reader's _version is a fast-hack used only to dedup same-chunk
+// duplicate reads (e.g. `for (…) r.read(sig)`). It is NOT trusted across
+// await — cross-await duplicates may still slip through if another compute
+// re-tags sender._version between our reads. Those are swept at settle
+// time via sweepReaderDeps.
+
+/**
+ * @constructor
+ * @param {!Receiver} node
+ */
+function Reader(node) {
+    /** @type {Receiver | null} */
+    this._node = node;
+    /** @type {number} */
+    this._flag = 0;
+    /** @type {number} Unique per-reader version for same-chunk dedup. */
+    this._version = VERSION += 2;
+}
+
+/** @const */
+var ReaderProto = Reader.prototype;
+
+/**
+ * Registers a dep on the owning node and returns sender.val(). Throws if
+ * the reader has been disposed (owning node has re-updated or been
+ * disposed since this reader was minted).
+ * @template T
+ * @param {!Sender<T>} sender
+ * @returns {T}
+ */
+ReaderProto.read = function (sender) {
+    if (this._flag & FLAG_DISPOSED) {
+        throw new Error('Reader disposed');
+    }
+    let value = sender.val();
+    if (sender._version === this._version) {
+        /** Same sync chunk already read this sender — skip the subscribe. */
+        return value;
+    }
+    sender._version = this._version;
+    let node = /** @type {!Receiver} */(this._node);
+    let slot;
+    if (node._dep1 === null) {
+        slot = subscribe(sender, node, -1);
+        node._dep1 = sender;
+        node._dep1slot = slot;
+    } else {
+        let deps = node._deps;
+        let depslot = deps === null ? 0 : deps.length;
+        slot = subscribe(sender, node, depslot);
+        if (deps === null) {
+            node._deps = [sender, slot];
+        } else {
+            deps.push(sender, slot);
+        }
+    }
+    return value;
+};
+
 // ─── Ownership methods installed on Root & Effect prototypes ───────────────
-// `this` is the owner (Root or Effect). Created nodes are appended to
-// `this._owned` (lazily allocated as an array). Compute-creating methods are
-// shared verbatim between Root and Effect; Effect-creating methods split
-// (see _effEffect/_rootEffect below) because the child's topological level
-// depends on whether the owner is an Effect (level+1) or a Root (level 0).
+// Thin delegates: call the corresponding top-level factory (passing `this`
+// as owner where the underlying node supports it), then register the new
+// node with `addOwned`. Effect-creating factories perform the topological
+// level bump internally when the owner is an Effect.
 
 /**
  * @this {Owner}
@@ -233,21 +318,12 @@ function _recover(fn) {
  * @returns {Compute<T,W>}
  */
 function _ownCompute(fn, seed, opts, args) {
-    let flag = FLAG_SETUP | ((0 | opts) & OPTIONS);
-    let node = new Compute(flag, fn, null, seed, args);
-    if (this._owned === null) {
-        this._owned = [node];
-    } else {
-        this._owned.push(node);
-    }
-    if (!(flag & FLAG_DEFER)) {
-        startCompute(node);
-    }
+    let node = compute(fn, seed, opts, args);
+    addOwned(this, node);
     return node;
 }
 
 /**
- * Stable compute owned by this node.
  * @this {Owner}
  * @param {function|Sender} fnOrDep
  * @param {*=} seedOrFn
@@ -256,71 +332,41 @@ function _ownCompute(fn, seed, opts, args) {
  * @returns {!Compute}
  */
 function _ownDerive(fnOrDep, seedOrFn, argsOrSeed, args) {
-    let node;
-    if (typeof fnOrDep === 'function') {
-        node = new Compute(FLAG_STABLE | FLAG_SETUP, fnOrDep, null, seedOrFn, argsOrSeed);
-    } else {
-        node = new Compute(FLAG_STABLE | FLAG_BOUND, seedOrFn, fnOrDep, argsOrSeed, args);
-        node._dep1slot = subscribe(fnOrDep, node, -1);
-    }
-    if (this._owned === null) {
-        this._owned = [node];
-    } else {
-        this._owned.push(node);
-    }
-    startCompute(node);
+    let node = derive(fnOrDep, seedOrFn, argsOrSeed, args);
+    addOwned(this, node);
     return node;
 }
 
 /**
- * Async compute owned by this node.
  * @this {Owner}
- * @template T,W
- * @param {function(T,W): Promise<T>} fn
- * @param {T=} seed
- * @param {number=} opts
- * @param {W=} args
- * @returns {!Compute<T,null,null,W>}
+ * @param {function|Sender} fnOrDep
+ * @param {*=} fnOrSeed
+ * @param {*=} optsOrArgs
+ * @param {*=} args
+ * @returns {!Compute}
  */
-function _ownTask(fn, seed, opts, args) {
-    opts = 0 | opts;
-    let flag = FLAG_ASYNC | FLAG_SETUP | (opts & OPTIONS);
-    if (!(opts & OPT_DYNAMIC)) {
-        flag |= FLAG_STABLE;
-    }
-    let node = new Compute(flag, fn, null, seed, args);
-    if (this._owned === null) {
-        this._owned = [node];
-    } else {
-        this._owned.push(node);
-    }
-    if (!(flag & FLAG_DEFER)) {
-        startCompute(node);
-    }
+function _ownTask(fnOrDep, fnOrSeed, optsOrArgs, args) {
+    let node = task(fnOrDep, fnOrSeed, optsOrArgs, args);
+    addOwned(this, node);
     return node;
 }
 
 /**
- * A nested Root owned by this node. The Root still escapes reactive
- * tracking, but is tied to this owner for disposal.
+ * A nested Root owned by this node. Kept inline (not a delegate to the
+ * top-level `root`) so the `_owned` append happens before `startRoot` runs
+ * the fn — preserves the existing ordering for any error mid-startup.
  * @this {Owner}
  * @param {function(!Root): ((function(): void) | void)} fn
  * @returns {!Root}
  */
 function _ownRoot(fn) {
     let node = new Root();
-    if (this._owned === null) {
-        this._owned = [node];
-    } else {
-        this._owned.push(node);
-    }
+    addOwned(this, node);
     startRoot(node, fn);
     return node;
 }
 
 /**
- * Unowned signal — signals don't participate in ownership chains. Exposed
- * on the Root/Effect prototypes purely for call-site symmetry.
  * @template T
  * @param {T} value
  * @returns {!Signal<T>}
@@ -330,164 +376,60 @@ function _ownSignal(value) {
 }
 
 /**
- * Effect owned by a Root — child level stays at the default 0 because
- * Root is the topological root of its scheduling tree.
- * @this {!Root}
+ * @this {Owner}
  * @template W
  * @param {function(!Effect, W): (function(): void | void)} fn
  * @param {number=} opts
  * @param {W=} args
  * @returns {!Effect<null,null,W>}
  */
-function _rootEffect(fn, opts, args) {
-    let flag = FLAG_SETUP | ((0 | opts) & OPTIONS);
-    let node = new Effect(flag, fn, null, this, args);
-    if (this._owned === null) {
-        this._owned = [node];
-    } else {
-        this._owned.push(node);
+function _ownEffect(fn, opts, args) {
+    let level = this._level + 1;
+    /** LEVELS/SCOPES default to length 4 (indices 0..3). Short-circuit on
+     *  shallow parents (`this._level <= 2` → child level <= 3, fits in
+     *  defaults) so the common case avoids the `LEVELS.length` read. */
+    if (this._level > 2 && level >= LEVELS.length) {
+        LEVELS.push(0);
+        SCOPES.push([]);
     }
-    startEffect(node);
+    let node = effect(fn, opts, args, this, level);
+    addOwned(this, node);
     return node;
 }
 
 /**
- * Watch owned by a Root.
- * @this {!Root}
+ * @this {Owner}
  * @param {function|Sender} fnOrDep
  * @param {*=} fnOrArgs
  * @param {*=} args
  * @returns {!Effect}
  */
-function _rootWatch(fnOrDep, fnOrArgs, args) {
-    let node;
-    if (typeof fnOrDep === 'function') {
-        node = new Effect(FLAG_STABLE | FLAG_SETUP, fnOrDep, null, this, fnOrArgs);
-    } else {
-        node = new Effect(FLAG_STABLE | FLAG_BOUND, fnOrArgs, fnOrDep, this, args);
-        node._dep1slot = subscribe(fnOrDep, node, -1);
-    }
-    if (this._owned === null) {
-        this._owned = [node];
-    } else {
-        this._owned.push(node);
-    }
-    startEffect(node);
-    return node;
-}
-
-/**
- * Async effect owned by a Root.
- * @this {!Root}
- * @template W
- * @param {function(!Effect, W): Promise<(function(): void) | void>} fn
- * @param {number=} opts
- * @param {W=} args
- * @returns {!Effect<null,null,W>}
- */
-function _rootSpawn(fn, opts, args) {
-    let opts_ = 0 | opts;
-    let flag = FLAG_ASYNC | FLAG_SETUP | (opts_ & OPTIONS);
-    if (!(opts_ & OPT_DYNAMIC)) {
-        flag |= FLAG_STABLE;
-    }
-    let node = new Effect(flag, fn, null, this, args);
-    if (this._owned === null) {
-        this._owned = [node];
-    } else {
-        this._owned.push(node);
-    }
-    startEffect(node);
-    return node;
-}
-
-/**
- * Effect owned by another Effect — child level = parent._level + 1 so the
- * start() loop processes parents before children.
- * @this {!Effect}
- * @template W
- * @param {function(!Effect, W): (function(): void | void)} fn
- * @param {number=} opts
- * @param {W=} args
- * @returns {!Effect<null,null,W>}
- */
-function _effEffect(fn, opts, args) {
-    let flag = FLAG_SETUP | ((0 | opts) & OPTIONS);
-    let node = new Effect(flag, fn, null, this, args);
+function _ownWatch(fnOrDep, fnOrArgs, args) {
     let level = this._level + 1;
-    node._level = level;
-    if (level >= LEVELS.length) {
+    if (this._level > 2 && level >= LEVELS.length) {
         LEVELS.push(0);
         SCOPES.push([]);
     }
-    if (this._owned === null) {
-        this._owned = [node];
-    } else {
-        this._owned.push(node);
-    }
-    startEffect(node);
+    let node = watch(fnOrDep, fnOrArgs, args, this, level);
+    addOwned(this, node);
     return node;
 }
 
 /**
- * Watch owned by an Effect.
- * @this {!Effect}
+ * @this {Owner}
  * @param {function|Sender} fnOrDep
  * @param {*=} fnOrArgs
  * @param {*=} args
  * @returns {!Effect}
  */
-function _effWatch(fnOrDep, fnOrArgs, args) {
-    let node;
-    if (typeof fnOrDep === 'function') {
-        node = new Effect(FLAG_STABLE | FLAG_SETUP, fnOrDep, null, this, fnOrArgs);
-    } else {
-        node = new Effect(FLAG_STABLE | FLAG_BOUND, fnOrArgs, fnOrDep, this, args);
-        node._dep1slot = subscribe(fnOrDep, node, -1);
-    }
+function _ownSpawn(fnOrDep, fnOrArgs, args) {
     let level = this._level + 1;
-    node._level = level;
-    if (level >= LEVELS.length) {
+    if (this._level > 2 && level >= LEVELS.length) {
         LEVELS.push(0);
         SCOPES.push([]);
     }
-    if (this._owned === null) {
-        this._owned = [node];
-    } else {
-        this._owned.push(node);
-    }
-    startEffect(node);
-    return node;
-}
-
-/**
- * Async effect owned by another Effect.
- * @this {!Effect}
- * @template W
- * @param {function(!Effect, W): Promise<(function(): void) | void>} fn
- * @param {number=} opts
- * @param {W=} args
- * @returns {!Effect<null,null,W>}
- */
-function _effSpawn(fn, opts, args) {
-    let opts_ = 0 | opts;
-    let flag = FLAG_ASYNC | FLAG_SETUP | (opts_ & OPTIONS);
-    if (!(opts_ & OPT_DYNAMIC)) {
-        flag |= FLAG_STABLE;
-    }
-    let node = new Effect(flag, fn, null, this, args);
-    let level = this._level + 1;
-    node._level = level;
-    if (level >= LEVELS.length) {
-        LEVELS.push(0);
-        SCOPES.push([]);
-    }
-    if (this._owned === null) {
-        this._owned = [node];
-    } else {
-        this._owned.push(node);
-    }
-    startEffect(node);
+    let node = spawn(fnOrDep, fnOrArgs, args, this, level);
+    addOwned(this, node);
     return node;
 }
 
@@ -523,6 +465,15 @@ var RootProto = Root.prototype;
 RootProto._owner = null;
 
 /**
+ * Root's children start at level 0, so we seed Root's `_level` at -1. This
+ * lets the shared `_ownEffect`/`_ownWatch`/`_ownSpawn` delegates compute the
+ * child level uniformly as `this._level + 1` for both Root and Effect
+ * owners — no branch, no instanceof check.
+ * @type {number}
+ */
+RootProto._level = -1;
+
+/**
  * @public
  * @this {!Root}
  * @returns {void}
@@ -535,7 +486,7 @@ RootProto.dispose = dispose;
  * @param {function(): void} fn
  * @returns {void}
  */
-RootProto.cleanup = function (fn) { addCleanup(this, fn); };
+RootProto.cleanup = _cleanup;
 
 /**
  * @public
@@ -543,7 +494,7 @@ RootProto.cleanup = function (fn) { addCleanup(this, fn); };
  * @param {function(*): boolean} fn
  * @returns {void}
  */
-RootProto.recover = function (fn) { addRecover(this, fn); };
+RootProto.recover = _recover;
 
 /**
  * @this {!Root}
@@ -562,17 +513,19 @@ RootProto._dispose = function () {
 };
 
 /**
- * Ownership methods on Root — shared with Effect for compute-creators,
- * distinct for effect-creators (root's children always start at level 0).
+ * Ownership methods on Root — the same _own* delegates are shared with
+ * Effect. Effect-creating delegates pass `this` to the top-level factory,
+ * which only bumps the topological level when the owner is an Effect (Root
+ * owners leave the child at level 0).
  */
 RootProto.compute = _ownCompute;
 RootProto.derive = _ownDerive;
 RootProto.task = _ownTask;
 RootProto.signal = _ownSignal;
 RootProto.root = _ownRoot;
-RootProto.effect = _rootEffect;
-RootProto.watch = _rootWatch;
-RootProto.spawn = _rootSpawn;
+RootProto.effect = _ownEffect;
+RootProto.watch = _ownWatch;
+RootProto.spawn = _ownSpawn;
 
 /**
  * Runs `fn` with the root node itself as the argument. Prototype methods
@@ -587,7 +540,7 @@ function startRoot(root, fn) {
     try {
         let cleanup = fn(root);
         if (typeof cleanup === 'function') {
-            addCleanup(root, cleanup);
+            root.cleanup(cleanup);
         }
     } finally {
         IDLE = idle;
@@ -830,9 +783,15 @@ function Compute(opts, fn, dep1, seed, args) {
      * @returns {void}
      */
     ComputeProto._dispose = function () {
+        let flag = this._flag;
         this._flag = FLAG_DISPOSED;
         clearSubs(this);
         clearDeps(this);
+        if (flag & FLAG_ASYNC) {
+            let reader = this._args._reader;
+            reader._flag = FLAG_DISPOSED;
+            reader._node = null;
+        }
         this._fn =
             this._value =
             this._args = null;
@@ -844,7 +803,7 @@ function Compute(opts, fn, dep1, seed, args) {
     ComputeProto._update = function (time) {
         let flag = this._flag;
         this._time = time;
-        this._flag = (flag & ~(FLAG_STALE | FLAG_INIT | FLAG_EQUAL | FLAG_NOTEQUAL)) | FLAG_RUNNING;
+        this._flag = (flag & ~(FLAG_STALE | FLAG_INIT | FLAG_LOADING | FLAG_EQUAL | FLAG_NOTEQUAL)) | FLAG_RUNNING;
         if (flag & FLAG_ASYNC) {
             return this._updateAsync(time);
         }
@@ -933,80 +892,67 @@ function Compute(opts, fn, dep1, seed, args) {
     };
 
     /**
-     * Async update path. Same two-branch structure as _update but with
-     * async post-processing (resolvePromise/resolveIterator).
+     * Async update path. Two branches:
+     *   - Bound (FLAG_STABLE | FLAG_BOUND): pass dep.val() as first arg, no tracking.
+     *   - Dynamic: tear down old deps, dispose old Reader, mint a new Reader,
+     *     invoke fn with (reader, prev, userArgs). Reader.read registers deps
+     *     synchronously on each call, surviving across await.
      * @param {number} time
      */
     ComputeProto._updateAsync = function (time) {
         let flag = this._flag;
         let value;
-        if ((flag & (FLAG_STABLE | FLAG_SETUP)) === FLAG_STABLE) {
+        if (flag & FLAG_BOUND) {
+            /** Bound single-dep async — no reader, no tracking. */
             try {
-                value = (flag & FLAG_BOUND)
-                    ? this._fn(this._dep1.val(), this._value, this._args)
-                    : this._fn(this, this._value, this._args);
+                value = this._fn(this._dep1.val(), this._value, this._args);
                 this._flag &= ~FLAG_ERROR;
             } catch (err) {
                 value = err;
                 this._flag |= FLAG_ERROR;
             }
         } else {
-            let prevVersion = this._version;
-            let version = VERSION += 2;
-            this._version = version;
-            let saveStart = VCOUNT;
-            let depCount = 0;
-            let depsLen = 0;
-            let prevDBase;
-            let prevReused;
-
-            if (flag & FLAG_SETUP) {
-                prevDBase = DBASE
-                DBASE = DCOUNT;
-            } else {
-                prevReused = REUSED
-                REUSED = 0;
-                depCount = sweep(version - 1, this._dep1, this._deps);
-                depsLen = this._deps !== null ? this._deps.length : 0;
+            /** Dynamic async — _args is always {_reader, _args}. */
+            let wrapper = this._args;
+            if (!(flag & FLAG_SETUP)) {
+                /** Subsequent run: dispose the old reader so any in-flight
+                 *  callback hits `reader._flag & FLAG_DISPOSED` and throws;
+                 *  tear down the deps the reader registered; mint a fresh
+                 *  reader. First run skips this — the factory-minted reader
+                 *  is still valid and there are no deps to tear down. */
+                let oldReader = wrapper._reader;
+                oldReader._flag = FLAG_DISPOSED;
+                oldReader._node = null;
+                if (this._dep1 !== null) {
+                    clearReceiver(this._dep1, this._dep1slot);
+                    this._dep1 = null;
+                    this._dep1slot = 0;
+                }
+                let deps = this._deps;
+                if (deps !== null) {
+                    let count = deps.length >> 1;
+                    while (count-- > 0) {
+                        let slot = deps.pop();
+                        let node = deps.pop();
+                        clearReceiver(node, slot);
+                    }
+                }
+                wrapper._reader = new Reader(this);
             }
 
             try {
-                value = this._fn(this, this._value, this._args);
+                value = this._fn(wrapper._reader, this._value, wrapper._args);
                 this._flag &= ~FLAG_ERROR;
             } catch (err) {
                 this._value = err;
                 this._flag = flag & ~(FLAG_RUNNING | FLAG_STALE | FLAG_PENDING | FLAG_INIT | FLAG_SETUP) | FLAG_ERROR;
                 this._ctime = time;
                 return;
-            } finally {
-                if (flag & FLAG_SETUP) {
-                    if (DCOUNT > DBASE) {
-                        this._deps = DSTACK.slice(DBASE, DCOUNT);
-                        DCOUNT = DBASE;
-                    }
-                    DBASE = prevDBase;
-                } else {
-                    if ((REUSED !== depCount || (this._deps !== null ? this._deps.length : 0) !== depsLen)) {
-                        pruneDeps(this, version, depCount);
-                    }
-                    REUSED = prevReused;
-                }
-                if (VCOUNT > saveStart) {
-                    let count = VCOUNT;
-                    let stack = VSTACK;
-                    for (let i = saveStart; i < count; i += 2) {
-                        stack[i]._version = stack[i + 1];
-                    }
-                    VCOUNT = saveStart;
-                }
-                this._version = prevVersion;
             }
         }
 
         flag = this._flag;
         this._flag &= ~(FLAG_RUNNING | FLAG_STALE | FLAG_PENDING | FLAG_INIT | FLAG_SETUP);
-        /** Dispatch on the return value — runtime detection replaces the
-         *  old FLAG_STREAM bit. Sync return settles immediately. */
         let kind = asyncKind(value);
         if (kind === ASYNC_SYNC) {
             if (value !== this._value) {
@@ -1017,13 +963,13 @@ function Compute(opts, fn, dep1, seed, args) {
             } else if (flag & FLAG_NOTEQUAL) {
                 this._ctime = time;
             }
-            return;
-        }
-        this._flag |= FLAG_LOADING;
-        if (kind === ASYNC_ITERATOR) {
-            resolveIterator(new WeakRef(this), /** @type {AsyncIterator | AsyncIterable} */(value), time);
         } else {
-            resolvePromise(new WeakRef(this), /** @type {IThenable} */(value), time);
+            this._flag |= FLAG_LOADING;
+            if (kind === ASYNC_PROMISE) {
+                resolvePromise(new WeakRef(this), /** @type {IThenable} */(value), time);
+            } else {
+                resolveIterator(new WeakRef(this), /** @type {AsyncIterator | AsyncIterable} */(value), time);
+            }
         }
     };
 
@@ -1287,9 +1233,9 @@ function checkRun(node, time) {
     }
 }
 
-/** @const */ const ASYNC_PROMISE = 1;
-/** @const */ const ASYNC_ITERATOR = 2;
-/** @const */ const ASYNC_SYNC = 3;
+const ASYNC_PROMISE = 1;
+const ASYNC_ITERATOR = 2;
+const ASYNC_SYNC = 3;
 
 /**
  * Classifies a value returned from a compute/effect fn:
@@ -1394,12 +1340,60 @@ function settle(node, value) {
         node._value = value;
         let time = TIME + 1;
         node._ctime = time;
-        if (unbound(node)) {
+        /** For async dynamic nodes the _args is {_reader, _args} — the
+         *  reader's reads during the run may have inserted duplicate
+         *  senders in _deps (cross-await pollution by other computes).
+         *  Sweep them now. The node keeps its fn and wrapper so it can
+         *  re-run on future signal changes. */
+        if (node._flag & FLAG_ASYNC) {
+            sweepReaderDeps(node);
+        } else if (unbound(node)) {
             node._fn = node._args = null;
         }
         notify(node, FLAG_STALE);
         start();
     }
+}
+
+/**
+ * Remove duplicate senders from node._dep1/_deps (added by Reader.read
+ * across await boundaries when another compute re-tagged sender._version
+ * between our reads). Uses a fresh VERSION bump as the sweep stamp so it
+ * cannot collide with any existing tag. Unsubscribes redundant slots.
+ * @param {!Receiver} node
+ * @returns {void}
+ */
+function sweepReaderDeps(node) {
+    let stamp = VERSION += 2;
+    let dep1 = node._dep1;
+    if (dep1 !== null) {
+        dep1._version = stamp;
+    }
+    let deps = node._deps;
+    if (deps === null) return;
+    let tail = 0;
+    for (let i = 0; i < deps.length; i += 2) {
+        let dep = /** @type {!Sender} */(deps[i]);
+        if (dep._version === stamp) {
+            /** Duplicate — unsubscribe and drop. */
+            clearReceiver(dep, /** @type {number} */(deps[i + 1]));
+            continue;
+        }
+        dep._version = stamp;
+        if (tail !== i) {
+            let slot = /** @type {number} */(deps[i + 1]);
+            deps[tail] = dep;
+            deps[tail + 1] = slot;
+            /** Fix sender's subslot to point at new position. */
+            if (slot === -1) {
+                dep._sub1slot = tail;
+            } else {
+                dep._subs[slot + 1] = tail;
+            }
+        }
+        tail += 2;
+    }
+    deps.length = tail;
 }
 
 /**
@@ -1504,7 +1498,7 @@ function Effect(opts, fn, dep1, owner, args) {
         let flag = this._flag;
 
         this._time = time;
-        this._flag |= FLAG_RUNNING;
+        this._flag = flag & ~(FLAG_LOADING) | FLAG_RUNNING;
         if (!(flag & FLAG_SETUP)) {
             if (this._cleanup !== null) {
                 clearCleanup(this);
@@ -1581,90 +1575,73 @@ function Effect(opts, fn, dep1, owner, args) {
         }
 
         if (typeof value === 'function') {
-            addCleanup(this, value);
+            this.cleanup(value);
         }
     };
 
     /**
-     * Async update path for effects. Same two-branch structure as _update
-     * but with async post-processing (resolveEffectPromise/resolveEffectIterator).
+     * @this {Effect}
      * @param {number} time
      */
     EffectProto._updateAsync = function (time) {
         let flag = this._flag;
         let value;
-        if ((flag & (FLAG_STABLE | FLAG_SETUP)) === FLAG_STABLE) {
+        if (flag & FLAG_BOUND) {
+            /** Bound single-dep async — no reader, no tracking. */
             try {
-                value = (flag & FLAG_BOUND)
-                    ? this._fn(this._dep1.val(), this._args)
-                    : this._fn(this, this._args);
+                value = this._fn(this._dep1.val(), this._args);
             } finally {
                 this._time = time;
                 this._flag &= ~(FLAG_RUNNING | FLAG_STALE | FLAG_PENDING);
             }
         } else {
-            let prevVersion = this._version;
-            let version = VERSION += 2;
-            this._version = version;
-            let saveStart = VCOUNT;
-            let depCount = 0;
-            let dep1 = this._dep1;
-            let depsLen = 0;
-            let prevReused;
-            let prevDBase;
-            if (flag & FLAG_SETUP) {
-                prevDBase = DBASE;
-                DBASE = DCOUNT;
-            } else {
-                prevReused = REUSED;
-                REUSED = 0;
-                depCount = sweep(version - 1, this._dep1, this._deps);
-                depsLen = this._deps !== null ? this._deps.length : 0;
+            /** Dynamic async — _args is always {_reader, _args}. */
+            let wrapper = this._args;
+            if (!(flag & FLAG_SETUP)) {
+                /** Subsequent run: dispose the old reader so any in-flight
+                 *  callback hits `reader._flag & FLAG_DISPOSED` and throws;
+                 *  tear down the deps the reader registered; mint a fresh
+                 *  reader. First run skips this — the factory-minted reader
+                 *  is still valid and there are no deps to tear down. */
+                let reader = wrapper._reader;
+                reader._flag = FLAG_DISPOSED;
+                reader._node = null;
+                if (this._dep1 !== null) {
+                    clearReceiver(this._dep1, this._dep1slot);
+                    this._dep1 = null;
+                    this._dep1slot = 0;
+                }
+                let deps = this._deps;
+                if (deps !== null) {
+                    let count = deps.length >> 1;
+                    while (count-- > 0) {
+                        let slot = deps.pop();
+                        let node = deps.pop();
+                        clearReceiver(node, slot);
+                    }
+                }
+                wrapper._reader = new Reader(this);
             }
 
             try {
-                value = this._fn(this, this._args);
+                value = this._fn(wrapper._reader, wrapper._args);
             } finally {
-                if (flag & FLAG_SETUP) {
-                    if (DCOUNT > DBASE) {
-                        this._deps = DSTACK.slice(DBASE, DCOUNT);
-                        DCOUNT = DBASE;
-                    }
-                    DBASE = prevDBase;
-                } else {
-                    if ((REUSED !== depCount || (this._deps !== null ? this._deps.length : 0) !== depsLen)) {
-                        pruneDeps(this, version, depCount);
-                    }
-                    REUSED = prevReused;
-                }
-
-                if (VCOUNT > saveStart) {
-                    let count = VCOUNT;
-                    let stack = VSTACK;
-                    for (let i = saveStart; i < count; i += 2) {
-                        stack[i]._version = stack[i + 1];
-                    }
-                    VCOUNT = saveStart;
-                }
-                this._version = prevVersion;
                 this._flag &= ~(FLAG_RUNNING | FLAG_STALE | FLAG_PENDING | FLAG_INIT | FLAG_SETUP);
             }
         }
 
-        /** Dispatch on the return value — runtime detection replaces the
-         *  old FLAG_STREAM bit. Sync return: cleanup fn if present. */
         let kind = asyncKind(value);
         if (kind === ASYNC_SYNC) {
             if (typeof value === 'function') {
-                addCleanup(this, value);
+                this.cleanup(value);
             }
-            return;
-        }
-        this._flag |= FLAG_LOADING;
-        if (kind === ASYNC_ITERATOR) {
-            resolveEffectIterator(new WeakRef(this), value);
         } else {
-            resolveEffectPromise(new WeakRef(this), value);
+            this._flag |= FLAG_LOADING;
+            if (kind === ASYNC_PROMISE) {
+                resolveEffectPromise(new WeakRef(this), value);
+            } else {
+                resolveEffectIterator(new WeakRef(this), value);
+            }
         }
     };
 
@@ -1673,6 +1650,7 @@ function Effect(opts, fn, dep1, owner, args) {
      * @returns {void}
      */
     EffectProto._dispose = function () {
+        let flag = this._flag;
         this._flag = FLAG_DISPOSED;
         clearDeps(this);
         if (this._cleanup !== null) {
@@ -1680,6 +1658,11 @@ function Effect(opts, fn, dep1, owner, args) {
         }
         if (this._owned !== null) {
             clearOwned(this);
+        }
+        if (flag & FLAG_ASYNC) {
+            let reader = this._args._reader;
+            reader._flag = FLAG_DISPOSED;
+            reader._node = null;
         }
         this._fn =
             this._args =
@@ -1739,20 +1722,19 @@ function Effect(opts, fn, dep1, owner, args) {
     EffectProto.recover = _recover;
 
     /**
-     * Ownership methods on Effect — install the shared implementations.
-     * The Compute-creating methods (compute/derive/task) are identical on
-     * Root; Effect-creating methods (effect/watch/spawn) differ because the
-     * child's topological level = parent._level + 1 for Effect owners,
-     * and 0 for Root owners.
+     * Ownership methods on Effect — the same delegates as Root. The
+     * Effect-creating delegates pass `this` to the top-level factory,
+     * which bumps the child's topological level since the owner is an
+     * Effect.
      */
     EffectProto.compute = _ownCompute;
     EffectProto.derive = _ownDerive;
     EffectProto.task = _ownTask;
     EffectProto.signal = _ownSignal;
     EffectProto.root = _ownRoot;
-    EffectProto.effect = _effEffect;
-    EffectProto.watch = _effWatch;
-    EffectProto.spawn = _effSpawn;
+    EffectProto.effect = _ownEffect;
+    EffectProto.watch = _ownWatch;
+    EffectProto.spawn = _ownSpawn;
 }
 
 
@@ -1805,7 +1787,7 @@ function resolveEffectPromise(ref, promise) {
         if (node !== void 0 && !(node._flag & FLAG_DISPOSED)) {
             node._flag &= ~FLAG_LOADING;
             if (typeof val === 'function') {
-                addCleanup(node, val);
+                node.cleanup(val);
             }
         }
     }, (err) => {
@@ -1846,7 +1828,7 @@ function resolveEffectIterator(ref, iterable) {
         iterator.next().then(onNext, onError);
         node._flag &= ~FLAG_LOADING;
         if (typeof result.value === 'function') {
-            addCleanup(node, result.value);
+            node.cleanup(result.value);
         }
     };
     let onError = (err) => {
@@ -1860,39 +1842,6 @@ function resolveEffectIterator(ref, iterable) {
         }
     };
     iterator.next().then(onNext, onError);
-}
-
-/**
- * @param {Owner} node
- * @param {function(): void} fn
- * @returns {void}
- */
-function addCleanup(node, fn) {
-    let cur = node._cleanup;
-    if (cur === null) {
-        node._cleanup = fn;
-    } else if (typeof cur === 'function') {
-        node._cleanup = [cur, fn];
-    } else {
-        cur.push(fn);
-    }
-}
-
-/**
- * @param {Owner} node
- * @param {function(*): boolean} fn
- * @returns {void}
- */
-function addRecover(node, fn) {
-    let cur = node._recover;
-    if (cur === null) {
-        node._recover = fn;
-    } else if (typeof cur === 'function') {
-        node._recover = [cur, fn];
-    } else {
-        cur.push(fn);
-    }
-    node._flag |= FLAG_RECOVER;
 }
 
 /**
@@ -2148,6 +2097,23 @@ function clearCleanup(owner) {
 }
 
 /**
+ * Appends `child` to `owner._owned`, lazily allocating the array. Used by
+ * the proto ownership methods after the top-level factory returns a new
+ * node, so `_owned` is populated even when the factory runs the node's fn
+ * inside its startup path.
+ * @param {!Owner} owner
+ * @param {!Receiver | !Root} child
+ * @returns {void}
+ */
+function addOwned(owner, child) {
+    if (owner._owned === null) {
+        owner._owned = [child];
+    } else {
+        owner._owned.push(child);
+    }
+}
+
+/**
  * Disposes all owned children. Called before re-running an owner effect
  * and on disposal. Only call when `_owned !== null` — owned is lazy and
  * only allocated when an effect or root actually adopts children.
@@ -2172,18 +2138,16 @@ function clearOwned(owner) {
 function tryRecover(node, error) {
     let owner = node._owner;
     while (owner !== null) {
-        if (owner._flag & FLAG_RECOVER) {
-            let recover = owner._recover;
-            if (typeof recover === 'function') {
-                if (recover(error) === true) {
+        let recover = owner._recover;
+        if (typeof recover === 'function') {
+            if (recover(error) === true) {
+                return true;
+            }
+        } else if (recover !== null) {
+            let len = recover.length;
+            for (let i = 0; i < len; i++) {
+                if (recover[i](error) === true) {
                     return true;
-                }
-            } else if (recover !== null) {
-                let len = recover.length;
-                for (let i = 0; i < len; i++) {
-                    if (recover[i](error) === true) {
-                        return true;
-                    }
                 }
             }
         }
@@ -2419,7 +2383,8 @@ function pruneDeps(node, version, depCount) {
 /**
  * @param {number} stamp
  * @param {Receiver | null} dep1 
- * @param {Array<Receiver> | null} deps 
+ * @param {Array<Receiver> | null} deps
+ * @returns {number}
  */
 function sweep(stamp, dep1, deps) {
     let depCount = 0;
@@ -2533,26 +2498,37 @@ function derive(fnOrDep, seedOrFn, argsOrSeed, args) {
 }
 
 /**
- * Async compute. Returns a promise whose resolved value becomes
- * the node's settled value. Stable by default; pass OPT_DYNAMIC
- * for dynamic dependency tracking.
- * @template T,W
- * @param {function(T,W): Promise<T>} fn
- * @param {T=} seed
- * @param {number=} opts
- * @param {W=} args
- * @returns {!Compute<T,null,null,W>}
+ * Async compute. Two signatures:
+ *   task(fn, seed?, opts?, args?)      — dynamic async, fn receives (reader, prev, args).
+ *   task(dep, fn, seed?, args?)        — bound single-dep, fn receives (depValue, prev, args).
+ * @param {function|Sender} fnOrDep
+ * @param {*=} fnOrSeed
+ * @param {*=} optsOrArgs
+ * @param {*=} args
+ * @returns {!Compute}
  */
-function task(fn, seed, opts, args) {
-    opts = 0 | opts;
-    let flag = FLAG_ASYNC | FLAG_SETUP | (opts & OPTIONS);
-    if (!(opts & OPT_DYNAMIC)) {
-        flag |= FLAG_STABLE;
+function task(fnOrDep, fnOrSeed, optsOrArgs, args) {
+    let node;
+    if (typeof fnOrDep === 'function') {
+        /** Dynamic async: task(fn, seed?, opts?, args?) */
+        let opts = 0 | optsOrArgs;
+        let flag = FLAG_ASYNC | FLAG_SETUP | (opts & OPTIONS);
+        node = new Compute(flag, fnOrDep, null, fnOrSeed, null);
+        /** Wrap _args upfront so _updateAsync can unconditionally
+         *  dereference node._args._reader on every run. */
+        node._args = { _reader: new Reader(node), _args: args };
+        if (!(flag & FLAG_DEFER)) {
+            startCompute(node);
+        }
+        return node;
     }
-    let node = new Compute(flag, fn, null, seed, args);
-    if (!(flag & FLAG_DEFER)) {
-        startCompute(node);
-    }
+    /** Bound single-dep async: task(dep, fn, seed?, args?) */
+    node = new Compute(
+        FLAG_ASYNC | FLAG_STABLE | FLAG_BOUND,
+        fnOrSeed, fnOrDep, optsOrArgs, args
+    );
+    node._dep1slot = subscribe(fnOrDep, node, -1);
+    startCompute(node);
     return node;
 }
 
@@ -2563,30 +2539,45 @@ function task(fn, seed, opts, args) {
  * @param {W=} args
  * @returns {Effect<null,null,W>}
  */
-function effect(fn, opts, args) {
+function effect(fn, opts, args, owner, level) {
     let flag = FLAG_SETUP | ((0 | opts) & OPTIONS);
-    let node = new Effect(flag, fn, null, null, args);
+    let node = new Effect(flag, fn, null, owner || null, args);
+    if (level) {
+        node._level = level;
+    }
     startEffect(node);
     return node;
 }
 
 /**
  * Async effect. Returns a promise whose resolved value, if a
- * function, is registered as cleanup. Stable by default; pass
- * OPT_DYNAMIC for dynamic dependency tracking.
+ * function, is registered as cleanup.
  * @template W
  * @param {function(!Effect, W): Promise<(function(): void) | void>} fn
  * @param {number=} opts
  * @param {W=} args
  * @returns {!Effect<null,null,W>}
  */
-function spawn(fn, opts, args) {
-    opts = 0 | opts;
-    let flag = FLAG_ASYNC | FLAG_SETUP | (opts & OPTIONS);
-    if (!(opts & OPT_DYNAMIC)) {
-        flag |= FLAG_STABLE;
+function spawn(fnOrDep, fnOrArgs, args, owner, level) {
+    let node;
+    let ownerRef = owner || null;
+    if (typeof fnOrDep === 'function') {
+        /** Dynamic async: spawn(fn, opts?, args?) */
+        let opts = 0 | fnOrArgs;
+        let flag = FLAG_ASYNC | FLAG_SETUP | (opts & OPTIONS);
+        node = new Effect(flag, fnOrDep, null, ownerRef, null);
+        node._args = { _reader: new Reader(node), _args: args };
+    } else {
+        /** Bound single-dep async effect: spawn(dep, fn, args?) */
+        node = new Effect(
+            FLAG_ASYNC | FLAG_STABLE | FLAG_BOUND,
+            fnOrArgs, fnOrDep, ownerRef, args
+        );
+        node._dep1slot = subscribe(fnOrDep, node, -1);
     }
-    let node = new Effect(flag, fn, null, null, args);
+    if (level) {
+        node._level = level;
+    }
     startEffect(node);
     return node;
 }
@@ -2600,14 +2591,18 @@ function spawn(fn, opts, args) {
  * @param {*=} args
  * @returns {!Effect}
  */
-function watch(fnOrDep, fnOrArgs, args) {
+function watch(fnOrDep, fnOrArgs, args, owner, level) {
+    let node;
+    let ownerRef = owner || null;
     if (typeof fnOrDep === 'function') {
-        let node = new Effect(FLAG_STABLE | FLAG_SETUP, fnOrDep, null, null, fnOrArgs);
-        startEffect(node);
-        return node;
+        node = new Effect(FLAG_STABLE | FLAG_SETUP, fnOrDep, null, ownerRef, fnOrArgs);
+    } else {
+        node = new Effect(FLAG_STABLE | FLAG_BOUND, fnOrArgs, fnOrDep, ownerRef, args);
+        node._dep1slot = subscribe(fnOrDep, node, -1);
     }
-    let node = new Effect(FLAG_STABLE | FLAG_BOUND, fnOrArgs, fnOrDep, null, args);
-    node._dep1slot = subscribe(fnOrDep, node, -1);
+    if (level) {
+        node._level = level;
+    }
     startEffect(node);
     return node;
 }
@@ -2632,11 +2627,11 @@ function batch(fn) {
 
 export {
     FLAG_DEFER, FLAG_STABLE, FLAG_SETUP, FLAG_STALE, FLAG_PENDING,
-    FLAG_RUNNING, FLAG_DISPOSED, FLAG_LOADING, FLAG_ERROR, FLAG_RECOVER,
+    FLAG_RUNNING, FLAG_DISPOSED, FLAG_LOADING, FLAG_ERROR,
     FLAG_BOUND, FLAG_DERIVED, FLAG_EQUAL, FLAG_WEAK,
     FLAG_INIT,
     FLAG_ASYNC,
-    OPT_DEFER, OPT_STABLE, OPT_SETUP, OPT_WEAK, OPT_DYNAMIC,
+    OPT_DEFER, OPT_STABLE, OPT_SETUP, OPT_WEAK,
     OPTIONS,
     IDLE,
     subscribe,

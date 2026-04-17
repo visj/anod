@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { signal, compute, effect, task } from "../";
+import { signal, compute, effect, task, spawn } from "../";
 
 const tick = () => Promise.resolve();
 
@@ -238,6 +238,224 @@ describe("async", () => {
 
             expect(returnCalled).toBe(true);
             expect(c1.val()).toBe(99); // value unchanged by the stale yield
+        });
+    });
+
+    describe("dynamic reader", () => {
+        test("reads a signal before and after await", async () => {
+            const s1 = signal(1);
+            const s2 = signal(10);
+            const c1 = task(async (r) => {
+                let a = r.read(s1);
+                await tick();
+                let b = r.read(s2);
+                return a + b;
+            });
+            await tick();
+            await tick();
+            expect(c1.val()).toBe(11);
+        });
+
+        test("re-runs when a dep added post-await changes", async () => {
+            const s1 = signal(1);
+            const s2 = signal(10);
+            let runs = 0;
+            const c1 = task(async (r) => {
+                runs++;
+                r.read(s1);
+                await tick();
+                return r.read(s2);
+            });
+            await tick();
+            await tick();
+            expect(c1.val()).toBe(10);
+            expect(runs).toBe(1);
+
+            s2.set(20);
+            c1.val();
+            await tick();
+            await tick();
+            expect(c1.val()).toBe(20);
+            expect(runs).toBe(2);
+        });
+
+        test("tear-down: stale dep is not re-subscribed if not re-read", async () => {
+            const s1 = signal(true);
+            const sA = signal('a');
+            const sB = signal('b');
+            let runs = 0;
+            const c1 = task(async (r) => {
+                runs++;
+                let sel = r.read(s1);
+                await tick();
+                return sel ? r.read(sA) : r.read(sB);
+            });
+            await tick();
+            await tick();
+            expect(c1.val()).toBe('a');
+
+            // sB is not a current dep — changing it must NOT trigger a re-run.
+            sB.set('B');
+            await tick();
+            expect(runs).toBe(1);
+
+            // Flip: now sB becomes the dep, sA is torn down.
+            s1.set(false);
+            c1.val();
+            await tick();
+            await tick();
+            expect(c1.val()).toBe('B');
+            expect(runs).toBe(2);
+
+            // sA no longer a dep.
+            sA.set('AA');
+            await tick();
+            expect(runs).toBe(2);
+        });
+
+        test("duplicate reads in same sync chunk are deduped via reader._version", async () => {
+            const s1 = signal(5);
+            let runs = 0;
+            const c1 = task(async (r) => {
+                runs++;
+                let sum = 0;
+                // Read s1 ten times in the same sync chunk.
+                for (let i = 0; i < 10; i++) sum += r.read(s1);
+                return sum;
+            });
+            await tick();
+            await tick();
+            expect(c1.val()).toBe(50);
+            expect(runs).toBe(1);
+
+            // If reader didn't dedup, s1 would have 10 subscriptions pointing
+            // at c1. Setting s1 would still fire notify once per sub — notify
+            // gates on flags so this is mostly observable via teardown cost.
+            // A stricter behavioral check: after the next run, s1's _subs size
+            // stays 1 (checked via signal→compute via an extra compute below).
+            s1.set(6);
+            c1.val();
+            await tick();
+            await tick();
+            expect(c1.val()).toBe(60);
+            expect(runs).toBe(2);
+
+            // Disposing c1 unsubscribes exactly once from s1 (if duplicates
+            // leaked, clearDeps would over-release). Then a fresh compute on
+            // s1 must still work — sanity check that s1's sub graph isn't
+            // corrupt.
+            c1.dispose();
+            const c2 = compute((c) => c.read(s1) + 1);
+            expect(c2.val()).toBe(7);
+            s1.set(7);
+            expect(c2.val()).toBe(8);
+        });
+
+        test("cross-compute pollution: same signal read twice across await is deduped", async () => {
+            const s1 = signal(1);
+            const s2 = signal(10);
+            // Unrelated compute also reading s2 — its first read sets s2._version.
+            const c0 = compute((c) => c.read(s2) * 100);
+            expect(c0.val()).toBe(1000);
+
+            // c1 reads s2 before AND after await. Between the reads, c0 has
+            // already tagged s2._version; the reader's version-based dedup
+            // therefore won't catch the second read, so s2 is added twice.
+            // sweepReaderDeps must collapse them at settle.
+            let runs = 0;
+            const c1 = task(async (r) => {
+                runs++;
+                r.read(s1);
+                r.read(s2);
+                await tick();
+                return r.read(s2);
+            });
+            await tick();
+            await tick();
+            expect(c1.val()).toBe(10);
+            expect(runs).toBe(1);
+
+            // If s2 is subscribed twice, a single set would fan out twice
+            // through notify → _receive → queue. The observable effect is
+            // that internal bookkeeping stays consistent: changing s2 once
+            // triggers exactly one re-run after pull.
+            s2.set(20);
+            c1.val();
+            await tick();
+            await tick();
+            expect(c1.val()).toBe(20);
+            expect(runs).toBe(2);
+
+            // Sanity: dispose c1, a fresh compute on s2 must still work
+            // (sub-graph wasn't corrupted by any over-release).
+            c1.dispose();
+            const c2 = compute((c) => c.read(s2));
+            expect(c2.val()).toBe(20);
+            s2.set(21);
+            expect(c2.val()).toBe(21);
+        });
+
+        test("disposed reader throws on read after node re-updates", async () => {
+            const s1 = signal(1);
+            let captured;
+            const c1 = task(async (r) => {
+                if (captured === undefined) captured = r;  // capture FIRST reader only
+                return r.read(s1);
+            });
+            await tick();
+            await tick();
+            expect(c1.val()).toBe(1);
+
+            s1.set(2);
+            c1.val();
+            await tick();
+            await tick();
+
+            expect(() => captured.read(s1)).toThrow('Reader disposed');
+        });
+
+        test("bound task: task(sig, fn)", async () => {
+            const s1 = signal(5);
+            const c1 = task(s1, async (v) => v * 2);
+            await tick();
+            expect(c1.val()).toBe(10);
+
+            s1.set(6);
+            c1.val();
+            await tick();
+            expect(c1.val()).toBe(12);
+        });
+
+        test("bound spawn: spawn(sig, fn)", async () => {
+            const s1 = signal(1);
+            let observed = null;
+            spawn(s1, async (v) => { observed = v; });
+            await tick();
+            expect(observed).toBe(1);
+
+            s1.set(2);
+            await tick();
+            expect(observed).toBe(2);
+        });
+
+        test("dynamic spawn: reads signals across await in an effect", async () => {
+            const s1 = signal(1);
+            const s2 = signal(10);
+            let observed = null;
+            spawn(async (r) => {
+                let a = r.read(s1);
+                await tick();
+                let b = r.read(s2);
+                observed = a + b;
+            });
+            await tick();
+            await tick();
+            expect(observed).toBe(11);
+
+            s2.set(20);
+            await tick();
+            await tick();
+            expect(observed).toBe(21);
         });
     });
 });

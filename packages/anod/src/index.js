@@ -3,7 +3,6 @@ export {
     OPT_STABLE,
     OPT_SETUP,
     OPT_WEAK,
-    OPT_DYNAMIC,
     FLAG_ASYNC,
     Root,
     Signal,

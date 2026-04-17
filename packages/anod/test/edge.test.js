@@ -9,7 +9,6 @@ import {
     watch,
     spawn,
     batch,
-    OPT_DYNAMIC,
 } from "../";
 
 const tick = () => Promise.resolve();
@@ -320,7 +319,7 @@ describe("edge cases", () => {
             expect(t.val()).toBe(20);
         });
 
-        test("with OPT_DYNAMIC allows changing deps", async () => {
+        test("async allows changing deps", async () => {
             const s1 = signal(true);
             const s2 = signal("a");
             const s3 = signal("b");
@@ -329,7 +328,7 @@ describe("edge cases", () => {
             const t = task((c) => {
                 runs++;
                 return Promise.resolve(c.read(s1) ? c.read(s2) : c.read(s3));
-            }, "", OPT_DYNAMIC);
+            });
 
             await tick();
             expect(t.val()).toBe("a");
@@ -440,7 +439,7 @@ describe("edge cases", () => {
             expect(runs).toBe(3);
         });
 
-        test("scope with OPT_DYNAMIC can change deps", () => {
+        test("effect scope can change deps", () => {
             const s1 = signal(true);
             const s2 = signal(0);
             const s3 = signal(0);
@@ -454,7 +453,7 @@ describe("edge cases", () => {
                     } else {
                         e.read(s3);
                     }
-                }, OPT_DYNAMIC);
+                });
             });
 
             expect(runs).toBe(1);
