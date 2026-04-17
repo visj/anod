@@ -1,4 +1,3 @@
-import { Anod } from "./api.js";
 import { Disposer, Owner, Sender, Receiver, ISignal, ICompute, IEffect } from "./types.js";
 
 // ─── Flags ─────────────────────────────────────────────────────────────────

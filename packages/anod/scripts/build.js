@@ -18,7 +18,7 @@ async function build() {
         },
         treeshake: {
             moduleSideEffects: (id) => {
-                if (id.includes('types.js') || id.includes('api.js')) {
+                if (id.includes('types.js')) {
                     return false;
                 }
                 return true;
