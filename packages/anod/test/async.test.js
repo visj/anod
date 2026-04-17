@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { signal, compute, effect, task, spawn } from "../";
+import { signal, compute, effect, task, spawn, OPT_STABLE } from "../";
 
 const tick = () => Promise.resolve();
 
@@ -456,6 +456,188 @@ describe("async", () => {
             await tick();
             await tick();
             expect(observed).toBe(21);
+        });
+    });
+
+    describe("stable reader", () => {
+        test("r.stable(): post-stable reads do not register new deps", async () => {
+            const s1 = signal(1);
+            const s2 = signal(10);
+            let runs = 0;
+            const c = task(async (r) => {
+                runs++;
+                const v1 = r.read(s1);
+                r.stable();
+                const v2 = r.read(s2);
+                return v1 + v2;
+            });
+            await tick(); await tick();
+            expect(c.val()).toBe(11);
+            expect(runs).toBe(1);
+
+            // s2 was read after stable() — not tracked. Changing it
+            // should NOT cause a rerun.
+            s2.set(99);
+            await tick();
+            expect(runs).toBe(1);
+        });
+
+        test("r.stable(): pre-stable reads stay tracked and trigger reruns", async () => {
+            const s1 = signal(1);
+            const s2 = signal(10);
+            let runs = 0;
+            const c = task(async (r) => {
+                runs++;
+                const v1 = r.read(s1);
+                r.stable();
+                const v2 = r.read(s2);
+                return v1 + v2;
+            });
+            await tick(); await tick();
+            expect(c.val()).toBe(11);
+
+            s1.set(2);
+            c.val();
+            await tick(); await tick();
+            expect(c.val()).toBe(12); // v1=2, v2=10 (s2 not tracked)
+            expect(runs).toBe(2);
+        });
+
+        test("r.stable(): subsequent runs reuse the same Reader", async () => {
+            const s1 = signal(1);
+            let firstReader;
+            const c = task(async (r) => {
+                if (firstReader === undefined) firstReader = r;
+                r.read(s1);
+                r.stable();
+                return r === firstReader;
+            });
+            await tick(); await tick();
+            expect(c.val()).toBe(true);
+
+            s1.set(2);
+            c.val();
+            await tick(); await tick();
+            expect(c.val()).toBe(true);
+        });
+
+        test("OPT_STABLE factory: reader inherits stable; first run still tracks", async () => {
+            const s1 = signal(1);
+            const s2 = signal(10);
+            let runs = 0;
+            const c = task(async (r) => {
+                runs++;
+                // Both reads happen in the first (setup) run. SETUP is
+                // set on the reader even though STABLE is also set, so
+                // the check `(STABLE | SETUP) === STABLE` is false →
+                // both reads register as deps.
+                const v1 = r.read(s1);
+                await tick();
+                const v2 = r.read(s2);
+                return v1 + v2;
+            }, undefined, OPT_STABLE);
+            await tick(); await tick(); await tick();
+            expect(c.val()).toBe(11);
+            expect(runs).toBe(1);
+
+            // Both s1 and s2 are tracked deps of the first setup run.
+            s1.set(2);
+            c.val();
+            await tick(); await tick(); await tick();
+            expect(c.val()).toBe(12);
+            expect(runs).toBe(2);
+
+            s2.set(20);
+            c.val();
+            await tick(); await tick(); await tick();
+            expect(c.val()).toBe(22);
+            expect(runs).toBe(3);
+        });
+
+        test("OPT_STABLE factory: post-settle reads don't re-subscribe", async () => {
+            // On rerun, SETUP has been cleared by propagateReaderFlags
+            // at settle. Reader has STABLE only → reads bypass subscribe.
+            const s1 = signal(1);
+            const extra = signal(0);
+            let runs = 0;
+            const c = task(async (r) => {
+                runs++;
+                const v1 = r.read(s1);
+                if (runs > 1) {
+                    // Rerun: this read should NOT create a new dep.
+                    r.read(extra);
+                }
+                return v1;
+            }, undefined, OPT_STABLE);
+            await tick(); await tick();
+            expect(c.val()).toBe(1);
+            expect(runs).toBe(1);
+
+            s1.set(2);
+            c.val();
+            await tick(); await tick();
+            expect(runs).toBe(2);
+
+            // `extra` was read in the rerun but with FLAG_STABLE set and
+            // FLAG_SETUP clear — should not have been subscribed.
+            extra.set(999);
+            await tick();
+            expect(runs).toBe(2);
+        });
+
+        test("r.equal() is callable on the reader and propagates to node", async () => {
+            const src = signal(0);
+            const c = task(async (r) => {
+                const v = r.read(src);
+                r.equal(true);  // just verifying the method exists & doesn't throw
+                return v;
+            });
+            await tick(); await tick();
+            expect(c.val()).toBe(0);
+        });
+
+        test("r.stable() on spawn()", async () => {
+            const s1 = signal(1);
+            const s2 = signal(100);
+            let runs = 0;
+            let observed;
+            spawn(async (r) => {
+                runs++;
+                const v1 = r.read(s1);
+                r.stable();
+                const v2 = r.read(s2);
+                observed = v1 + v2;
+            });
+            await tick(); await tick();
+            expect(observed).toBe(101);
+            expect(runs).toBe(1);
+
+            s2.set(200); // not tracked
+            await tick();
+            expect(runs).toBe(1);
+
+            s1.set(2); // tracked
+            await tick(); await tick();
+            expect(observed).toBe(202);
+            expect(runs).toBe(2);
+        });
+
+        test("r.stable() before any reads: node goes dormant", async () => {
+            const s1 = signal(1);
+            let runs = 0;
+            const c = task(async (r) => {
+                runs++;
+                r.stable();
+                return r.read(s1); // post-stable — no subscribe
+            });
+            await tick(); await tick();
+            expect(c.val()).toBe(1);
+            expect(runs).toBe(1);
+
+            s1.set(2);
+            await tick();
+            expect(runs).toBe(1);
+            expect(c.val()).toBe(1);
         });
     });
 });

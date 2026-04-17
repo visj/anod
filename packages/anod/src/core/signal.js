@@ -278,15 +278,21 @@ function Effect(opts, fn, dep1, owner, args) {
  * duplicate reads (`for (…) r.read(sig)`). It is NOT trusted across await —
  * cross-await duplicates may still slip through if another compute re-tags
  * `sender._version` between our reads. Those are swept at settle time via
- * sweepReaderDeps.
+ * patchReaderDeps.
  * @constructor
  * @param {!Receiver} node
  */
 function Reader(node) {
     /** @type {Receiver | null} */
     this._node = node;
-    /** @type {number} */
-    this._flag = 0;
+    /** Snapshot the node's flag directly. The caller (`_update` / the
+     *  factory) has already cleared per-run bits like EQUAL/NOTEQUAL on
+     *  the node, and set FLAG_SETUP on the first run, so the Reader's
+     *  tracking-mode check `(STABLE | SETUP) === STABLE` lines up
+     *  without extra masking. Bits the Reader doesn't interpret are
+     *  just inert.
+     *  @type {number} */
+    this._flag = node._flag;
     /** @type {number} Unique per-reader version for same-chunk dedup. */
     this._version = VERSION += 2;
 }
@@ -345,7 +351,11 @@ function _equal(eq) {
 }
 
 /**
- * Marks the current node stable — no dynamic dep tracking on subsequent runs.
+ * Marks the current node stable — no dynamic dep tracking on subsequent
+ * runs. Shared across Compute and Effect prototypes; `read()` then
+ * short-circuits on `(FLAG_STABLE | FLAG_SETUP) === FLAG_STABLE`. The
+ * async-dynamic counterpart lives on the Reader (see `ReaderProto.stable`
+ * in the proto-assignment block).
  * @this {Receiver}
  * @returns {void}
  */
@@ -467,13 +477,14 @@ function _ownCompute(fn, seed, opts, args) {
 /**
  * @this {Owner}
  * @param {function|Sender} fnOrDep
- * @param {*=} seedOrFn
- * @param {*=} argsOrSeed
- * @param {*=} args
+ * @param {*=} a2
+ * @param {*=} a3
+ * @param {*=} a4
+ * @param {*=} a5
  * @returns {!Compute}
  */
-function _ownDerive(fnOrDep, seedOrFn, argsOrSeed, args) {
-    let node = derive(fnOrDep, seedOrFn, argsOrSeed, args);
+function _ownDerive(fnOrDep, a2, a3, a4, a5) {
+    let node = derive(fnOrDep, a2, a3, a4, a5);
     addOwned(this, node);
     return node;
 }
@@ -481,13 +492,14 @@ function _ownDerive(fnOrDep, seedOrFn, argsOrSeed, args) {
 /**
  * @this {Owner}
  * @param {function|Sender} fnOrDep
- * @param {*=} fnOrSeed
- * @param {*=} optsOrArgs
- * @param {*=} args
+ * @param {*=} a2
+ * @param {*=} a3
+ * @param {*=} a4
+ * @param {*=} a5
  * @returns {!Compute}
  */
-function _ownTask(fnOrDep, fnOrSeed, optsOrArgs, args) {
-    let node = task(fnOrDep, fnOrSeed, optsOrArgs, args);
+function _ownTask(fnOrDep, a2, a3, a4, a5) {
+    let node = task(fnOrDep, a2, a3, a4, a5);
     addOwned(this, node);
     return node;
 }
@@ -541,17 +553,18 @@ function _ownEffect(fn, opts, args) {
 /**
  * @this {Owner}
  * @param {function|Sender} fnOrDep
- * @param {*=} fnOrArgs
- * @param {*=} args
+ * @param {*=} a2
+ * @param {*=} a3
+ * @param {*=} a4
  * @returns {!Effect}
  */
-function _ownWatch(fnOrDep, fnOrArgs, args) {
+function _ownWatch(fnOrDep, a2, a3, a4) {
     let level = this._level + 1;
     if (this._level > 2 && level >= LEVELS.length) {
         LEVELS.push(0);
         SCOPES.push([]);
     }
-    let node = watch(fnOrDep, fnOrArgs, args, this, level);
+    let node = watch(fnOrDep, a2, a3, a4, this, level);
     addOwned(this, node);
     return node;
 }
@@ -559,17 +572,18 @@ function _ownWatch(fnOrDep, fnOrArgs, args) {
 /**
  * @this {Owner}
  * @param {function|Sender} fnOrDep
- * @param {*=} fnOrArgs
- * @param {*=} args
+ * @param {*=} a2
+ * @param {*=} a3
+ * @param {*=} a4
  * @returns {!Effect}
  */
-function _ownSpawn(fnOrDep, fnOrArgs, args) {
+function _ownSpawn(fnOrDep, a2, a3, a4) {
     let level = this._level + 1;
     if (this._level > 2 && level >= LEVELS.length) {
         LEVELS.push(0);
         SCOPES.push([]);
     }
-    let node = spawn(fnOrDep, fnOrArgs, args, this, level);
+    let node = spawn(fnOrDep, a2, a3, a4, this, level);
     addOwned(this, node);
     return node;
 }
@@ -809,9 +823,7 @@ function _ownSpawn(fnOrDep, fnOrArgs, args) {
         clearSubs(this);
         clearDeps(this);
         if (flag & FLAG_ASYNC) {
-            let reader = this._args._reader;
-            reader._flag = FLAG_DISPOSED;
-            reader._node = null;
+            this._args._reader._dispose();
         }
         this._fn =
             this._value =
@@ -883,7 +895,7 @@ function _ownSpawn(fnOrDep, fnOrArgs, args) {
                 } else {
                     /** Reconcile deps (dynamic only) */
                     if ((REUSED !== depCount || (this._deps !== null ? this._deps.length : 0) !== depsLen)) {
-                        pruneDeps(this, version, depCount);
+                        patchDeps(this, version, depCount);
                     }
                     REUSED = prevReused;
                 }
@@ -900,9 +912,7 @@ function _ownSpawn(fnOrDep, fnOrArgs, args) {
                 this._version = prevVersion;
             }
         }
-
-        flag = this._flag;
-        this._flag &= ~(FLAG_RUNNING | FLAG_STALE | FLAG_PENDING | FLAG_INIT | FLAG_SETUP);
+        flag = this._flag &= ~(FLAG_RUNNING | FLAG_STALE | FLAG_PENDING | FLAG_INIT | FLAG_SETUP);
         if (value !== this._value) {
             this._value = value;
             if (!(flag & FLAG_EQUAL)) {
@@ -914,8 +924,12 @@ function _ownSpawn(fnOrDep, fnOrArgs, args) {
     };
 
     /**
-     * Async update path. Two branches:
+     * Async update path. Three cases:
      *   - Bound (FLAG_STABLE | FLAG_BOUND): pass dep.val() as first arg, no tracking.
+     *   - Stable dynamic (FLAG_STABLE, no SETUP): reuse the existing Reader,
+     *     skip dep tear-down — the Reader's FLAG_STABLE makes its `read()`
+     *     short-circuit, so no new deps get registered and no old ones get
+     *     removed. Captured deps stay subscribed and keep firing reruns.
      *   - Dynamic: tear down old deps, dispose old Reader, mint a new Reader,
      *     invoke fn with (reader, prev, userArgs). Reader.read registers deps
      *     synchronously on each call, surviving across await.
@@ -935,17 +949,18 @@ function _ownSpawn(fnOrDep, fnOrArgs, args) {
                 this._flag |= FLAG_ERROR;
             }
         } else {
+            let reader;
             /** Dynamic async — _args is always {_reader, _args}. */
             let context = this._args;
-            if (!(flag & FLAG_SETUP)) {
-                /** Subsequent run: dispose the old reader so any in-flight
-                 *  callback hits `reader._flag & FLAG_DISPOSED` and throws;
-                 *  tear down the deps the reader registered; mint a fresh
-                 *  reader. First run skips this — the factory-minted reader
-                 *  is still valid and there are no deps to tear down. */
-                let reader = context._reader;
-                reader._flag = FLAG_DISPOSED;
-                reader._node = null;
+            /** Tear down + mint only when neither SETUP (first run, factory
+             *  reader still valid) nor STABLE (reader keeps firing after
+             *  stabilization with its captured deps). */
+            if (!(flag & (FLAG_STABLE | FLAG_SETUP))) {
+                /** Subsequent non-stable run: dispose the old reader so any
+                 *  in-flight callback hits `reader._flag & FLAG_DISPOSED`
+                 *  and throws; tear down the deps the reader registered;
+                 *  mint a fresh reader. */
+                context._reader._dispose();
                 if (this._dep1 !== null) {
                     clearReceiver(this._dep1, this._dep1slot);
                     this._dep1 = null;
@@ -960,12 +975,20 @@ function _ownSpawn(fnOrDep, fnOrArgs, args) {
                         clearReceiver(node, slot);
                     }
                 }
-                context._reader = new Reader(this);
+                reader = context._reader = new Reader(this);
+            } else {
+                reader = context._reader;
+                /** Reusing the reader across runs — wipe per-run mutable
+                 *  flags so the fn starts from a clean EQUAL/NOTEQUAL
+                 *  state (STABLE persists by design). Matches the
+                 *  FLAG_EQUAL/NOTEQUAL clear that `_update` does on the
+                 *  node at the top of each sync run. */
+                reader._flag &= ~(FLAG_EQUAL | FLAG_NOTEQUAL);
             }
 
             try {
-                value = this._fn(context._reader, this._value, context._args);
-                this._flag &= ~FLAG_ERROR;
+                value = this._fn(reader, this._value, context._args);
+                this._flag = flag & ~FLAG_ERROR | (reader._flag & (FLAG_STABLE | FLAG_EQUAL | FLAG_NOTEQUAL));
             } catch (err) {
                 this._value = err;
                 this._flag = flag & ~(FLAG_RUNNING | FLAG_STALE | FLAG_PENDING | FLAG_INIT | FLAG_SETUP) | FLAG_ERROR;
@@ -973,11 +996,10 @@ function _ownSpawn(fnOrDep, fnOrArgs, args) {
                 return;
             }
         }
-
-        flag = this._flag;
         this._flag &= ~(FLAG_RUNNING | FLAG_STALE | FLAG_PENDING | FLAG_INIT | FLAG_SETUP);
         let kind = asyncKind(value);
         if (kind === ASYNC_SYNC) {
+            flag = this._flag;
             if (value !== this._value) {
                 this._value = value;
                 if (!(flag & FLAG_EQUAL)) {
@@ -1077,7 +1099,7 @@ function _ownSpawn(fnOrDep, fnOrArgs, args) {
                     DBASE = dbase;
                 } else {
                     if ((REUSED !== depCount || (this._deps !== null ? this._deps.length : 0) !== depsLen)) {
-                        pruneDeps(this, version, depCount);
+                        patchDeps(this, version, depCount);
                     }
                     REUSED = reused;
                 }
@@ -1116,21 +1138,21 @@ function _ownSpawn(fnOrDep, fnOrArgs, args) {
                 this._flag &= ~(FLAG_RUNNING | FLAG_STALE | FLAG_PENDING);
             }
         } else {
-            /** Dynamic async — _args is always {_reader, _args}. */
+            /** Dynamic async — _args is always {_reader, _args}. See
+             *  `ComputeProto._updateAsync` for the three-case rationale.
+             *  FLAG_STABLE here means `.stable()` was called inside the
+             *  fn; subsequent runs reuse the same Reader (which has its
+             *  own FLAG_STABLE short-circuiting future reads). */
             let context = this._args;
-            if (!(flag & FLAG_SETUP)) {
-                /** Subsequent run: dispose the old reader so any in-flight
-                 *  callback hits `reader._flag & FLAG_DISPOSED` and throws;
-                 *  tear down the deps the reader registered; mint a fresh
-                 *  reader. First run skips this — the factory-minted reader
-                 *  is still valid and there are no deps to tear down. */
-                let reader = context._reader;
-                reader._flag = FLAG_DISPOSED;
-                reader._node = null;
+            if (!(flag & (FLAG_STABLE | FLAG_SETUP))) {
+                /** Subsequent non-stable run: dispose the old reader so
+                 *  any in-flight callback hits `reader._flag &
+                 *  FLAG_DISPOSED` and throws; tear down the deps the
+                 *  reader registered; mint a fresh reader. */
+                context._reader._dispose();
                 if (this._dep1 !== null) {
                     clearReceiver(this._dep1, this._dep1slot);
                     this._dep1 = null;
-                    this._dep1slot = 0;
                 }
                 let deps = this._deps;
                 if (deps !== null) {
@@ -1143,9 +1165,11 @@ function _ownSpawn(fnOrDep, fnOrArgs, args) {
                 }
                 context._reader = new Reader(this);
             }
-
+            
+            let reader = context._reader;
             try {
-                value = this._fn(context._reader, context._args);
+                value = this._fn(reader, context._args);
+                this._flag = flag | (reader._flag & (FLAG_STABLE));
             } finally {
                 this._flag &= ~(FLAG_RUNNING | FLAG_STALE | FLAG_PENDING | FLAG_INIT | FLAG_SETUP);
             }
@@ -1181,9 +1205,7 @@ function _ownSpawn(fnOrDep, fnOrArgs, args) {
             clearOwned(this);
         }
         if (flag & FLAG_ASYNC) {
-            let reader = this._args._reader;
-            reader._flag = FLAG_DISPOSED;
-            reader._node = null;
+            this._args._reader._dispose();
         }
         this._fn =
             this._args =
@@ -1213,17 +1235,28 @@ function _ownSpawn(fnOrDep, fnOrArgs, args) {
     /**
      * Registers a dep on the owning node and returns sender.val(). Throws
      * if the reader has been disposed (owning node has re-updated or been
-     * disposed since this reader was minted).
+     * disposed since this reader was minted). Short-circuits on
+     * `(STABLE | SETUP) === STABLE` — mirrors the sync `read()` check so
+     * tracking still happens during the first (setup) run even when
+     * OPT_STABLE was passed to the factory, then freezes after SETUP
+     * clears at settle time.
      * @template T
      * @this {!Reader}
      * @param {!Sender<T>} sender
      * @returns {T}
      */
     ReaderProto.read = function (sender) {
-        if (this._flag & FLAG_DISPOSED) {
+        let flag = this._flag;
+        if (flag & FLAG_DISPOSED) {
             throw new Error('Reader disposed');
         }
         let value = sender.val();
+        if ((flag & (FLAG_STABLE | FLAG_SETUP)) === FLAG_STABLE) {
+            /** Stabilized — return current value, no subscribe. Deps
+             *  captured before `.stable()` stay subscribed; reads after
+             *  it pass through. */
+            return value;
+        }
         if (sender._version === this._version) {
             /** Same sync chunk already read this sender — skip the subscribe. */
             return value;
@@ -1244,6 +1277,27 @@ function _ownSpawn(fnOrDep, fnOrArgs, args) {
             }
         }
         return value;
+    };
+
+    /**
+     * @this {Reader}
+     */
+    ReaderProto._dispose = function() {
+        this._flag = FLAG_DISPOSED;
+        this._node = null;
+    }
+
+    /** The Reader mirrors the node's tracking API. `r.equal()` is the
+     *  shared `_equal` — just flips EQUAL/NOTEQUAL. `r.stable()` does
+     *  extra work on the Reader: it also clears FLAG_SETUP so the
+     *  `(STABLE | SETUP) === STABLE` short-circuit in `read()` fires
+     *  immediately, letting reads in the same first run stop tracking
+     *  as soon as the user says "stop". The node-level `_stable` can't
+     *  do this — on sync nodes SETUP drives the DSTACK setup machinery
+     *  and must not be cleared mid-fn. */
+    ReaderProto.equal = _equal;
+    ReaderProto.stable = function () {
+        this._flag = (this._flag | FLAG_STABLE) & ~FLAG_SETUP;
     };
 }
 
@@ -1492,7 +1546,7 @@ function connect(receiver, sender) {
     }
 }
 
-// ─── pruneDeps ─────────────────────────────────────────────────────────────
+// ─── patchDeps ─────────────────────────────────────────────────────────────
 
 /**
  * After a dynamic fn re-execution, reconciles dep subscriptions.
@@ -1510,7 +1564,7 @@ function connect(receiver, sender) {
  * @param {number} depCount
  * @returns {void}
  */
-function pruneDeps(node, version, depCount) {
+function patchDeps(node, version, depCount) {
     let deps = node._deps;
     let existingLen = depCount > 1 ? (depCount - 1) * 2 : 0;
     /** ni = index of next new dep to consume (unsubscribed, slot 0) */
@@ -1631,7 +1685,18 @@ function pruneDeps(node, version, depCount) {
         }
         node._deps = null;
     } else {
-        deps.length = tail;
+        /** Shrink the array with explicit pops rather than assigning
+         *  `.length = tail`. Setting `.length` to a smaller value is
+         *  surprisingly expensive in V8 for the short-array case — a
+         *  handful of `pop()` calls is faster. */
+        let excess = deps.length - tail;
+        if (excess < 20) {
+            while (excess-- > 0) {
+                deps.pop();
+            }
+        } else {
+            deps.length = tail;
+        }
     }
 }
 
@@ -2003,6 +2068,19 @@ function resolveIterator(ref, iterable, time) {
  */
 function settle(node, value) {
     node._flag &= ~FLAG_LOADING;
+    /** Fold any `r.stable()` / `r.equal()` bits the Reader picked up
+     *  during the run into the node — the EQUAL/NOTEQUAL branch below
+     *  and subsequent-run dispatch in `_updateAsync` both read from the
+     *  node's flag. The matching clear of EQUAL/NOTEQUAL on the node
+     *  happens at the top of each run in `_computeUpdate`, so we only
+     *  need to OR the new bits in. Clearing the Reader's SETUP marks
+     *  the end of the first run's setup phase — later reads on a
+     *  stable reader now short-circuit. Bound async has no Reader. */
+    if (!(node._flag & FLAG_BOUND)) {
+        let reader = node._args._reader;
+        node._flag |= reader._flag & (FLAG_STABLE | FLAG_EQUAL | FLAG_NOTEQUAL);
+        reader._flag &= ~FLAG_SETUP;
+    }
 
     if (value !== node._value || (node._flag & FLAG_ERROR)) {
         node._value = value;
@@ -2014,7 +2092,9 @@ function settle(node, value) {
          *  Sweep them now. The node keeps its fn and wrapper so it can
          *  re-run on future signal changes. */
         if (node._flag & FLAG_ASYNC) {
-            sweepReaderDeps(node);
+            if (node._deps !== null) {
+                dedupDeps(node);
+            }
         } else if (unbound(node)) {
             node._fn = node._args = null;
         }
@@ -2031,37 +2111,46 @@ function settle(node, value) {
  * @param {!Receiver} node
  * @returns {void}
  */
-function sweepReaderDeps(node) {
+function dedupDeps(node) {
     let stamp = VERSION += 2;
     let dep1 = node._dep1;
+    let deps = node._deps;
     if (dep1 !== null) {
         dep1._version = stamp;
     }
-    let deps = node._deps;
-    if (deps === null) return;
-    let tail = 0;
-    for (let i = 0; i < deps.length; i += 2) {
+    /**
+     * Walk backward. First occurrence we hit (at the tail) is the one we
+     * keep — it gets stamped. Any earlier occurrence of the same sender
+     * then reads as already-stamped and is removed via swap-with-last +
+     * pop. This way only the dups cost a move (one each); kept entries
+     * in the unique-prefix region stay put. Forward-walk would instead
+     * shift every kept entry after the first dup, which is wasteful when
+     * dups are rare (the common case).
+     */
+    let i = deps.length - 2;
+    while (i >= 0) {
         let dep = /** @type {!Sender} */(deps[i]);
         if (dep._version === stamp) {
-            /** Duplicate — unsubscribe and drop. */
+            /** Duplicate — unsubscribe and compact via swap-with-last+pop. */
             clearReceiver(dep, /** @type {number} */(deps[i + 1]));
-            continue;
-        }
-        dep._version = stamp;
-        if (tail !== i) {
-            let slot = /** @type {number} */(deps[i + 1]);
-            deps[tail] = dep;
-            deps[tail + 1] = slot;
-            /** Fix sender's subslot to point at new position. */
-            if (slot === -1) {
-                dep._sub1slot = tail;
-            } else {
-                dep._subs[slot + 1] = tail;
+            let lastSlot = /** @type {number} */(deps.pop());
+            let lastDep = /** @type {!Sender} */(deps.pop());
+            if (i !== deps.length) {
+                /** Not the current end — put the popped pair at i and
+                 *  fix its sender's subs entry to point at the new depslot. */
+                deps[i] = lastDep;
+                deps[i + 1] = lastSlot;
+                if (lastSlot === -1) {
+                    lastDep._sub1slot = i;
+                } else {
+                    lastDep._subs[lastSlot + 1] = i;
+                }
             }
+        } else {
+            dep._version = stamp;
         }
-        tail += 2;
+        i -= 2;
     }
-    deps.length = tail;
 }
 
 /**
@@ -2076,6 +2165,14 @@ function resolveEffectPromise(ref, promise) {
         let node = ref.deref();
         if (node !== void 0 && !(node._flag & FLAG_DISPOSED)) {
             node._flag &= ~FLAG_LOADING;
+            /** Fold the Reader's STABLE bit onto the effect so the next
+             *  rerun takes the no-tear-down path, and clear the Reader's
+             *  SETUP. Bound async has no Reader. */
+            if (!(node._flag & FLAG_BOUND)) {
+                let reader = node._args._reader;
+                node._flag |= reader._flag & FLAG_STABLE;
+                reader._flag &= ~FLAG_SETUP;
+            }
             if (typeof val === 'function') {
                 node.cleanup(val);
             }
@@ -2113,10 +2210,20 @@ function resolveEffectIterator(ref, iterable) {
         }
         if (result.done) {
             node._flag &= ~FLAG_LOADING;
+            if (!(node._flag & FLAG_BOUND)) {
+                let reader = node._args._reader;
+                node._flag |= reader._flag & FLAG_STABLE;
+                reader._flag &= ~FLAG_SETUP;
+            }
             return;
         }
         iterator.next().then(onNext, onError);
         node._flag &= ~FLAG_LOADING;
+        if (!(node._flag & FLAG_BOUND)) {
+            let reader = node._args._reader;
+            node._flag |= reader._flag & FLAG_STABLE;
+            reader._flag &= ~FLAG_SETUP;
+        }
         if (typeof result.value === 'function') {
             node.cleanup(result.value);
         }
@@ -2254,12 +2361,13 @@ function start() {
                                 TRANSACTION = VERSION;
                                 node._update(time);
                             } catch (err) {
-                                let recovered = tryRecover(node, err);
-                                node._dispose();
-                                if (!recovered && !thrown) {
-                                    error = err;
-                                    thrown = true;
+                                if (!thrown) {
+                                    if (!tryRecover(node, err)) {
+                                        error = err;
+                                        thrown = true;
+                                    }
                                 }
+                                node._dispose();
                             }
                         } else {
                             node._flag &= ~(FLAG_STALE | FLAG_PENDING);
@@ -2280,12 +2388,13 @@ function start() {
                         try {
                             node._update(time);
                         } catch (err) {
-                            let recovered = tryRecover(node, err);
-                            node._dispose();
-                            if (!recovered && !thrown) {
-                                error = err;
-                                thrown = true;
+                            if (!thrown) {
+                                if (!tryRecover(node, err)) {
+                                    error = err;
+                                    thrown = true;
+                                }
                             }
+                            node._dispose();
                         }
                     } else {
                         node._flag &= ~(FLAG_STALE | FLAG_PENDING);
@@ -2354,56 +2463,68 @@ function compute(fn, seed, opts, args) {
 }
 
 /**
+ * Stable compute. Two signatures:
+ *   derive(fn, seed?, opts?, args?)          — dynamic stable compute
+ *   derive(dep, fn, seed?, opts?, args?)     — bound single-dep compute
+ * Both honor `OPT_DEFER` — with it the compute is not started eagerly; it
+ * stays STALE and runs on first read (or when the bound dep next changes).
  * @param {function|Sender} fnOrDep
- * @param {*=} seedOrFn
- * @param {*=} argsOrSeed
- * @param {*=} args
+ * @param {*=} arg2 - fn (bound) or seed (dynamic)
+ * @param {*=} arg3 - seed (bound) or opts (dynamic)
+ * @param {*=} arg4 - opts (bound) or args (dynamic)
+ * @param {*=} arg5 - args (bound only)
  * @returns {!Compute}
  */
-function derive(fnOrDep, seedOrFn, argsOrSeed, args) {
+function derive(fnOrDep, arg2, arg3, arg4, arg5) {
     let node;
+    let flag;
     if (typeof fnOrDep === 'function') {
-        node = new Compute(FLAG_STABLE | FLAG_SETUP, fnOrDep, null, seedOrFn, argsOrSeed);
+        /** derive(fn, seed?, opts?, args?) */
+        flag = FLAG_STABLE | FLAG_SETUP | ((0 | arg3) & OPTIONS);
+        node = new Compute(flag, fnOrDep, null, arg2, arg4);
     } else {
-        node = new Compute(FLAG_STABLE | FLAG_BOUND, seedOrFn, fnOrDep, argsOrSeed, args);
+        /** derive(dep, fn, seed?, opts?, args?) */
+        flag = FLAG_STABLE | FLAG_BOUND | ((0 | arg4) & OPTIONS);
+        node = new Compute(flag, arg2, fnOrDep, arg3, arg5);
         node._dep1slot = subscribe(fnOrDep, node, -1);
     }
-    startCompute(node);
+    if (!(flag & FLAG_DEFER)) {
+        startCompute(node);
+    }
     return node;
 }
 
 /**
  * Async compute. Two signatures:
- *   task(fn, seed?, opts?, args?)      — dynamic async, fn receives (reader, prev, args).
- *   task(dep, fn, seed?, args?)        — bound single-dep, fn receives (depValue, prev, args).
+ *   task(fn, seed?, opts?, args?)        — dynamic async, fn receives (reader, prev, args).
+ *   task(dep, fn, seed?, opts?, args?)   — bound single-dep, fn receives (depValue, prev, args).
+ * Both honor `OPT_DEFER`.
  * @param {function|Sender} fnOrDep
- * @param {*=} fnOrSeed
- * @param {*=} optsOrArgs
- * @param {*=} args
+ * @param {*=} arg2 - fn (bound) or seed (dynamic)
+ * @param {*=} arg3 - seed (bound) or opts (dynamic)
+ * @param {*=} arg4 - opts (bound) or args (dynamic)
+ * @param {*=} arg5 - args (bound only)
  * @returns {!Compute}
  */
-function task(fnOrDep, fnOrSeed, optsOrArgs, args) {
+function task(fnOrDep, arg2, arg3, arg4, arg5) {
     let node;
+    let flag;
     if (typeof fnOrDep === 'function') {
-        /** Dynamic async: task(fn, seed?, opts?, args?) */
-        let opts = 0 | optsOrArgs;
-        let flag = FLAG_ASYNC | FLAG_SETUP | (opts & OPTIONS);
-        node = new Compute(flag, fnOrDep, null, fnOrSeed, null);
+        /** task(fn, seed?, opts?, args?) */
+        flag = FLAG_ASYNC | FLAG_SETUP | ((0 | arg3) & OPTIONS);
+        node = new Compute(flag, fnOrDep, null, arg2, null);
         /** Wrap _args upfront so _updateAsync can unconditionally
          *  dereference node._args._reader on every run. */
-        node._args = { _reader: new Reader(node), _args: args };
-        if (!(flag & FLAG_DEFER)) {
-            startCompute(node);
-        }
-        return node;
+        node._args = { _reader: new Reader(node), _args: arg4 };
+    } else {
+        /** task(dep, fn, seed?, opts?, args?) */
+        flag = FLAG_ASYNC | FLAG_STABLE | FLAG_BOUND | ((0 | arg4) & OPTIONS);
+        node = new Compute(flag, arg2, fnOrDep, arg3, arg5);
+        node._dep1slot = subscribe(fnOrDep, node, -1);
     }
-    /** Bound single-dep async: task(dep, fn, seed?, args?) */
-    node = new Compute(
-        FLAG_ASYNC | FLAG_STABLE | FLAG_BOUND,
-        fnOrSeed, fnOrDep, optsOrArgs, args
-    );
-    node._dep1slot = subscribe(fnOrDep, node, -1);
-    startCompute(node);
+    if (!(flag & FLAG_DEFER)) {
+        startCompute(node);
+    }
     return node;
 }
 
@@ -2425,60 +2546,83 @@ function effect(fn, opts, args, owner, level) {
 }
 
 /**
- * Async effect. Returns a promise whose resolved value, if a
- * function, is registered as cleanup.
- * @template W
- * @param {function(!Effect, W): Promise<(function(): void) | void>} fn
- * @param {number=} opts
- * @param {W=} args
- * @returns {!Effect<null,null,W>}
+ * Async effect. Two signatures:
+ *   spawn(fn, opts?, args?)           — dynamic async effect; always starts
+ *                                       immediately (unbound effects ignore
+ *                                       `OPT_DEFER` — no dep to wait for).
+ *   spawn(dep, fn, opts?, args?)      — bound single-dep; honors `OPT_DEFER`
+ *                                       so the effect first fires on a dep
+ *                                       change rather than on creation.
+ * @param {function|Sender} fnOrDep
+ * @param {*=} arg2 - fn (bound) or opts (dynamic)
+ * @param {*=} arg3 - opts (bound) or args (dynamic)
+ * @param {*=} arg4 - args (bound only)
+ * @returns {!Effect}
  */
-function spawn(fnOrDep, fnOrArgs, args, owner, level) {
+function spawn(fnOrDep, arg2, arg3, arg4, owner, level) {
     let node;
+    let flag;
     let ownerRef = owner || null;
     if (typeof fnOrDep === 'function') {
-        /** Dynamic async: spawn(fn, opts?, args?) */
-        let opts = 0 | fnOrArgs;
-        let flag = FLAG_ASYNC | FLAG_SETUP | (opts & OPTIONS);
+        /** spawn(fn, opts?, args?) */
+        flag = FLAG_ASYNC | FLAG_SETUP | ((0 | arg2) & OPTIONS);
         node = new Effect(flag, fnOrDep, null, ownerRef, null);
-        node._args = { _reader: new Reader(node), _args: args };
+        node._args = { _reader: new Reader(node), _args: arg3 };
     } else {
-        /** Bound single-dep async effect: spawn(dep, fn, args?) */
-        node = new Effect(
-            FLAG_ASYNC | FLAG_STABLE | FLAG_BOUND,
-            fnOrArgs, fnOrDep, ownerRef, args
-        );
+        /** spawn(dep, fn, opts?, args?) */
+        flag = FLAG_ASYNC | FLAG_STABLE | FLAG_BOUND | ((0 | arg3) & OPTIONS);
+        node = new Effect(flag, arg2, fnOrDep, ownerRef, arg4);
         node._dep1slot = subscribe(fnOrDep, node, -1);
     }
     if (level) {
         node._level = level;
     }
-    startEffect(node);
+    /** Unbound spawns always run. Bound spawns honor DEFER: skip the
+     *  initial run — the subscription is already live, so the next
+     *  dep.set() will fire the effect. */
+    if ((flag & (FLAG_BOUND | FLAG_DEFER)) !== (FLAG_BOUND | FLAG_DEFER)) {
+        startEffect(node);
+    }
     return node;
 }
 
 /**
  * Stable effect. Two signatures:
- *   watch(fn, args?)       — multi-dep, uses setup tracking
- *   watch(dep, fn, args?)  — bound single-dep, skips setup
+ *   watch(fn, opts?, args?)           — multi-dep with setup tracking; always
+ *                                       runs once to register deps (unbound
+ *                                       effects ignore `OPT_DEFER`).
+ *   watch(dep, fn, opts?, args?)      — bound single-dep; honors `OPT_DEFER`
+ *                                       so the watcher fires only when the
+ *                                       dep next changes.
  * @param {function|Sender} fnOrDep
- * @param {*=} fnOrArgs
- * @param {*=} args
+ * @param {*=} a2 - fn (bound) or opts (dynamic)
+ * @param {*=} a3 - opts (bound) or args (dynamic)
+ * @param {*=} a4 - args (bound only)
  * @returns {!Effect}
  */
-function watch(fnOrDep, fnOrArgs, args, owner, level) {
+function watch(fnOrDep, a2, a3, a4, owner, level) {
     let node;
+    let flag;
     let ownerRef = owner || null;
     if (typeof fnOrDep === 'function') {
-        node = new Effect(FLAG_STABLE | FLAG_SETUP, fnOrDep, null, ownerRef, fnOrArgs);
+        /** watch(fn, opts?, args?) */
+        flag = FLAG_STABLE | FLAG_SETUP | ((0 | a2) & OPTIONS);
+        node = new Effect(flag, fnOrDep, null, ownerRef, a3);
     } else {
-        node = new Effect(FLAG_STABLE | FLAG_BOUND, fnOrArgs, fnOrDep, ownerRef, args);
+        /** watch(dep, fn, opts?, args?) */
+        flag = FLAG_STABLE | FLAG_BOUND | ((0 | a3) & OPTIONS);
+        node = new Effect(flag, a2, fnOrDep, ownerRef, a4);
         node._dep1slot = subscribe(fnOrDep, node, -1);
     }
     if (level) {
         node._level = level;
     }
-    startEffect(node);
+    /** Same rule as `spawn`: unbound watches ignore DEFER so the setup
+     *  pass runs and registers deps; bound watches defer the first run
+     *  until the dep changes. */
+    if ((flag & (FLAG_BOUND | FLAG_DEFER)) !== (FLAG_BOUND | FLAG_DEFER)) {
+        startEffect(node);
+    }
     return node;
 }
 
@@ -2501,16 +2645,14 @@ function batch(fn) {
 }
 
 export {
-    FLAG_DEFER, FLAG_STABLE, FLAG_SETUP, FLAG_STALE, FLAG_PENDING,
-    FLAG_RUNNING, FLAG_DISPOSED, FLAG_LOADING, FLAG_ERROR,
-    FLAG_BOUND, FLAG_DERIVED, FLAG_EQUAL, FLAG_WEAK,
-    FLAG_INIT,
-    FLAG_ASYNC,
-    OPT_DEFER, OPT_STABLE, OPT_SETUP, OPT_WEAK,
-    OPTIONS,
-    IDLE,
-    subscribe,
-    startEffect,
+    FLAG_DEFER, FLAG_STABLE, FLAG_SETUP,
+    FLAG_STALE, FLAG_PENDING, FLAG_RUNNING,
+    FLAG_DISPOSED, FLAG_LOADING, FLAG_ERROR,
+    FLAG_BOUND, FLAG_DERIVED, FLAG_EQUAL,
+    FLAG_WEAK, FLAG_INIT, FLAG_ASYNC,
+    OPT_DEFER, OPT_STABLE, OPT_SETUP,
+    OPT_WEAK, OPTIONS,
+    IDLE, subscribe, startEffect,
 }
 
 export {

@@ -49,3 +49,16 @@ export const OVERRIDES_ANOD_STABLE = {
     dynUpdateSimple: 14,
     dynUpdateDynamic: 86,
 };
+
+/**
+ * usignal does not skip propagation when a compute returns a value equal to
+ * its previous output — it always re-evaluates downstream subscribers. This
+ * inflates counts in diamond-shaped graphs (mux), in chains that collapse to
+ * a constant (avoidable), and in molWire where two computes temporarily
+ * recover their prior values across the two batches.
+ */
+export const OVERRIDES_USIGNAL = {
+    mux: 301,
+    avoidable: 6,
+    molWire: 15,
+};
