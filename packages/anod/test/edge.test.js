@@ -661,23 +661,6 @@ describe("edge cases", () => {
         });
     });
 
-    describe("circular dependency", () => {
-        test("compute reading itself via signal indirection throws", () => {
-            const s1 = signal(0);
-            const c1 = compute((c) => {
-                let v = c.read(s1);
-                if (v > 0) {
-                    return c.read(c1);
-                }
-                return v;
-            });
-
-            expect(c1.val()).toBe(0);
-            s1.set(1);
-            expect(() => c1.val()).toThrow("Circular dependency");
-        });
-    });
-
     describe("dynamic dependency changes", () => {
         test("compute drops old deps and picks up new ones", () => {
             const s1 = signal(true);

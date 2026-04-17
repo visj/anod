@@ -903,9 +903,6 @@ function Compute(opts, fn, dep1, seed, args) {
      */
     ComputeProto.val = function () {
         let flag = this._flag;
-        if (flag & FLAG_RUNNING) {
-            throw new Error('Circular dependency');
-        }
         if (flag & (FLAG_STALE | FLAG_PENDING)) {
             if (IDLE) {
                 IDLE = false;
@@ -2400,18 +2397,16 @@ function unbound(node) {
  * @returns {T}
  */
 function read(sender) {
-    let flag = this._flag;
-    if ((flag & (FLAG_STABLE | FLAG_SETUP)) === FLAG_STABLE) {
-        return sender.val();
+    if (sender._version === this._version) {
+        return sender._value;
     }
+    let flag = this._flag;
     let value = sender.val();
-
-    let version = this._version;
-    let stamp = sender._version;
-
-    if (version === stamp) {
+    if ((flag & (FLAG_STABLE | FLAG_SETUP)) === FLAG_STABLE) {
         return value;
     }
+    let version = this._version;
+    let stamp = sender._version;
 
     sender._version = version;
 

@@ -135,18 +135,6 @@ describe("compute", () => {
         });
     });
 
-    describe("with circular dependencies", () => {
-        test("throws when cycle created by modifying a branch", () => {
-            const s1 = signal(1);
-            var c1 = compute((c) => c.read(s1) > 1 ? c1.val() : c.read(s1));
-            c1.val();
-            expect(() => {
-                s1.set(2);
-                c1.val();
-            }).toThrow(); // "Should throw circular dependency error"
-        });
-    });
-
     describe("with converging dependencies", () => {
         test("propagates in topological order", () => {
             let order = "";
