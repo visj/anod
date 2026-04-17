@@ -19,11 +19,9 @@ const FLAG_BOUND = 1 << 14;
 const FLAG_DERIVED = 1 << 15;
 const FLAG_WEAK = 1 << 17;
 
-
 const FLAG_EQUAL = 1 << 18;
 const FLAG_NOTEQUAL = 1 << 19;
 const FLAG_ASYNC = 1 << 20;
-const FLAG_STREAM = 1 << 21;
 
 const OPT_DEFER = FLAG_DEFER;
 const OPT_STABLE = FLAG_STABLE;
@@ -32,7 +30,7 @@ const OPT_WEAK = FLAG_WEAK;
 
 const OPT_DYNAMIC = 0x800000;
 
-const OPTIONS = OPT_DEFER | OPT_STABLE | OPT_SETUP | OPT_WEAK | FLAG_ASYNC | FLAG_STREAM;
+const OPTIONS = OPT_DEFER | OPT_STABLE | OPT_SETUP | OPT_WEAK | FLAG_ASYNC;
 
 /**
  * @type {number}
@@ -847,7 +845,7 @@ function Compute(opts, fn, dep1, seed, args) {
         let flag = this._flag;
         this._time = time;
         this._flag = (flag & ~(FLAG_STALE | FLAG_INIT | FLAG_EQUAL | FLAG_NOTEQUAL)) | FLAG_RUNNING;
-        if (flag & (FLAG_ASYNC | FLAG_STREAM)) {
+        if (flag & FLAG_ASYNC) {
             return this._updateAsync(time);
         }
 
@@ -958,83 +956,74 @@ function Compute(opts, fn, dep1, seed, args) {
             this._version = version;
             let saveStart = VCOUNT;
             let depCount = 0;
-            let dep1 = this._dep1;
             let depsLen = 0;
-            let prevReused = REUSED;
+            let prevDBase;
+            let prevReused;
 
-            let prevDBase = DBASE;
             if (flag & FLAG_SETUP) {
+                prevDBase = DBASE
                 DBASE = DCOUNT;
-            }
-
-            if (!(flag & FLAG_SETUP)) {
+            } else {
+                prevReused = REUSED
                 REUSED = 0;
-                let stamp = version - 1;
-                if (dep1 !== null) {
-                    let depver = dep1._version;
-                    if (depver > TRANSACTION) {
-                        VSTACK[VCOUNT++] = dep1;
-                        VSTACK[VCOUNT++] = depver;
-                    }
-                    dep1._version = stamp;
-                    depCount = 1;
-                }
-                let deps = this._deps;
-                if (deps !== null) {
-                    depsLen = deps.length;
-                    for (let i = 0; i < depsLen; i += 2) {
-                        let dep = /** @type {Sender} */(deps[i]);
-                        let depver = dep._version;
-                        if (depver > TRANSACTION) {
-                            VSTACK[VCOUNT++] = dep;
-                            VSTACK[VCOUNT++] = depver;
-                        }
-                        dep._version = stamp;
-                    }
-                    depCount += depsLen / 2;
-                }
+                depCount = sweep(version - 1, this._dep1, this._deps);
+                depsLen = this._deps !== null ? this._deps.length : 0;
             }
 
             try {
                 value = this._fn(this, this._value, this._args);
                 this._flag &= ~FLAG_ERROR;
             } catch (err) {
-                value = err;
-                this._flag |= FLAG_ERROR;
-            }
-
-            if (!(flag & FLAG_SETUP) && (REUSED !== depCount || (this._deps !== null ? this._deps.length : 0) !== depsLen)) {
-                pruneDeps(this, version, depCount);
-            }
-            if (DCOUNT > DBASE) {
-                this._deps = DSTACK.slice(DBASE, DCOUNT);
-                DCOUNT = DBASE;
-            }
-            DBASE = prevDBase;
-            REUSED = prevReused;
-            if (VCOUNT > saveStart) {
-                let count = VCOUNT;
-                let stack = VSTACK;
-                for (let i = saveStart; i < count; i += 2) {
-                    stack[i]._version = stack[i + 1];
+                this._value = err;
+                this._flag = flag & ~(FLAG_RUNNING | FLAG_STALE | FLAG_PENDING | FLAG_INIT | FLAG_SETUP) | FLAG_ERROR;
+                this._ctime = time;
+                return;
+            } finally {
+                if (flag & FLAG_SETUP) {
+                    if (DCOUNT > DBASE) {
+                        this._deps = DSTACK.slice(DBASE, DCOUNT);
+                        DCOUNT = DBASE;
+                    }
+                    DBASE = prevDBase;
+                } else {
+                    if ((REUSED !== depCount || (this._deps !== null ? this._deps.length : 0) !== depsLen)) {
+                        pruneDeps(this, version, depCount);
+                    }
+                    REUSED = prevReused;
                 }
-                VCOUNT = saveStart;
+                if (VCOUNT > saveStart) {
+                    let count = VCOUNT;
+                    let stack = VSTACK;
+                    for (let i = saveStart; i < count; i += 2) {
+                        stack[i]._version = stack[i + 1];
+                    }
+                    VCOUNT = saveStart;
+                }
+                this._version = prevVersion;
             }
-            this._version = prevVersion;
         }
 
         flag = this._flag;
         this._flag &= ~(FLAG_RUNNING | FLAG_STALE | FLAG_PENDING | FLAG_INIT | FLAG_SETUP);
-        if (flag & FLAG_ERROR) {
-            this._value = value;
-            this._ctime = time;
-        } else {
-            this._flag |= FLAG_LOADING;
-            if (flag & FLAG_STREAM) {
-                resolveIterator(new WeakRef(this), /** @type {AsyncIterator | AsyncIterable} */(value), time);
-            } else {
-                resolvePromise(new WeakRef(this), /** @type {IThenable} */(value), time);
+        /** Dispatch on the return value — runtime detection replaces the
+         *  old FLAG_STREAM bit. Sync return settles immediately. */
+        let kind = asyncKind(value);
+        if (kind === ASYNC_SYNC) {
+            if (value !== this._value) {
+                this._value = value;
+                if (!(flag & FLAG_EQUAL)) {
+                    this._ctime = time;
+                }
+            } else if (flag & FLAG_NOTEQUAL) {
+                this._ctime = time;
             }
+            return;
+        }
+        this._flag |= FLAG_LOADING;
+        if (kind === ASYNC_ITERATOR) {
+            resolveIterator(new WeakRef(this), /** @type {AsyncIterator | AsyncIterable} */(value), time);
+        } else {
+            resolvePromise(new WeakRef(this), /** @type {IThenable} */(value), time);
         }
     };
 
@@ -1298,6 +1287,31 @@ function checkRun(node, time) {
     }
 }
 
+/** @const */ const ASYNC_PROMISE = 1;
+/** @const */ const ASYNC_ITERATOR = 2;
+/** @const */ const ASYNC_SYNC = 3;
+
+/**
+ * Classifies a value returned from a compute/effect fn:
+ *   1 (ASYNC_PROMISE)  — thenable: resolve as a promise.
+ *   2 (ASYNC_ITERATOR) — async iterable/iterator: consume incrementally.
+ *   3 (ASYNC_SYNC)     — plain value: settle immediately, no loading.
+ * @param {*} value
+ * @returns {number}
+ */
+function asyncKind(value) {
+    if (value === null || typeof value !== 'object') {
+        return ASYNC_SYNC;
+    }
+    if (typeof value.then === 'function') {
+        return ASYNC_PROMISE;
+    }
+    if (typeof value[Symbol.asyncIterator] === 'function') {
+        return ASYNC_ITERATOR;
+    }
+    return ASYNC_SYNC;
+}
+
 /**
  * @template T
  * @param {WeakRef<!Compute<T>>} ref
@@ -1502,7 +1516,7 @@ function Effect(opts, fn, dep1, owner, args) {
         }
 
         /** Async nodes delegate after pre-exec cleanup. */
-        if (flag & (FLAG_ASYNC | FLAG_STREAM)) {
+        if (flag & FLAG_ASYNC) {
             return this._updateAsync(time);
         }
         /** @type {(function(): void) | null | undefined} */
@@ -1525,13 +1539,13 @@ function Effect(opts, fn, dep1, owner, args) {
             let saveStart = VCOUNT;
             let depCount = 0;
             let depsLen = 0;
-            let prevDBase;
-            let prevReused;
+            let dbase;
+            let reused;
             if (flag & FLAG_SETUP) {
-                prevDBase = DBASE
+                dbase = DBASE
                 DBASE = DCOUNT;
             } else {
-                prevReused = REUSED
+                reused = REUSED
                 REUSED = 0;
                 depCount = sweep(version - 1, this._dep1, this._deps);
                 depsLen = this._deps !== null ? this._deps.length : 0;
@@ -1545,12 +1559,12 @@ function Effect(opts, fn, dep1, owner, args) {
                         this._deps = DSTACK.slice(DBASE, DCOUNT);
                         DCOUNT = DBASE;
                     }
-                    DBASE = prevDBase;
+                    DBASE = dbase;
                 } else {
                     if ((REUSED !== depCount || (this._deps !== null ? this._deps.length : 0) !== depsLen)) {
                         pruneDeps(this, version, depCount);
                     }
-                    REUSED = prevReused;
+                    REUSED = reused;
                 }
                 /** Restore saved version tags from VSTACK (both setup and dynamic) */
                 if (VCOUNT > saveStart) {
@@ -1579,9 +1593,7 @@ function Effect(opts, fn, dep1, owner, args) {
     EffectProto._updateAsync = function (time) {
         let flag = this._flag;
         let value;
-
         if ((flag & (FLAG_STABLE | FLAG_SETUP)) === FLAG_STABLE) {
-            this._flag |= FLAG_RUNNING;
             try {
                 value = (flag & FLAG_BOUND)
                     ? this._fn(this._dep1.val(), this._args)
@@ -1598,54 +1610,34 @@ function Effect(opts, fn, dep1, owner, args) {
             let depCount = 0;
             let dep1 = this._dep1;
             let depsLen = 0;
-            let prevReused = REUSED;
-
-            let prevDBase = DBASE;
+            let prevReused;
+            let prevDBase;
             if (flag & FLAG_SETUP) {
+                prevDBase = DBASE;
                 DBASE = DCOUNT;
-            }
-
-            if (!(flag & FLAG_SETUP)) {
-                this._flag |= FLAG_RUNNING;
+            } else {
+                prevReused = REUSED;
                 REUSED = 0;
-                let stamp = version - 1;
-                if (dep1 !== null) {
-                    let depver = dep1._version;
-                    if (depver > TRANSACTION) {
-                        VSTACK[VCOUNT++] = dep1;
-                        VSTACK[VCOUNT++] = depver;
-                    }
-                    dep1._version = stamp;
-                    depCount = 1;
-                }
-                let deps = this._deps;
-                if (deps !== null) {
-                    depsLen = deps.length;
-                    for (let i = 0; i < depsLen; i += 2) {
-                        let dep = /** @type {Sender} */(deps[i]);
-                        let depver = dep._version;
-                        if (depver > TRANSACTION) {
-                            VSTACK[VCOUNT++] = dep;
-                            VSTACK[VCOUNT++] = depver;
-                        }
-                        dep._version = stamp;
-                    }
-                    depCount += depsLen >> 1;
-                }
+                depCount = sweep(version - 1, this._dep1, this._deps);
+                depsLen = this._deps !== null ? this._deps.length : 0;
             }
 
             try {
                 value = this._fn(this, this._args);
             } finally {
-                if (!(flag & FLAG_SETUP) && (REUSED !== depCount || (this._deps !== null ? this._deps.length : 0) !== depsLen)) {
-                    pruneDeps(this, version, depCount);
+                if (flag & FLAG_SETUP) {
+                    if (DCOUNT > DBASE) {
+                        this._deps = DSTACK.slice(DBASE, DCOUNT);
+                        DCOUNT = DBASE;
+                    }
+                    DBASE = prevDBase;
+                } else {
+                    if ((REUSED !== depCount || (this._deps !== null ? this._deps.length : 0) !== depsLen)) {
+                        pruneDeps(this, version, depCount);
+                    }
+                    REUSED = prevReused;
                 }
-                if (DCOUNT > DBASE) {
-                    this._deps = DSTACK.slice(DBASE, DCOUNT);
-                    DCOUNT = DBASE;
-                }
-                DBASE = prevDBase;
-                REUSED = prevReused;
+
                 if (VCOUNT > saveStart) {
                     let count = VCOUNT;
                     let stack = VSTACK;
@@ -1655,13 +1647,21 @@ function Effect(opts, fn, dep1, owner, args) {
                     VCOUNT = saveStart;
                 }
                 this._version = prevVersion;
-                this._time = time;
                 this._flag &= ~(FLAG_RUNNING | FLAG_STALE | FLAG_PENDING | FLAG_INIT | FLAG_SETUP);
             }
         }
 
+        /** Dispatch on the return value — runtime detection replaces the
+         *  old FLAG_STREAM bit. Sync return: cleanup fn if present. */
+        let kind = asyncKind(value);
+        if (kind === ASYNC_SYNC) {
+            if (typeof value === 'function') {
+                addCleanup(this, value);
+            }
+            return;
+        }
         this._flag |= FLAG_LOADING;
-        if (flag & FLAG_STREAM) {
+        if (kind === ASYNC_ITERATOR) {
             resolveEffectIterator(new WeakRef(this), value);
         } else {
             resolveEffectPromise(new WeakRef(this), value);
@@ -2635,7 +2635,7 @@ export {
     FLAG_RUNNING, FLAG_DISPOSED, FLAG_LOADING, FLAG_ERROR, FLAG_RECOVER,
     FLAG_BOUND, FLAG_DERIVED, FLAG_EQUAL, FLAG_WEAK,
     FLAG_INIT,
-    FLAG_ASYNC, FLAG_STREAM,
+    FLAG_ASYNC,
     OPT_DEFER, OPT_STABLE, OPT_SETUP, OPT_WEAK, OPT_DYNAMIC,
     OPTIONS,
     IDLE,

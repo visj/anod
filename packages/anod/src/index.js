@@ -5,7 +5,6 @@ export {
     OPT_WEAK,
     OPT_DYNAMIC,
     FLAG_ASYNC,
-    FLAG_STREAM,
     Root,
     Signal,
     Compute,

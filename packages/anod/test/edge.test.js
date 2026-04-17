@@ -10,7 +10,6 @@ import {
     spawn,
     batch,
     OPT_DYNAMIC,
-    FLAG_STREAM,
 } from "../";
 
 const tick = () => Promise.resolve();
@@ -731,8 +730,8 @@ describe("edge cases", () => {
         });
     });
 
-    describe("FLAG_STREAM via compute", () => {
-        test("async iterable compute settles on each yield", async () => {
+    describe("async iterable via task", () => {
+        test("async iterable task settles on each yield", async () => {
             const resolvers = [];
             const iter = {
                 [Symbol.asyncIterator]() { return this; },
@@ -740,7 +739,7 @@ describe("edge cases", () => {
                 return() { return Promise.resolve({ done: true }); }
             };
 
-            const c1 = compute((c) => iter, undefined, FLAG_STREAM);
+            const c1 = task((c) => iter);
             const values = [];
 
             effect((e) => {

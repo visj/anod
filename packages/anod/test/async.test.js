@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { signal, compute, effect, task, FLAG_STREAM } from "../";
+import { signal, compute, effect, task } from "../";
 
 const tick = () => Promise.resolve();
 
@@ -126,7 +126,7 @@ describe("async", () => {
                 next() { return new Promise(r => { resolver = r; }); }
             };
 
-            const c1 = compute((c) => { return iter; }, undefined, FLAG_STREAM);
+            const c1 = task((c) => { return iter; });
 
             expect(c1.loading()).toBe(true);
             expect(c1.val()).toBeUndefined();
@@ -143,7 +143,7 @@ describe("async", () => {
                 return() { return Promise.resolve({ done: true }); }
             };
 
-            const c1 = compute((c) => { return iter; }, undefined, FLAG_STREAM);
+            const c1 = task((c) => { return iter; });
             const values = [];
 
             // Always call c1.val() so the effect subscribes to c1 as a dependency;
@@ -177,7 +177,7 @@ describe("async", () => {
                 return() { return Promise.resolve({ done: true }); }
             };
 
-            const c1 = compute((c) => { return iter; }, undefined, FLAG_STREAM);
+            const c1 = task((c) => { return iter; });
 
             expect(c1.loading()).toBe(true);
 
@@ -193,7 +193,7 @@ describe("async", () => {
                 throw new Error("iterator error");
             }
 
-            const c1 = compute((c) => { return failing(); }, undefined, FLAG_STREAM);
+            const c1 = task((c) => { return failing(); });
 
             await tick();
 
@@ -216,12 +216,12 @@ describe("async", () => {
             };
 
             const s1 = signal(true);
-            const c1 = compute((c) => {
+            const c1 = task((c) => {
                 if (c.read(s1)) {
                     return staleIter;
                 }
                 return (async function*() { yield 99; })();
-            }, undefined, FLAG_STREAM);
+            });
 
             // Signal update — c1 re-runs, picks up the new generator; staleIter is now stale
             s1.set(false);
