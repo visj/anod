@@ -2582,16 +2582,15 @@ function effect(fn, opts, args, owner, level) {
 function spawn(fnOrDep, arg2, arg3, arg4, owner, level) {
     let node;
     let flag;
-    let ownerRef = owner || null;
     if (typeof fnOrDep === 'function') {
         /** spawn(fn, opts?, args?) */
         flag = FLAG_ASYNC | FLAG_SETUP | ((0 | arg2) & OPTIONS);
-        node = new Effect(flag, fnOrDep, null, ownerRef, null);
+        node = new Effect(flag, fnOrDep, null, owner || null, null);
         node._args = { _reader: new Reader(node), _args: arg3 };
     } else {
         /** spawn(dep, fn, opts?, args?) */
         flag = FLAG_ASYNC | FLAG_STABLE | FLAG_BOUND | ((0 | arg3) & OPTIONS);
-        node = new Effect(flag, arg2, fnOrDep, ownerRef, arg4);
+        node = new Effect(flag, arg2, fnOrDep, owner || null, arg4);
         node._dep1slot = subscribe(fnOrDep, node, -1);
     }
     if (level) {
@@ -2615,23 +2614,23 @@ function spawn(fnOrDep, arg2, arg3, arg4, owner, level) {
  *                                       so the watcher fires only when the
  *                                       dep next changes.
  * @param {function|Sender} fnOrDep
- * @param {*=} a2 - fn (bound) or opts (dynamic)
- * @param {*=} a3 - opts (bound) or args (dynamic)
- * @param {*=} a4 - args (bound only)
+ * @param {*=} arg2 - fn (bound) or opts (dynamic)
+ * @param {*=} arg3 - opts (bound) or args (dynamic)
+ * @param {*=} arg4 - args (bound only)
  * @returns {!Effect}
  */
-function watch(fnOrDep, a2, a3, a4, owner, level) {
+function watch(fnOrDep, arg2, arg3, arg4, owner, level) {
     let node;
     let flag;
     let ownerRef = owner || null;
     if (typeof fnOrDep === 'function') {
         /** watch(fn, opts?, args?) */
-        flag = FLAG_STABLE | FLAG_SETUP | ((0 | a2) & OPTIONS);
-        node = new Effect(flag, fnOrDep, null, ownerRef, a3);
+        flag = FLAG_STABLE | FLAG_SETUP | ((0 | arg2) & OPTIONS);
+        node = new Effect(flag, fnOrDep, null, ownerRef, arg3);
     } else {
         /** watch(dep, fn, opts?, args?) */
-        flag = FLAG_STABLE | FLAG_BOUND | ((0 | a3) & OPTIONS);
-        node = new Effect(flag, a2, fnOrDep, ownerRef, a4);
+        flag = FLAG_STABLE | FLAG_BOUND | ((0 | arg3) & OPTIONS);
+        node = new Effect(flag, arg2, fnOrDep, ownerRef, arg4);
         node._dep1slot = subscribe(fnOrDep, node, -1);
     }
     if (level) {

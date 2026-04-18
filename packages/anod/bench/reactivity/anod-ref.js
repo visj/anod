@@ -486,18 +486,6 @@ function setupDynBuild(width, totalLayers, staticFraction, nSources) {
         for (let r = 0; r < leaves.length; r++) {
             sink += leaves[r].val();
         }
-        // let subCounts = new Map();
-        // let depCounts = new Map();
-        // layers[0].forEach(c => {
-        //     let subLength = c._subs !== null ? c._subs.length : 0;
-        //     let depLength = c._deps !== null ? c._deps.length : 0;
-        //     let existingSubLength = subCounts.get(subLength) || 0;
-        //     subCounts.set(subLength, existingSubLength + 1);
-        //     let existingDepLength = depCounts.get(depLength) || 0;
-        //     depCounts.set(depLength, existingDepLength + 1);
-        // });
-        // console.log("subs", subCounts);
-        // console.log("deps", depCounts);
         return layers;
     };
 }
