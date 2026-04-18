@@ -25,13 +25,13 @@ function setupDeep() {
     const head = signal(0);
     let current = head;
     for (let i = 0; i < len; i++) {
-        current = derive(current, (v) => {
+        current = current.derive((v) => {
             counter++;
             return v + 1;
         });
     }
     const tail = current;
-    watch(tail, (v) => {
+    tail.watch((v) => {
         counter++;
         sink += v;
     });
@@ -44,15 +44,15 @@ function setupDeep() {
 function setupBroad() {
     const head = signal(0);
     for (let i = 0; i < 50; i++) {
-        const current = derive(head, (v) => {
+        const current = head.derive((v) => {
             counter++;
             return v + i;
         });
-        const current2 = derive(current, (v) => {
+        const current2 = current.derive((v) => {
             counter++;
             return v + 1;
         });
-        watch(current2, (v) => {
+        current2.watch((v) => {
             counter++;
             sink += v;
         });
@@ -68,7 +68,7 @@ function setupDiamond() {
     const head = signal(0);
     const branches = [];
     for (let i = 0; i < width; i++) {
-        branches.push(derive(head, (v) => {
+        branches.push(head.derive((v) => {
             counter++;
             return v + 1;
         }));
@@ -77,7 +77,7 @@ function setupDiamond() {
         counter++;
         return branches.reduce((a, b) => a + b.val(), 0);
     });
-    watch(sum, (v) => {
+    sum.watch((v) => {
         counter++;
         sink += v;
     });
@@ -94,7 +94,7 @@ function setupTriangle() {
     const list = [];
     for (let i = 0; i < width - 1; i++) {
         list.push(current);
-        current = derive(current, (v) => {
+        current = current.derive((v) => {
             counter++;
             return v + 1;
         });
@@ -104,7 +104,7 @@ function setupTriangle() {
         counter++;
         return list.reduce((a, b) => a + b.val(), 0);
     });
-    watch(sum, (v) => {
+    sum.watch((v) => {
         counter++;
         sink += v;
     });
@@ -121,16 +121,16 @@ function setupMux() {
         return heads.map(h => h.val());
     });
     const split = heads
-        .map((_, index) => derive(mux, (v) => {
+        .map((_, index) => mux.derive((v) => {
             counter++;
             return v[index];
         }))
-        .map(x => derive(x, (v) => {
+        .map(x => x.derive((v) => {
             counter++;
             return v + 1;
         }));
     for (const x of split) {
-        watch(x, (v) => {
+        x.watch((v) => {
             counter++;
             sink += v;
         });
@@ -144,11 +144,11 @@ function setupMux() {
 
 function setupUnstable() {
     const head = signal(0);
-    const double = derive(head, (v) => {
+    const double = head.derive((v) => {
         counter++;
         return v * 2;
     });
-    const inverse = derive(head, (v) => {
+    const inverse = head.derive((v) => {
         counter++;
         return -v;
     });
@@ -160,7 +160,7 @@ function setupUnstable() {
         }
         return result;
     });
-    watch(current, (v) => {
+    current.watch((v) => {
         counter++;
         sink += v;
     });
@@ -172,27 +172,27 @@ function setupUnstable() {
 
 function setupAvoidable() {
     const head = signal(0);
-    const computed1 = derive(head, (v) => {
+    const computed1 = head.derive((v) => {
         counter++;
         return v;
     });
-    const computed2 = derive(computed1, (v) => {
+    const computed2 = computed1.derive((v) => {
         counter++;
         return 0;
     });
-    const computed3 = derive(computed2, (v) => {
+    const computed3 = computed2.derive((v) => {
         counter++;
         return v + 1;
     });
-    const computed4 = derive(computed3, (v) => {
+    const computed4 = computed3.derive((v) => {
         counter++;
         return v + 2;
     });
-    const computed5 = derive(computed4, (v) => {
+    const computed5 = computed4.derive((v) => {
         counter++;
         return v + 3;
     });
-    watch(computed5, (v) => {
+    computed5.watch((v) => {
         counter++;
         sink += v;
     });
@@ -213,7 +213,7 @@ function setupRepeatedObservers() {
         }
         return result;
     });
-    watch(current, (v) => {
+    current.watch((v) => {
         counter++;
         sink += v;
     });
@@ -236,7 +236,7 @@ function setupCellx(layers) {
     for (let i = layers; i > 0; i--) {
         const m = layer;
         const s = {
-            prop1: derive(m.prop2, (v) => {
+            prop1: m.prop2.derive((v) => {
                 counter++;
                 return v;
             }),
@@ -248,19 +248,19 @@ function setupCellx(layers) {
                 counter++;
                 return m.prop2.val() + m.prop4.val();
             }),
-            prop4: derive(m.prop3, (v) => {
+            prop4: m.prop3.derive((v) => {
                 counter++;
                 return v;
             }),
         };
-        watch(s.prop1, (v) => { counter++; sink += v; });
-        watch(s.prop2, (v) => { counter++; sink += v; });
-        watch(s.prop3, (v) => { counter++; sink += v; });
-        watch(s.prop4, (v) => { counter++; sink += v; });
-        watch(s.prop1, (v) => { counter++; sink += v; });
-        watch(s.prop2, (v) => { counter++; sink += v; });
-        watch(s.prop3, (v) => { counter++; sink += v; });
-        watch(s.prop4, (v) => { counter++; sink += v; });
+        s.prop1.watch((v) => { counter++; sink += v; });
+        s.prop2.watch((v) => { counter++; sink += v; });
+        s.prop3.watch((v) => { counter++; sink += v; });
+        s.prop4.watch((v) => { counter++; sink += v; });
+        s.prop1.watch((v) => { counter++; sink += v; });
+        s.prop2.watch((v) => { counter++; sink += v; });
+        s.prop3.watch((v) => { counter++; sink += v; });
+        s.prop4.watch((v) => { counter++; sink += v; });
         layer = s;
     }
     const end = layer;

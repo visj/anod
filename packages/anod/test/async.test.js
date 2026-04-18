@@ -414,9 +414,9 @@ describe("async", () => {
             expect(() => captured.read(s1)).toThrow('Reader disposed');
         });
 
-        test("bound task: task(sig, fn)", async () => {
+        test("bound task: sig.task(fn)", async () => {
             const s1 = signal(5);
-            const c1 = task(s1, async (v) => v * 2);
+            const c1 = s1.task(async (v) => v * 2);
             await tick();
             expect(c1.val()).toBe(10);
 
@@ -426,10 +426,10 @@ describe("async", () => {
             expect(c1.val()).toBe(12);
         });
 
-        test("bound spawn: spawn(sig, fn)", async () => {
+        test("bound spawn: sig.spawn(fn)", async () => {
             const s1 = signal(1);
             let observed = null;
-            spawn(s1, async (v) => { observed = v; });
+            s1.spawn(async (v) => { observed = v; });
             await tick();
             expect(observed).toBe(1);
 

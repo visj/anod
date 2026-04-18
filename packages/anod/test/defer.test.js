@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { signal, compute, derive, task, watch, spawn, effect, root, OPT_DEFER } from "../";
+import { signal, compute, derive, watch, effect, root, OPT_DEFER } from "../";
 
 describe("OPT_DEFER", () => {
     describe("compute", () => {
@@ -27,7 +27,7 @@ describe("OPT_DEFER", () => {
         test("defers initial run; dep change triggers first run", () => {
             const s1 = signal(5);
             let runs = 0;
-            const c1 = derive(s1, (v) => { runs++; return v + 1; }, undefined, OPT_DEFER);
+            const c1 = s1.derive((v) => { runs++; return v + 1; }, undefined, OPT_DEFER);
             expect(runs).toBe(0);
             /** First val() still defers to lazy run. */
             expect(c1.val()).toBe(6);
@@ -39,7 +39,7 @@ describe("OPT_DEFER", () => {
         test("defers bound async compute until read", () => {
             const s1 = signal(3);
             let runs = 0;
-            const c1 = task(s1, async (v) => { runs++; return v; }, undefined, OPT_DEFER);
+            const c1 = s1.task(async (v) => { runs++; return v; }, undefined, OPT_DEFER);
             expect(runs).toBe(0);
         });
     });
@@ -50,7 +50,7 @@ describe("OPT_DEFER", () => {
             let observed;
             root(() => {
                 const s1 = signal(1);
-                watch(s1, (v) => { runs++; observed = v; }, OPT_DEFER);
+                s1.watch((v) => { runs++; observed = v; }, OPT_DEFER);
                 expect(runs).toBe(0);
                 expect(observed).toBeUndefined();
 
@@ -70,7 +70,7 @@ describe("OPT_DEFER", () => {
             let runs = 0;
             root(() => {
                 const s1 = signal(1);
-                spawn(s1, async (v) => { runs++; }, OPT_DEFER);
+                s1.spawn(async (v) => { runs++; }, OPT_DEFER);
                 expect(runs).toBe(0);
 
                 s1.set(2);
@@ -108,7 +108,7 @@ describe("OPT_DEFER", () => {
             root(() => {
                 const s1 = signal(10);
                 let runs = 0;
-                const c1 = derive(s1, (v) => { runs++; return v * 2; }, undefined, OPT_DEFER);
+                const c1 = s1.derive((v) => { runs++; return v * 2; }, undefined, OPT_DEFER);
                 expect(runs).toBe(0);
                 expect(c1.val()).toBe(20);
                 expect(runs).toBe(1);
@@ -119,7 +119,7 @@ describe("OPT_DEFER", () => {
             root(() => {
                 const s1 = signal("a");
                 let runs = 0;
-                watch(s1, () => { runs++; }, OPT_DEFER);
+                s1.watch(() => { runs++; }, OPT_DEFER);
                 expect(runs).toBe(0);
                 s1.set("b");
                 expect(runs).toBe(1);

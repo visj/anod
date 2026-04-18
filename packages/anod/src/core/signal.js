@@ -1197,6 +1197,123 @@ function _read(sender) {
     ReaderProto.stable = function () {
         this._flag = (this._flag | FLAG_STABLE) & ~FLAG_SETUP;
     };
+
+    // ─── Bound single-dep prototype methods ───────────────────────────────
+
+    /**
+     * Bound stable compute. Creates a Compute subscribed to `this` as the
+     * sole dependency. The fn receives (depValue, prev, args).
+     * Honors `OPT_DEFER`.
+     * @this {!Sender}
+     * @param {function} fn
+     * @param {*=} seed
+     * @param {number=} opts
+     * @param {*=} args
+     * @returns {!Compute}
+     */
+    function deriveOne(fn, seed, opts, args) {
+        let flag = FLAG_STABLE | FLAG_BOUND | FLAG_SINGLE | ((0 | opts) & OPTIONS);
+        let node = new Compute(flag, fn, this, seed, args);
+        node._dep1slot = subscribe(this, node, -1);
+        if (STATE & STATE_OWN) {
+            addOwned(RUNNING, node);
+        }
+        if (!(flag & FLAG_DEFER)) {
+            startCompute(node);
+        }
+        return node;
+    }
+
+    /**
+     * Bound async compute. Creates a Compute subscribed to `this` as the
+     * sole dependency. The fn receives (depValue, prev, args).
+     * Honors `OPT_DEFER`.
+     * @this {!Sender}
+     * @param {function} fn
+     * @param {*=} seed
+     * @param {number=} opts
+     * @param {*=} args
+     * @returns {!Compute}
+     */
+    function taskOne(fn, seed, opts, args) {
+        let flag = FLAG_ASYNC | FLAG_STABLE | FLAG_BOUND | FLAG_SINGLE | ((0 | opts) & OPTIONS);
+        let node = new Compute(flag, fn, this, seed, args);
+        node._dep1slot = subscribe(this, node, -1);
+        if (STATE & STATE_OWN) {
+            addOwned(RUNNING, node);
+        }
+        if (!(flag & FLAG_DEFER)) {
+            startCompute(node);
+        }
+        return node;
+    }
+
+    /**
+     * Bound stable effect. Creates an Effect subscribed to `this` as the
+     * sole dependency. The fn receives (depValue, args).
+     * Honors `OPT_DEFER` — the effect does not fire on creation, only on
+     * the first dep change.
+     * @this {!Sender}
+     * @param {function} fn
+     * @param {number=} opts
+     * @param {*=} args
+     * @returns {!Effect}
+     */
+    function watchOne(fn, opts, args) {
+        let flag = FLAG_STABLE | FLAG_BOUND | FLAG_SINGLE | ((0 | opts) & OPTIONS);
+        let owner = (STATE & STATE_OWN) ? RUNNING : null;
+        let node = new Effect(flag, fn, this, owner, args);
+        node._dep1slot = subscribe(this, node, -1);
+        if (owner) {
+            let level = owner._level + 1;
+            if (owner._level > 2 && level >= LEVELS.length) {
+                LEVELS.push(0);
+                SCOPES.push([]);
+            }
+            node._level = level;
+            addOwned(owner, node);
+        }
+        if ((flag & (FLAG_BOUND | FLAG_DEFER)) !== (FLAG_BOUND | FLAG_DEFER)) {
+            startEffect(node);
+        }
+        return node;
+    }
+
+    /**
+     * Bound async effect. Creates an Effect subscribed to `this` as the
+     * sole dependency. The fn receives (depValue, args).
+     * Honors `OPT_DEFER` — the effect does not fire on creation, only on
+     * the first dep change.
+     * @this {!Sender}
+     * @param {function} fn
+     * @param {number=} opts
+     * @param {*=} args
+     * @returns {!Effect}
+     */
+    function spawnOne(fn, opts, args) {
+        let flag = FLAG_ASYNC | FLAG_STABLE | FLAG_BOUND | FLAG_SINGLE | ((0 | opts) & OPTIONS);
+        let owner = (STATE & STATE_OWN) ? RUNNING : null;
+        let node = new Effect(flag, fn, this, owner, args);
+        node._dep1slot = subscribe(this, node, -1);
+        if (owner) {
+            let level = owner._level + 1;
+            if (owner._level > 2 && level >= LEVELS.length) {
+                LEVELS.push(0);
+                SCOPES.push([]);
+            }
+            node._level = level;
+            addOwned(owner, node);
+        }
+        if ((flag & (FLAG_BOUND | FLAG_DEFER)) !== (FLAG_BOUND | FLAG_DEFER)) {
+            startEffect(node);
+        }
+        return node;
+    }
+
+    SignalProto.derive = ComputeProto.derive = deriveOne;
+    SignalProto.task = ComputeProto.task = taskOne;
+    SignalProto.watch = ComputeProto.watch = watchOne;
+    SignalProto.spawn = ComputeProto.spawn = spawnOne;
 }
 
 // ─── Global helpers (non-prototype) ────────────────────────────────────────
@@ -2418,31 +2535,19 @@ function compute(fn, seed, opts, args) {
 }
 
 /**
- * Stable compute. Two signatures:
- *   derive(fn, seed?, opts?, args?)          — dynamic stable compute
- *   derive(dep, fn, seed?, opts?, args?)     — bound single-dep compute
- * Both honor `OPT_DEFER` — with it the compute is not started eagerly; it
- * stays STALE and runs on first read (or when the bound dep next changes).
- * @param {function|Sender} fnOrDep
- * @param {*=} arg2 - fn (bound) or seed (dynamic)
- * @param {*=} arg3 - seed (bound) or opts (dynamic)
- * @param {*=} arg4 - opts (bound) or args (dynamic)
- * @param {*=} arg5 - args (bound only)
+ * Stable compute (dynamic, unbound).
+ * derive(fn, seed?, opts?, args?) — fn receives (prev, args) after setup.
+ * Honors `OPT_DEFER` — with it the compute is not started eagerly; it
+ * stays STALE and runs on first read.
+ * @param {function} fn
+ * @param {*=} seed
+ * @param {number=} opts
+ * @param {*=} args
  * @returns {!Compute}
  */
-function derive(fnOrDep, arg2, arg3, arg4, arg5) {
-    let node;
-    let flag;
-    if (typeof fnOrDep === 'function') {
-        /** derive(fn, seed?, opts?, args?) */
-        flag = FLAG_STABLE | FLAG_SETUP | ((0 | arg3) & OPTIONS);
-        node = new Compute(flag, fnOrDep, null, arg2, arg4);
-    } else {
-        /** derive(dep, fn, seed?, opts?, args?) */
-        flag = FLAG_STABLE | FLAG_BOUND | FLAG_SINGLE | ((0 | arg4) & OPTIONS);
-        node = new Compute(flag, arg2, fnOrDep, arg3, arg5);
-        node._dep1slot = subscribe(fnOrDep, node, -1);
-    }
+function derive(fn, seed, opts, args) {
+    let flag = FLAG_STABLE | FLAG_SETUP | ((0 | opts) & OPTIONS);
+    let node = new Compute(flag, fn, null, seed, args);
     if (STATE & STATE_OWN) {
         addOwned(RUNNING, node);
     }
@@ -2453,33 +2558,21 @@ function derive(fnOrDep, arg2, arg3, arg4, arg5) {
 }
 
 /**
- * Async compute. Two signatures:
- *   task(fn, seed?, opts?, args?)        — dynamic async, fn receives (reader, prev, args).
- *   task(dep, fn, seed?, opts?, args?)   — bound single-dep, fn receives (depValue, prev, args).
- * Both honor `OPT_DEFER`.
- * @param {function|Sender} fnOrDep
- * @param {*=} arg2 - fn (bound) or seed (dynamic)
- * @param {*=} arg3 - seed (bound) or opts (dynamic)
- * @param {*=} arg4 - opts (bound) or args (dynamic)
- * @param {*=} arg5 - args (bound only)
+ * Async compute (dynamic, unbound).
+ * task(fn, seed?, opts?, args?) — fn receives (reader, prev, args).
+ * Honors `OPT_DEFER`.
+ * @param {function} fn
+ * @param {*=} seed
+ * @param {number=} opts
+ * @param {*=} args
  * @returns {!Compute}
  */
-function task(fnOrDep, arg2, arg3, arg4, arg5) {
-    let node;
-    let flag;
-    if (typeof fnOrDep === 'function') {
-        /** task(fn, seed?, opts?, args?) */
-        flag = FLAG_ASYNC | FLAG_SETUP | ((0 | arg3) & OPTIONS);
-        node = new Compute(flag, fnOrDep, null, arg2, null);
-        /** Wrap _args upfront so _updateAsync can unconditionally
-         *  dereference node._args._reader on every run. */
-        node._args = { _reader: new Reader(node), _args: arg4 };
-    } else {
-        /** task(dep, fn, seed?, opts?, args?) */
-        flag = FLAG_ASYNC | FLAG_STABLE | FLAG_BOUND | FLAG_SINGLE | ((0 | arg4) & OPTIONS);
-        node = new Compute(flag, arg2, fnOrDep, arg3, arg5);
-        node._dep1slot = subscribe(fnOrDep, node, -1);
-    }
+function task(fn, seed, opts, args) {
+    let flag = FLAG_ASYNC | FLAG_SETUP | ((0 | opts) & OPTIONS);
+    let node = new Compute(flag, fn, null, seed, null);
+    /** Wrap _args upfront so _updateAsync can unconditionally
+     *  dereference node._args._reader on every run. */
+    node._args = { _reader: new Reader(node), _args: args };
     if (STATE & STATE_OWN) {
         addOwned(RUNNING, node);
     }
@@ -2514,34 +2607,19 @@ function effect(fn, opts, args) {
 }
 
 /**
- * Async effect. Two signatures:
- *   spawn(fn, opts?, args?)           — dynamic async effect; always starts
- *                                       immediately (unbound effects ignore
- *                                       `OPT_DEFER` — no dep to wait for).
- *   spawn(dep, fn, opts?, args?)      — bound single-dep; honors `OPT_DEFER`
- *                                       so the effect first fires on a dep
- *                                       change rather than on creation.
- * @param {function|Sender} fnOrDep
- * @param {*=} arg2 - fn (bound) or opts (dynamic)
- * @param {*=} arg3 - opts (bound) or args (dynamic)
- * @param {*=} arg4 - args (bound only)
+ * Async effect (dynamic, unbound).
+ * spawn(fn, opts?, args?) — always starts immediately (unbound effects
+ * ignore `OPT_DEFER` — no dep to wait for).
+ * @param {function} fn
+ * @param {number=} opts
+ * @param {*=} args
  * @returns {!Effect}
  */
-function spawn(fnOrDep, arg2, arg3, arg4) {
-    let node;
-    let flag;
+function spawn(fn, opts, args) {
+    let flag = FLAG_ASYNC | FLAG_SETUP | ((0 | opts) & OPTIONS);
     let owner = (STATE & STATE_OWN) ? RUNNING : null;
-    if (typeof fnOrDep === 'function') {
-        /** spawn(fn, opts?, args?) */
-        flag = FLAG_ASYNC | FLAG_SETUP | ((0 | arg2) & OPTIONS);
-        node = new Effect(flag, fnOrDep, null, owner, null);
-        node._args = { _reader: new Reader(node), _args: arg3 };
-    } else {
-        /** spawn(dep, fn, opts?, args?) */
-        flag = FLAG_ASYNC | FLAG_STABLE | FLAG_BOUND | FLAG_SINGLE | ((0 | arg3) & OPTIONS);
-        node = new Effect(flag, arg2, fnOrDep, owner, arg4);
-        node._dep1slot = subscribe(fnOrDep, node, -1);
-    }
+    let node = new Effect(flag, fn, null, owner, null);
+    node._args = { _reader: new Reader(node), _args: args };
     if (owner) {
         let level = owner._level + 1;
         if (owner._level > 2 && level >= LEVELS.length) {
@@ -2551,40 +2629,23 @@ function spawn(fnOrDep, arg2, arg3, arg4) {
         node._level = level;
         addOwned(owner, node);
     }
-    if ((flag & (FLAG_BOUND | FLAG_DEFER)) !== (FLAG_BOUND | FLAG_DEFER)) {
-        startEffect(node);
-    }
+    startEffect(node);
     return node;
 }
 
 /**
- * Stable effect. Two signatures:
- *   watch(fn, opts?, args?)           — multi-dep with setup tracking; always
- *                                       runs once to register deps (unbound
- *                                       effects ignore `OPT_DEFER`).
- *   watch(dep, fn, opts?, args?)      — bound single-dep; honors `OPT_DEFER`
- *                                       so the watcher fires only when the
- *                                       dep next changes.
- * @param {function|Sender} fnOrDep
- * @param {*=} arg2 - fn (bound) or opts (dynamic)
- * @param {*=} arg3 - opts (bound) or args (dynamic)
- * @param {*=} arg4 - args (bound only)
+ * Stable effect (dynamic, unbound).
+ * watch(fn, opts?, args?) — always runs once to register deps (unbound
+ * effects ignore `OPT_DEFER`).
+ * @param {function} fn
+ * @param {number=} opts
+ * @param {*=} args
  * @returns {!Effect}
  */
-function watch(fnOrDep, arg2, arg3, arg4) {
-    let node;
-    let flag;
+function watch(fn, opts, args) {
+    let flag = FLAG_STABLE | FLAG_SETUP | ((0 | opts) & OPTIONS);
     let owner = (STATE & STATE_OWN) ? RUNNING : null;
-    if (typeof fnOrDep === 'function') {
-        /** watch(fn, opts?, args?) */
-        flag = FLAG_STABLE | FLAG_SETUP | ((0 | arg2) & OPTIONS);
-        node = new Effect(flag, fnOrDep, null, owner, arg3);
-    } else {
-        /** watch(dep, fn, opts?, args?) */
-        flag = FLAG_STABLE | FLAG_BOUND | FLAG_SINGLE | ((0 | arg3) & OPTIONS);
-        node = new Effect(flag, arg2, fnOrDep, owner, arg4);
-        node._dep1slot = subscribe(fnOrDep, node, -1);
-    }
+    let node = new Effect(flag, fn, null, owner, args);
     if (owner) {
         let level = owner._level + 1;
         if (owner._level > 2 && level >= LEVELS.length) {
@@ -2594,9 +2655,7 @@ function watch(fnOrDep, arg2, arg3, arg4) {
         node._level = level;
         addOwned(owner, node);
     }
-    if ((flag & (FLAG_BOUND | FLAG_DEFER)) !== (FLAG_BOUND | FLAG_DEFER)) {
-        startEffect(node);
-    }
+    startEffect(node);
     return node;
 }
 
