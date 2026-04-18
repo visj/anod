@@ -19,6 +19,7 @@ const FLAG_ERROR = 1 << 9;
 const FLAG_DEFER = 1 << 10;
 const FLAG_STABLE = 1 << 11;
 
+const FLAG_SINGLE = 1 << 12;
 const FLAG_BOUND = 1 << 14;
 const FLAG_DERIVED = 1 << 15;
 const FLAG_WEAK = 1 << 17;
@@ -453,6 +454,7 @@ function _read(sender) {
         connect(this, sender);
     } else if (this._deps === null) {
         this._deps = [sender, 0];
+        this._flag &= ~FLAG_SINGLE;
     } else {
         this._deps.push(sender, 0);
     }
@@ -599,6 +601,8 @@ function _read(sender) {
             } else {
                 if (flag & FLAG_STALE) {
                     this._update(TIME);
+                } else if (flag & FLAG_SINGLE) {
+                    checkSingle(this, TIME);
                 } else {
                     checkRun(this, TIME);
                 }
@@ -752,12 +756,15 @@ function _read(sender) {
                 if (DCOUNT > DBASE) {
                     this._deps = DSTACK.slice(DBASE, DCOUNT);
                     DCOUNT = DBASE;
+                } else if (this._dep1 !== null) {
+                    this._flag |= FLAG_SINGLE;
                 }
                 DBASE = prevDBase;
             } else {
                 /** Reconcile deps (dynamic only) */
-                if ((REUSED !== depCount || (this._deps !== null ? this._deps.length : 0) !== depsLen)) {
-                    patchDeps(this, version, depCount);
+                let newLen = this._deps !== null ? this._deps.length : 0;
+                if (REUSED !== depCount || newLen !== depsLen) {
+                    patchDeps(this, version, depCount, newLen);
                 }
                 REUSED = prevReused;
             }
@@ -976,11 +983,14 @@ function _read(sender) {
                     if (DCOUNT > DBASE) {
                         this._deps = DSTACK.slice(DBASE, DCOUNT);
                         DCOUNT = DBASE;
+                    } else if (this._dep1 !== null) {
+                        this._flag |= FLAG_SINGLE;
                     }
                     DBASE = dbase;
                 } else {
-                    if ((REUSED !== depCount || (this._deps !== null ? this._deps.length : 0) !== depsLen)) {
-                        patchDeps(this, version, depCount);
+                    let newLen = this._deps !== null ? this._deps.length : 0;
+                    if (REUSED !== depCount || newLen !== depsLen) {
+                        patchDeps(this, version, depCount, newLen);
                     }
                     REUSED = reused;
                 }
@@ -1468,12 +1478,12 @@ function connect(receiver, sender) {
  * @param {number} depCount
  * @returns {void}
  */
-function patchDeps(node, version, depCount) {
+function patchDeps(node, version, depCount, newLen) {
     let deps = node._deps;
     let existingLen = depCount > 1 ? (depCount - 1) * 2 : 0;
     /** ni = index of next new dep to consume (unsubscribed, slot 0) */
-    let ni = deps !== null ? existingLen : 0;
-    let totalLen = deps !== null ? deps.length : 0;
+    let ni = newLen > 0 ? existingLen : 0;
+    let totalLen = newLen;
 
     /** Check dep1 */
     let dep1 = node._dep1;
@@ -1493,6 +1503,9 @@ function patchDeps(node, version, depCount) {
     }
 
     if (deps === null) {
+        if (node._dep1 !== null) {
+            node._flag |= FLAG_SINGLE;
+        }
         return;
     }
 
@@ -1573,9 +1586,12 @@ function patchDeps(node, version, depCount) {
         ni += 2;
     }
 
-    /** Trim or null out */
+    /** Trim or null out, update FLAG_SINGLE */
     if (tail === 0) {
         node._deps = null;
+        if (node._dep1 !== null) {
+            node._flag |= FLAG_SINGLE;
+        }
     } else if (tail === 2 && node._dep1 === null) {
         /** Single dep in array, dep1 empty — promote to dep1 */
         let dep = /** @type {Sender} */(deps[0]);
@@ -1588,7 +1604,9 @@ function patchDeps(node, version, depCount) {
             dep._subs[slot + 1] = -1;
         }
         node._deps = null;
+        node._flag |= FLAG_SINGLE;
     } else {
+        node._flag &= ~FLAG_SINGLE;
         /** Shrink the array with explicit pops rather than assigning
          *  `.length = tail`. Setting `.length` to a smaller value is
          *  surprisingly expensive in V8 for the short-array case — a
@@ -1687,7 +1705,11 @@ function needsUpdate(node, time) {
                 /** @type {Compute} */(dep)._update(time);
         } else if (flag & FLAG_PENDING) {
             TRANSACTION = VERSION;
-            checkRun(/** @type {Compute} */(dep), time);
+            if (flag & FLAG_SINGLE) {
+                checkSingle(/** @type {Compute} */(dep), time);
+            } else {
+                checkRun(/** @type {Compute} */(dep), time);
+            }
         }
         if (dep._ctime > lastRun) {
             return true;
@@ -1704,7 +1726,11 @@ function needsUpdate(node, time) {
                     /** @type {Compute} */(dep)._update(time);
             } else if (flag & FLAG_PENDING) {
                 TRANSACTION = VERSION;
-                checkRun(/** @type {Compute} */(dep), time);
+                if (flag & FLAG_SINGLE) {
+                    checkSingle(/** @type {Compute} */(dep), time);
+                } else {
+                    checkRun(/** @type {Compute} */(dep), time);
+                }
             }
             if (dep._ctime > lastRun) {
                 return true;
@@ -1730,6 +1756,67 @@ function needsUpdate(node, time) {
  * re-entering the main scan loop. This avoids resumeFrom branching
  * overhead in the common single-dep-chain case.
  *
+ * @param {Compute} node
+ * @param {number} time
+ * @returns {void}
+ */
+function checkSingle(node, time) {
+    let dep = node._dep1;
+    let flag = dep._flag;
+    if (flag & FLAG_STALE) {
+        dep._update(time);
+    } else if (flag & FLAG_PENDING) {
+        if (flag & FLAG_SINGLE) {
+            checkSingle(/** @type {Compute} */(dep), time);
+        } else {
+            checkRun(/** @type {Compute} */(dep), time);
+        }
+    }
+    if (dep._ctime > node._time) {
+        node._update(time);
+    } else {
+        node._time = time;
+        node._flag &= ~(FLAG_STALE | FLAG_PENDING);
+    }
+}
+
+function check(node, time) {
+    let dep = node._dep1;
+    let ctime = node._ctime;
+    if (dep !== null) {
+        let flag = dep._flag;
+        if (flag & FLAG_STALE) {
+            dep._update(time);
+        } else if (flag & FLAG_PENDING ){
+            check(dep, time);
+        }
+        if (dep._ctime > ctime) {
+            node._update(time);
+            return;
+        }
+    }
+    let deps = node._deps;
+    if (deps !== null) {
+        let count = deps.length;
+        for (let i = 0; i < count; i += 2) {
+            dep = deps[i];
+            let flag = dep._flag;
+            if (flag & FLAG_STALE) {
+                dep._update(time);
+            } else if (flag & FLAG_PENDING ){
+                check(dep, time);
+            }
+            if (dep._ctime > ctime) {
+                node._update(time);
+                return;
+            }
+        }
+    }
+    node._time = time;
+    node._flag &= ~(FLAG_STALE | FLAG_PENDING);
+}
+
+/**
  * @param {Compute} node
  * @param {number} time
  * @returns {void}
@@ -1775,12 +1862,16 @@ function checkRun(node, time) {
                     if (flag & FLAG_STALE) {
                         dep._update(time);
                     } else if (flag & FLAG_PENDING) {
-                        /** Descend into dep1 — push current node, resume later */
-                        CSTACK[CTOP] = node;
-                        CINDEX[CTOP] = -1;
-                        CTOP++;
-                        node = dep;
-                        continue outer;
+                        if (flag & FLAG_SINGLE) {
+                            checkSingle(/** @type {Compute} */(dep), time);
+                        } else {
+                            /** Descend into dep1 — push current node, resume later */
+                            CSTACK[CTOP] = node;
+                            CINDEX[CTOP] = -1;
+                            CTOP++;
+                            node = dep;
+                            continue outer;
+                        }
                     }
                     if (dep._ctime > lastRun) {
                         node._update(time);
@@ -1813,13 +1904,17 @@ function checkRun(node, time) {
                     if (flag & FLAG_STALE) {
                         dep._update(time);
                     } else if (flag & FLAG_PENDING) {
-                        /** Descend into deps[i] — push current node */
-                        CSTACK[CTOP] = node;
-                        CINDEX[CTOP] = i;
-                        CTOP++;
-                        node = dep;
-                        resumeFrom = -2;
-                        continue outer;
+                        if (flag & FLAG_SINGLE) {
+                            checkSingle(/** @type {Compute} */(dep), time);
+                        } else {
+                            /** Descend into deps[i] — push current node */
+                            CSTACK[CTOP] = node;
+                            CINDEX[CTOP] = i;
+                            CTOP++;
+                            node = dep;
+                            resumeFrom = -2;
+                            continue outer;
+                        }
                     }
                     if (dep._ctime > lastRun) {
                         node._update(time);
@@ -2404,7 +2499,7 @@ function derive(fnOrDep, arg2, arg3, arg4, arg5) {
         node = new Compute(flag, fnOrDep, null, arg2, arg4);
     } else {
         /** derive(dep, fn, seed?, opts?, args?) */
-        flag = FLAG_STABLE | FLAG_BOUND | ((0 | arg4) & OPTIONS);
+        flag = FLAG_STABLE | FLAG_BOUND | FLAG_SINGLE | ((0 | arg4) & OPTIONS);
         node = new Compute(flag, arg2, fnOrDep, arg3, arg5);
         node._dep1slot = subscribe(fnOrDep, node, -1);
     }
@@ -2441,7 +2536,7 @@ function task(fnOrDep, arg2, arg3, arg4, arg5) {
         node._args = { _reader: new Reader(node), _args: arg4 };
     } else {
         /** task(dep, fn, seed?, opts?, args?) */
-        flag = FLAG_ASYNC | FLAG_STABLE | FLAG_BOUND | ((0 | arg4) & OPTIONS);
+        flag = FLAG_ASYNC | FLAG_STABLE | FLAG_BOUND | FLAG_SINGLE | ((0 | arg4) & OPTIONS);
         node = new Compute(flag, arg2, fnOrDep, arg3, arg5);
         node._dep1slot = subscribe(fnOrDep, node, -1);
     }
@@ -2503,7 +2598,7 @@ function spawn(fnOrDep, arg2, arg3, arg4) {
         node._args = { _reader: new Reader(node), _args: arg3 };
     } else {
         /** spawn(dep, fn, opts?, args?) */
-        flag = FLAG_ASYNC | FLAG_STABLE | FLAG_BOUND | ((0 | arg3) & OPTIONS);
+        flag = FLAG_ASYNC | FLAG_STABLE | FLAG_BOUND | FLAG_SINGLE | ((0 | arg3) & OPTIONS);
         node = new Effect(flag, arg2, fnOrDep, owner, arg4);
         node._dep1slot = subscribe(fnOrDep, node, -1);
     }
@@ -2546,7 +2641,7 @@ function watch(fnOrDep, arg2, arg3, arg4) {
         node = new Effect(flag, fnOrDep, null, owner, arg3);
     } else {
         /** watch(dep, fn, opts?, args?) */
-        flag = FLAG_STABLE | FLAG_BOUND | ((0 | arg3) & OPTIONS);
+        flag = FLAG_STABLE | FLAG_BOUND | FLAG_SINGLE | ((0 | arg3) & OPTIONS);
         node = new Effect(flag, arg2, fnOrDep, owner, arg4);
         node._dep1slot = subscribe(fnOrDep, node, -1);
     }
