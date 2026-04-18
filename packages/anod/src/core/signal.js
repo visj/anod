@@ -202,11 +202,10 @@ function Root() {
  * @constructor
  * @implements {ISignal<T>}
  * @param {T} value
- * @param {number=} opts
  */
-function Signal(value, opts) {
+function Signal(value) {
     /** @type {number} */
-    this._flag = 0 | opts;
+    this._flag = 0;
     /** @type {T} */
     this._value = value;
     /** @type {number} */
@@ -739,7 +738,7 @@ function _read(sender) {
             } else {
                 prevReused = REUSED;
                 REUSED = 0;
-                depCount = sweep(version - 1, this._dep1, this._deps);
+                depCount = sweepDeps(version - 1, this._dep1, this._deps);
                 depsLen = this._deps !== null ? this._deps.length : 0;
             }
 
@@ -972,7 +971,7 @@ function _read(sender) {
             } else {
                 reused = REUSED
                 REUSED = 0;
-                depCount = sweep(version - 1, this._dep1, this._deps);
+                depCount = sweepDeps(version - 1, this._dep1, this._deps);
                 depsLen = this._deps !== null ? this._deps.length : 0;
             }
 
@@ -1058,7 +1057,7 @@ function _read(sender) {
                 }
                 context._reader = new Reader(this);
             }
-            
+
             let reader = context._reader;
             try {
                 value = this._fn(reader, context._args);
@@ -1175,7 +1174,7 @@ function _read(sender) {
     /**
      * @this {Reader}
      */
-    ReaderProto._dispose = function() {
+    ReaderProto._dispose = function () {
         this._flag = FLAG_DISPOSED;
         this._node = null;
     }
@@ -1628,7 +1627,7 @@ function patchDeps(node, version, depCount, newLen) {
  * @param {Array<Receiver> | null} deps
  * @returns {number}
  */
-function sweep(stamp, dep1, deps) {
+function sweepDeps(stamp, dep1, deps) {
     let depCount = 0;
     let vstack = VSTACK;
     let vcount = VCOUNT;
@@ -1741,21 +1740,6 @@ function needsUpdate(node, time) {
 }
 
 /**
- * Pull-based evaluation using an explicit stack instead of recursion.
- * Walks down PENDING dep chains, updates STALE leaves, then ascends
- * checking whether each dep's _ctime changed and updating accordingly.
- *
- * Stack frame encoding:
- *   CSTACK[i] = the parent node that was being scanned
- *   CINDEX[i] = -1 if we descended from dep1, >= 0 if from _deps[index]
- *
- * Re-entrancy safe: each call saves/restores CTOP via `base`.
- *
- * The ascend phase uses a tight while loop to cascade updates (when
- * deps changed) or fast-clear flags (when deps didn't change) without
- * re-entering the main scan loop. This avoids resumeFrom branching
- * overhead in the common single-dep-chain case.
- *
  * @param {Compute} node
  * @param {number} time
  * @returns {void}
@@ -1826,16 +1810,12 @@ function checkRun(node, time) {
                     if (flag & FLAG_STALE) {
                         dep._update(time);
                     } else if (flag & FLAG_PENDING) {
-                        if (flag & FLAG_SINGLE) {
-                            checkSingle(/** @type {Compute} */(dep), time);
-                        } else {
-                            /** Descend into dep1 — push current node, resume later */
-                            CSTACK[CTOP] = node;
-                            CINDEX[CTOP] = -1;
-                            CTOP++;
-                            node = dep;
-                            continue outer;
-                        }
+                        /** Descend into dep1 — push current node, resume later */
+                        CSTACK[CTOP] = node;
+                        CINDEX[CTOP] = -1;
+                        CTOP++;
+                        node = dep;
+                        continue outer;
                     }
                     if (dep._ctime > lastRun) {
                         node._update(time);
@@ -1868,17 +1848,13 @@ function checkRun(node, time) {
                     if (flag & FLAG_STALE) {
                         dep._update(time);
                     } else if (flag & FLAG_PENDING) {
-                        if (flag & FLAG_SINGLE) {
-                            checkSingle(/** @type {Compute} */(dep), time);
-                        } else {
-                            /** Descend into deps[i] — push current node */
-                            CSTACK[CTOP] = node;
-                            CINDEX[CTOP] = i;
-                            CTOP++;
-                            node = dep;
-                            resumeFrom = -2;
-                            continue outer;
-                        }
+                        /** Descend into deps[i] — push current node */
+                        CSTACK[CTOP] = node;
+                        CINDEX[CTOP] = i;
+                        CTOP++;
+                        node = dep;
+                        resumeFrom = -2;
+                        continue outer;
                     }
                     if (dep._ctime > lastRun) {
                         node._update(time);
@@ -2063,7 +2039,7 @@ function settle(node, value) {
          *  re-run on future signal changes. */
         if (node._flag & FLAG_ASYNC) {
             if (node._deps !== null) {
-                dedupDeps(node);
+                checkDeps(node);
             }
         } else if (unbound(node)) {
             node._fn = node._args = null;
@@ -2081,7 +2057,7 @@ function settle(node, value) {
  * @param {!Receiver} node
  * @returns {void}
  */
-function dedupDeps(node) {
+function checkDeps(node) {
     let stamp = VERSION += 2;
     let dep1 = node._dep1;
     let deps = node._deps;
@@ -2221,9 +2197,9 @@ function resolveEffectIterator(ref, iterable) {
 function startRoot(root, fn) {
     let prevRunning = RUNNING;
     let prevState = STATE;
+    let idle = IDLE;
     RUNNING = root;
     STATE = STATE_OWN;
-    let idle = IDLE;
     IDLE = true;
     try {
         let ret = fn(root);
