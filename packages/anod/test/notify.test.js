@@ -1,17 +1,17 @@
 import { describe, test, expect } from "bun:test";
-import { root, signal, compute, effect, batch } from "../";
+import { root, signal, compute, effect, batch, equal } from "../";
 
 describe("equal()", () => {
     test("equal(true) suppresses notification when value changes", () => {
         const s1 = signal(1);
         let runs = 0;
-        const c1 = compute((c) => {
-            c.equal(true);
-            return c.read(s1);
+        const c1 = compute(() => {
+            equal(true);
+            return s1.val();
         });
-        const c2 = compute((c) => {
+        const c2 = compute(() => {
             runs++;
-            return c.read(c1);
+            return c1.val();
         });
 
         runs = 0;
@@ -24,14 +24,14 @@ describe("equal()", () => {
     test("equal(false) forces notification when value stays the same", () => {
         const s1 = signal(1);
         let runs = 0;
-        const c1 = compute((c) => {
-            c.equal(false);
-            c.read(s1);
+        const c1 = compute(() => {
+            equal(false);
+            s1.val();
             return 42;
         });
-        const c2 = compute((c) => {
+        const c2 = compute(() => {
             runs++;
-            return c.read(c1);
+            return c1.val();
         });
 
         expect(c1.val()).toBe(42);
@@ -45,14 +45,14 @@ describe("equal()", () => {
     test("equal(false) forces notification on effects", () => {
         const s1 = signal(1);
         let runs = 0;
-        const c1 = compute((c) => {
-            c.equal(false);
-            c.read(s1);
+        const c1 = compute(() => {
+            equal(false);
+            s1.val();
             return 42;
         });
-        effect((e) => {
+        effect(() => {
             runs++;
-            e.read(c1);
+            c1.val();
         });
 
         runs = 0;
@@ -63,13 +63,13 @@ describe("equal()", () => {
     test("default behavior: no notification when value stays the same", () => {
         const s1 = signal(1);
         let runs = 0;
-        const c1 = compute((c) => {
-            c.read(s1);
+        const c1 = compute(() => {
+            s1.val();
             return 42;
         });
-        const c2 = compute((c) => {
+        const c2 = compute(() => {
             runs++;
-            return c.read(c1);
+            return c1.val();
         });
 
         runs = 0;
@@ -82,12 +82,12 @@ describe("equal()", () => {
     test("default behavior: notifies when value changes", () => {
         const s1 = signal(1);
         let runs = 0;
-        const c1 = compute((c) => {
-            return c.read(s1) * 2;
+        const c1 = compute(() => {
+            return s1.val() * 2;
         });
-        const c2 = compute((c) => {
+        const c2 = compute(() => {
             runs++;
-            return c.read(c1);
+            return c1.val();
         });
 
         runs = 0;
@@ -100,15 +100,15 @@ describe("equal()", () => {
     test("equal(true) then equal(false) uses last call", () => {
         const s1 = signal(1);
         let runs = 0;
-        const c1 = compute((c) => {
-            c.equal(true);
-            c.equal(false);
-            c.read(s1);
+        const c1 = compute(() => {
+            equal(true);
+            equal(false);
+            s1.val();
             return 42;
         });
-        const c2 = compute((c) => {
+        const c2 = compute(() => {
             runs++;
-            return c.read(c1);
+            return c1.val();
         });
 
         runs = 0;
@@ -121,14 +121,14 @@ describe("equal()", () => {
     test("equal(false) then equal(true) uses last call", () => {
         const s1 = signal(1);
         let runs = 0;
-        const c1 = compute((c) => {
-            c.equal(false);
-            c.equal(true);
-            return c.read(s1);
+        const c1 = compute(() => {
+            equal(false);
+            equal(true);
+            return s1.val();
         });
-        const c2 = compute((c) => {
+        const c2 = compute(() => {
             runs++;
-            return c.read(c1);
+            return c1.val();
         });
 
         runs = 0;
@@ -142,16 +142,16 @@ describe("equal()", () => {
         const s1 = signal(1);
         let forceNotify = false;
         let runs = 0;
-        const c1 = compute((c) => {
+        const c1 = compute(() => {
             if (forceNotify) {
-                c.equal(false);
+                equal(false);
             }
-            c.read(s1);
+            s1.val();
             return 42;
         });
-        const c2 = compute((c) => {
+        const c2 = compute(() => {
             runs++;
-            return c.read(c1);
+            return c1.val();
         });
 
         runs = 0;

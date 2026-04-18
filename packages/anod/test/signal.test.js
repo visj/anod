@@ -17,8 +17,8 @@ describe("signal", () => {
         const s1 = signal(1);
         let count = 0;
 
-        const c1 = compute((c) => {
-            c.read(s1);
+        const c1 = compute(() => {
+            s1.val();
             return ++count;
         });
 
@@ -31,8 +31,8 @@ describe("signal", () => {
         const s1 = signal(1);
         let count = 0;
 
-        const c1 = compute((c) => {
-            c.read(s1);
+        const c1 = compute(() => {
+            s1.val();
             return ++count;
         });
 
@@ -47,32 +47,32 @@ describe("signal", () => {
             expect(s1.val()).toBe(1); // "val should return current value"
         });
 
-        test("does not track a dependency", () => {
+        test("tracks all val() calls as dependencies", () => {
             const s1 = signal(1);
             const s2 = signal(2);
             const s3 = signal(3);
             let count = 0;
 
-            const c1 = compute((c) => {
+            const c1 = compute(() => {
                 count++;
-                c.read(s1);
-                s2.val(); // Should not track
-                c.read(s3);
+                s1.val();
+                s2.val();
+                s3.val();
             });
 
             expect(count).toBe(1, "initial"); // "Initial execution"
 
             s1.set(5);
-            c1.val(); // Pull to trigger re-evaluation
+            c1.val();
             expect(count).toBe(2, "s1"); // "Propagates on s1 change"
 
             s2.set(4);
             c1.val();
-            expect(count).toBe(2, "s2"); // "Does not propagate on s2 (peek) change"
+            expect(count).toBe(3, "s2"); // "Propagates on s2 change"
 
             s3.set(6);
             c1.val();
-            expect(count).toBe(3, "s3"); // "Propagates on s3 change"
+            expect(count).toBe(4, "s3"); // "Propagates on s3 change"
         });
     });
 });

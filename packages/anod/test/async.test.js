@@ -62,7 +62,7 @@ describe("async", () => {
         test("clears error on subsequent successful resolution", async () => {
             const s1 = signal(true);
             const c1 = task((c) => {
-                return c.read(s1)
+                return s1.val()
                     ? Promise.reject(new Error("fail"))
                     : Promise.resolve(42);
             });
@@ -82,7 +82,7 @@ describe("async", () => {
             const c1 = task((c) => { return Promise.resolve(42); });
             let received = void 0;
 
-            effect((e) => { received = e.read(c1); });
+            effect((e) => { received = c1.val(); });
 
             expect(received).toBeUndefined(); // seed while loading
             await tick();
@@ -95,7 +95,7 @@ describe("async", () => {
             const s1 = signal(0);
 
             const c1 = task((c) => {
-                const v = c.read(s1);
+                const v = s1.val();
                 return new Promise(r => { resolvers[v] = r; });
             });
 
@@ -149,7 +149,7 @@ describe("async", () => {
             // Always call c1.val() so the effect subscribes to c1 as a dependency;
             // without this, c1 is never tracked and the effect won't re-run on settle.
             effect((e) => {
-                const v = e.read(c1);
+                const v = c1.val();
                 if (!c1.loading()) {
                     values.push(v);
                 }
@@ -217,7 +217,7 @@ describe("async", () => {
 
             const s1 = signal(true);
             const c1 = task((c) => {
-                if (c.read(s1)) {
+                if (s1.val()) {
                     return staleIter;
                 }
                 return (async function*() { yield 99; })();
@@ -345,7 +345,7 @@ describe("async", () => {
             // s1 must still work — sanity check that s1's sub graph isn't
             // corrupt.
             c1.dispose();
-            const c2 = compute((c) => c.read(s1) + 1);
+            const c2 = compute((c) => s1.val() + 1);
             expect(c2.val()).toBe(7);
             s1.set(7);
             expect(c2.val()).toBe(8);
@@ -355,7 +355,7 @@ describe("async", () => {
             const s1 = signal(1);
             const s2 = signal(10);
             // Unrelated compute also reading s2 — its first read sets s2._version.
-            const c0 = compute((c) => c.read(s2) * 100);
+            const c0 = compute((c) => s2.val() * 100);
             expect(c0.val()).toBe(1000);
 
             // c1 reads s2 before AND after await. Between the reads, c0 has
@@ -389,7 +389,7 @@ describe("async", () => {
             // Sanity: dispose c1, a fresh compute on s2 must still work
             // (sub-graph wasn't corrupted by any over-release).
             c1.dispose();
-            const c2 = compute((c) => c.read(s2));
+            const c2 = compute((c) => s2.val());
             expect(c2.val()).toBe(20);
             s2.set(21);
             expect(c2.val()).toBe(21);

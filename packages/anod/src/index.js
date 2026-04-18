@@ -15,5 +15,9 @@ export {
     effect,
     watch,
     spawn,
-    batch
+    batch,
+    equal,
+    stable,
+    cleanup,
+    recover,
 } from "./core/signal.js";

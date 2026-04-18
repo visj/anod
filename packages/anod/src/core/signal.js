@@ -13,6 +13,7 @@ const FLAG_COMPUTE = 1 << 4;
 const FLAG_INIT = 1 << 5;
 const FLAG_SETUP = 1 << 6;
 
+const FLAG_RUNNING = 1 << 7;
 const FLAG_LOADING = 1 << 8;
 const FLAG_ERROR = 1 << 9;
 const FLAG_DEFER = 1 << 10;
@@ -39,7 +40,36 @@ const ASYNC_PROMISE = 1;
 const ASYNC_ITERATOR = 2;
 const ASYNC_SYNC = 3;
 
+/**
+ * RUNNING state bits. STATE and RUNNING are always set together —
+ * a non-zero STATE implies RUNNING !== null.
+ */
+const STATE_LISTEN = 1;
+const STATE_OWN = 2;
+
 // ─── Global state ──────────────────────────────────────────────────────────
+
+/**
+ * The currently-running node. Acts as the listening receiver
+ * (for dep tracking). The STATE bitmask distinguishes which role(s) it fills.
+ * @type {Compute | Effect | Root | null}
+ */
+var RUNNING = null;
+/**
+ * Bitmask of STATE_LISTEN. Paired with RUNNING — a non-zero
+ * value implies RUNNING !== null.
+ * @type {number}
+ */
+var STATE = 0;
+/**
+ * Currently-tracking receiver's version. Mirror of RUNNING's tracking
+ * version when RUNNING is a Receiver in a tracking context — but as a plain
+ * number, avoids the bimorphic field-access cost that RUNNING._version
+ * would incur at every sig.val() call site. Set by Compute/Effect
+ * _update when entering the tracking path, restored on exit.
+ * @type {number}
+ */
+var RVER = 0;
 
 /**
  * @type {number}
@@ -336,91 +366,70 @@ function loading() {
 }
 
 /**
- * Declares the current compute's output semantically equal (or not)
- * to its previous value.
- * @this {Receiver}
+ * Declares the currently-running compute's output semantically equal (or not)
+ * to its previous value. Operates on RUNNING.
  * @param {boolean=} eq
  * @returns {void}
  */
-function _equal(eq) {
+function equal(eq) {
     if (eq === false) {
-        this._flag = (this._flag | FLAG_NOTEQUAL) & ~FLAG_EQUAL;
+        RUNNING._flag = (RUNNING._flag | FLAG_NOTEQUAL) & ~FLAG_EQUAL;
     } else {
-        this._flag = (this._flag | FLAG_EQUAL) & ~FLAG_NOTEQUAL;
+        RUNNING._flag = (RUNNING._flag | FLAG_EQUAL) & ~FLAG_NOTEQUAL;
     }
 }
 
 /**
- * Marks the current node stable — no dynamic dep tracking on subsequent
- * runs. Shared across Compute and Effect prototypes; `read()` then
- * short-circuits on `(FLAG_STABLE | FLAG_SETUP) === FLAG_STABLE`. The
- * async-dynamic counterpart lives on the Reader (see `ReaderProto.stable`
- * in the proto-assignment block).
- * @this {Receiver}
+ * Marks the currently-running node stable — no dynamic dep tracking on
+ * subsequent runs. Operates on RUNNING.
  * @returns {void}
  */
-function _stable() {
-    this._flag |= FLAG_STABLE;
+function stable() {
+    RUNNING._flag |= FLAG_STABLE;
 }
 
 /**
- * Registers a cleanup fn on the current node. Valid on any Effect or Root.
- * Stored compactly: `_cleanup` holds a single function when there's one
- * registration, graduating to an array on the second. Internal callsites
- * (async resolvers, effect update, startRoot return value) call the same
- * prototype method through the node — no separate `addCleanup(node, fn)`
- * helper needed.
- * @this {Owner}
+ * Registers a cleanup fn on the currently-running owner (Effect or Root).
+ * Operates on RUNNING. Stored compactly: _cleanup holds a single function
+ * when there's one registration, graduating to an array on the second.
  * @param {function(): void} fn
  * @returns {void}
  */
-function _cleanup(fn) {
-    let cleanup = this._cleanup;
-    if (cleanup === null) {
-        this._cleanup = fn;
-    } else if (typeof cleanup === 'function') {
-        this._cleanup = [cleanup, fn];
-    } else {
-        cleanup.push(fn);
-    }
+function cleanup(fn) {
+    addCleanup(RUNNING, fn);
 }
 
 /**
- * Registers a recover handler on the current node. Valid on any Effect or Root.
- * @this {Owner}
+ * Registers a recover handler on the currently-running owner (Effect or Root).
+ * Operates on RUNNING.
  * @param {function(*): boolean} fn
  * @returns {void}
  */
-function _recover(fn) {
-    let recover = this._recover;
-    if (recover === null) {
-        this._recover = fn;
-    } else if (typeof recover === 'function') {
-        this._recover = [recover, fn];
+function recover(fn) {
+    let rec = RUNNING._recover;
+    if (rec === null) {
+        RUNNING._recover = fn;
+    } else if (typeof rec === 'function') {
+        RUNNING._recover = [rec, fn];
     } else {
-        recover.push(fn);
+        rec.push(fn);
     }
 }
 
 /**
- * Dependency-tracking `read` for Compute/Effect. Called as `c.read(sender)`
- * inside the fn body. On setup passes the sender is appended to DSTACK,
- * on dynamic passes to `_deps`; on stable nodes tracking is skipped.
- * @template T
+ * Registers a dependency link from sender -> this (the tracking node).
+ * Called from val() when tracking is active (STATE & STATE_LISTEN).
+ *
+ * Invariants at entry (guaranteed by the call-site guard in val()):
+ *   - STATE & STATE_LISTEN !== 0  (this is tracking)
+ *   - sender._version !== RVER    (not already tracked this run)
+ *
  * @this {Receiver}
- * @param {!Sender<T>} sender
- * @returns {T}
+ * @param {Sender} sender
+ * @returns {void}
  */
-function read(sender) {
-    if (sender._version === this._version) {
-        return sender._value;
-    }
-    let flag = this._flag;
-    let value = sender.val();
-    if ((flag & (FLAG_STABLE | FLAG_SETUP)) === FLAG_STABLE) {
-        return value;
-    }
-    let version = this._version;
+function _read(sender) {
+    let version = RVER;
     let stamp = sender._version;
 
     sender._version = version;
@@ -428,7 +437,7 @@ function read(sender) {
     /** Reuse: was our dep last run, visited again this run — O(1) */
     if (stamp === version - 1) {
         REUSED++;
-        return value;
+        return;
     }
 
     /**
@@ -440,160 +449,16 @@ function read(sender) {
         VSTACK[VCOUNT++] = stamp;
     }
 
-    if (flag & FLAG_SETUP) {
+    if (this._flag & FLAG_SETUP) {
         connect(this, sender);
+    } else if (this._deps === null) {
+        this._deps = [sender, 0];
     } else {
-        if (this._deps === null) {
-            this._deps = [sender, 0];
-        } else {
-            this._deps.push(sender, 0);
-        }
+        this._deps.push(sender, 0);
     }
-    return value;
-}
-
-// ─── Ownership delegates ───────────────────────────────────────────────────
-// Installed on both Root and Effect prototypes. Thin wrappers that call the
-// top-level factory (passing `this` as owner where applicable), then register
-// the new node with `addOwned`. The Effect-creating delegates compute the
-// topological child level inline and extend LEVELS/SCOPES lazily — with a
-// fast-path that skips the `LEVELS.length` read for shallow parents.
-
-/**
- * @this {Owner}
- * @template T,W
- * @param {function(T,W): T} fn
- * @param {T=} seed
- * @param {number=} opts
- * @param {W=} args
- * @returns {Compute<T,W>}
- */
-function _ownCompute(fn, seed, opts, args) {
-    let node = compute(fn, seed, opts, args);
-    addOwned(this, node);
-    return node;
-}
-
-/**
- * @this {Owner}
- * @param {function|Sender} fnOrDep
- * @param {*=} a2
- * @param {*=} a3
- * @param {*=} a4
- * @param {*=} a5
- * @returns {!Compute}
- */
-function _ownDerive(fnOrDep, a2, a3, a4, a5) {
-    let node = derive(fnOrDep, a2, a3, a4, a5);
-    addOwned(this, node);
-    return node;
-}
-
-/**
- * @this {Owner}
- * @param {function|Sender} fnOrDep
- * @param {*=} a2
- * @param {*=} a3
- * @param {*=} a4
- * @param {*=} a5
- * @returns {!Compute}
- */
-function _ownTask(fnOrDep, a2, a3, a4, a5) {
-    let node = task(fnOrDep, a2, a3, a4, a5);
-    addOwned(this, node);
-    return node;
-}
-
-/**
- * A nested Root owned by this node. Kept inline (not a delegate to the
- * top-level `root`) so the `_owned` append happens before `startRoot` runs
- * the fn — preserves the existing ordering for any error mid-startup.
- * @this {Owner}
- * @param {function(!Root): ((function(): void) | void)} fn
- * @returns {!Root}
- */
-function _ownRoot(fn) {
-    let node = new Root();
-    addOwned(this, node);
-    startRoot(node, fn);
-    return node;
-}
-
-/**
- * @template T
- * @param {T} value
- * @returns {!Signal<T>}
- */
-function _ownSignal(value) {
-    return new Signal(value);
-}
-
-/**
- * @this {Owner}
- * @template W
- * @param {function(!Effect, W): (function(): void | void)} fn
- * @param {number=} opts
- * @param {W=} args
- * @returns {!Effect<null,null,W>}
- */
-function _ownEffect(fn, opts, args) {
-    let level = this._level + 1;
-    /** LEVELS/SCOPES default to length 4 (indices 0..3). Short-circuit on
-     *  shallow parents (`this._level <= 2` → child level <= 3, fits in
-     *  defaults) so the common case avoids the `LEVELS.length` read. */
-    if (this._level > 2 && level >= LEVELS.length) {
-        LEVELS.push(0);
-        SCOPES.push([]);
-    }
-    let node = effect(fn, opts, args, this, level);
-    addOwned(this, node);
-    return node;
-}
-
-/**
- * @this {Owner}
- * @param {function|Sender} fnOrDep
- * @param {*=} a2
- * @param {*=} a3
- * @param {*=} a4
- * @returns {!Effect}
- */
-function _ownWatch(fnOrDep, a2, a3, a4) {
-    let level = this._level + 1;
-    if (this._level > 2 && level >= LEVELS.length) {
-        LEVELS.push(0);
-        SCOPES.push([]);
-    }
-    let node = watch(fnOrDep, a2, a3, a4, this, level);
-    addOwned(this, node);
-    return node;
-}
-
-/**
- * @this {Owner}
- * @param {function|Sender} fnOrDep
- * @param {*=} a2
- * @param {*=} a3
- * @param {*=} a4
- * @returns {!Effect}
- */
-function _ownSpawn(fnOrDep, a2, a3, a4) {
-    let level = this._level + 1;
-    if (this._level > 2 && level >= LEVELS.length) {
-        LEVELS.push(0);
-        SCOPES.push([]);
-    }
-    let node = spawn(fnOrDep, a2, a3, a4, this, level);
-    addOwned(this, node);
-    return node;
 }
 
 // ─── Prototype assignments ─────────────────────────────────────────────────
-// One block. Methods shared across 2+ prototypes reference the top-level
-// named functions above (dispose, error, loading, _equal, _stable, _cleanup,
-// _recover, read, _ownX). Methods unique to one prototype are inlined here
-// as anonymous function expressions — no point forcing a named top-level
-// declaration for something with exactly one callsite.
 
 {
     /** @const */
@@ -622,30 +487,12 @@ function _ownSpawn(fnOrDep, a2, a3, a4) {
     // Disposer#dispose — shared by all four node types
     RootProto.dispose = SignalProto.dispose = ComputeProto.dispose = EffectProto.dispose = dispose;
 
-    // Receiver#read — Compute + Effect share the same tracking impl
-    ComputeProto.read = EffectProto.read = read;
+    // Receiver#_read — internal dep tracking, called from val() when listening
+    ComputeProto._read = EffectProto._read = _read;
 
     // IAwaitable — Compute + Effect
     ComputeProto.error = EffectProto.error = error;
     ComputeProto.loading = EffectProto.loading = loading;
-
-    // Tracking hints — Compute + Effect
-    ComputeProto.equal = EffectProto.equal = _equal;
-    ComputeProto.stable = EffectProto.stable = _stable;
-
-    // Owner cleanup/recover — Root + Effect
-    RootProto.cleanup = EffectProto.cleanup = _cleanup;
-    RootProto.recover = EffectProto.recover = _recover;
-
-    // Owner factories — Root + Effect
-    RootProto.compute = EffectProto.compute = _ownCompute;
-    RootProto.derive = EffectProto.derive = _ownDerive;
-    RootProto.task = EffectProto.task = _ownTask;
-    RootProto.signal = EffectProto.signal = _ownSignal;
-    RootProto.root = EffectProto.root = _ownRoot;
-    RootProto.effect = EffectProto.effect = _ownEffect;
-    RootProto.watch = EffectProto.watch = _ownWatch;
-    RootProto.spawn = EffectProto.spawn = _ownSpawn;
 
     // ─── Root — single-use methods ─────────────────────────────────────────
 
@@ -672,6 +519,9 @@ function _ownSpawn(fnOrDep, a2, a3, a4) {
      * @returns {T}
      */
     SignalProto.val = function () {
+        if ((STATE & STATE_LISTEN) !== 0 && RVER !== this._version) {
+            RUNNING._read(this);
+        }
         return this._value;
     };
 
@@ -729,6 +579,9 @@ function _ownSpawn(fnOrDep, a2, a3, a4) {
      */
     ComputeProto.val = function () {
         let flag = this._flag;
+        if (flag & FLAG_RUNNING) {
+            throw new Error('Circular dependency');
+        }
         if (flag & (FLAG_STALE | FLAG_PENDING)) {
             if (IDLE) {
                 IDLE = false;
@@ -750,6 +603,9 @@ function _ownSpawn(fnOrDep, a2, a3, a4) {
                     checkRun(this, TIME);
                 }
             }
+        }
+        if ((STATE & STATE_LISTEN) !== 0 && RVER !== this._version) {
+            RUNNING._read(this);
         }
         if (this._flag & FLAG_ERROR) {
             throw this._value;
@@ -835,37 +691,39 @@ function _ownSpawn(fnOrDep, a2, a3, a4) {
     ComputeProto._update = function (time) {
         let flag = this._flag;
         this._time = time;
-        /** Pre-fn flag clear. FLAG_RUNNING was a lifecycle bit that
-         *  nothing reads — dropped. The EQUAL/NOTEQUAL clear here is
-         *  what lets `c.equal()` in the fn body produce a clean fresh
-         *  result even without being called (no c.equal()-left-over
-         *  from prior run). STALE/INIT/LOADING are cleared for the
-         *  same reason: the fn should see the node as "currently
-         *  running", not as stale/init/loading from whatever state
-         *  triggered this update. */
-        this._flag = flag & ~(FLAG_STALE | FLAG_INIT | FLAG_LOADING | FLAG_EQUAL | FLAG_NOTEQUAL);
         if (flag & FLAG_ASYNC) {
+            this._flag = flag & ~(FLAG_STALE | FLAG_INIT | FLAG_LOADING | FLAG_EQUAL | FLAG_NOTEQUAL);
             return this._updateAsync(time);
         }
+        this._flag = (flag & ~(FLAG_STALE | FLAG_INIT | FLAG_LOADING | FLAG_EQUAL | FLAG_NOTEQUAL)) | FLAG_RUNNING;
+
+        /** Save RUNNING/STATE for re-entry. */
+        let prevRunning = RUNNING;
+        let prevState = STATE;
+        RUNNING = this;
 
         let value;
         if ((flag & (FLAG_STABLE | FLAG_SETUP)) === FLAG_STABLE) {
-            /** Stable or bound: no version tracking, no dep management */
+            /** Stable or bound: no tracking, no dep management */
+            STATE = 0;
             try {
                 value = (flag & FLAG_BOUND)
                     ? this._fn(this._dep1.val(), this._value, this._args)
-                    : this._fn(this, this._value, this._args);
+                    : this._fn(this._value, this._args);
             } catch (err) {
+                STATE = prevState;
+                RUNNING = prevRunning;
                 this._value = err;
-                this._flag = (this._flag & ~(FLAG_STALE | FLAG_PENDING | FLAG_INIT | FLAG_SETUP)) | FLAG_ERROR;
+                this._flag = (flag & ~(FLAG_RUNNING | FLAG_STALE | FLAG_PENDING | FLAG_INIT | FLAG_SETUP)) | FLAG_ERROR;
                 this._ctime = time;
                 return;
             }
         } else {
-            /** Setup or dynamic: bump version for dep tracking */
-            let prevVersion = this._version;
+            /** Setup or dynamic: bump RVER for dep tracking */
+            STATE = STATE_LISTEN;
+            let prevRVer = RVER;
             let version = VERSION += 2;
-            this._version = version;
+            RVER = version;
             let saveStart = VCOUNT;
             let depsLen = 0;
             let depCount = 0;
@@ -882,48 +740,48 @@ function _ownSpawn(fnOrDep, a2, a3, a4) {
             }
 
             try {
-                value = this._fn(this, this._value, this._args);
+                value = this._fn(this._value, this._args);
+                this._flag &= ~FLAG_ERROR;
             } catch (err) {
-                this._value = err;
-                this._flag = (this._flag & ~(FLAG_STALE | FLAG_PENDING | FLAG_INIT | FLAG_SETUP)) | FLAG_ERROR;
-                this._ctime = time;
-                return;
-            } finally {
-                if (flag & FLAG_SETUP) {
-                    /** Create exact-capacity _deps from DSTACK (setup only) */
-                    if (DCOUNT > DBASE) {
-                        this._deps = DSTACK.slice(DBASE, DCOUNT);
-                        DCOUNT = DBASE;
-                    }
-                    DBASE = prevDBase;
-                } else {
-                    /** Reconcile deps (dynamic only) */
-                    if ((REUSED !== depCount || (this._deps !== null ? this._deps.length : 0) !== depsLen)) {
-                        patchDeps(this, version, depCount);
-                    }
-                    REUSED = prevReused;
-                }
-
-                /** Restore saved version tags from VSTACK (both setup and dynamic) */
-                if (VCOUNT > saveStart) {
-                    let count = VCOUNT;
-                    let stack = VSTACK;
-                    for (let i = saveStart; i < count; i += 2) {
-                        stack[i]._version = stack[i + 1];
-                    }
-                    VCOUNT = saveStart;
-                }
-                this._version = prevVersion;
+                value = err;
+                this._flag |= FLAG_ERROR;
             }
+
+            if (flag & FLAG_SETUP) {
+                /** Create exact-capacity _deps from DSTACK (setup only) */
+                if (DCOUNT > DBASE) {
+                    this._deps = DSTACK.slice(DBASE, DCOUNT);
+                    DCOUNT = DBASE;
+                }
+                DBASE = prevDBase;
+            } else {
+                /** Reconcile deps (dynamic only) */
+                if ((REUSED !== depCount || (this._deps !== null ? this._deps.length : 0) !== depsLen)) {
+                    patchDeps(this, version, depCount);
+                }
+                REUSED = prevReused;
+            }
+
+            /** Restore saved version tags from VSTACK (both setup and dynamic) */
+            if (VCOUNT > saveStart) {
+                let count = VCOUNT;
+                let stack = VSTACK;
+                for (let i = saveStart; i < count; i += 2) {
+                    stack[i]._version = stack[i + 1];
+                }
+                VCOUNT = saveStart;
+            }
+            RVER = prevRVer;
         }
-        /** Single post-fn flag write: clears the transient STALE/PENDING/
-         *  INIT/SETUP bits AND any stale ERROR from a prior run (no
-         *  separate `this._flag &= ~FLAG_ERROR` needed — fn reached here
-         *  without throwing, so ERROR should be cleared). `flag` is
-         *  re-read to pick up any EQUAL/NOTEQUAL bits the fn set via
-         *  `c.equal()`; those feed the ctime check below. */
-        flag = this._flag &= ~(FLAG_ERROR | FLAG_STALE | FLAG_PENDING | FLAG_INIT | FLAG_SETUP);
-        if (value !== this._value) {
+
+        STATE = prevState;
+        RUNNING = prevRunning;
+
+        flag = this._flag &= ~(FLAG_RUNNING | FLAG_STALE | FLAG_PENDING | FLAG_INIT | FLAG_SETUP);
+        if (flag & FLAG_ERROR) {
+            this._value = value;
+            this._ctime = time;
+        } else if (value !== this._value) {
             this._value = value;
             if (!(flag & FLAG_EQUAL)) {
                 this._ctime = time;
@@ -1069,23 +927,33 @@ function _ownSpawn(fnOrDep, a2, a3, a4) {
             this._flag = flag & ~FLAG_LOADING;
             return this._updateAsync(time);
         }
+
+        /** Save RUNNING/STATE for re-entry. */
+        let prevRunning = RUNNING;
+        let prevState = STATE;
+        RUNNING = this;
+
         /** @type {(function(): void) | null | undefined} */
         let value;
 
         if ((flag & (FLAG_STABLE | FLAG_SETUP)) === FLAG_STABLE) {
-            /** Stable or bound: no version tracking, no dep management */
+            /** Stable or bound: no tracking, but still own children */
+            STATE = STATE_OWN;
             try {
                 value = (flag & FLAG_BOUND)
                     ? this._fn(this._dep1.val(), this._args)
-                    : this._fn(this, this._args);
+                    : this._fn(this._args);
             } finally {
                 this._flag &= ~(FLAG_STALE | FLAG_PENDING);
+                STATE = prevState;
+                RUNNING = prevRunning;
             }
         } else {
-            /** Setup or dynamic: bump version for dep tracking */
-            let prevVersion = this._version;
+            /** Setup or dynamic: bump RVER for dep tracking + own children */
+            STATE = STATE_LISTEN | STATE_OWN;
+            let prevRVer = RVER;
             let version = VERSION += 2;
-            this._version = version;
+            RVER = version;
             let saveStart = VCOUNT;
             let depCount = 0;
             let depsLen = 0;
@@ -1102,7 +970,7 @@ function _ownSpawn(fnOrDep, a2, a3, a4) {
             }
 
             try {
-                value = this._fn(this, this._args);
+                value = this._fn(this._args);
             } finally {
                 if (flag & FLAG_SETUP) {
                     if (DCOUNT > DBASE) {
@@ -1125,8 +993,10 @@ function _ownSpawn(fnOrDep, a2, a3, a4) {
                     }
                     VCOUNT = saveStart;
                 }
-                this._version = prevVersion;
+                RVER = prevRVer;
                 this._flag &= ~(FLAG_STALE | FLAG_PENDING | FLAG_INIT | FLAG_SETUP);
+                STATE = prevState;
+                RUNNING = prevRunning;
             }
         }
 
@@ -1308,7 +1178,13 @@ function _ownSpawn(fnOrDep, a2, a3, a4) {
      *  as soon as the user says "stop". The node-level `_stable` can't
      *  do this — on sync nodes SETUP drives the DSTACK setup machinery
      *  and must not be cleared mid-fn. */
-    ReaderProto.equal = _equal;
+    ReaderProto.equal = function (eq) {
+        if (eq === false) {
+            this._flag = (this._flag | FLAG_NOTEQUAL) & ~FLAG_EQUAL;
+        } else {
+            this._flag = (this._flag | FLAG_EQUAL) & ~FLAG_NOTEQUAL;
+        }
+    };
     ReaderProto.stable = function () {
         this._flag = (this._flag | FLAG_STABLE) & ~FLAG_SETUP;
     };
@@ -1449,6 +1325,21 @@ function clearSubs(send) {
  * @param {Owner} owner
  * @returns {void}
  */
+/**
+ * @param {!Owner} owner
+ * @param {function(): void} fn
+ */
+function addCleanup(owner, fn) {
+    let c = owner._cleanup;
+    if (c === null) {
+        owner._cleanup = fn;
+    } else if (typeof c === 'function') {
+        owner._cleanup = [c, fn];
+    } else {
+        c.push(fn);
+    }
+}
+
 function clearCleanup(owner) {
     let cleanup = owner._cleanup;
     if (typeof cleanup === 'function') {
@@ -2269,15 +2160,21 @@ function resolveEffectIterator(ref, iterable) {
  * @returns {void}
  */
 function startRoot(root, fn) {
+    let prevRunning = RUNNING;
+    let prevState = STATE;
+    RUNNING = root;
+    STATE = STATE_OWN;
     let idle = IDLE;
     IDLE = true;
     try {
-        let cleanup = fn(root);
-        if (typeof cleanup === 'function') {
-            root.cleanup(cleanup);
+        let ret = fn(root);
+        if (typeof ret === 'function') {
+            addCleanup(root, ret);
         }
     } finally {
         IDLE = idle;
+        STATE = prevState;
+        RUNNING = prevRunning;
     }
 }
 
@@ -2476,6 +2373,9 @@ function signal(value) {
 function compute(fn, seed, opts, args) {
     let flag = FLAG_SETUP | ((0 | opts) & OPTIONS);
     let node = new Compute(flag, fn, null, seed, args);
+    if (STATE & STATE_OWN) {
+        addOwned(RUNNING, node);
+    }
     if (!(flag & FLAG_DEFER)) {
         startCompute(node);
     }
@@ -2507,6 +2407,9 @@ function derive(fnOrDep, arg2, arg3, arg4, arg5) {
         flag = FLAG_STABLE | FLAG_BOUND | ((0 | arg4) & OPTIONS);
         node = new Compute(flag, arg2, fnOrDep, arg3, arg5);
         node._dep1slot = subscribe(fnOrDep, node, -1);
+    }
+    if (STATE & STATE_OWN) {
+        addOwned(RUNNING, node);
     }
     if (!(flag & FLAG_DEFER)) {
         startCompute(node);
@@ -2542,6 +2445,9 @@ function task(fnOrDep, arg2, arg3, arg4, arg5) {
         node = new Compute(flag, arg2, fnOrDep, arg3, arg5);
         node._dep1slot = subscribe(fnOrDep, node, -1);
     }
+    if (STATE & STATE_OWN) {
+        addOwned(RUNNING, node);
+    }
     if (!(flag & FLAG_DEFER)) {
         startCompute(node);
     }
@@ -2550,16 +2456,23 @@ function task(fnOrDep, arg2, arg3, arg4, arg5) {
 
 /**
  * @template W
- * @param {function(!Effect, W): (function(): void | void)} fn
+ * @param {function(W): (function(): void | void)} fn
  * @param {number=} opts
  * @param {W=} args
  * @returns {Effect<null,null,W>}
  */
-function effect(fn, opts, args, owner, level) {
+function effect(fn, opts, args) {
     let flag = FLAG_SETUP | ((0 | opts) & OPTIONS);
-    let node = new Effect(flag, fn, null, owner || null, args);
-    if (level) {
+    let owner = (STATE & STATE_OWN) ? RUNNING : null;
+    let node = new Effect(flag, fn, null, owner, args);
+    if (owner) {
+        let level = owner._level + 1;
+        if (owner._level > 2 && level >= LEVELS.length) {
+            LEVELS.push(0);
+            SCOPES.push([]);
+        }
         node._level = level;
+        addOwned(owner, node);
     }
     startEffect(node);
     return node;
@@ -2579,26 +2492,30 @@ function effect(fn, opts, args, owner, level) {
  * @param {*=} arg4 - args (bound only)
  * @returns {!Effect}
  */
-function spawn(fnOrDep, arg2, arg3, arg4, owner, level) {
+function spawn(fnOrDep, arg2, arg3, arg4) {
     let node;
     let flag;
+    let owner = (STATE & STATE_OWN) ? RUNNING : null;
     if (typeof fnOrDep === 'function') {
         /** spawn(fn, opts?, args?) */
         flag = FLAG_ASYNC | FLAG_SETUP | ((0 | arg2) & OPTIONS);
-        node = new Effect(flag, fnOrDep, null, owner || null, null);
+        node = new Effect(flag, fnOrDep, null, owner, null);
         node._args = { _reader: new Reader(node), _args: arg3 };
     } else {
         /** spawn(dep, fn, opts?, args?) */
         flag = FLAG_ASYNC | FLAG_STABLE | FLAG_BOUND | ((0 | arg3) & OPTIONS);
-        node = new Effect(flag, arg2, fnOrDep, owner || null, arg4);
+        node = new Effect(flag, arg2, fnOrDep, owner, arg4);
         node._dep1slot = subscribe(fnOrDep, node, -1);
     }
-    if (level) {
+    if (owner) {
+        let level = owner._level + 1;
+        if (owner._level > 2 && level >= LEVELS.length) {
+            LEVELS.push(0);
+            SCOPES.push([]);
+        }
         node._level = level;
+        addOwned(owner, node);
     }
-    /** Unbound spawns always run. Bound spawns honor DEFER: skip the
-     *  initial run — the subscription is already live, so the next
-     *  dep.set() will fire the effect. */
     if ((flag & (FLAG_BOUND | FLAG_DEFER)) !== (FLAG_BOUND | FLAG_DEFER)) {
         startEffect(node);
     }
@@ -2619,26 +2536,29 @@ function spawn(fnOrDep, arg2, arg3, arg4, owner, level) {
  * @param {*=} arg4 - args (bound only)
  * @returns {!Effect}
  */
-function watch(fnOrDep, arg2, arg3, arg4, owner, level) {
+function watch(fnOrDep, arg2, arg3, arg4) {
     let node;
     let flag;
-    let ownerRef = owner || null;
+    let owner = (STATE & STATE_OWN) ? RUNNING : null;
     if (typeof fnOrDep === 'function') {
         /** watch(fn, opts?, args?) */
         flag = FLAG_STABLE | FLAG_SETUP | ((0 | arg2) & OPTIONS);
-        node = new Effect(flag, fnOrDep, null, ownerRef, arg3);
+        node = new Effect(flag, fnOrDep, null, owner, arg3);
     } else {
         /** watch(dep, fn, opts?, args?) */
         flag = FLAG_STABLE | FLAG_BOUND | ((0 | arg3) & OPTIONS);
-        node = new Effect(flag, arg2, fnOrDep, ownerRef, arg4);
+        node = new Effect(flag, arg2, fnOrDep, owner, arg4);
         node._dep1slot = subscribe(fnOrDep, node, -1);
     }
-    if (level) {
+    if (owner) {
+        let level = owner._level + 1;
+        if (owner._level > 2 && level >= LEVELS.length) {
+            LEVELS.push(0);
+            SCOPES.push([]);
+        }
         node._level = level;
+        addOwned(owner, node);
     }
-    /** Same rule as `spawn`: unbound watches ignore DEFER so the setup
-     *  pass runs and registers deps; bound watches defer the first run
-     *  until the dep changes. */
     if ((flag & (FLAG_BOUND | FLAG_DEFER)) !== (FLAG_BOUND | FLAG_DEFER)) {
         startEffect(node);
     }
@@ -2687,5 +2607,9 @@ export {
     effect,
     watch,
     spawn,
-    batch
+    batch,
+    equal,
+    stable,
+    cleanup,
+    recover,
 }

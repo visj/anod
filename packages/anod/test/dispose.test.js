@@ -11,9 +11,9 @@ describe("dispose", () => {
             const r1 = root((r) => {
                 count = 0;
                 s1 = signal(0);
-                c1 = r.compute((c) => {
+                c1 = compute(() => {
                     count++;
-                    return c.read(s1);
+                    return s1.val();
                 });
 
                 expect(c1.val()).toBe(0);
@@ -34,19 +34,19 @@ describe("dispose", () => {
 
     describe("computations", () => {
         test("persists through cycle when manually disposed", () => {
-            root((r) => {
+            root(() => {
                 const s1 = signal(0);
-                const c1 = r.compute((c) => c.read(s1));
+                const c1 = compute(() => s1.val());
                 let count = 0;
 
-                r.effect((e) => {
-                    e.effect((e2) => {
-                        if (e2.read(s1) > 0) {
+                effect(() => {
+                    effect(() => {
+                        if (s1.val() > 0) {
                             c1.dispose();
                         }
                     });
-                    e.effect((e3) => {
-                        count += (e3.read(c1) || 0);
+                    effect(() => {
+                        count += (c1.val() || 0);
                     });
                 });
 

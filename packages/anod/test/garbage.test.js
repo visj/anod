@@ -13,7 +13,7 @@ function collect(callback) {
 describe("garbage collection", () => {
     test("should not be collected when referenced", async () => {
         const s1 = signal(1);
-        const ref = new WeakRef(compute((c) => c.read(s1)));
+        const ref = new WeakRef(compute(() => s1.val()));
 
         // Bind dependencies to ensure bidirectional link exists.
         ref.deref()?.val();
@@ -28,7 +28,7 @@ describe("garbage collection", () => {
 
     test("should be collected when disposed", async () => {
         const s1 = signal(1);
-        const c1 = new WeakRef(compute((c) => c.read(s1)));
+        const c1 = new WeakRef(compute(() => s1.val()));
 
         c1.deref()?.val();
 

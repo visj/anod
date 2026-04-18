@@ -16,7 +16,7 @@ describe("OPT_DEFER", () => {
         test("defers initial run", () => {
             const s1 = signal(1);
             let runs = 0;
-            const c1 = derive((c) => { runs++; return c.read(s1) * 2; }, undefined, OPT_DEFER);
+            const c1 = derive(() => { runs++; return s1.val() * 2; }, undefined, OPT_DEFER);
             expect(runs).toBe(0);
             expect(c1.val()).toBe(2);
             expect(runs).toBe(1);
@@ -94,7 +94,7 @@ describe("OPT_DEFER", () => {
             let runs = 0;
             root(() => {
                 const s1 = signal(1);
-                watch((e) => { runs++; e.read(s1); }, OPT_DEFER);
+                watch(() => { runs++; s1.val(); }, OPT_DEFER);
                 expect(runs).toBe(1);
 
                 s1.set(2);
@@ -104,22 +104,22 @@ describe("OPT_DEFER", () => {
     });
 
     describe("owned variants via proto", () => {
-        test("r.derive(dep, fn, seed, OPT_DEFER) defers", () => {
-            root((r) => {
+        test("derive(dep, fn, seed, OPT_DEFER) defers", () => {
+            root(() => {
                 const s1 = signal(10);
                 let runs = 0;
-                const c1 = r.derive(s1, (v) => { runs++; return v * 2; }, undefined, OPT_DEFER);
+                const c1 = derive(s1, (v) => { runs++; return v * 2; }, undefined, OPT_DEFER);
                 expect(runs).toBe(0);
                 expect(c1.val()).toBe(20);
                 expect(runs).toBe(1);
             });
         });
 
-        test("r.watch(dep, fn, OPT_DEFER) defers until dep changes", () => {
-            root((r) => {
+        test("watch(dep, fn, OPT_DEFER) defers until dep changes", () => {
+            root(() => {
                 const s1 = signal("a");
                 let runs = 0;
-                r.watch(s1, () => { runs++; }, OPT_DEFER);
+                watch(s1, () => { runs++; }, OPT_DEFER);
                 expect(runs).toBe(0);
                 s1.set("b");
                 expect(runs).toBe(1);

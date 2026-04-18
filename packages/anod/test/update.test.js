@@ -1,18 +1,18 @@
 import { describe, test, expect } from "bun:test";
-import { root, signal, compute, effect } from "../";
+import { root, signal, compute, effect, cleanup } from "../";
 
 describe("update", () => {
     test("does not register a dependency on the subcomputation", () => {
-        root((r) => {
+        root(() => {
             const s1 = signal(1);
             let outerCount = 0;
             let innerCount = 0;
 
-            r.effect((ef) => {
+            effect(() => {
                 outerCount++;
-                ef.effect((e) => {
+                effect(() => {
                     innerCount++;
-                    e.read(s1);
+                    s1.val();
                 });
             });
 
@@ -28,13 +28,13 @@ describe("update", () => {
         test("does not trigger downstream computations unless changed", () => {
             const s1 = signal(1);
             let order = "";
-            const c1 = compute((c) => {
+            const c1 = compute(() => {
                 order += "c1";
-                return c.read(s1) > 0;
+                return s1.val() > 0;
             });
-            const c2 = compute((c) => {
+            const c2 = compute(() => {
                 order += "c2";
-                return c.read(c1);
+                return c1.val();
             });
 
             order = "";
@@ -53,19 +53,19 @@ describe("update", () => {
             const s2 = signal(0);
             let order = "";
 
-            const c1 = compute((c) => {
+            const c1 = compute(() => {
                 order += "c1";
-                return c.read(s1) === 0;
+                return s1.val() === 0;
             });
 
-            root((r) => {
-                r.effect((ef) => {
-                    ef.read(c1);
+            root(() => {
+                effect(() => {
+                    c1.val();
                     order += "e1";
-                    ef.effect((e) => {
+                    effect(() => {
                         order += "e2";
-                        e.read(s2);
-                        e.cleanup(() => { order += "cl1"; });
+                        s2.val();
+                        cleanup(() => { order += "cl1"; });
                     });
                 });
             });
