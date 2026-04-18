@@ -426,39 +426,34 @@ function context() {
 
 /**
  * Registers a dependency link from sender -> this (the tracking node).
- * Called from val() when tracking is active (STATE & STATE_LISTEN).
- *
- * Invariants at entry (guaranteed by the call-site guard in val()):
- *   - STATE & STATE_LISTEN !== 0  (this is tracking)
- *   - sender._version !== RVER    (not already tracked this run)
+ * Called from val() only for non-reuse cases (new dep or conflict).
+ * The common reuse case (stamp === RVER - 1) is handled inline in val().
  *
  * @this {Receiver}
  * @param {Sender} sender
+ * @param {number} stamp - sender's previous _version before tagging
  * @returns {void}
  */
-function _read(sender) {
-    let version = RVER;
-    let stamp = sender._version;
-
-    sender._version = version;
-
-    /** Reuse: was our dep last run, visited again this run — O(1) */
-    if (stamp === version - 1) {
-        REUSED++;
-        return;
-    }
-
-    /**
-     * Conflict: tagged by some other running node in this execution
-     * tree. Save [sender, version] to global VSTACK for restoration.
-     */
+function _read(sender, stamp) {
+    /** Conflict: tagged by some other running node in this execution
+     *  tree. Save [sender, oldVersion] to VSTACK for restoration. */
     if (stamp > TRANSACTION) {
         VSTACK[VCOUNT++] = sender;
         VSTACK[VCOUNT++] = stamp;
     }
 
     if (this._flag & FLAG_SETUP) {
-        connect(this, sender);
+        /** Setup path: first run, push deps to DSTACK. */
+        if (this._dep1 === null) {
+            let subslot = subscribe(sender, this, -1);
+            this._dep1 = sender;
+            this._dep1slot = subslot;
+        } else {
+            let depslot = DCOUNT - DBASE;
+            let subslot = subscribe(sender, this, depslot);
+            DSTACK[DCOUNT++] = sender;
+            DSTACK[DCOUNT++] = subslot;
+        }
     } else if (this._deps === null) {
         this._deps = [sender, 0];
         this._flag &= ~FLAG_SINGLE;
@@ -528,8 +523,16 @@ function _read(sender) {
      * @returns {T}
      */
     SignalProto.val = function () {
-        if ((STATE & STATE_LISTEN) !== 0 && RVER !== this._version) {
-            RUNNING._read(this);
+        if ((STATE & STATE_LISTEN) !== 0) {
+            let stamp = this._version;
+            if (stamp !== RVER) {
+                this._version = RVER;
+                if (stamp === RVER - 1) {
+                    REUSED++;
+                } else {
+                    RUNNING._read(this, stamp);
+                }
+            }
         }
         return this._value;
     };
@@ -615,8 +618,16 @@ function _read(sender) {
                 }
             }
         }
-        if ((STATE & STATE_LISTEN) !== 0 && RVER !== this._version) {
-            RUNNING._read(this);
+        if ((STATE & STATE_LISTEN) !== 0) {
+            let stamp = this._version;
+            if (stamp !== RVER) {
+                this._version = RVER;
+                if (stamp === RVER - 1) {
+                    REUSED++;
+                } else {
+                    RUNNING._read(this, stamp);
+                }
+            }
         }
         if (this._flag & FLAG_ERROR) {
             throw this._value;
@@ -1481,18 +1492,6 @@ function unbound(node) {
  * @param {Receiver} receiver
  * @param {Sender} sender
  */
-function connect(receiver, sender) {
-    if (receiver._dep1 === null) {
-        let subslot = subscribe(sender, receiver, -1);
-        receiver._dep1 = sender;
-        receiver._dep1slot = subslot;
-    } else {
-        let depslot = DCOUNT - DBASE;
-        let subslot = subscribe(sender, receiver, depslot);
-        DSTACK[DCOUNT++] = sender;
-        DSTACK[DCOUNT++] = subslot;
-    }
-}
 
 // ─── patchDeps ─────────────────────────────────────────────────────────────
 
