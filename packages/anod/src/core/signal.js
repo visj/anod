@@ -63,20 +63,6 @@ var RUNNING = null;
  * @type {number}
  */
 var STATE = 0;
-/**
- * Currently-tracking receiver's version. Mirror of RUNNING's tracking
- * version when RUNNING is a Receiver in a tracking context — but as a plain
- * number, avoids the bimorphic field-access cost that RUNNING._version
- * would incur at every sig.val() call site. Set by Compute/Effect
- * _update when entering the tracking path, restored on exit.
- * @type {number}
- */
-var RVER = 0;
-
-/**
- * @type {number}
- */
-var TRANSACTION = 0;
 
 /**
  * @type {Array<Sender | number>}
@@ -135,12 +121,22 @@ var IDLE = true;
 /**
  * @type {number}
  */
-var VERSION = 1;
+var SEED = 1;
+
+/**
+ * @type {number}
+ */
+var VERSION = 0;
+
+/**
+ * @type {number}
+ */
+var TRANSACTION = 0;
 
 /** @const @type {Array<Disposer>} */
 var DISPOSES = [];
 
-var DISPOSES_COUNT = 0;
+var DISPOSER_COUNT = 0;
 
 /**
  * Writable senders (Signal + writable Compute) pending an assignment
@@ -156,7 +152,7 @@ var SENDERS = [];
  * @type {Array}
  */
 var PAYLOADS = [];
-var SENDERS_COUNT = 0;
+var SENDER_COUNT = 0;
 
 /**
  * @const
@@ -169,14 +165,14 @@ var COMPUTES_COUNT = 0;
 /** @const @type {Array<number>} */
 var LEVELS = [0, 0, 0, 0];
 /** @const @type {Array<Array<Effect>>} */
-var SCOPES = [[], [], [], []];
+var OWNERS = [[], [], [], []];
 
-var SCOPES_COUNT = 0;
+var OWNER_COUNT = 0;
 
 /** @const @type {Array<Effect>} */
-var EFFECTS = [];
+var RECEIVERS = [];
 
-var EFFECTS_COUNT = 0;
+var RECEIVER_COUNT = 0;
 
 // ─── Constructors ──────────────────────────────────────────────────────────
 // All five node types declared together. Fields only — methods are installed
@@ -271,8 +267,6 @@ function Compute(opts, fn, dep1, seed, args) {
 function Effect(opts, fn, dep1, owner, args) {
     /** @type {number} */
     this._flag = FLAG_INIT | (0 | opts);
-    /** @type {number} */
-    this._version = 0;
     /** @type {(function(W): (function(): void | void)) | (function(U,W): (function(): void | void)) | (function(U,V,W): (function(): void | void)) | null} */
     this._fn = fn;
     /** @type {Sender<U> | null} */
@@ -315,7 +309,7 @@ function Context(node) {
     /** @type {number} */
     this._flag = node._flag;
     /** @type {number} Unique per-context version for same-chunk dedup. */
-    this._version = VERSION += 2;
+    this._version = SEED += 2;
 }
 
 // ─── Prototype method implementations ──────────────────────────────────────
@@ -335,7 +329,7 @@ function dispose() {
         if (IDLE) {
             this._dispose();
         } else {
-            DISPOSES[DISPOSES_COUNT++] = this;
+            DISPOSES[DISPOSER_COUNT++] = this;
         }
     }
 }
@@ -354,74 +348,6 @@ function error() {
  */
 function loading() {
     return (this._flag & FLAG_LOADING) !== 0;
-}
-
-/**
- * Declares the currently-running compute's output semantically equal (or not)
- * to its previous value. Operates on RUNNING.
- * @param {boolean=} eq
- * @returns {void}
- */
-function equal(eq) {
-    if (eq === false) {
-        RUNNING._flag = (RUNNING._flag | FLAG_NOTEQUAL) & ~FLAG_EQUAL;
-    } else {
-        RUNNING._flag = (RUNNING._flag | FLAG_EQUAL) & ~FLAG_NOTEQUAL;
-    }
-}
-
-/**
- * Marks the currently-running node stable — no dynamic dep tracking on
- * subsequent runs. Operates on RUNNING.
- * @returns {void}
- */
-function stable() {
-    RUNNING._flag |= FLAG_STABLE;
-}
-
-/**
- * Registers a cleanup fn on the currently-running owner (Effect or Root).
- * Operates on RUNNING. Stored compactly: _cleanup holds a single function
- * when there's one registration, graduating to an array on the second.
- * @param {function(): void} fn
- * @returns {void}
- */
-function cleanup(fn) {
-    addCleanup(RUNNING, fn);
-}
-
-/**
- * Registers a recover handler on the currently-running owner (Effect or Root).
- * Operates on RUNNING.
- * @param {function(*): boolean} fn
- * @returns {void}
- */
-function recover(fn) {
-    let rec = RUNNING._recover;
-    if (rec === null) {
-        RUNNING._recover = fn;
-    } else if (typeof rec === 'function') {
-        RUNNING._recover = [rec, fn];
-    } else {
-        rec.push(fn);
-    }
-}
-
-/**
- * Creates an on-demand async tracking context for the currently-running
- * node. Call this inside a task/spawn fn before any `await` to capture a
- * handle that can register deps across async boundaries via `c.val(sig)`.
- *
- * Wraps the node's `_args` as `{ _context, _args }` and sets FLAG_CONTEXT
- * so the next re-run disposes the old context and unwraps.
- * @returns {!Context}
- */
-function context() {
-    let node = RUNNING;
-    let ctx = new Context(node);
-    node._args = { _context: ctx, _args: node._args };
-    node._flag |= FLAG_CONTEXT;
-    return ctx;
 }
 
 /**
@@ -498,6 +424,72 @@ function _read(sender, stamp) {
     ComputeProto.error = EffectProto.error = error;
     ComputeProto.loading = EffectProto.loading = loading;
 
+    // ─── Shared owner methods — Root + Effect ──────────────────────────────
+
+    /**
+     * Registers a cleanup fn on this owner. Stored compactly: _cleanup holds
+     * a single fn for count=1, graduating to an array on the second.
+     * @this {!Root | !Effect}
+     * @param {function(): void} fn
+     * @returns {void}
+     */
+    function _addCleanup(fn) {
+        let c = this._cleanup;
+        if (c === null) {
+            this._cleanup = fn;
+        } else if (typeof c === 'function') {
+            this._cleanup = [c, fn];
+        } else {
+            c.push(fn);
+        }
+    }
+
+    /**
+     * Registers a recover handler on this owner.
+     * @this {!Root | !Effect}
+     * @param {function(*): boolean} fn
+     * @returns {void}
+     */
+    function _addRecover(fn) {
+        let rec = this._recover;
+        if (rec === null) {
+            this._recover = fn;
+        } else if (typeof rec === 'function') {
+            this._recover = [rec, fn];
+        } else {
+            rec.push(fn);
+        }
+    }
+
+    /**
+     * Marks the node's output semantically equal (or not) to its previous
+     * value. Shared by Compute and Context — both carry a _flag.
+     * @this {!Compute | !Context}
+     * @param {boolean=} eq
+     * @returns {void}
+     */
+    function _equal(eq) {
+        if (eq === false) {
+            this._flag = (this._flag | FLAG_NOTEQUAL) & ~FLAG_EQUAL;
+        } else {
+            this._flag = (this._flag | FLAG_EQUAL) & ~FLAG_NOTEQUAL;
+        }
+    }
+
+    /**
+     * Marks the node stable — no dynamic dep tracking on subsequent runs.
+     * @this {!Compute | !Effect}
+     * @returns {void}
+     */
+    function _stable() {
+        this._flag |= FLAG_STABLE;
+    }
+
+    RootProto._addCleanup = EffectProto._addCleanup = _addCleanup;
+    RootProto._addRecover = EffectProto._addRecover = _addRecover;
+    ComputeProto.equal = ContextProto.equal = _equal;
+    ComputeProto.stable = EffectProto.stable = _stable;
+
     // ─── Root — single-use methods ─────────────────────────────────────────
 
     /**
@@ -525,9 +517,9 @@ function _read(sender, stamp) {
     SignalProto.val = function () {
         if ((STATE & STATE_LISTEN) !== 0) {
             let stamp = this._version;
-            if (stamp !== RVER) {
-                this._version = RVER;
-                if (stamp === RVER - 1) {
+            if (stamp !== VERSION) {
+                this._version = VERSION;
+                if (stamp === VERSION - 1) {
                     REUSED++;
                 } else {
                     RUNNING._read(this, stamp);
@@ -550,7 +542,7 @@ function _read(sender, stamp) {
                 start();
             } else {
                 this._flag |= FLAG_SCHEDULED;
-                let index = SENDERS_COUNT++;
+                let index = SENDER_COUNT++;
                 SENDERS[index] = this;
                 PAYLOADS[index] = value;
             }
@@ -599,10 +591,10 @@ function _read(sender, stamp) {
                 IDLE = false;
                 try {
                     if (flag & FLAG_STALE || needsUpdate(this, TIME)) {
-                        TRANSACTION = VERSION;
+                        TRANSACTION = SEED;
                         this._update(TIME);
                     }
-                    if (SENDERS_COUNT > 0 || DISPOSES_COUNT > 0) {
+                    if (SENDER_COUNT > 0 || DISPOSER_COUNT > 0) {
                         start();
                     }
                 } finally {
@@ -620,9 +612,9 @@ function _read(sender, stamp) {
         }
         if ((STATE & STATE_LISTEN) !== 0) {
             let stamp = this._version;
-            if (stamp !== RVER) {
-                this._version = RVER;
-                if (stamp === RVER - 1) {
+            if (stamp !== VERSION) {
+                this._version = VERSION;
+                if (stamp === VERSION - 1) {
                     REUSED++;
                 } else {
                     RUNNING._read(this, stamp);
@@ -665,7 +657,7 @@ function _read(sender, stamp) {
                 start();
             } else {
                 this._flag |= FLAG_SCHEDULED;
-                let index = SENDERS_COUNT++;
+                let index = SENDER_COUNT++;
                 SENDERS[index] = this;
                 PAYLOADS[index] = value;
             }
@@ -747,9 +739,9 @@ function _read(sender, stamp) {
         } else {
             /** Setup or dynamic: bump RVER for dep tracking */
             STATE = STATE_LISTEN;
-            let prevRVer = RVER;
-            let version = VERSION += 2;
-            RVER = version;
+            let prevRVer = VERSION;
+            let version = SEED += 2;
+            VERSION = version;
             let saveStart = VCOUNT;
             let depsLen = 0;
             let depCount = 0;
@@ -774,9 +766,16 @@ function _read(sender, stamp) {
             }
 
             if (flag & FLAG_SETUP) {
-                /** Create exact-capacity _deps from DSTACK (setup only) */
+                /** Create exact-capacity _deps from DSTACK (setup only).
+                 *  Null out the slots we owned so the senders can be GC'd
+                 *  once the graph drops them — leaving sender refs in a
+                 *  global array would root them indefinitely. */
                 if (DCOUNT > DBASE) {
-                    this._deps = DSTACK.slice(DBASE, DCOUNT);
+                    let stack = DSTACK;
+                    this._deps = stack.slice(DBASE, DCOUNT);
+                    for (let i = DBASE; i < DCOUNT; i += 2) {
+                        stack[i] = null;
+                    }
                     DCOUNT = DBASE;
                 } else if (this._dep1 !== null) {
                     this._flag |= FLAG_SINGLE;
@@ -791,16 +790,20 @@ function _read(sender, stamp) {
                 REUSED = prevReused;
             }
 
-            /** Restore saved version tags from VSTACK (both setup and dynamic) */
+            /** Restore saved version tags from VSTACK (both setup and dynamic).
+             *  Null out the sender slot on the way by — numbers (subslots)
+             *  need no cleanup, but sender refs would otherwise stay
+             *  rooted in VSTACK across transactions. */
             if (VCOUNT > saveStart) {
                 let count = VCOUNT;
                 let stack = VSTACK;
                 for (let i = saveStart; i < count; i += 2) {
                     stack[i]._version = stack[i + 1];
+                    stack[i] = null;
                 }
                 VCOUNT = saveStart;
             }
-            RVER = prevRVer;
+            VERSION = prevRVer;
         }
 
         STATE = prevState;
@@ -908,9 +911,9 @@ function _read(sender, stamp) {
         } else {
             /** Setup or dynamic: bump RVER for dep tracking + own children */
             STATE = STATE_LISTEN | STATE_OWN;
-            let prevRVer = RVER;
-            let version = VERSION += 2;
-            RVER = version;
+            let prevRVer = VERSION;
+            let version = SEED += 2;
+            VERSION = version;
             let saveStart = VCOUNT;
             let depCount = 0;
             let depsLen = 0;
@@ -931,7 +934,14 @@ function _read(sender, stamp) {
             } finally {
                 if (flag & FLAG_SETUP) {
                     if (DCOUNT > DBASE) {
-                        this._deps = DSTACK.slice(DBASE, DCOUNT);
+                        /** Null out sender slots we pushed onto DSTACK —
+                         *  see the matching block in Compute._update for
+                         *  the rationale. */
+                        let stack = DSTACK;
+                        this._deps = stack.slice(DBASE, DCOUNT);
+                        for (let i = DBASE; i < DCOUNT; i += 2) {
+                            stack[i] = null;
+                        }
                         DCOUNT = DBASE;
                     } else if (this._dep1 !== null) {
                         this._flag |= FLAG_SINGLE;
@@ -944,16 +954,18 @@ function _read(sender, stamp) {
                     }
                     REUSED = reused;
                 }
-                /** Restore saved version tags from VSTACK (both setup and dynamic) */
+                /** Restore saved version tags from VSTACK (both setup and
+                 *  dynamic). Null the sender slot to release GC roots. */
                 if (VCOUNT > saveStart) {
                     let count = VCOUNT;
                     let stack = VSTACK;
                     for (let i = saveStart; i < count; i += 2) {
                         stack[i]._version = stack[i + 1];
+                        stack[i] = null;
                     }
                     VCOUNT = saveStart;
                 }
-                RVER = prevRVer;
+                VERSION = prevRVer;
                 this._flag &= ~(FLAG_STALE | FLAG_PENDING | FLAG_INIT | FLAG_SETUP);
                 STATE = prevState;
                 RUNNING = prevRunning;
@@ -975,7 +987,7 @@ function _read(sender, stamp) {
         }
 
         if (typeof value === 'function') {
-            addCleanup(this, value);
+            this._addCleanup(value);
         }
     };
 
@@ -1009,13 +1021,13 @@ function _read(sender, stamp) {
      */
     EffectProto._receive = function () {
         if (this._owned === null) {
-            EFFECTS[EFFECTS_COUNT++] = this;
+            RECEIVERS[RECEIVER_COUNT++] = this;
         } else {
             let level = this._level;
             let count = LEVELS[level];
-            SCOPES[level][count] = this;
+            OWNERS[level][count] = this;
             LEVELS[level] = count + 1;
-            SCOPES_COUNT++;
+            OWNER_COUNT++;
         }
     };
 
@@ -1073,22 +1085,10 @@ function _read(sender, stamp) {
     };
 
     /**
-     * Sets EQUAL/NOTEQUAL on the context. Folded into the node at
-     * settle time.
-     * @this {!Context}
-     * @param {boolean=} eq
-     */
-    ContextProto.equal = function (eq) {
-        if (eq === false) {
-            this._flag = (this._flag | FLAG_NOTEQUAL) & ~FLAG_EQUAL;
-        } else {
-            this._flag = (this._flag | FLAG_EQUAL) & ~FLAG_NOTEQUAL;
-        }
-    };
-
-    /**
      * Marks the context stable — no further dep tracking on subsequent
-     * `val()` calls.
+     * `val()` calls. Also clears FLAG_SETUP because Context._flag is an
+     * independent copy of the node's flag at creation time — both bits
+     * need clearing for context.val() to short-circuit correctly.
      * @this {!Context}
      */
     ContextProto.stable = function () {
@@ -1104,7 +1104,7 @@ function _read(sender, stamp) {
         if (this._flag & FLAG_DISPOSED) {
             throw new Error('Context disposed');
         }
-        addCleanup(this._node, fn);
+        this._node._addCleanup(fn);
     };
 
     /**
@@ -1116,15 +1116,7 @@ function _read(sender, stamp) {
         if (this._flag & FLAG_DISPOSED) {
             throw new Error('Context disposed');
         }
-        let node = this._node;
-        let rec = node._recover;
-        if (rec === null) {
-            node._recover = fn;
-        } else if (typeof rec === 'function') {
-            node._recover = [rec, fn];
-        } else {
-            rec.push(fn);
-        }
+        this._node._addRecover(fn);
     };
 
     // ─── Bound single-dep prototype methods ───────────────────────────────
@@ -1197,7 +1189,7 @@ function _read(sender, stamp) {
             let level = owner._level + 1;
             if (owner._level > 2 && level >= LEVELS.length) {
                 LEVELS.push(0);
-                SCOPES.push([]);
+                OWNERS.push([]);
             }
             node._level = level;
             addOwned(owner, node);
@@ -1228,7 +1220,7 @@ function _read(sender, stamp) {
             let level = owner._level + 1;
             if (owner._level > 2 && level >= LEVELS.length) {
                 LEVELS.push(0);
-                SCOPES.push([]);
+                OWNERS.push([]);
             }
             node._level = level;
             addOwned(owner, node);
@@ -1370,28 +1362,6 @@ function clearSubs(send) {
             clearSender(/** @type {Receiver} */(subs[i]), /** @type {number} */(subs[i + 1]));
         }
         send._subs = null;
-    }
-}
-
-/**
- * Runs and clears any registered cleanup fns. Called before re-running an
- * effect, and on disposal. Cheap when `_cleanup` is null (common) — caller
- * is expected to guard via the null check before invoking.
- * @param {Owner} owner
- * @returns {void}
- */
-/**
- * @param {!Owner} owner
- * @param {function(): void} fn
- */
-function addCleanup(owner, fn) {
-    let c = owner._cleanup;
-    if (c === null) {
-        owner._cleanup = fn;
-    } else if (typeof c === 'function') {
-        owner._cleanup = [c, fn];
-    } else {
-        c.push(fn);
     }
 }
 
@@ -1609,15 +1579,43 @@ function patchDeps(node, version, depCount, newLen) {
             }
         }
     }
+    if (ni < newLen) {
+        if (node._dep1 === null) {
+            /** Fill hole with next new dep */
+            let newDep = /** @type {Sender} */(deps[ni]);
+            let subslot = subscribe(newDep, node, i);
+            deps[i] = newDep;
+            deps[i + 1] = subslot;
+            ni += 2;
+        }
+        /** Remaining new deps — subscribe at the end of the live region */
+        while (ni < newLen) {
+            let dep = /** @type {Sender} */(deps[ni]);
+            let subslot = subscribe(dep, node, tail);
+            deps[tail] = dep;
+            deps[tail + 1] = subslot;
+            tail += 2;
+            ni += 2;
+        }
+    }
 
-    /** Remaining new deps — subscribe at the end of the live region */
-    while (ni < newLen) {
-        let dep = /** @type {Sender} */(deps[ni]);
-        let subslot = subscribe(dep, node, tail);
-        deps[tail] = dep;
-        deps[tail + 1] = subslot;
-        tail += 2;
-        ni += 2;
+    /** Invariant: if any deps remain, `_dep1` must be populated.
+     *  `checkRun` dereferences `node._dep1` without a null check, and
+     *  the `existingLen = (depCount - 1) * 2` formula above implicitly
+     *  assumes one dep is in dep1. Promote the last remaining array
+     *  entry (swap-with-last, O(1)) when dep1 is empty. tail=0 is then
+     *  handled uniformly by the branch below. */
+    if (node._dep1 === null && tail > 0) {
+        tail -= 2;
+        let dep = /** @type {Sender} */(deps[tail]);
+        let slot = /** @type {number} */(deps[tail + 1]);
+        node._dep1 = dep;
+        node._dep1slot = slot;
+        if (slot === -1) {
+            dep._sub1slot = -1;
+        } else {
+            dep._subs[slot + 1] = -1;
+        }
     }
 
     /** Trim or null out, update FLAG_SINGLE */
@@ -1626,19 +1624,6 @@ function patchDeps(node, version, depCount, newLen) {
         if (node._dep1 !== null) {
             node._flag |= FLAG_SINGLE;
         }
-    } else if (tail === 2 && node._dep1 === null) {
-        /** Single dep in array, dep1 empty — promote to dep1 */
-        let dep = /** @type {Sender} */(deps[0]);
-        let slot = /** @type {number} */(deps[1]);
-        node._dep1 = dep;
-        node._dep1slot = slot;
-        if (slot === -1) {
-            dep._sub1slot = -1;
-        } else {
-            dep._subs[slot + 1] = -1;
-        }
-        node._deps = null;
-        node._flag |= FLAG_SINGLE;
     } else {
         node._flag &= ~FLAG_SINGLE;
         /** Shrink the array with explicit pops rather than assigning
@@ -1737,10 +1722,10 @@ function needsUpdate(node, time) {
     if (dep !== null) {
         let flag = dep._flag;
         if (flag & FLAG_STALE) {
-            TRANSACTION = VERSION;
+            TRANSACTION = SEED;
                 /** @type {Compute} */(dep)._update(time);
         } else if (flag & FLAG_PENDING) {
-            TRANSACTION = VERSION;
+            TRANSACTION = SEED;
             if (flag & FLAG_SINGLE) {
                 checkSingle(/** @type {Compute} */(dep), time);
             } else {
@@ -1758,10 +1743,10 @@ function needsUpdate(node, time) {
             dep = /** @type {Sender} */(deps[i]);
             let flag = dep._flag;
             if (flag & FLAG_STALE) {
-                TRANSACTION = VERSION;
+                TRANSACTION = SEED;
                     /** @type {Compute} */(dep)._update(time);
             } else if (flag & FLAG_PENDING) {
-                TRANSACTION = VERSION;
+                TRANSACTION = SEED;
                 if (flag & FLAG_SINGLE) {
                     checkSingle(/** @type {Compute} */(dep), time);
                 } else {
@@ -1915,6 +1900,10 @@ function checkRun(node, time) {
         while (CTOP > base) {
             CTOP--;
             let parent = CSTACK[CTOP];
+            /** Release the slot so the popped compute isn't rooted in
+             *  CSTACK until the slot is overwritten by a future call.
+             *  CINDEX holds numbers, so no cleanup needed there. */
+            CSTACK[CTOP] = null;
             /**
              * `node` is always the child that the parent was scanning
              * when it pushed — no need to look it up from parent._dep1
@@ -2088,7 +2077,7 @@ function settle(node, value) {
  * @returns {void}
  */
 function checkDeps(node) {
-    let stamp = VERSION += 2;
+    let stamp = SEED += 2;
     let dep1 = node._dep1;
     let deps = node._deps;
     if (dep1 !== null) {
@@ -2147,7 +2136,7 @@ function resolveEffectPromise(ref, promise) {
                 ctx._flag &= ~FLAG_SETUP;
             }
             if (typeof val === 'function') {
-                addCleanup(node, val);
+                node._addCleanup(val);
             }
         }
     }, (err) => {
@@ -2198,7 +2187,7 @@ function resolveEffectIterator(ref, iterable) {
             ctx._flag &= ~FLAG_SETUP;
         }
         if (typeof result.value === 'function') {
-            addCleanup(node, result.value);
+            node._addCleanup(result.value);
         }
     };
     let onError = (err) => {
@@ -2231,7 +2220,7 @@ function startRoot(root, fn) {
     try {
         let ret = fn(root);
         if (typeof ret === 'function') {
-            addCleanup(root, ret);
+            root._addCleanup(ret);
         }
     } finally {
         IDLE = idle;
@@ -2248,9 +2237,9 @@ function startCompute(node) {
     if (IDLE) {
         IDLE = false;
         try {
-            TRANSACTION = VERSION;
+            TRANSACTION = SEED;
             node._update(TIME);
-            if (SENDERS_COUNT > 0 || DISPOSES_COUNT > 0) {
+            if (SENDER_COUNT > 0 || DISPOSER_COUNT > 0) {
                 start();
             }
         } finally {
@@ -2269,9 +2258,9 @@ function startEffect(node) {
     if (IDLE) {
         IDLE = false;
         try {
-            TRANSACTION = VERSION;
+            TRANSACTION = SEED;
             node._update(TIME);
-            if (SENDERS_COUNT > 0 || DISPOSES_COUNT > 0) {
+            if (SENDER_COUNT > 0 || DISPOSER_COUNT > 0) {
                 start();
             }
         } catch (err) {
@@ -2312,32 +2301,32 @@ function start() {
     try {
         do {
             time = ++TIME;
-            if (DISPOSES_COUNT > 0) {
-                let count = DISPOSES_COUNT;
+            if (DISPOSER_COUNT > 0) {
+                let count = DISPOSER_COUNT;
                 for (let i = 0; i < count; i++) {
                     DISPOSES[i]._dispose();
                     DISPOSES[i] = null;
                 }
-                DISPOSES_COUNT = 0;
+                DISPOSER_COUNT = 0;
             }
-            if (SENDERS_COUNT > 0) {
-                let count = SENDERS_COUNT;
+            if (SENDER_COUNT > 0) {
+                let count = SENDER_COUNT;
                 for (let i = 0; i < count; i++) {
                     SENDERS[i]._assign(PAYLOADS[i]);
                     SENDERS[i] = PAYLOADS[i] = null;
                 }
-                SENDERS_COUNT = 0;
+                SENDER_COUNT = 0;
             }
-            if (SCOPES_COUNT > 0) {
+            if (OWNER_COUNT > 0) {
                 let levels = LEVELS.length;
                 for (let i = 0; i < levels; i++) {
                     let count = LEVELS[i];
-                    let effects = SCOPES[i];
+                    let effects = OWNERS[i];
                     for (let j = 0; j < count; j++) {
                         let node = effects[j];
                         if ((node._flag & FLAG_STALE) || ((node._flag & FLAG_PENDING) && needsUpdate(node, time))) {
                             try {
-                                TRANSACTION = VERSION;
+                                TRANSACTION = SEED;
                                 node._update(time);
                             } catch (err) {
                                 if (!thrown) {
@@ -2355,15 +2344,15 @@ function start() {
                     }
                     LEVELS[i] = 0;
                 }
-                SCOPES_COUNT = 0;
+                OWNER_COUNT = 0;
             }
-            if (EFFECTS_COUNT > 0) {
-                let count = EFFECTS_COUNT;
+            if (RECEIVER_COUNT > 0) {
+                let count = RECEIVER_COUNT;
                 for (let i = 0; i < count; i++) {
-                    let node = EFFECTS[i];
-                    EFFECTS[i] = null;
+                    let node = RECEIVERS[i];
+                    RECEIVERS[i] = null;
                     if ((node._flag & FLAG_STALE) || ((node._flag & FLAG_PENDING) && needsUpdate(node, time))) {
-                        TRANSACTION = VERSION;
+                        TRANSACTION = SEED;
                         try {
                             node._update(time);
                         } catch (err) {
@@ -2379,7 +2368,7 @@ function start() {
                         node._flag &= ~(FLAG_STALE | FLAG_PENDING);
                     }
                 }
-                EFFECTS_COUNT = 0;
+                RECEIVER_COUNT = 0;
             }
             if (cycle++ === 1e5) {
                 error = new Error('Runaway cycle');
@@ -2388,15 +2377,15 @@ function start() {
             }
         } while (
             !thrown &&
-            (SENDERS_COUNT > 0 ||
-                DISPOSES_COUNT > 0)
+            (SENDER_COUNT > 0 ||
+                DISPOSER_COUNT > 0)
         );
     } finally {
         IDLE = true;
-        DISPOSES_COUNT =
-            SENDERS_COUNT =
-            EFFECTS_COUNT =
-            SCOPES_COUNT = 0;
+        DISPOSER_COUNT =
+            SENDER_COUNT =
+            OWNER_COUNT = 
+            RECEIVER_COUNT = 0;
         if (thrown) {
             throw error;
         }
@@ -2505,7 +2494,7 @@ function effect(fn, opts, args) {
         let level = owner._level + 1;
         if (owner._level > 2 && level >= LEVELS.length) {
             LEVELS.push(0);
-            SCOPES.push([]);
+            OWNERS.push([]);
         }
         node._level = level;
         addOwned(owner, node);
@@ -2531,7 +2520,7 @@ function spawn(fn, opts, args) {
         let level = owner._level + 1;
         if (owner._level > 2 && level >= LEVELS.length) {
             LEVELS.push(0);
-            SCOPES.push([]);
+            OWNERS.push([]);
         }
         node._level = level;
         addOwned(owner, node);
@@ -2557,7 +2546,7 @@ function watch(fn, opts, args) {
         let level = owner._level + 1;
         if (owner._level > 2 && level >= LEVELS.length) {
             LEVELS.push(0);
-            SCOPES.push([]);
+            OWNERS.push([]);
         }
         node._level = level;
         addOwned(owner, node);
@@ -2582,6 +2571,56 @@ function batch(fn) {
     } else {
         fn();
     }
+}
+
+/**
+ * Declares the currently-running compute's output semantically equal (or not)
+ * to its previous value. Delegates to the prototype method on RUNNING.
+ * @param {boolean=} eq
+ * @returns {void}
+ */
+function equal(eq) {
+    RUNNING.equal(eq);
+}
+
+/**
+ * Marks the currently-running node stable — no dynamic dep tracking on
+ * subsequent runs. Delegates to the prototype method on RUNNING.
+ * @returns {void}
+ */
+function stable() {
+    RUNNING.stable();
+}
+
+/**
+ * Registers a cleanup fn on the currently-running owner (Effect or Root).
+ * Delegates to the prototype method on RUNNING.
+ * @param {function(): void} fn
+ * @returns {void}
+ */
+function cleanup(fn) {
+    RUNNING._addCleanup(fn);
+}
+
+/**
+ * Registers a recover handler on the currently-running owner (Effect or Root).
+ * Delegates to the prototype method on RUNNING.
+ * @param {function(*): boolean} fn
+ * @returns {void}
+ */
+function recover(fn) {
+    RUNNING._addRecover(fn);
+}
+
+/**
+ * @returns {!Context}
+ */
+function context() {
+    let node = RUNNING;
+    let ctx = new Context(node);
+    node._args = { _context: ctx, _args: node._args };
+    node._flag |= FLAG_CONTEXT;
+    return ctx;
 }
 
 export {
