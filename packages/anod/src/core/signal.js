@@ -20,6 +20,7 @@ const FLAG_DEFER = 1 << 10;
 const FLAG_STABLE = 1 << 11;
 
 const FLAG_SINGLE = 1 << 12;
+const FLAG_CONTEXT = 1 << 13;
 const FLAG_BOUND = 1 << 14;
 const FLAG_DERIVED = 1 << 15;
 const FLAG_WEAK = 1 << 17;
@@ -297,33 +298,23 @@ function Effect(opts, fn, dep1, owner, args) {
 }
 
 /**
- * Per-run tracking handle given to async dynamic Compute/Effect fns. Allows
- * `reader.read(sig)` before and after `await`. On each run, a fresh Reader
- * is minted; the old one is marked FLAG_DISPOSED so any in-flight callback
- * that tries to `.read()` throws — the throw bubbles into the promise's
- * `.catch`, where the out-of-time guard in resolvePromise/resolveIterator
- * safely ignores it.
+ * On-demand async tracking handle. Created by calling `context()` inside an
+ * async compute/effect fn. Allows `c.val(sig)` before and after `await`.
+ * Stored on the node via `_args = { _context, _args }` with FLAG_CONTEXT set.
+ * On re-run the old Context is disposed and a new one can be minted.
  *
- * The Reader's `_version` is a fast-hack used only to dedup same-chunk
- * duplicate reads (`for (…) r.read(sig)`). It is NOT trusted across await —
- * cross-await duplicates may still slip through if another compute re-tags
- * `sender._version` between our reads. Those are swept at settle time via
- * patchReaderDeps.
+ * The Context's `_version` deduplicates same-chunk reads. It is NOT trusted
+ * across await — cross-await duplicates are swept at settle time via
+ * checkDeps.
  * @constructor
  * @param {!Receiver} node
  */
-function Reader(node) {
+function Context(node) {
     /** @type {Receiver | null} */
     this._node = node;
-    /** Snapshot the node's flag directly. The caller (`_update` / the
-     *  factory) has already cleared per-run bits like EQUAL/NOTEQUAL on
-     *  the node, and set FLAG_SETUP on the first run, so the Reader's
-     *  tracking-mode check `(STABLE | SETUP) === STABLE` lines up
-     *  without extra masking. Bits the Reader doesn't interpret are
-     *  just inert.
-     *  @type {number} */
+    /** @type {number} */
     this._flag = node._flag;
-    /** @type {number} Unique per-reader version for same-chunk dedup. */
+    /** @type {number} Unique per-context version for same-chunk dedup. */
     this._version = VERSION += 2;
 }
 
@@ -417,6 +408,23 @@ function recover(fn) {
 }
 
 /**
+ * Creates an on-demand async tracking context for the currently-running
+ * node. Call this inside a task/spawn fn before any `await` to capture a
+ * handle that can register deps across async boundaries via `c.val(sig)`.
+ *
+ * Wraps the node's `_args` as `{ _context, _args }` and sets FLAG_CONTEXT
+ * so the next re-run disposes the old context and unwraps.
+ * @returns {!Context}
+ */
+function context() {
+    let node = RUNNING;
+    let ctx = new Context(node);
+    node._args = { _context: ctx, _args: node._args };
+    node._flag |= FLAG_CONTEXT;
+    return ctx;
+}
+
+/**
  * Registers a dependency link from sender -> this (the tracking node).
  * Called from val() when tracking is active (STATE & STATE_LISTEN).
  *
@@ -471,7 +479,7 @@ function _read(sender) {
     /** @const */
     let EffectProto = Effect.prototype;
     /** @const */
-    let ReaderProto = Reader.prototype;
+    let ContextProto = Context.prototype;
 
     // ─── Prototype-level default fields ────────────────────────────────────
 
@@ -679,8 +687,8 @@ function _read(sender) {
         this._flag = FLAG_DISPOSED;
         clearSubs(this);
         clearDeps(this);
-        if (flag & FLAG_ASYNC) {
-            this._args._reader._dispose();
+        if (flag & FLAG_CONTEXT) {
+            this._args._context._dispose();
         }
         this._fn =
             this._value =
@@ -694,11 +702,15 @@ function _read(sender) {
     ComputeProto._update = function (time) {
         let flag = this._flag;
         this._time = time;
-        if (flag & FLAG_ASYNC) {
-            this._flag = flag & ~(FLAG_STALE | FLAG_INIT | FLAG_LOADING | FLAG_EQUAL | FLAG_NOTEQUAL);
-            return this._updateAsync(time);
-        }
         this._flag = (flag & ~(FLAG_STALE | FLAG_INIT | FLAG_LOADING | FLAG_EQUAL | FLAG_NOTEQUAL)) | FLAG_RUNNING;
+
+        /** On re-run, dispose the old Context if one was created. Unwrap
+         *  _args back to the user's args and clear the flag. */
+        if (flag & FLAG_CONTEXT) {
+            this._args._context._dispose();
+            this._args = this._args._args;
+            this._flag &= ~FLAG_CONTEXT;
+        }
 
         /** Save RUNNING/STATE for re-entry. */
         let prevRunning = RUNNING;
@@ -784,6 +796,27 @@ function _read(sender) {
         RUNNING = prevRunning;
 
         flag = this._flag &= ~(FLAG_RUNNING | FLAG_STALE | FLAG_PENDING | FLAG_INIT | FLAG_SETUP);
+
+        /** Async nodes: check if the value is a promise/iterator. If so,
+         *  defer the value update to the resolve callback. */
+        if (flag & FLAG_ASYNC) {
+            if (flag & FLAG_ERROR) {
+                this._value = value;
+                this._ctime = time;
+                return;
+            }
+            let kind = asyncKind(value);
+            if (kind !== ASYNC_SYNC) {
+                this._flag |= FLAG_LOADING;
+                if (kind === ASYNC_PROMISE) {
+                    resolvePromise(new WeakRef(this), /** @type {IThenable} */(value), time);
+                } else {
+                    resolveIterator(new WeakRef(this), /** @type {AsyncIterator | AsyncIterable} */(value), time);
+                }
+                return;
+            }
+        }
+
         if (flag & FLAG_ERROR) {
             this._value = value;
             this._ctime = time;
@@ -794,101 +827,6 @@ function _read(sender) {
             }
         } else if (flag & FLAG_NOTEQUAL) {
             this._ctime = time;
-        }
-    };
-
-    /**
-     * Async update path. Three cases:
-     *   - Bound (FLAG_STABLE | FLAG_BOUND): pass dep.val() as first arg, no tracking.
-     *   - Stable dynamic (FLAG_STABLE, no SETUP): reuse the existing Reader,
-     *     skip dep tear-down — the Reader's FLAG_STABLE makes its `read()`
-     *     short-circuit, so no new deps get registered and no old ones get
-     *     removed. Captured deps stay subscribed and keep firing reruns.
-     *   - Dynamic: tear down old deps, dispose old Reader, mint a new Reader,
-     *     invoke fn with (reader, prev, userArgs). Reader.read registers deps
-     *     synchronously on each call, surviving across await.
-     * @this {!Compute<T,U,V,W>}
-     * @param {number} time
-     */
-    ComputeProto._updateAsync = function (time) {
-        let flag = this._flag;
-        let value;
-        if (flag & FLAG_BOUND) {
-            /** Bound single-dep async — no reader, no tracking. */
-            try {
-                value = this._fn(this._dep1.val(), this._value, this._args);
-                this._flag &= ~FLAG_ERROR;
-            } catch (err) {
-                value = err;
-                this._flag |= FLAG_ERROR;
-            }
-        } else {
-            let reader;
-            /** Dynamic async — _args is always {_reader, _args}. */
-            let context = this._args;
-            /** Tear down + mint only when neither SETUP (first run, factory
-             *  reader still valid) nor STABLE (reader keeps firing after
-             *  stabilization with its captured deps). */
-            if (!(flag & (FLAG_STABLE | FLAG_SETUP))) {
-                /** Subsequent non-stable run: dispose the old reader so any
-                 *  in-flight callback hits `reader._flag & FLAG_DISPOSED`
-                 *  and throws; tear down the deps the reader registered;
-                 *  mint a fresh reader. */
-                context._reader._dispose();
-                if (this._dep1 !== null) {
-                    clearReceiver(this._dep1, this._dep1slot);
-                    this._dep1 = null;
-                    this._dep1slot = 0;
-                }
-                let deps = this._deps;
-                if (deps !== null) {
-                    let count = deps.length >> 1;
-                    while (count-- > 0) {
-                        let slot = deps.pop();
-                        let node = deps.pop();
-                        clearReceiver(node, slot);
-                    }
-                }
-                reader = context._reader = new Reader(this);
-            } else {
-                reader = context._reader;
-                /** Reusing the reader across runs — wipe per-run mutable
-                 *  flags so the fn starts from a clean EQUAL/NOTEQUAL
-                 *  state (STABLE persists by design). Matches the
-                 *  FLAG_EQUAL/NOTEQUAL clear that `_update` does on the
-                 *  node at the top of each sync run. */
-                reader._flag &= ~(FLAG_EQUAL | FLAG_NOTEQUAL);
-            }
-
-            try {
-                value = this._fn(reader, this._value, context._args);
-                this._flag = flag & ~FLAG_ERROR | (reader._flag & (FLAG_STABLE | FLAG_EQUAL | FLAG_NOTEQUAL));
-            } catch (err) {
-                this._value = err;
-                this._flag = flag & ~(FLAG_STALE | FLAG_PENDING | FLAG_INIT | FLAG_SETUP) | FLAG_ERROR;
-                this._ctime = time;
-                return;
-            }
-        }
-        this._flag &= ~(FLAG_STALE | FLAG_PENDING | FLAG_INIT | FLAG_SETUP);
-        let kind = asyncKind(value);
-        if (kind === ASYNC_SYNC) {
-            flag = this._flag;
-            if (value !== this._value) {
-                this._value = value;
-                if (!(flag & FLAG_EQUAL)) {
-                    this._ctime = time;
-                }
-            } else if (flag & FLAG_NOTEQUAL) {
-                this._ctime = time;
-            }
-        } else {
-            this._flag |= FLAG_LOADING;
-            if (kind === ASYNC_PROMISE) {
-                resolvePromise(new WeakRef(this), /** @type {IThenable} */(value), time);
-            } else {
-                resolveIterator(new WeakRef(this), /** @type {AsyncIterator | AsyncIterable} */(value), time);
-            }
         }
     };
 
@@ -925,13 +863,15 @@ function _read(sender) {
             this._recover = null;
         }
 
-        /** Async nodes delegate after pre-exec cleanup. The LOADING
-         *  bit only exists on async effects, so clearing it before the
-         *  sync fn runs would be dead work — confine the clear to the
-         *  async branch. */
+        /** On re-run, dispose the old Context if one was created. */
+        if (flag & FLAG_CONTEXT) {
+            this._args._context._dispose();
+            this._args = this._args._args;
+            this._flag &= ~FLAG_CONTEXT;
+        }
+
         if (flag & FLAG_ASYNC) {
-            this._flag = flag & ~FLAG_LOADING;
-            return this._updateAsync(time);
+            this._flag &= ~FLAG_LOADING;
         }
 
         /** Save RUNNING/STATE for re-entry. */
@@ -966,10 +906,10 @@ function _read(sender) {
             let dbase;
             let reused;
             if (flag & FLAG_SETUP) {
-                dbase = DBASE
+                dbase = DBASE;
                 DBASE = DCOUNT;
             } else {
-                reused = REUSED
+                reused = REUSED;
                 REUSED = 0;
                 depCount = sweepDeps(version - 1, this._dep1, this._deps);
                 depsLen = this._deps !== null ? this._deps.length : 0;
@@ -1009,76 +949,22 @@ function _read(sender) {
             }
         }
 
+        /** Async effects: check if the value is a promise/iterator. */
+        if (flag & FLAG_ASYNC) {
+            let kind = asyncKind(value);
+            if (kind !== ASYNC_SYNC) {
+                this._flag |= FLAG_LOADING;
+                if (kind === ASYNC_PROMISE) {
+                    resolveEffectPromise(new WeakRef(this), value);
+                } else {
+                    resolveEffectIterator(new WeakRef(this), value);
+                }
+                return;
+            }
+        }
+
         if (typeof value === 'function') {
-            this.cleanup(value);
-        }
-    };
-
-    /**
-     * @this {!Effect<U,V,W>}
-     * @param {number} time
-     */
-    EffectProto._updateAsync = function (time) {
-        let flag = this._flag;
-        let value;
-        if (flag & FLAG_BOUND) {
-            /** Bound single-dep async — no reader, no tracking. */
-            try {
-                value = this._fn(this._dep1.val(), this._args);
-            } finally {
-                this._time = time;
-                this._flag &= ~(FLAG_STALE | FLAG_PENDING);
-            }
-        } else {
-            /** Dynamic async — _args is always {_reader, _args}. See
-             *  `ComputeProto._updateAsync` for the three-case rationale.
-             *  FLAG_STABLE here means `.stable()` was called inside the
-             *  fn; subsequent runs reuse the same Reader (which has its
-             *  own FLAG_STABLE short-circuiting future reads). */
-            let context = this._args;
-            if (!(flag & (FLAG_STABLE | FLAG_SETUP))) {
-                /** Subsequent non-stable run: dispose the old reader so
-                 *  any in-flight callback hits `reader._flag &
-                 *  FLAG_DISPOSED` and throws; tear down the deps the
-                 *  reader registered; mint a fresh reader. */
-                context._reader._dispose();
-                if (this._dep1 !== null) {
-                    clearReceiver(this._dep1, this._dep1slot);
-                    this._dep1 = null;
-                }
-                let deps = this._deps;
-                if (deps !== null) {
-                    let count = deps.length >> 1;
-                    while (count-- > 0) {
-                        let slot = deps.pop();
-                        let node = deps.pop();
-                        clearReceiver(node, slot);
-                    }
-                }
-                context._reader = new Reader(this);
-            }
-
-            let reader = context._reader;
-            try {
-                value = this._fn(reader, context._args);
-                this._flag = flag | (reader._flag & (FLAG_STABLE));
-            } finally {
-                this._flag &= ~(FLAG_STALE | FLAG_PENDING | FLAG_INIT | FLAG_SETUP);
-            }
-        }
-
-        let kind = asyncKind(value);
-        if (kind === ASYNC_SYNC) {
-            if (typeof value === 'function') {
-                this.cleanup(value);
-            }
-        } else {
-            this._flag |= FLAG_LOADING;
-            if (kind === ASYNC_PROMISE) {
-                resolveEffectPromise(new WeakRef(this), value);
-            } else {
-                resolveEffectIterator(new WeakRef(this), value);
-            }
+            addCleanup(this, value);
         }
     };
 
@@ -1096,8 +982,8 @@ function _read(sender) {
         if (this._owned !== null) {
             clearOwned(this);
         }
-        if (flag & FLAG_ASYNC) {
-            this._args._reader._dispose();
+        if (flag & FLAG_CONTEXT) {
+            this._args._context._dispose();
         }
         this._fn =
             this._args =
@@ -1122,35 +1008,31 @@ function _read(sender) {
         }
     };
 
-    // ─── Reader — single-use methods ───────────────────────────────────────
+    // ─── Context — on-demand async tracking handle ─────────────────────────
 
     /**
-     * Registers a dep on the owning node and returns sender.val(). Throws
-     * if the reader has been disposed (owning node has re-updated or been
-     * disposed since this reader was minted). Short-circuits on
-     * `(STABLE | SETUP) === STABLE` — mirrors the sync `read()` check so
-     * tracking still happens during the first (setup) run even when
-     * OPT_STABLE was passed to the factory, then freezes after SETUP
-     * clears at settle time.
+     * Reads a sender's value and registers it as a dependency on the
+     * owning node. Throws if the context has been disposed (owning node
+     * re-ran or was disposed since this context was created).
+     *
+     * Uses the Context's own `_version` for dedup. Does NOT touch VSTACK
+     * because async runs are always separate from the main transaction
+     * loop and cannot poison any version.
      * @template T
-     * @this {!Reader}
+     * @this {!Context}
      * @param {!Sender<T>} sender
      * @returns {T}
      */
-    ReaderProto.read = function (sender) {
+    ContextProto.val = function (sender) {
         let flag = this._flag;
         if (flag & FLAG_DISPOSED) {
-            throw new Error('Reader disposed');
+            throw new Error('Context disposed');
         }
-        let value = sender.val();
+        let value = sender._value;
         if ((flag & (FLAG_STABLE | FLAG_SETUP)) === FLAG_STABLE) {
-            /** Stabilized — return current value, no subscribe. Deps
-             *  captured before `.stable()` stay subscribed; reads after
-             *  it pass through. */
             return value;
         }
         if (sender._version === this._version) {
-            /** Same sync chunk already read this sender — skip the subscribe. */
             return value;
         }
         sender._version = this._version;
@@ -1172,30 +1054,66 @@ function _read(sender) {
     };
 
     /**
-     * @this {Reader}
+     * @this {Context}
      */
-    ReaderProto._dispose = function () {
+    ContextProto._dispose = function () {
         this._flag = FLAG_DISPOSED;
         this._node = null;
-    }
+    };
 
-    /** The Reader mirrors the node's tracking API. `r.equal()` is the
-     *  shared `_equal` — just flips EQUAL/NOTEQUAL. `r.stable()` does
-     *  extra work on the Reader: it also clears FLAG_SETUP so the
-     *  `(STABLE | SETUP) === STABLE` short-circuit in `read()` fires
-     *  immediately, letting reads in the same first run stop tracking
-     *  as soon as the user says "stop". The node-level `_stable` can't
-     *  do this — on sync nodes SETUP drives the DSTACK setup machinery
-     *  and must not be cleared mid-fn. */
-    ReaderProto.equal = function (eq) {
+    /**
+     * Sets EQUAL/NOTEQUAL on the context. Folded into the node at
+     * settle time.
+     * @this {!Context}
+     * @param {boolean=} eq
+     */
+    ContextProto.equal = function (eq) {
         if (eq === false) {
             this._flag = (this._flag | FLAG_NOTEQUAL) & ~FLAG_EQUAL;
         } else {
             this._flag = (this._flag | FLAG_EQUAL) & ~FLAG_NOTEQUAL;
         }
     };
-    ReaderProto.stable = function () {
+
+    /**
+     * Marks the context stable — no further dep tracking on subsequent
+     * `val()` calls.
+     * @this {!Context}
+     */
+    ContextProto.stable = function () {
         this._flag = (this._flag | FLAG_STABLE) & ~FLAG_SETUP;
+    };
+
+    /**
+     * Registers a cleanup fn on the context's owning node.
+     * @this {!Context}
+     * @param {function(): void} fn
+     */
+    ContextProto.cleanup = function (fn) {
+        if (this._flag & FLAG_DISPOSED) {
+            throw new Error('Context disposed');
+        }
+        addCleanup(this._node, fn);
+    };
+
+    /**
+     * Registers a recover handler on the context's owning node.
+     * @this {!Context}
+     * @param {function(*): boolean} fn
+     */
+    ContextProto.recover = function (fn) {
+        if (this._flag & FLAG_DISPOSED) {
+            throw new Error('Context disposed');
+        }
+        let node = this._node;
+        let rec = node._recover;
+        if (rec === null) {
+            node._recover = fn;
+        } else if (typeof rec === 'function') {
+            node._recover = [rec, fn];
+        } else {
+            rec.push(fn);
+        }
     };
 
     // ─── Bound single-dep prototype methods ───────────────────────────────
@@ -2131,30 +2049,23 @@ function resolveIterator(ref, iterable, time) {
  */
 function settle(node, value) {
     node._flag &= ~FLAG_LOADING;
-    /** Fold any `r.stable()` / `r.equal()` bits the Reader picked up
-     *  during the run into the node — the EQUAL/NOTEQUAL branch below
-     *  and subsequent-run dispatch in `_updateAsync` both read from the
-     *  node's flag. The matching clear of EQUAL/NOTEQUAL on the node
-     *  happens at the top of each run in `_computeUpdate`, so we only
-     *  need to OR the new bits in. Clearing the Reader's SETUP marks
-     *  the end of the first run's setup phase — later reads on a
-     *  stable reader now short-circuit. Bound async has no Reader. */
-    if (!(node._flag & FLAG_BOUND)) {
-        let reader = node._args._reader;
-        node._flag |= reader._flag & (FLAG_STABLE | FLAG_EQUAL | FLAG_NOTEQUAL);
-        reader._flag &= ~FLAG_SETUP;
+    /** If a Context was created, fold its stable/equal/notequal bits
+     *  into the node and clear its SETUP so subsequent val() calls
+     *  on a stable context short-circuit. */
+    if (node._flag & FLAG_CONTEXT) {
+        let ctx = node._args._context;
+        node._flag |= ctx._flag & (FLAG_STABLE | FLAG_EQUAL | FLAG_NOTEQUAL);
+        ctx._flag &= ~FLAG_SETUP;
     }
 
     if (value !== node._value || (node._flag & FLAG_ERROR)) {
         node._value = value;
         let time = TIME + 1;
         node._ctime = time;
-        /** For async dynamic nodes the _args is {_reader, _args} — the
-         *  reader's reads during the run may have inserted duplicate
-         *  senders in _deps (cross-await pollution by other computes).
-         *  Sweep them now. The node keeps its fn and wrapper so it can
-         *  re-run on future signal changes. */
-        if (node._flag & FLAG_ASYNC) {
+        /** Context.val() across await boundaries may insert duplicate
+         *  deps (cross-await pollution by other computes re-tagging
+         *  sender._version). Sweep them now. */
+        if (node._flag & FLAG_CONTEXT) {
             if (node._deps !== null) {
                 checkDeps(node);
             }
@@ -2167,7 +2078,7 @@ function settle(node, value) {
 }
 
 /**
- * Remove duplicate senders from node._dep1/_deps (added by Reader.read
+ * Remove duplicate senders from node._dep1/_deps (added by Context.val
  * across await boundaries when another compute re-tagged sender._version
  * between our reads). Uses a fresh VERSION bump as the sweep stamp so it
  * cannot collide with any existing tag. Unsubscribes redundant slots.
@@ -2228,16 +2139,13 @@ function resolveEffectPromise(ref, promise) {
         let node = ref.deref();
         if (node !== void 0 && !(node._flag & FLAG_DISPOSED)) {
             node._flag &= ~FLAG_LOADING;
-            /** Fold the Reader's STABLE bit onto the effect so the next
-             *  rerun takes the no-tear-down path, and clear the Reader's
-             *  SETUP. Bound async has no Reader. */
-            if (!(node._flag & FLAG_BOUND)) {
-                let reader = node._args._reader;
-                node._flag |= reader._flag & FLAG_STABLE;
-                reader._flag &= ~FLAG_SETUP;
+            if (node._flag & FLAG_CONTEXT) {
+                let ctx = node._args._context;
+                node._flag |= ctx._flag & FLAG_STABLE;
+                ctx._flag &= ~FLAG_SETUP;
             }
             if (typeof val === 'function') {
-                node.cleanup(val);
+                addCleanup(node, val);
             }
         }
     }, (err) => {
@@ -2273,22 +2181,22 @@ function resolveEffectIterator(ref, iterable) {
         }
         if (result.done) {
             node._flag &= ~FLAG_LOADING;
-            if (!(node._flag & FLAG_BOUND)) {
-                let reader = node._args._reader;
-                node._flag |= reader._flag & FLAG_STABLE;
-                reader._flag &= ~FLAG_SETUP;
+            if (node._flag & FLAG_CONTEXT) {
+                let ctx = node._args._context;
+                node._flag |= ctx._flag & FLAG_STABLE;
+                ctx._flag &= ~FLAG_SETUP;
             }
             return;
         }
         iterator.next().then(onNext, onError);
         node._flag &= ~FLAG_LOADING;
-        if (!(node._flag & FLAG_BOUND)) {
-            let reader = node._args._reader;
-            node._flag |= reader._flag & FLAG_STABLE;
-            reader._flag &= ~FLAG_SETUP;
+        if (node._flag & FLAG_CONTEXT) {
+            let ctx = node._args._context;
+            node._flag |= ctx._flag & FLAG_STABLE;
+            ctx._flag &= ~FLAG_SETUP;
         }
         if (typeof result.value === 'function') {
-            node.cleanup(result.value);
+            addCleanup(node, result.value);
         }
     };
     let onError = (err) => {
@@ -2559,7 +2467,8 @@ function derive(fn, seed, opts, args) {
 
 /**
  * Async compute (dynamic, unbound).
- * task(fn, seed?, opts?, args?) — fn receives (reader, prev, args).
+ * task(fn, seed?, opts?, args?) — fn receives (prev, args), same as
+ * derive/compute. For reads after an async boundary, call context().
  * Honors `OPT_DEFER`.
  * @param {function} fn
  * @param {*=} seed
@@ -2569,10 +2478,7 @@ function derive(fn, seed, opts, args) {
  */
 function task(fn, seed, opts, args) {
     let flag = FLAG_ASYNC | FLAG_SETUP | ((0 | opts) & OPTIONS);
-    let node = new Compute(flag, fn, null, seed, null);
-    /** Wrap _args upfront so _updateAsync can unconditionally
-     *  dereference node._args._reader on every run. */
-    node._args = { _reader: new Reader(node), _args: args };
+    let node = new Compute(flag, fn, null, seed, args);
     if (STATE & STATE_OWN) {
         addOwned(RUNNING, node);
     }
@@ -2618,8 +2524,7 @@ function effect(fn, opts, args) {
 function spawn(fn, opts, args) {
     let flag = FLAG_ASYNC | FLAG_SETUP | ((0 | opts) & OPTIONS);
     let owner = (STATE & STATE_OWN) ? RUNNING : null;
-    let node = new Effect(flag, fn, null, owner, null);
-    node._args = { _reader: new Reader(node), _args: args };
+    let node = new Effect(flag, fn, null, owner, args);
     if (owner) {
         let level = owner._level + 1;
         if (owner._level > 2 && level >= LEVELS.length) {
@@ -2702,6 +2607,7 @@ export {
     watch,
     spawn,
     batch,
+    context,
     equal,
     stable,
     cleanup,

@@ -16,6 +16,7 @@ export {
     watch,
     spawn,
     batch,
+    context,
     equal,
     stable,
     cleanup,

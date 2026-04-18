@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { signal, compute, effect, task, spawn, OPT_STABLE } from "../";
+import { signal, compute, effect, task, spawn, context, OPT_STABLE } from "../";
 
 const tick = () => Promise.resolve();
 
@@ -7,7 +7,7 @@ describe("async", () => {
     describe("promise", () => {
         test("is loading while the promise is pending", async () => {
             let resolve;
-            const c1 = task((c) => { return new Promise(r => { resolve = r; }); });
+            const c1 = task(() => { return new Promise(r => { resolve = r; }); });
 
             expect(c1.loading()).toBe(true);
 
@@ -19,7 +19,7 @@ describe("async", () => {
 
         test("returns seed value while loading", async () => {
             let resolve;
-            const c1 = task((c) => { return new Promise(r => { resolve = r; }); }, 0);
+            const c1 = task(() => { return new Promise(r => { resolve = r; }); }, 0);
 
             expect(c1.val()).toBe(0);
             expect(c1.loading()).toBe(true);
@@ -32,7 +32,7 @@ describe("async", () => {
         });
 
         test("settles to the resolved value", async () => {
-            const c1 = task((c) => { return Promise.resolve(42); });
+            const c1 = task(() => { return Promise.resolve(42); });
 
             expect(c1.loading()).toBe(true);
             await tick();
@@ -43,7 +43,7 @@ describe("async", () => {
         });
 
         test("sets error flag on rejection", async () => {
-            const c1 = task((c) => { return Promise.reject(new Error("async error")); });
+            const c1 = task(() => { return Promise.reject(new Error("async error")); });
 
             await tick();
 
@@ -52,7 +52,7 @@ describe("async", () => {
         });
 
         test("rethrows the error when read after rejection", async () => {
-            const c1 = task((c) => { return Promise.reject(new Error("async error")); });
+            const c1 = task(() => { return Promise.reject(new Error("async error")); });
 
             await tick();
 
@@ -61,7 +61,7 @@ describe("async", () => {
 
         test("clears error on subsequent successful resolution", async () => {
             const s1 = signal(true);
-            const c1 = task((c) => {
+            const c1 = task(() => {
                 return s1.val()
                     ? Promise.reject(new Error("fail"))
                     : Promise.resolve(42);
@@ -79,10 +79,10 @@ describe("async", () => {
         });
 
         test("notifies downstream effect when promise settles", async () => {
-            const c1 = task((c) => { return Promise.resolve(42); });
+            const c1 = task(() => { return Promise.resolve(42); });
             let received = void 0;
 
-            effect((e) => { received = c1.val(); });
+            effect(() => { received = c1.val(); });
 
             expect(received).toBeUndefined(); // seed while loading
             await tick();
@@ -94,7 +94,7 @@ describe("async", () => {
             const resolvers = [];
             const s1 = signal(0);
 
-            const c1 = task((c) => {
+            const c1 = task(() => {
                 const v = s1.val();
                 return new Promise(r => { resolvers[v] = r; });
             });
@@ -126,7 +126,7 @@ describe("async", () => {
                 next() { return new Promise(r => { resolver = r; }); }
             };
 
-            const c1 = task((c) => { return iter; });
+            const c1 = task(() => { return iter; });
 
             expect(c1.loading()).toBe(true);
             expect(c1.val()).toBeUndefined();
@@ -143,12 +143,12 @@ describe("async", () => {
                 return() { return Promise.resolve({ done: true }); }
             };
 
-            const c1 = task((c) => { return iter; });
+            const c1 = task(() => { return iter; });
             const values = [];
 
             // Always call c1.val() so the effect subscribes to c1 as a dependency;
             // without this, c1 is never tracked and the effect won't re-run on settle.
-            effect((e) => {
+            effect(() => {
                 const v = c1.val();
                 if (!c1.loading()) {
                     values.push(v);
@@ -177,7 +177,7 @@ describe("async", () => {
                 return() { return Promise.resolve({ done: true }); }
             };
 
-            const c1 = task((c) => { return iter; });
+            const c1 = task(() => { return iter; });
 
             expect(c1.loading()).toBe(true);
 
@@ -193,7 +193,7 @@ describe("async", () => {
                 throw new Error("iterator error");
             }
 
-            const c1 = task((c) => { return failing(); });
+            const c1 = task(() => { return failing(); });
 
             await tick();
 
@@ -216,7 +216,7 @@ describe("async", () => {
             };
 
             const s1 = signal(true);
-            const c1 = task((c) => {
+            const c1 = task(() => {
                 if (s1.val()) {
                     return staleIter;
                 }
@@ -241,14 +241,15 @@ describe("async", () => {
         });
     });
 
-    describe("dynamic reader", () => {
+    describe("context", () => {
         test("reads a signal before and after await", async () => {
             const s1 = signal(1);
             const s2 = signal(10);
-            const c1 = task(async (r) => {
-                let a = r.read(s1);
+            const c1 = task(async () => {
+                let a = s1.val();
+                const c = context();
                 await tick();
-                let b = r.read(s2);
+                let b = c.val(s2);
                 return a + b;
             });
             await tick();
@@ -260,11 +261,12 @@ describe("async", () => {
             const s1 = signal(1);
             const s2 = signal(10);
             let runs = 0;
-            const c1 = task(async (r) => {
+            const c1 = task(async () => {
                 runs++;
-                r.read(s1);
+                s1.val();
+                const c = context();
                 await tick();
-                return r.read(s2);
+                return c.val(s2);
             });
             await tick();
             await tick();
@@ -284,11 +286,12 @@ describe("async", () => {
             const sA = signal('a');
             const sB = signal('b');
             let runs = 0;
-            const c1 = task(async (r) => {
+            const c1 = task(async () => {
                 runs++;
-                let sel = r.read(s1);
+                let sel = s1.val();
+                const c = context();
                 await tick();
-                return sel ? r.read(sA) : r.read(sB);
+                return sel ? c.val(sA) : c.val(sB);
             });
             await tick();
             await tick();
@@ -313,14 +316,17 @@ describe("async", () => {
             expect(runs).toBe(2);
         });
 
-        test("duplicate reads in same sync chunk are deduped via reader._version", async () => {
+        test("duplicate reads in same sync chunk are deduped via context._version", async () => {
             const s1 = signal(5);
             let runs = 0;
-            const c1 = task(async (r) => {
+            const c1 = task(async () => {
                 runs++;
+                const c = context();
                 let sum = 0;
                 // Read s1 ten times in the same sync chunk.
-                for (let i = 0; i < 10; i++) sum += r.read(s1);
+                for (let i = 0; i < 10; i++) {
+                    sum += c.val(s1);
+                }
                 return sum;
             });
             await tick();
@@ -328,11 +334,6 @@ describe("async", () => {
             expect(c1.val()).toBe(50);
             expect(runs).toBe(1);
 
-            // If reader didn't dedup, s1 would have 10 subscriptions pointing
-            // at c1. Setting s1 would still fire notify once per sub — notify
-            // gates on flags so this is mostly observable via teardown cost.
-            // A stricter behavioral check: after the next run, s1's _subs size
-            // stays 1 (checked via signal→compute via an extra compute below).
             s1.set(6);
             c1.val();
             await tick();
@@ -345,7 +346,7 @@ describe("async", () => {
             // s1 must still work — sanity check that s1's sub graph isn't
             // corrupt.
             c1.dispose();
-            const c2 = compute((c) => s1.val() + 1);
+            const c2 = compute(() => s1.val() + 1);
             expect(c2.val()).toBe(7);
             s1.set(7);
             expect(c2.val()).toBe(8);
@@ -355,30 +356,23 @@ describe("async", () => {
             const s1 = signal(1);
             const s2 = signal(10);
             // Unrelated compute also reading s2 — its first read sets s2._version.
-            const c0 = compute((c) => s2.val() * 100);
+            const c0 = compute(() => s2.val() * 100);
             expect(c0.val()).toBe(1000);
 
-            // c1 reads s2 before AND after await. Between the reads, c0 has
-            // already tagged s2._version; the reader's version-based dedup
-            // therefore won't catch the second read, so s2 is added twice.
-            // sweepReaderDeps must collapse them at settle.
             let runs = 0;
-            const c1 = task(async (r) => {
+            const c1 = task(async () => {
                 runs++;
-                r.read(s1);
-                r.read(s2);
+                const c = context();
+                s1.val();
+                c.val(s2);
                 await tick();
-                return r.read(s2);
+                return c.val(s2);
             });
             await tick();
             await tick();
             expect(c1.val()).toBe(10);
             expect(runs).toBe(1);
 
-            // If s2 is subscribed twice, a single set would fan out twice
-            // through notify → _receive → queue. The observable effect is
-            // that internal bookkeeping stays consistent: changing s2 once
-            // triggers exactly one re-run after pull.
             s2.set(20);
             c1.val();
             await tick();
@@ -387,20 +381,22 @@ describe("async", () => {
             expect(runs).toBe(2);
 
             // Sanity: dispose c1, a fresh compute on s2 must still work
-            // (sub-graph wasn't corrupted by any over-release).
             c1.dispose();
-            const c2 = compute((c) => s2.val());
+            const c2 = compute(() => s2.val());
             expect(c2.val()).toBe(20);
             s2.set(21);
             expect(c2.val()).toBe(21);
         });
 
-        test("disposed reader throws on read after node re-updates", async () => {
+        test("disposed context throws on val after node re-updates", async () => {
             const s1 = signal(1);
             let captured;
-            const c1 = task(async (r) => {
-                if (captured === undefined) captured = r;  // capture FIRST reader only
-                return r.read(s1);
+            const c1 = task(async () => {
+                const c = context();
+                if (captured === undefined) {
+                    captured = c;
+                }
+                return c.val(s1);
             });
             await tick();
             await tick();
@@ -411,7 +407,7 @@ describe("async", () => {
             await tick();
             await tick();
 
-            expect(() => captured.read(s1)).toThrow('Reader disposed');
+            expect(() => captured.val(s1)).toThrow('Context disposed');
         });
 
         test("bound task: sig.task(fn)", async () => {
@@ -442,10 +438,11 @@ describe("async", () => {
             const s1 = signal(1);
             const s2 = signal(10);
             let observed = null;
-            spawn(async (r) => {
-                let a = r.read(s1);
+            spawn(async () => {
+                let a = s1.val();
+                const c = context();
                 await tick();
-                let b = r.read(s2);
+                let b = c.val(s2);
                 observed = a + b;
             });
             await tick();
@@ -459,20 +456,21 @@ describe("async", () => {
         });
     });
 
-    describe("stable reader", () => {
-        test("r.stable(): post-stable reads do not register new deps", async () => {
+    describe("stable context", () => {
+        test("c.stable(): post-stable reads do not register new deps", async () => {
             const s1 = signal(1);
             const s2 = signal(10);
             let runs = 0;
-            const c = task(async (r) => {
+            const c1 = task(async () => {
                 runs++;
-                const v1 = r.read(s1);
-                r.stable();
-                const v2 = r.read(s2);
+                const c = context();
+                const v1 = c.val(s1);
+                c.stable();
+                const v2 = c.val(s2);
                 return v1 + v2;
             });
             await tick(); await tick();
-            expect(c.val()).toBe(11);
+            expect(c1.val()).toBe(11);
             expect(runs).toBe(1);
 
             // s2 was read after stable() — not tracked. Changing it
@@ -482,130 +480,51 @@ describe("async", () => {
             expect(runs).toBe(1);
         });
 
-        test("r.stable(): pre-stable reads stay tracked and trigger reruns", async () => {
+        test("c.stable(): pre-stable reads stay tracked and trigger reruns", async () => {
             const s1 = signal(1);
             const s2 = signal(10);
             let runs = 0;
-            const c = task(async (r) => {
+            const c1 = task(async () => {
                 runs++;
-                const v1 = r.read(s1);
-                r.stable();
-                const v2 = r.read(s2);
+                const c = context();
+                const v1 = c.val(s1);
+                c.stable();
+                const v2 = c.val(s2);
                 return v1 + v2;
             });
             await tick(); await tick();
-            expect(c.val()).toBe(11);
+            expect(c1.val()).toBe(11);
 
             s1.set(2);
-            c.val();
+            c1.val();
             await tick(); await tick();
-            expect(c.val()).toBe(12); // v1=2, v2=10 (s2 not tracked)
+            expect(c1.val()).toBe(12); // v1=2, v2=10 (s2 not tracked)
             expect(runs).toBe(2);
         });
 
-        test("r.stable(): subsequent runs reuse the same Reader", async () => {
-            const s1 = signal(1);
-            let firstReader;
-            const c = task(async (r) => {
-                if (firstReader === undefined) firstReader = r;
-                r.read(s1);
-                r.stable();
-                return r === firstReader;
-            });
-            await tick(); await tick();
-            expect(c.val()).toBe(true);
-
-            s1.set(2);
-            c.val();
-            await tick(); await tick();
-            expect(c.val()).toBe(true);
-        });
-
-        test("OPT_STABLE factory: reader inherits stable; first run still tracks", async () => {
-            const s1 = signal(1);
-            const s2 = signal(10);
-            let runs = 0;
-            const c = task(async (r) => {
-                runs++;
-                // Both reads happen in the first (setup) run. SETUP is
-                // set on the reader even though STABLE is also set, so
-                // the check `(STABLE | SETUP) === STABLE` is false →
-                // both reads register as deps.
-                const v1 = r.read(s1);
-                await tick();
-                const v2 = r.read(s2);
-                return v1 + v2;
-            }, undefined, OPT_STABLE);
-            await tick(); await tick(); await tick();
-            expect(c.val()).toBe(11);
-            expect(runs).toBe(1);
-
-            // Both s1 and s2 are tracked deps of the first setup run.
-            s1.set(2);
-            c.val();
-            await tick(); await tick(); await tick();
-            expect(c.val()).toBe(12);
-            expect(runs).toBe(2);
-
-            s2.set(20);
-            c.val();
-            await tick(); await tick(); await tick();
-            expect(c.val()).toBe(22);
-            expect(runs).toBe(3);
-        });
-
-        test("OPT_STABLE factory: post-settle reads don't re-subscribe", async () => {
-            // On rerun, SETUP has been cleared by propagateReaderFlags
-            // at settle. Reader has STABLE only → reads bypass subscribe.
-            const s1 = signal(1);
-            const extra = signal(0);
-            let runs = 0;
-            const c = task(async (r) => {
-                runs++;
-                const v1 = r.read(s1);
-                if (runs > 1) {
-                    // Rerun: this read should NOT create a new dep.
-                    r.read(extra);
-                }
-                return v1;
-            }, undefined, OPT_STABLE);
-            await tick(); await tick();
-            expect(c.val()).toBe(1);
-            expect(runs).toBe(1);
-
-            s1.set(2);
-            c.val();
-            await tick(); await tick();
-            expect(runs).toBe(2);
-
-            // `extra` was read in the rerun but with FLAG_STABLE set and
-            // FLAG_SETUP clear — should not have been subscribed.
-            extra.set(999);
-            await tick();
-            expect(runs).toBe(2);
-        });
-
-        test("r.equal() is callable on the reader and propagates to node", async () => {
+        test("c.equal() is callable on the context and propagates to node", async () => {
             const src = signal(0);
-            const c = task(async (r) => {
-                const v = r.read(src);
-                r.equal(true);  // just verifying the method exists & doesn't throw
+            const c1 = task(async () => {
+                const c = context();
+                const v = c.val(src);
+                c.equal(true);
                 return v;
             });
             await tick(); await tick();
-            expect(c.val()).toBe(0);
+            expect(c1.val()).toBe(0);
         });
 
-        test("r.stable() on spawn()", async () => {
+        test("c.stable() on spawn()", async () => {
             const s1 = signal(1);
             const s2 = signal(100);
             let runs = 0;
             let observed;
-            spawn(async (r) => {
+            spawn(async () => {
                 runs++;
-                const v1 = r.read(s1);
-                r.stable();
-                const v2 = r.read(s2);
+                const c = context();
+                const v1 = c.val(s1);
+                c.stable();
+                const v2 = c.val(s2);
                 observed = v1 + v2;
             });
             await tick(); await tick();
@@ -622,22 +541,23 @@ describe("async", () => {
             expect(runs).toBe(2);
         });
 
-        test("r.stable() before any reads: node goes dormant", async () => {
+        test("c.stable() before any reads: node goes dormant", async () => {
             const s1 = signal(1);
             let runs = 0;
-            const c = task(async (r) => {
+            const c1 = task(async () => {
                 runs++;
-                r.stable();
-                return r.read(s1); // post-stable — no subscribe
+                const c = context();
+                c.stable();
+                return c.val(s1); // post-stable — no subscribe
             });
             await tick(); await tick();
-            expect(c.val()).toBe(1);
+            expect(c1.val()).toBe(1);
             expect(runs).toBe(1);
 
             s1.set(2);
             await tick();
             expect(runs).toBe(1);
-            expect(c.val()).toBe(1);
+            expect(c1.val()).toBe(1);
         });
     });
 });
