@@ -2333,42 +2333,47 @@ function ll(t) {
 	return null === t.W && (null === t.q || 0 === t.q.length);
 }
 function cl(t, i, l, n) {
-	let s = t.q, e = l > 1 ? 2 * (l - 1) : 0, h = n > 0 ? e : 0, f = n, u = t.W;
-	if (null !== u && l >= 1 && u.u !== i && (St(u, t.D), h < f ? (t.W = s[h], t.D = M(s[h], t, -1), h += 2) : (t.W = null, t.D = 0)), null === s) return void (null !== t.W && (t.j |= vl));
-	let o = e, r = 0;
-	for (; r < o;) {
-		let l = s[r], n = s[r + 1];
-		if (l.u !== i) if (St(l, n), h < f) {
-			let i = s[h], l = M(i, t, r);
-			s[r] = i, s[r + 1] = l, h += 2, r += 2;
+	let s = t.q, e = l > 1 ? 2 * (l - 1) : 0, h = e, f = t.W;
+	if (null !== f && f.u !== i) if (St(f, t.D), h < n) {
+		let i = s[h];
+		t.W = i, t.D = M(i, t, -1), h += 2;
+	} else t.W = null, t.D = 0;
+	if (null === s) return void (null !== t.W && (t.j |= vl));
+	let u = e, o = 0;
+	for (; o < u;) {
+		let l = s[o];
+		if (l.u !== i) if (St(l, s[o + 1]), h < n) {
+			let i = s[h], l = M(i, t, o);
+			s[o] = i, s[o + 1] = l, h += 2, o += 2;
 		} else {
 			let t = 0;
-			for (; o > r + 2;) {
-				o -= 2;
-				let l = s[o], n = s[o + 1];
+			for (; u > o + 2;) {
+				u -= 2;
+				let l = s[u];
 				if (l.u === i) {
-					s[r] = l, s[r + 1] = n, -1 === n ? l.P = r : l.T[n + 1] = r, t = 1;
+					let i = s[u + 1];
+					s[o] = l, s[o + 1] = i, -1 === i ? l.P = o : l.T[i + 1] = o, t = 1;
 					break;
 				}
-				St(l, n);
+				St(l, s[u + 1]);
 			}
-			t ? r += 2 : o = r;
+			t ? o += 2 : u = o;
 		}
-		else r += 2;
+		else o += 2;
 	}
-	for (; h < f;) {
-		let i = s[h], l = M(i, t, o);
-		s[o] = i, s[o + 1] = l, o += 2, h += 2;
+	for (; h < n;) {
+		let i = s[h], l = M(i, t, u);
+		s[u] = i, s[u + 1] = l, u += 2, h += 2;
 	}
-	if (0 === o) t.q = null, null !== t.W && (t.j |= vl);
-	else if (2 === o && null === t.W) {
+	if (0 === u) t.q = null, null !== t.W && (t.j |= vl);
+	else if (2 === u && null === t.W) {
 		let i = s[0], l = s[1];
 		t.W = i, t.D = l, -1 === l ? i.P = -1 : i.T[l + 1] = -1, t.q = null, t.j |= vl;
 	} else {
 		t.j &= -4097;
-		let i = s.length - o;
-		if (i < 20) for (; i-- > 0;) s.pop();
-		else s.length = o;
+		let i = s.length - u;
+		if (i > 0) if (i < 20) for (; i-- > 0;) s.pop();
+		else s.length = u;
 	}
 }
 function ml(t, i, l) {

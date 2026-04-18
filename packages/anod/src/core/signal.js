@@ -1515,18 +1515,20 @@ function patchDeps(node, version, depCount, newLen) {
     let deps = node._deps;
     let existingLen = depCount > 1 ? (depCount - 1) * 2 : 0;
     /** ni = index of next new dep to consume (unsubscribed, slot 0) */
-    let ni = newLen > 0 ? existingLen : 0;
-    let totalLen = newLen;
+    let ni = existingLen;
 
-    /** Check dep1 */
+    /** Check dep1 — always exists when depCount >= 1, and _read never
+     *  writes new deps into dep1 (only setup does), so the only
+     *  question is whether dep1 was reused or dropped. */
     let dep1 = node._dep1;
-    if (dep1 !== null && depCount >= 1) {
+    if (dep1 !== null) {
         if (dep1._version !== version) {
             clearReceiver(dep1, node._dep1slot);
-            if (ni < totalLen) {
+            if (ni < newLen) {
                 /** Fill dep1 with a new dep */
-                node._dep1 = /** @type {Sender} */(deps[ni]);
-                node._dep1slot = subscribe(/** @type {Sender} */(deps[ni]), node, -1);
+                let newDep = /** @type {Sender} */(deps[ni]);
+                node._dep1 = newDep;
+                node._dep1slot = subscribe(newDep, node, -1);
                 ni += 2;
             } else {
                 node._dep1 = null;
@@ -1549,7 +1551,7 @@ function patchDeps(node, version, depCount, newLen) {
      *   tail — end of live region, shrinks when we pop reused deps from the back
      *
      * When we hit a dropped dep at position i:
-     *   1. If new deps available (ni < totalLen): subscribe new dep at position i
+     *   1. If new deps available (ni < newLen): subscribe new dep at position i
      *   2. Else: scan backward from tail to find last reused dep, move it to i
      *      Any dropped deps found during backward scan are also cleared.
      *      When forward and backward pointers meet, we're done.
@@ -1558,15 +1560,14 @@ function patchDeps(node, version, depCount, newLen) {
     let i = 0;
     while (i < tail) {
         let dep = /** @type {Sender} */(deps[i]);
-        let slot = /** @type {number} */(deps[i + 1]);
         if (dep._version === version) {
             /** Reused — stays in place */
             i += 2;
             continue;
         }
-        /** Dropped — unbind */
-        clearReceiver(dep, slot);
-        if (ni < totalLen) {
+        /** Dropped — unbind (read slot only on the drop path) */
+        clearReceiver(dep, /** @type {number} */(deps[i + 1]));
+        if (ni < newLen) {
             /** Fill hole with next new dep */
             let newDep = /** @type {Sender} */(deps[ni]);
             let subslot = subscribe(newDep, node, i);
@@ -1583,9 +1584,9 @@ function patchDeps(node, version, depCount, newLen) {
             while (tail > i + 2) {
                 tail -= 2;
                 let tDep = /** @type {Sender} */(deps[tail]);
-                let tSlot = /** @type {number} */(deps[tail + 1]);
                 if (tDep._version === version) {
                     /** Move reused dep into the hole at i */
+                    let tSlot = /** @type {number} */(deps[tail + 1]);
                     deps[i] = tDep;
                     deps[i + 1] = tSlot;
                     if (tSlot === -1) {
@@ -1597,7 +1598,7 @@ function patchDeps(node, version, depCount, newLen) {
                     break;
                 } else {
                     /** Also dropped — unbind */
-                    clearReceiver(tDep, tSlot);
+                    clearReceiver(tDep, /** @type {number} */(deps[tail + 1]));
                 }
             }
             if (found) {
@@ -1610,7 +1611,7 @@ function patchDeps(node, version, depCount, newLen) {
     }
 
     /** Remaining new deps — subscribe at the end of the live region */
-    while (ni < totalLen) {
+    while (ni < newLen) {
         let dep = /** @type {Sender} */(deps[ni]);
         let subslot = subscribe(dep, node, tail);
         deps[tail] = dep;
@@ -1645,12 +1646,14 @@ function patchDeps(node, version, depCount, newLen) {
          *  surprisingly expensive in V8 for the short-array case — a
          *  handful of `pop()` calls is faster. */
         let excess = deps.length - tail;
-        if (excess < 20) {
-            while (excess-- > 0) {
-                deps.pop();
+        if (excess > 0) {
+            if (excess < 20) {
+                while (excess-- > 0) {
+                    deps.pop();
+                }
+            } else {
+                deps.length = tail;
             }
-        } else {
-            deps.length = tail;
         }
     }
 }
