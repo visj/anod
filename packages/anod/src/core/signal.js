@@ -1780,42 +1780,6 @@ function checkSingle(node, time) {
     }
 }
 
-function check(node, time) {
-    let dep = node._dep1;
-    let ctime = node._ctime;
-    if (dep !== null) {
-        let flag = dep._flag;
-        if (flag & FLAG_STALE) {
-            dep._update(time);
-        } else if (flag & FLAG_PENDING ){
-            check(dep, time);
-        }
-        if (dep._ctime > ctime) {
-            node._update(time);
-            return;
-        }
-    }
-    let deps = node._deps;
-    if (deps !== null) {
-        let count = deps.length;
-        for (let i = 0; i < count; i += 2) {
-            dep = deps[i];
-            let flag = dep._flag;
-            if (flag & FLAG_STALE) {
-                dep._update(time);
-            } else if (flag & FLAG_PENDING ){
-                check(dep, time);
-            }
-            if (dep._ctime > ctime) {
-                node._update(time);
-                return;
-            }
-        }
-    }
-    node._time = time;
-    node._flag &= ~(FLAG_STALE | FLAG_PENDING);
-}
-
 /**
  * @param {Compute} node
  * @param {number} time
