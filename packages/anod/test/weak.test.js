@@ -1,131 +1,131 @@
 import { describe, test, expect } from "bun:test";
-import { root, signal, compute, effect, batch, OPT_WEAK } from "../";
+import { c, OPT_WEAK } from "../";
 
 describe("OPT_WEAK", () => {
     test("releases value when last subscriber disposes", () => {
-        const s1 = signal({ data: "large" });
-        const c1 = compute(() => {
-            return s1.val();
+        const s1 = c.signal({ data: "large" });
+        const c1 = c.compute(c => {
+            return c.val(s1);
         }, undefined, OPT_WEAK);
 
-        const e1 = effect(() => {
-            c1.val();
+        const e1 = c.effect(c => {
+            c.val(c1);
         });
 
         /** While subscribed, value is retained */
-        expect(c1.val()).toEqual({ data: "large" });
+        expect(c1.peek()).toEqual({ data: "large" });
 
         /** After disposing the only subscriber, value is released */
         e1.dispose();
-        expect(c1.val()).toEqual({ data: "large" });
+        expect(c1.peek()).toEqual({ data: "large" });
     });
 
     test("recomputes fresh after value is released", () => {
         let runs = 0;
-        const s1 = signal(1);
-        const c1 = compute(() => {
+        const s1 = c.signal(1);
+        const c1 = c.compute(c => {
             runs++;
-            return s1.val();
+            return c.val(s1);
         }, undefined, OPT_WEAK);
 
-        const e1 = effect(() => {
-            c1.val();
+        const e1 = c.effect(c => {
+            c.val(c1);
         });
 
-        expect(c1.val()).toBe(1);
+        expect(c1.peek()).toBe(1);
         runs = 0;
 
-        /** Dispose subscriber → value released, node marked STALE */
+        /** Dispose subscriber -- value released, node marked STALE */
         e1.dispose();
 
         /** Reading again triggers a fresh recompute */
-        expect(c1.val()).toBe(1);
+        expect(c1.peek()).toBe(1);
         expect(runs).toBe(1);
     });
 
     test("retains value while at least one subscriber exists", () => {
         let runs = 0;
-        const s1 = signal(1);
-        const c1 = compute(() => {
+        const s1 = c.signal(1);
+        const c1 = c.compute(c => {
             runs++;
-            return s1.val();
+            return c.val(s1);
         }, undefined, OPT_WEAK);
 
-        const e1 = effect(() => {
-            c1.val();
+        const e1 = c.effect(c => {
+            c.val(c1);
         });
-        const e2 = effect(() => {
-            c1.val();
+        const e2 = c.effect(c => {
+            c.val(c1);
         });
 
         runs = 0;
 
-        /** Disposing one subscriber — still has another */
+        /** Disposing one subscriber -- still has another */
         e1.dispose();
         expect(runs).toBe(0);
 
-        /** Reading should NOT recompute — still subscribed */
-        expect(c1.val()).toBe(1);
+        /** Reading should NOT recompute -- still subscribed */
+        expect(c1.peek()).toBe(1);
         expect(runs).toBe(0);
     });
 
     test("releases only when all subscribers are gone", () => {
         let runs = 0;
-        const s1 = signal(1);
-        const c1 = compute(() => {
+        const s1 = c.signal(1);
+        const c1 = c.compute(c => {
             runs++;
-            return s1.val();
+            return c.val(s1);
         }, undefined, OPT_WEAK);
 
-        const e1 = effect(() => {
-            c1.val();
+        const e1 = c.effect(c => {
+            c.val(c1);
         });
-        const e2 = effect(() => {
-            c1.val();
+        const e2 = c.effect(c => {
+            c.val(c1);
         });
 
         runs = 0;
         e1.dispose();
         e2.dispose();
 
-        /** Now fully unsubscribed — reading should recompute */
-        expect(c1.val()).toBe(1);
+        /** Now fully unsubscribed -- reading should recompute */
+        expect(c1.peek()).toBe(1);
         expect(runs).toBe(1);
     });
 
     test("works with weak compute", () => {
         let runs = 0;
-        const s1 = signal(1);
-        const c1 = compute(() => {
+        const s1 = c.signal(1);
+        const c1 = c.compute(c => {
             runs++;
-            return s1.val() * 2;
+            return c.val(s1) * 2;
         }, undefined, OPT_WEAK);
 
-        const e1 = effect(() => {
-            c1.val();
+        const e1 = c.effect(c => {
+            c.val(c1);
         });
 
-        expect(c1.val()).toBe(2);
+        expect(c1.peek()).toBe(2);
         runs = 0;
 
         e1.dispose();
 
         /** Reading after release triggers recompute */
-        expect(c1.val()).toBe(2);
+        expect(c1.peek()).toBe(2);
         expect(runs).toBe(1);
     });
 
     test("re-subscribing after release works correctly", () => {
         let runs = 0;
-        const s1 = signal(1);
-        const c1 = compute(() => {
+        const s1 = c.signal(1);
+        const c1 = c.compute(c => {
             runs++;
-            return s1.val();
+            return c.val(s1);
         }, undefined, OPT_WEAK);
 
         /** First subscriber */
-        const e1 = effect(() => {
-            c1.val();
+        const e1 = c.effect(c => {
+            c.val(c1);
         });
 
         runs = 0;
@@ -133,14 +133,14 @@ describe("OPT_WEAK", () => {
 
         /** New subscriber created after release */
         let effectVal = 0;
-        const e2 = effect(() => {
-            effectVal = c1.val();
+        const e2 = c.effect(c => {
+            effectVal = c.val(c1);
         });
 
         expect(effectVal).toBe(1);
         expect(runs).toBe(1);
 
-        /** Source changes while subscribed — should propagate */
+        /** Source changes while subscribed -- should propagate */
         runs = 0;
         s1.set(2);
         expect(effectVal).toBe(2);
@@ -151,52 +151,52 @@ describe("OPT_WEAK", () => {
         e2.dispose();
 
         /** Should recompute on read again */
-        expect(c1.val()).toBe(2);
+        expect(c1.peek()).toBe(2);
         expect(runs).toBe(1);
     });
 
     test("dynamic dep changes release weak compute", () => {
         let runs = 0;
-        const s1 = signal(1);
-        const s2 = signal(true);
-        const weak1 = compute(() => {
+        const s1 = c.signal(1);
+        const s2 = c.signal(true);
+        const weak1 = c.compute(c => {
             runs++;
-            return s1.val();
+            return c.val(s1);
         }, undefined, OPT_WEAK);
 
         /**
          * This compute conditionally reads weak1.  When the
          * condition flips, pruneDeps will unsubscribe from weak1.
          */
-        const c2 = compute(() => {
-            if (s2.val()) {
-                return weak1.val();
+        const c2 = c.compute(c => {
+            if (c.val(s2)) {
+                return c.val(weak1);
             }
             return 0;
         });
 
-        expect(c2.val()).toBe(1);
+        expect(c2.peek()).toBe(1);
         runs = 0;
 
-        /** Flip condition — c2 stops reading weak1 */
+        /** Flip condition -- c2 stops reading weak1 */
         s2.set(false);
-        expect(c2.val()).toBe(0);
+        expect(c2.peek()).toBe(0);
 
         /** weak1 should have released its value and recompute on read */
-        expect(weak1.val()).toBe(1);
+        expect(weak1.peek()).toBe(1);
         expect(runs).toBe(1);
     });
 
     test("updates correctly when source changes while released", () => {
         let runs = 0;
-        const s1 = signal(1);
-        const c1 = compute(() => {
+        const s1 = c.signal(1);
+        const c1 = c.compute(c => {
             runs++;
-            return s1.val();
+            return c.val(s1);
         }, undefined, OPT_WEAK);
 
-        const e1 = effect(() => {
-            c1.val();
+        const e1 = c.effect(c => {
+            c.val(c1);
         });
 
         runs = 0;
@@ -206,46 +206,46 @@ describe("OPT_WEAK", () => {
         s1.set(42);
 
         /** Reading should recompute and pick up the new value */
-        expect(c1.val()).toBe(42);
+        expect(c1.peek()).toBe(42);
         expect(runs).toBe(1);
     });
 
     test("non-weak compute does NOT release value when unsubscribed", () => {
         let runs = 0;
-        const s1 = signal(1);
-        const c1 = compute(() => {
+        const s1 = c.signal(1);
+        const c1 = c.compute(c => {
             runs++;
-            return s1.val();
+            return c.val(s1);
         });
 
-        const e1 = effect(() => {
-            c1.val();
+        const e1 = c.effect(c => {
+            c.val(c1);
         });
 
         runs = 0;
         e1.dispose();
 
         /** Non-weak: should NOT recompute on read */
-        expect(c1.val()).toBe(1);
+        expect(c1.peek()).toBe(1);
         expect(runs).toBe(0);
     });
 
     test("weak compute in a chain retains while intermediate subscribes", () => {
         let runs1 = 0;
-        const s1 = signal(1);
-        const c1 = compute(() => {
+        const s1 = c.signal(1);
+        const c1 = c.compute(c => {
             runs1++;
-            return s1.val();
+            return c.val(s1);
         }, undefined, OPT_WEAK);
-        const c2 = compute(() => {
-            return c1.val() * 2;
+        const c2 = c.compute(c => {
+            return c.val(c1) * 2;
         });
 
-        const e1 = effect(() => {
-            c2.val();
+        const e1 = c.effect(c => {
+            c.val(c2);
         });
 
-        expect(c2.val()).toBe(2);
+        expect(c2.peek()).toBe(2);
         runs1 = 0;
 
         /**
@@ -253,26 +253,26 @@ describe("OPT_WEAK", () => {
          * but c2 still subscribes to c1.  c1 should NOT release.
          */
         e1.dispose();
-        expect(c1.val()).toBe(1);
+        expect(c1.peek()).toBe(1);
         expect(runs1).toBe(0);
     });
 
     test("weak compute in a chain releases when intermediate disposes", () => {
         let runs1 = 0;
-        const s1 = signal(1);
-        const c1 = compute(() => {
+        const s1 = c.signal(1);
+        const c1 = c.compute(c => {
             runs1++;
-            return s1.val();
+            return c.val(s1);
         }, undefined, OPT_WEAK);
-        const c2 = compute(() => {
-            return c1.val() * 2;
+        const c2 = c.compute(c => {
+            return c.val(c1) * 2;
         });
 
-        const e1 = effect(() => {
-            c2.val();
+        const e1 = c.effect(c => {
+            c.val(c2);
         });
 
-        expect(c2.val()).toBe(2);
+        expect(c2.peek()).toBe(2);
         runs1 = 0;
 
         /**
@@ -280,25 +280,25 @@ describe("OPT_WEAK", () => {
          * subscribers and should release its value.
          */
         c2.dispose();
-        expect(c1.val()).toBe(1);
+        expect(c1.peek()).toBe(1);
         expect(runs1).toBe(1);
     });
 
     test("OPT_WEAK with batch", () => {
         let runs = 0;
-        const s1 = signal(1);
-        const c1 = compute(() => {
+        const s1 = c.signal(1);
+        const c1 = c.compute(c => {
             runs++;
-            return s1.val();
+            return c.val(s1);
         }, undefined, OPT_WEAK);
 
         let effectVal = 0;
-        const e1 = effect(() => {
-            effectVal = c1.val();
+        const e1 = c.effect(c => {
+            effectVal = c.val(c1);
         });
 
         runs = 0;
-        batch(() => {
+        c.batch(() => {
             s1.set(2);
             s1.set(3);
         });
@@ -309,10 +309,10 @@ describe("OPT_WEAK", () => {
         e1.dispose();
 
         /** After release, batch update then read */
-        batch(() => {
+        c.batch(() => {
             s1.set(10);
         });
-        expect(c1.val()).toBe(10);
+        expect(c1.peek()).toBe(10);
         expect(runs).toBe(1);
     });
 });

@@ -1,24 +1,21 @@
 /**
- * Reference benchmark using only compute() and effect() — the "dumb" API
+ * Reference benchmark using only c.compute() and c.effect() — the "dumb" API
  * that matches what other frameworks expose. No derive/watch/bound
  * optimizations. This measures anod's baseline performance when used the
  * same way as alien-signals, preact-signals, etc.
  */
 import { bench, run } from 'mitata';
 import { EXPECTED, OVERRIDES_ANOD } from './expected.js';
-import {
-    batch,
-    compute,
-    effect,
-    signal
-} from '../../dist/index.mjs';
+import { c } from '../../dist/index.mjs';
 import { saveRun } from './save-run.js';
 
 let sink = 0;
 let counter = 0;
 
 const fib = (n) => {
-    if (n < 2) return 1;
+    if (n < 2) {
+        return 1;
+    }
     return fib(n - 1) + fib(n - 2);
 };
 const hard = (n, _log) => n + fib(16);
@@ -27,19 +24,19 @@ const hard = (n, _log) => n + fib(16);
 
 function setupDeep() {
     const len = 50;
-    const head = signal(0);
+    const head = c.signal(0);
     let current = head;
     for (let i = 0; i < len; i++) {
         const prev = current;
-        current = compute(() => {
+        current = c.compute(cx => {
             counter++;
-            return prev.val() + 1;
+            return cx.val(prev) + 1;
         });
     }
     const tail = current;
-    effect(() => {
+    c.effect(cx => {
         counter++;
-        sink += tail.val();
+        sink += cx.val(tail);
     });
     let i = 0;
     return () => {
@@ -48,19 +45,19 @@ function setupDeep() {
 }
 
 function setupBroad() {
-    const head = signal(0);
+    const head = c.signal(0);
     for (let i = 0; i < 50; i++) {
-        const current = compute(() => {
+        const current = c.compute(cx => {
             counter++;
-            return head.val() + i;
+            return cx.val(head) + i;
         });
-        const current2 = compute(() => {
+        const current2 = c.compute(cx => {
             counter++;
-            return current.val() + 1;
+            return cx.val(current) + 1;
         });
-        effect(() => {
+        c.effect(cx => {
             counter++;
-            sink += current2.val();
+            sink += cx.val(current2);
         });
     }
     let i = 0;
@@ -71,21 +68,21 @@ function setupBroad() {
 
 function setupDiamond() {
     const width = 5;
-    const head = signal(0);
+    const head = c.signal(0);
     const branches = [];
     for (let i = 0; i < width; i++) {
-        branches.push(compute(() => {
+        branches.push(c.compute(cx => {
             counter++;
-            return head.val() + 1;
+            return cx.val(head) + 1;
         }));
     }
-    const sum = compute(() => {
+    const sum = c.compute(cx => {
         counter++;
-        return branches.reduce((a, b) => a + b.val(), 0);
+        return branches.reduce((a, b) => a + cx.val(b), 0);
     });
-    effect(() => {
+    c.effect(cx => {
         counter++;
-        sink += sum.val();
+        sink += cx.val(sum);
     });
     let i = 0;
     return () => {
@@ -95,25 +92,25 @@ function setupDiamond() {
 
 function setupTriangle() {
     const width = 10;
-    const head = signal(0);
+    const head = c.signal(0);
     let current = head;
     const list = [];
     for (let i = 0; i < width - 1; i++) {
         const prev = current;
         list.push(current);
-        current = compute(() => {
+        current = c.compute(cx => {
             counter++;
-            return prev.val() + 1;
+            return cx.val(prev) + 1;
         });
     }
     list.push(current);
-    const sum = compute(() => {
+    const sum = c.compute(cx => {
         counter++;
-        return list.reduce((a, b) => a + b.val(), 0);
+        return list.reduce((a, b) => a + cx.val(b), 0);
     });
-    effect(() => {
+    c.effect(cx => {
         counter++;
-        sink += sum.val();
+        sink += cx.val(sum);
     });
     let i = 0;
     return () => {
@@ -122,24 +119,24 @@ function setupTriangle() {
 }
 
 function setupMux() {
-    const heads = new Array(100).fill(null).map(() => signal(0));
-    const mux = compute(() => {
+    const heads = new Array(100).fill(null).map(() => c.signal(0));
+    const mux = c.compute(cx => {
         counter++;
-        return heads.map(h => h.val());
+        return heads.map(h => cx.val(h));
     });
     const split = heads
-        .map((_, index) => compute(() => {
+        .map((_, index) => c.compute(cx => {
             counter++;
-            return mux.val()[index];
+            return cx.val(mux)[index];
         }))
-        .map(x => compute(() => {
+        .map(x => c.compute(cx => {
             counter++;
-            return x.val() + 1;
+            return cx.val(x) + 1;
         }));
     for (const x of split) {
-        effect(() => {
+        c.effect(cx => {
             counter++;
-            sink += x.val();
+            sink += cx.val(x);
         });
     }
     let i = 0;
@@ -150,26 +147,26 @@ function setupMux() {
 }
 
 function setupUnstable() {
-    const head = signal(0);
-    const double = compute(() => {
+    const head = c.signal(0);
+    const double = c.compute(cx => {
         counter++;
-        return head.val() * 2;
+        return cx.val(head) * 2;
     });
-    const inverse = compute(() => {
+    const inverse = c.compute(cx => {
         counter++;
-        return -head.val();
+        return -cx.val(head);
     });
-    const current = compute(() => {
+    const current = c.compute(cx => {
         counter++;
         let result = 0;
         for (let i = 0; i < 20; i++) {
-            result += head.val() % 2 ? double.val() : inverse.val();
+            result += cx.val(head) % 2 ? cx.val(double) : cx.val(inverse);
         }
         return result;
     });
-    effect(() => {
+    c.effect(cx => {
         counter++;
-        sink += current.val();
+        sink += cx.val(current);
     });
     let i = 0;
     return () => {
@@ -178,31 +175,31 @@ function setupUnstable() {
 }
 
 function setupAvoidable() {
-    const head = signal(0);
-    const computed1 = compute(() => {
+    const head = c.signal(0);
+    const computed1 = c.compute(cx => {
         counter++;
-        return head.val();
+        return cx.val(head);
     });
-    const computed2 = compute(() => {
+    const computed2 = c.compute(cx => {
         counter++;
-        computed1.val();
+        cx.val(computed1);
         return 0;
     });
-    const computed3 = compute(() => {
+    const computed3 = c.compute(cx => {
         counter++;
-        return computed2.val() + 1;
+        return cx.val(computed2) + 1;
     });
-    const computed4 = compute(() => {
+    const computed4 = c.compute(cx => {
         counter++;
-        return computed3.val() + 2;
+        return cx.val(computed3) + 2;
     });
-    const computed5 = compute(() => {
+    const computed5 = c.compute(cx => {
         counter++;
-        return computed4.val() + 3;
+        return cx.val(computed4) + 3;
     });
-    effect(() => {
+    c.effect(cx => {
         counter++;
-        sink += computed5.val();
+        sink += cx.val(computed5);
     });
     let i = 0;
     return () => {
@@ -212,18 +209,18 @@ function setupAvoidable() {
 
 function setupRepeatedObservers() {
     const size = 30;
-    const head = signal(0);
-    const current = compute(() => {
+    const head = c.signal(0);
+    const current = c.compute(cx => {
         counter++;
         let result = 0;
         for (let i = 0; i < size; i++) {
-            result += head.val();
+            result += cx.val(head);
         }
         return result;
     });
-    effect(() => {
+    c.effect(cx => {
         counter++;
-        sink += current.val();
+        sink += cx.val(current);
     });
     let i = 0;
     return () => {
@@ -235,56 +232,56 @@ function setupRepeatedObservers() {
 
 function setupCellx(layers) {
     const start = {
-        prop1: signal(1),
-        prop2: signal(2),
-        prop3: signal(3),
-        prop4: signal(4),
+        prop1: c.signal(1),
+        prop2: c.signal(2),
+        prop3: c.signal(3),
+        prop4: c.signal(4),
     };
     let layer = start;
     for (let i = layers; i > 0; i--) {
         const m = layer;
         const s = {
-            prop1: compute(() => {
+            prop1: c.compute(cx => {
                 counter++;
-                return m.prop2.val();
+                return cx.val(m.prop2);
             }),
-            prop2: compute(() => {
+            prop2: c.compute(cx => {
                 counter++;
-                return m.prop1.val() - m.prop3.val();
+                return cx.val(m.prop1) - cx.val(m.prop3);
             }),
-            prop3: compute(() => {
+            prop3: c.compute(cx => {
                 counter++;
-                return m.prop2.val() + m.prop4.val();
+                return cx.val(m.prop2) + cx.val(m.prop4);
             }),
-            prop4: compute(() => {
+            prop4: c.compute(cx => {
                 counter++;
-                return m.prop3.val();
+                return cx.val(m.prop3);
             }),
         };
-        effect(() => { counter++; sink += s.prop1.val(); });
-        effect(() => { counter++; sink += s.prop2.val(); });
-        effect(() => { counter++; sink += s.prop3.val(); });
-        effect(() => { counter++; sink += s.prop4.val(); });
-        effect(() => { counter++; sink += s.prop1.val(); });
-        effect(() => { counter++; sink += s.prop2.val(); });
-        effect(() => { counter++; sink += s.prop3.val(); });
-        effect(() => { counter++; sink += s.prop4.val(); });
+        c.effect(cx => { counter++; sink += cx.val(s.prop1); });
+        c.effect(cx => { counter++; sink += cx.val(s.prop2); });
+        c.effect(cx => { counter++; sink += cx.val(s.prop3); });
+        c.effect(cx => { counter++; sink += cx.val(s.prop4); });
+        c.effect(cx => { counter++; sink += cx.val(s.prop1); });
+        c.effect(cx => { counter++; sink += cx.val(s.prop2); });
+        c.effect(cx => { counter++; sink += cx.val(s.prop3); });
+        c.effect(cx => { counter++; sink += cx.val(s.prop4); });
         layer = s;
     }
     const end = layer;
     let toggle = false;
     return () => {
         toggle = !toggle;
-        batch(() => {
+        c.batch(() => {
             start.prop1.set(toggle ? 4 : 1);
             start.prop2.set(toggle ? 3 : 2);
             start.prop3.set(toggle ? 2 : 3);
             start.prop4.set(toggle ? 1 : 4);
         });
-        end.prop1.val();
-        end.prop2.val();
-        end.prop3.val();
-        end.prop4.val();
+        end.prop1.peek();
+        end.prop2.peek();
+        end.prop3.peek();
+        end.prop4.peek();
     };
 }
 
@@ -292,48 +289,48 @@ function setupCellx(layers) {
 
 function setupMolWire() {
     const numbers = Array.from({ length: 5 }, (_, i) => i);
-    const A = signal(0);
-    const B = signal(0);
-    const C = compute(() => {
+    const A = c.signal(0);
+    const B = c.signal(0);
+    const C = c.compute(cx => {
         counter++;
-        return (A.val() % 2) + (B.val() % 2);
+        return (cx.val(A) % 2) + (cx.val(B) % 2);
     });
-    const D = compute(() => {
+    const D = c.compute(cx => {
         counter++;
-        return numbers.map(i => ({ x: i + (A.val() % 2) - (B.val() % 2) }));
+        return numbers.map(i => ({ x: i + (cx.val(A) % 2) - (cx.val(B) % 2) }));
     });
-    const E = compute(() => {
+    const E = c.compute(cx => {
         counter++;
-        return hard(C.val() + A.val() + D.val()[0].x, 'E');
+        return hard(cx.val(C) + cx.val(A) + cx.val(D)[0].x, 'E');
     });
-    const F = compute(() => {
+    const F = c.compute(cx => {
         counter++;
-        return hard(D.val()[2].x || B.val(), 'F');
+        return hard(cx.val(D)[2].x || cx.val(B), 'F');
     });
-    const G = compute(() => {
+    const G = c.compute(cx => {
         counter++;
-        return C.val() + (C.val() || E.val() % 2) + D.val()[4].x + F.val();
+        return cx.val(C) + (cx.val(C) || cx.val(E) % 2) + cx.val(D)[4].x + cx.val(F);
     });
-    effect(() => {
+    c.effect(cx => {
         counter++;
-        sink += hard(G.val(), 'H');
+        sink += hard(cx.val(G), 'H');
     });
-    effect(() => {
+    c.effect(cx => {
         counter++;
-        sink += G.val();
+        sink += cx.val(G);
     });
-    effect(() => {
+    c.effect(cx => {
         counter++;
-        sink += hard(F.val(), 'J');
+        sink += hard(cx.val(F), 'J');
     });
     let i = 0;
     return () => {
         i++;
-        batch(() => {
+        c.batch(() => {
             B.set(1);
             A.set(1 + i * 2);
         });
-        batch(() => {
+        c.batch(() => {
             A.set(2 + i * 2);
             B.set(2);
         });
@@ -346,7 +343,7 @@ function benchCreateSignals(count) {
     return () => {
         let signals = [];
         for (let i = 0; i < count; i++) {
-            signals[i] = signal(i);
+            signals[i] = c.signal(i);
         }
         return signals;
     };
@@ -354,15 +351,15 @@ function benchCreateSignals(count) {
 
 function benchCreateComputations(count) {
     return () => {
-        const src = signal(0);
+        const src = c.signal(0);
         for (let i = 0; i < count; i++) {
-            const comp = compute(() => {
+            const comp = c.compute(cx => {
                 counter++;
-                return src.val();
+                return cx.val(src);
             });
-            effect(() => {
+            c.effect(cx => {
                 counter++;
-                sink += comp.val();
+                sink += cx.val(comp);
             });
         }
     };
@@ -420,7 +417,7 @@ function removeElems(src, rmCount, rand) {
 
 /**
  * Build a rectangular reactive dependency graph.
- * All nodes use compute() — no derive optimizations.
+ * All nodes use c.compute() — no derive optimizations.
  * @param {number} width
  * @param {number} totalLayers
  * @param {number} staticFraction - fraction of static nodes [0, 1]
@@ -429,7 +426,7 @@ function removeElems(src, rmCount, rand) {
 function makeDynGraph(width, totalLayers, staticFraction, nSources) {
     const sources = new Array(width);
     for (let i = 0; i < width; i++) {
-        sources[i] = signal(i);
+        sources[i] = c.signal(i);
     }
     const random = pseudoRandom('seed');
     let prevRow = sources;
@@ -442,27 +439,27 @@ function makeDynGraph(width, totalLayers, staticFraction, nSources) {
                 mySources[s] = prevRow[(myDex + s) % width];
             }
             if (random() < staticFraction) {
-                row[myDex] = compute(() => {
+                row[myDex] = c.compute(cx => {
                     counter++;
                     let sum = 0;
                     for (let s = 0; s < mySources.length; s++) {
-                        sum += mySources[s].val();
+                        sum += cx.val(mySources[s]);
                     }
                     return sum;
                 });
             } else {
                 const first = mySources[0];
                 const tail = mySources.slice(1);
-                row[myDex] = compute(() => {
+                row[myDex] = c.compute(cx => {
                     counter++;
-                    let sum = first.val();
+                    let sum = cx.val(first);
                     const shouldDrop = sum & 0x1;
                     const dropDex = sum % tail.length;
                     for (let i = 0; i < tail.length; i++) {
                         if (shouldDrop && i === dropDex) {
                             continue;
                         }
-                        sum += tail[i].val();
+                        sum += cx.val(tail[i]);
                     }
                     return sum;
                 });
@@ -484,7 +481,7 @@ function setupDynBuild(width, totalLayers, staticFraction, nSources) {
         const { layers } = makeDynGraph(width, totalLayers, staticFraction, nSources);
         const leaves = layers[layers.length - 1];
         for (let r = 0; r < leaves.length; r++) {
-            sink += leaves[r].val();
+            sink += leaves[r].peek();
         }
         return layers;
     };
@@ -500,7 +497,7 @@ function setupDynUpdate(width, totalLayers, staticFraction, nSources, readFracti
     const leaves = layers[layers.length - 1];
     /** Force-read ALL leaves so lazy frameworks fully materialize the graph. */
     for (let r = 0; r < leaves.length; r++) {
-        sink += leaves[r].val();
+        sink += leaves[r].peek();
     }
     const rand = pseudoRandom('seed');
     const skipCount = Math.round(leaves.length * (1 - readFraction));
@@ -514,7 +511,7 @@ function setupDynUpdate(width, totalLayers, staticFraction, nSources, readFracti
         const sourceDex = iter % srcLen;
         sources[sourceDex].set(iter + sourceDex);
         for (let r = 0; r < readLen; r++) {
-            sink += readLeaves[r].val();
+            sink += readLeaves[r].peek();
         }
     };
 }

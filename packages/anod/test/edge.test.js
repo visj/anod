@@ -1,18 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import {
-    root,
-    signal,
-    compute,
-    derive,
-    task,
-    effect,
-    watch,
-    spawn,
-    batch,
-    equal,
-    cleanup,
-    recover,
-} from "../";
+import { c } from "../";
 
 const tick = () => Promise.resolve();
 
@@ -20,41 +7,41 @@ describe("edge cases", () => {
 
     describe("effect error does not corrupt ctx", () => {
         test("effect throwing during creation does not corrupt outer compute", () => {
-            const s1 = signal(1);
-            const c1 = compute(() => {
-                let val = s1.val();
+            const s1 = c.signal(1);
+            const c1 = c.compute(r => {
+                let val = r.val(s1);
                 if (val > 1) {
                     try {
-                        effect(() => { throw new Error("inner boom"); });
+                        c.effect(c2 => { throw new Error("inner boom"); });
                     } catch (_) { }
                 }
                 return val * 10;
             });
 
-            expect(c1.val()).toBe(10);
+            expect(c1.peek()).toBe(10);
             s1.set(2);
-            expect(c1.val()).toBe(20);
+            expect(c1.peek()).toBe(20);
             s1.set(3);
-            expect(c1.val()).toBe(30);
+            expect(c1.peek()).toBe(30);
         });
 
         test("effect throwing during creation does not corrupt outer effect deps (with try/catch)", () => {
-            const s1 = signal(0);
-            const s2 = signal(0);
+            const s1 = c.signal(0);
+            const s2 = c.signal(0);
             let outerRuns = 0;
 
-            const r = root((r) => {
-                recover(() => true);
+            const r = c.root(r => {
+                r.recover(() => true);
 
-                effect(() => {
+                r.effect(c => {
                     outerRuns++;
-                    s1.val();
-                    if (s1.val() === 1) {
+                    c.val(s1);
+                    if (c.val(s1) === 1) {
                         try {
-                            effect(() => { throw new Error("inner"); });
+                            c.effect(c2 => { throw new Error("inner"); });
                         } catch (_) { }
                     }
-                    s2.val();
+                    c.val(s2);
                 });
             });
 
@@ -68,20 +55,20 @@ describe("edge cases", () => {
         });
 
         test("inner effect error recovered via owner chain keeps outer alive", () => {
-            const s1 = signal(0);
+            const s1 = c.signal(0);
             let outerRuns = 0;
 
-            const r = root((r) => {
-                recover(() => true);
+            const r = c.root(r => {
+                r.recover(() => true);
 
-                effect(() => {
+                r.effect(c => {
                     outerRuns++;
-                    s1.val();
-                    if (s1.val() === 1) {
-                        /** Auto-owned inner effect — error walks up owner chain
+                    c.val(s1);
+                    if (c.val(s1) === 1) {
+                        /** Auto-owned inner effect -- error walks up owner chain
                          *  to root's recover handler, which returns true. Inner
                          *  effect is disposed, outer effect survives. */
-                        effect(() => { throw new Error("inner"); });
+                        c.effect(c2 => { throw new Error("inner"); });
                     }
                 });
             });
@@ -89,44 +76,44 @@ describe("edge cases", () => {
             expect(outerRuns).toBe(1);
             s1.set(1);
             expect(outerRuns).toBe(2);
-            /** Outer effect survived — root's recover handled the error */
+            /** Outer effect survived -- root's recover handled the error */
             s1.set(2);
             expect(outerRuns).toBe(3);
             r.dispose();
         });
 
         test("effect throwing during creation inside compute does not corrupt compute", () => {
-            const s1 = signal(1);
-            const c1 = compute(() => {
-                let val = s1.val();
+            const s1 = c.signal(1);
+            const c1 = c.compute(r => {
+                let val = r.val(s1);
                 if (val > 1) {
                     try {
-                        effect(() => { throw new Error("boom"); });
+                        c.effect(c2 => { throw new Error("boom"); });
                     } catch (_) { }
                 }
                 return val + 100;
             });
 
-            expect(c1.val()).toBe(101);
+            expect(c1.peek()).toBe(101);
             s1.set(2);
-            expect(c1.val()).toBe(102);
+            expect(c1.peek()).toBe(102);
             s1.set(3);
-            expect(c1.val()).toBe(103);
+            expect(c1.peek()).toBe(103);
         });
 
         test("nested scope throwing does not corrupt parent scope", () => {
-            const s1 = signal(0);
+            const s1 = c.signal(0);
             let parentRuns = 0;
 
-            const r = root((r) => {
-                recover(() => true);
+            const r = c.root(r => {
+                r.recover(() => true);
 
-                effect(() => {
+                r.effect(c => {
                     parentRuns++;
-                    s1.val();
+                    c.val(s1);
 
-                    if (s1.val() === 1) {
-                        effect(() => {
+                    if (c.val(s1) === 1) {
+                        c.effect(c2 => {
                             throw new Error("inner scope");
                         });
                     }
@@ -144,20 +131,20 @@ describe("edge cases", () => {
 
     describe("effect error in start() loop", () => {
         test("second effect still runs after first effect throws", () => {
-            const s1 = signal(0);
+            const s1 = c.signal(0);
             let secondRan = false;
 
-            const r = root((r) => {
-                recover(() => true);
+            const r = c.root(r => {
+                r.recover(() => true);
 
-                effect(() => {
-                    if (s1.val() > 0) {
+                r.effect(c => {
+                    if (c.val(s1) > 0) {
                         throw new Error("first");
                     }
                 });
 
-                effect(() => {
-                    s1.val();
+                r.effect(c => {
+                    c.val(s1);
                     secondRan = true;
                 });
             });
@@ -169,20 +156,20 @@ describe("edge cases", () => {
         });
 
         test("scoped effect throwing does not break sibling scope", () => {
-            const s1 = signal(0);
+            const s1 = c.signal(0);
             let siblingRuns = 0;
 
-            const r = root((r) => {
-                recover(() => true);
+            const r = c.root(r => {
+                r.recover(() => true);
 
-                effect(() => {
-                    if (s1.val() > 0) {
+                r.effect(c => {
+                    if (c.val(s1) > 0) {
                         throw new Error("scope boom");
                     }
                 });
 
-                effect(() => {
-                    s1.val();
+                r.effect(c => {
+                    c.val(s1);
                     siblingRuns++;
                 });
             });
@@ -196,53 +183,53 @@ describe("edge cases", () => {
 
     describe("derive (was memo)", () => {
         test("tracks deps on first run only", () => {
-            const s1 = signal(1);
-            const s2 = signal(10);
+            const s1 = c.signal(1);
+            const s2 = c.signal(10);
             let runs = 0;
 
-            const d = derive(() => {
+            const d = c.derive(c => {
                 runs++;
-                return s1.val() + s2.val();
+                return c.val(s1) + c.val(s2);
             });
 
-            expect(d.val()).toBe(11);
+            expect(d.peek()).toBe(11);
             expect(runs).toBe(1);
 
             s1.set(2);
-            expect(d.val()).toBe(12);
+            expect(d.peek()).toBe(12);
             expect(runs).toBe(2);
 
             s2.set(20);
-            expect(d.val()).toBe(22);
+            expect(d.peek()).toBe(22);
             expect(runs).toBe(3);
         });
 
         test("does not re-execute when value unchanged", () => {
-            const s1 = signal(1);
+            const s1 = c.signal(1);
             let runs = 0;
 
-            const d = derive(() => {
+            const d = c.derive(c => {
                 runs++;
-                s1.val();
+                c.val(s1);
                 return 42;
             });
 
-            expect(d.val()).toBe(42);
+            expect(d.peek()).toBe(42);
             expect(runs).toBe(1);
 
             s1.set(2);
             /** derive runs because s1 changed, but value is still 42 */
-            expect(d.val()).toBe(42);
+            expect(d.peek()).toBe(42);
             expect(runs).toBe(2);
         });
     });
 
     describe("watch (was reaction)", () => {
         test("runs when dependency changes", () => {
-            const s1 = signal(1);
+            const s1 = c.signal(1);
             let last = 0;
 
-            watch(() => { last = s1.val(); });
+            c.watch(c => { last = c.val(s1); });
 
             expect(last).toBe(1);
             s1.set(2);
@@ -250,12 +237,12 @@ describe("edge cases", () => {
         });
 
         test("cleanup is called on update", () => {
-            const s1 = signal(1);
+            const s1 = c.signal(1);
             let cleanups = 0;
 
-            watch(() => {
-                s1.val();
-                cleanup(() => { cleanups++; });
+            c.effect(c => {
+                c.val(s1);
+                c.cleanup(() => { cleanups++; });
             });
 
             expect(cleanups).toBe(0);
@@ -266,13 +253,13 @@ describe("edge cases", () => {
 
     describe("task", () => {
         test("is stable by default", () => {
-            const s1 = signal(1);
-            const s2 = signal(10);
+            const s1 = c.signal(1);
+            const s2 = c.signal(10);
             let runs = 0;
 
-            const t = task(() => {
+            const t = c.task(c => {
                 runs++;
-                return Promise.resolve(s1.val() + s2.val());
+                return Promise.resolve(c.val(s1) + c.val(s2));
             }, 0);
 
             expect(runs).toBe(1);
@@ -280,22 +267,22 @@ describe("edge cases", () => {
         });
 
         test("settles to resolved value", async () => {
-            const t = task(() => Promise.resolve(42), 0);
+            const t = c.task(() => Promise.resolve(42), 0);
 
-            expect(t.val()).toBe(0);
+            expect(t.peek()).toBe(0);
             expect(t.loading()).toBe(true);
 
             await tick();
 
-            expect(t.val()).toBe(42);
+            expect(t.peek()).toBe(42);
             expect(t.loading()).toBe(false);
         });
 
         test("notifies downstream on settle", async () => {
-            const t = task(() => Promise.resolve(42), 0);
+            const t = c.task(() => Promise.resolve(42), 0);
             let received = 0;
 
-            effect(() => { received = t.val(); });
+            c.effect(c => { received = c.val(t); });
 
             expect(received).toBe(0);
             await tick();
@@ -303,60 +290,60 @@ describe("edge cases", () => {
         });
 
         test("sets error flag on rejection", async () => {
-            const t = task(() => Promise.reject(new Error("fail")), 0);
+            const t = c.task(() => Promise.reject(new Error("fail")), 0);
 
             await tick();
 
             expect(t.error()).toBe(true);
-            expect(() => t.val()).toThrow("fail");
+            expect(() => t.peek()).toThrow("fail");
         });
 
         test("re-evaluates when dep changes", async () => {
-            const s1 = signal(1);
-            const t = task(() => Promise.resolve(s1.val() * 10), 0);
+            const s1 = c.signal(1);
+            const t = c.task(c => Promise.resolve(c.val(s1) * 10), 0);
 
             await tick();
-            expect(t.val()).toBe(10);
+            expect(t.peek()).toBe(10);
 
             s1.set(2);
-            t.val();
+            t.peek();
             await tick();
-            expect(t.val()).toBe(20);
+            expect(t.peek()).toBe(20);
         });
 
         test("async allows changing deps", async () => {
-            const s1 = signal(true);
-            const s2 = signal("a");
-            const s3 = signal("b");
+            const s1 = c.signal(true);
+            const s2 = c.signal("a");
+            const s3 = c.signal("b");
             let runs = 0;
 
-            const t = task(() => {
+            const t = c.task(c => {
                 runs++;
-                return Promise.resolve(s1.val() ? s2.val() : s3.val());
+                return Promise.resolve(c.val(s1) ? c.val(s2) : c.val(s3));
             });
 
             await tick();
-            expect(t.val()).toBe("a");
+            expect(t.peek()).toBe("a");
             expect(runs).toBe(1);
 
             s1.set(false);
-            t.val();
+            t.peek();
             await tick();
-            expect(t.val()).toBe("b");
+            expect(t.peek()).toBe("b");
             expect(runs).toBe(2);
 
             /** s2 should no longer be tracked */
             s2.set("x");
-            t.val();
+            t.peek();
             await tick();
-            expect(t.val()).toBe("b");
+            expect(t.peek()).toBe("b");
             expect(runs).toBe(2);
 
             /** s3 should be tracked */
             s3.set("y");
-            t.val();
+            t.peek();
             await tick();
-            expect(t.val()).toBe("y");
+            expect(t.peek()).toBe("y");
             expect(runs).toBe(3);
         });
     });
@@ -365,7 +352,7 @@ describe("edge cases", () => {
         test("runs async effect", async () => {
             let ran = false;
 
-            spawn(() => {
+            c.spawn(c => {
                 return new Promise((resolve) => {
                     ran = true;
                     resolve();
@@ -378,11 +365,11 @@ describe("edge cases", () => {
 
         test("resolved function is registered as cleanup", async () => {
             let cleaned = false;
-            const s1 = signal(0);
+            const s1 = c.signal(0);
 
-            const r = root((r) => {
-                spawn(() => {
-                    s1.val();
+            const r = c.root(r => {
+                r.spawn(c => {
+                    c.val(s1);
                     return Promise.resolve(() => { cleaned = false; });
                 });
             });
@@ -394,14 +381,14 @@ describe("edge cases", () => {
         });
 
         test("is stable by default", () => {
-            const s1 = signal(1);
-            const s2 = signal(2);
+            const s1 = c.signal(1);
+            const s2 = c.signal(2);
             let runs = 0;
 
-            spawn(() => {
+            c.spawn(c => {
                 runs++;
-                s1.val();
-                s2.val();
+                c.val(s1);
+                c.val(s2);
                 return Promise.resolve();
             });
 
@@ -410,12 +397,12 @@ describe("edge cases", () => {
 
         test("sets loading flag", () => {
             let node;
-            const s1 = signal(0);
+            const s1 = c.signal(0);
 
             /** We can't easily check loading on Effect from outside,
              *  but we verify the effect doesn't crash */
-            spawn(() => {
-                s1.val();
+            c.spawn(c => {
+                c.val(s1);
                 return new Promise((r) => setTimeout(r, 100));
             });
         });
@@ -423,15 +410,15 @@ describe("edge cases", () => {
 
     describe("scope stable by default", () => {
         test("scope is stable by default", () => {
-            const s1 = signal(1);
-            const s2 = signal(10);
+            const s1 = c.signal(1);
+            const s2 = c.signal(10);
             let runs = 0;
 
-            root(() => {
-                effect(() => {
+            c.root(r => {
+                r.effect(c => {
                     runs++;
-                    s1.val();
-                    s2.val();
+                    c.val(s1);
+                    c.val(s2);
                 });
             });
 
@@ -445,18 +432,18 @@ describe("edge cases", () => {
         });
 
         test("effect scope can change deps", () => {
-            const s1 = signal(true);
-            const s2 = signal(0);
-            const s3 = signal(0);
+            const s1 = c.signal(true);
+            const s2 = c.signal(0);
+            const s3 = c.signal(0);
             let runs = 0;
 
-            root(() => {
-                effect(() => {
+            c.root(r => {
+                r.effect(c => {
                     runs++;
-                    if (s1.val()) {
-                        s2.val();
+                    if (c.val(s1)) {
+                        c.val(s2);
                     } else {
-                        s3.val();
+                        c.val(s3);
                     }
                 });
             });
@@ -482,15 +469,15 @@ describe("edge cases", () => {
 
     describe("diamond dependency", () => {
         test("effect runs once for diamond update", () => {
-            const s1 = signal(0);
-            const c1 = derive(() => s1.val() + 1);
-            const c2 = derive(() => s1.val() + 10);
+            const s1 = c.signal(0);
+            const c1 = c.derive(c => c.val(s1) + 1);
+            const c2 = c.derive(c => c.val(s1) + 10);
             let runs = 0;
 
-            effect(() => {
+            c.effect(c => {
                 runs++;
-                c1.val();
-                c2.val();
+                c.val(c1);
+                c.val(c2);
             });
 
             expect(runs).toBe(1);
@@ -499,48 +486,48 @@ describe("edge cases", () => {
         });
 
         test("compute evaluates correctly in diamond", () => {
-            const s1 = signal(1);
-            const left = derive(() => s1.val() * 2);
-            const right = derive(() => s1.val() * 3);
-            const sum = derive(() => left.val() + right.val());
+            const s1 = c.signal(1);
+            const left = c.derive(c => c.val(s1) * 2);
+            const right = c.derive(c => c.val(s1) * 3);
+            const sum = c.derive(c => c.val(left) + c.val(right));
 
-            expect(sum.val()).toBe(5);
+            expect(sum.peek()).toBe(5);
             s1.set(2);
-            expect(sum.val()).toBe(10);
+            expect(sum.peek()).toBe(10);
             s1.set(3);
-            expect(sum.val()).toBe(15);
+            expect(sum.peek()).toBe(15);
         });
 
         test("deep diamond with pending/stale split", () => {
-            const s1 = signal(0);
-            const a = derive(() => s1.val() + 1);
-            const b = derive(() => a.val() + 1);
-            const c1 = derive(() => a.val() + b.val());
+            const s1 = c.signal(0);
+            const a = c.derive(c => c.val(s1) + 1);
+            const b = c.derive(c => c.val(a) + 1);
+            const c1 = c.derive(c => c.val(a) + c.val(b));
             let runs = 0;
 
-            effect(() => {
+            c.effect(c => {
                 runs++;
-                c1.val();
+                c.val(c1);
             });
 
             expect(runs).toBe(1);
             s1.set(1);
             expect(runs).toBe(2);
-            expect(c1.val()).toBe(5);
+            expect(c1.peek()).toBe(5);
         });
     });
 
     describe("avoidable computation", () => {
         test("downstream skips when upstream absorbs change", () => {
-            const s1 = signal(1);
+            const s1 = c.signal(1);
             let c1Runs = 0;
             let c2Runs = 0;
 
             /** c1 absorbs: always returns 0 regardless of s1 */
-            const c1 = derive(() => { c1Runs++; s1.val(); return 0; });
-            const c2 = derive(() => { c2Runs++; return c1.val() + 1; });
+            const c1 = c.derive(c => { c1Runs++; c.val(s1); return 0; });
+            const c2 = c.derive(c => { c2Runs++; return c.val(c1) + 1; });
 
-            effect(() => { c2.val(); });
+            c.effect(c => { c.val(c2); });
 
             expect(c1Runs).toBe(1);
             expect(c2Runs).toBe(1);
@@ -552,14 +539,14 @@ describe("edge cases", () => {
         });
 
         test("deep chain avoids unnecessary work", () => {
-            const s1 = signal(0);
-            const c1 = derive(() => { s1.val(); return 0; });
-            const c2 = derive(() => c1.val() + 1);
-            const c3 = derive(() => c2.val() + 1);
-            const c4 = derive(() => c3.val() + 1);
+            const s1 = c.signal(0);
+            const c1 = c.derive(c => { c.val(s1); return 0; });
+            const c2 = c.derive(c => c.val(c1) + 1);
+            const c3 = c.derive(c => c.val(c2) + 1);
+            const c4 = c.derive(c => c.val(c3) + 1);
             let runs = 0;
 
-            effect(() => { runs++; c4.val(); });
+            c.effect(c => { runs++; c.val(c4); });
 
             expect(runs).toBe(1);
             s1.set(1);
@@ -570,18 +557,18 @@ describe("edge cases", () => {
 
     describe("batch", () => {
         test("coalesces multiple signal updates", () => {
-            const s1 = signal(0);
-            const s2 = signal(0);
+            const s1 = c.signal(0);
+            const s2 = c.signal(0);
             let runs = 0;
 
-            effect(() => {
+            c.effect(c => {
                 runs++;
-                s1.val();
-                s2.val();
+                c.val(s1);
+                c.val(s2);
             });
 
             expect(runs).toBe(1);
-            batch(() => {
+            c.batch(() => {
                 s1.set(1);
                 s2.set(2);
             });
@@ -589,52 +576,52 @@ describe("edge cases", () => {
         });
 
         test("nested batch is a no-op", () => {
-            const s1 = signal(0);
+            const s1 = c.signal(0);
             let runs = 0;
 
-            effect(() => { runs++; s1.val(); });
+            c.effect(c => { runs++; c.val(s1); });
 
             expect(runs).toBe(1);
-            batch(() => {
-                batch(() => {
+            c.batch(() => {
+                c.batch(() => {
                     s1.set(1);
                 });
-                /** Still inside outer batch — effect hasn't run yet */
+                /** Still inside outer batch -- effect hasn't run yet */
             });
             expect(runs).toBe(2);
         });
 
         test("signal read inside batch sees old value", () => {
-            const s1 = signal(0);
+            const s1 = c.signal(0);
             let mid = -1;
 
-            batch(() => {
+            c.batch(() => {
                 s1.set(1);
-                mid = s1.val();
+                mid = s1.peek();
             });
 
             /** Inside batch, set is deferred, so val sees old value */
             expect(mid).toBe(0);
-            expect(s1.val()).toBe(1);
+            expect(s1.peek()).toBe(1);
         });
     });
 
     describe("dispose", () => {
         test("disposed compute returns last value", () => {
-            const s1 = signal(1);
-            const c1 = derive(() => s1.val() * 2);
+            const s1 = c.signal(1);
+            const c1 = c.derive(c => c.val(s1) * 2);
 
-            expect(c1.val()).toBe(2);
+            expect(c1.peek()).toBe(2);
             c1.dispose();
             s1.set(2);
             /** Disposed compute retains nothing usable */
         });
 
         test("disposed effect stops running", () => {
-            const s1 = signal(0);
+            const s1 = c.signal(0);
             let runs = 0;
 
-            const e1 = effect(() => { runs++; s1.val(); });
+            const e1 = c.effect(c => { runs++; c.val(s1); });
 
             expect(runs).toBe(1);
             e1.dispose();
@@ -643,12 +630,12 @@ describe("edge cases", () => {
         });
 
         test("root.dispose() cleans up all owned nodes", () => {
-            const s1 = signal(0);
+            const s1 = c.signal(0);
             let runs = 0;
 
-            const r = root((r) => {
-                effect(() => { runs++; s1.val(); });
-                effect(() => { runs++; s1.val(); });
+            const r = c.root(r => {
+                r.effect(c => { runs++; c.val(s1); });
+                r.effect(c => { runs++; c.val(s1); });
             });
 
             expect(runs).toBe(2);
@@ -658,7 +645,7 @@ describe("edge cases", () => {
         });
 
         test("double dispose is safe", () => {
-            const e1 = effect(() => { });
+            const e1 = c.effect(c => { });
             e1.dispose();
             e1.dispose();
         });
@@ -666,24 +653,24 @@ describe("edge cases", () => {
 
     describe("dynamic dependency changes", () => {
         test("compute drops old deps and picks up new ones", () => {
-            const s1 = signal(true);
-            const s2 = signal("a");
-            const s3 = signal("b");
+            const s1 = c.signal(true);
+            const s2 = c.signal("a");
+            const s3 = c.signal("b");
             let runs = 0;
 
-            const c1 = compute(() => {
+            const c1 = c.compute(c => {
                 runs++;
-                return s1.val() ? s2.val() : s3.val();
+                return c.val(s1) ? c.val(s2) : c.val(s3);
             });
 
-            effect(() => { c1.val(); });
+            c.effect(c => { c.val(c1); });
 
             expect(runs).toBe(1);
-            expect(c1.val()).toBe("a");
+            expect(c1.peek()).toBe("a");
 
             /** Switch branch */
             s1.set(false);
-            expect(c1.val()).toBe("b");
+            expect(c1.peek()).toBe("b");
             expect(runs).toBe(2);
 
             /** s2 should no longer trigger */
@@ -692,22 +679,22 @@ describe("edge cases", () => {
 
             /** s3 should trigger */
             s3.set("y");
-            expect(c1.val()).toBe("y");
+            expect(c1.peek()).toBe("y");
             expect(runs).toBe(3);
         });
     });
 
     describe("equal() API", () => {
         test("equal(true) suppresses notification", () => {
-            const s1 = signal(0);
+            const s1 = c.signal(0);
             let runs = 0;
 
-            const c1 = compute(() => {
-                equal(true);
-                return s1.val();
+            const c1 = c.compute(c => {
+                c.equal(true);
+                return c.val(s1);
             });
 
-            effect(() => { runs++; c1.val(); });
+            c.effect(c => { runs++; c.val(c1); });
 
             expect(runs).toBe(1);
             s1.set(1);
@@ -716,16 +703,16 @@ describe("edge cases", () => {
         });
 
         test("equal(false) forces notification", () => {
-            const s1 = signal(0);
+            const s1 = c.signal(0);
             let runs = 0;
 
-            const c1 = compute(() => {
-                equal(false);
-                s1.val();
+            const c1 = c.compute(c => {
+                c.equal(false);
+                c.val(s1);
                 return 42;
             });
 
-            effect(() => { runs++; c1.val(); });
+            c.effect(c => { runs++; c.val(c1); });
 
             expect(runs).toBe(1);
             s1.set(1);
@@ -743,11 +730,11 @@ describe("edge cases", () => {
                 return() { return Promise.resolve({ done: true }); }
             };
 
-            const c1 = task(() => iter);
+            const c1 = c.task(() => iter);
             const values = [];
 
-            effect(() => {
-                const v = c1.val();
+            c.effect(c => {
+                const v = c.val(c1);
                 if (!c1.loading()) {
                     values.push(v);
                 }
@@ -766,39 +753,39 @@ describe("edge cases", () => {
     describe("seed value", () => {
         test("compute receives seed as prev on first run", () => {
             let received;
-            const c1 = compute((prev) => {
+            const c1 = c.compute((c, prev) => {
                 received = prev;
                 return prev + 1;
             }, 10);
 
-            expect(c1.val()).toBe(11);
+            expect(c1.peek()).toBe(11);
             expect(received).toBe(10);
         });
 
         test("derive receives seed", () => {
             let received;
-            const d = derive((prev) => {
+            const d = c.derive((c, prev) => {
                 received = prev;
                 return 42;
             }, 99);
 
-            expect(d.val()).toBe(42);
+            expect(d.peek()).toBe(42);
             expect(received).toBe(99);
         });
     });
 
     describe("multiple signal writes in effect", () => {
         test("effect writing to signal triggers another cycle", () => {
-            const s1 = signal(0);
-            const s2 = signal(0);
+            const s1 = c.signal(0);
+            const s2 = c.signal(0);
             let s2val = 0;
 
-            effect(() => {
-                s2.set(s1.val() * 10);
+            c.effect(c => {
+                s2.set(c.val(s1) * 10);
             });
 
-            effect(() => {
-                s2val = s2.val();
+            c.effect(c => {
+                s2val = c.val(s2);
             });
 
             expect(s2val).toBe(0);
@@ -808,54 +795,60 @@ describe("edge cases", () => {
     });
 
     describe("recover edge cases", () => {
-        test("error in compute is caught when effect reads it", () => {
+        test("error in effect is caught by recover", () => {
             let caught = null;
+            const s1 = c.signal(0);
 
-            const r = root((r) => {
-                recover((err) => { caught = err; return true; });
+            const r = c.root(r => {
+                r.recover(err => { caught = err; return true; });
 
-                const c1 = compute(() => { throw new Error("compute err"); });
-                effect(() => { c1.val(); });
+                r.effect(c => {
+                    if (c.val(s1) > 0) {
+                        throw new Error("effect err");
+                    }
+                });
             });
 
+            expect(caught).toBeNull();
+            s1.set(1);
             expect(caught).toBeInstanceOf(Error);
-            expect(caught.message).toBe("compute err");
+            expect(caught.message).toBe("effect err");
             r.dispose();
         });
 
         test("compute.error() returns true after throw", () => {
-            const c1 = compute(() => { throw new Error("fail"); });
+            const c1 = c.compute(() => { throw new Error("fail"); });
             expect(c1.error()).toBe(true);
         });
 
-        test("compute.val() rethrows stored error", () => {
-            const c1 = compute(() => { throw new Error("rethrow me"); });
-            expect(() => c1.val()).toThrow("rethrow me");
+        test("compute.peek() rethrows stored error", () => {
+            const c1 = c.compute(() => { throw new Error("rethrow me"); });
+            expect(() => c1.peek()).toThrow("rethrow me");
         });
     });
 
     describe("stress: deep chain", () => {
         test("50-deep chain propagates correctly", () => {
-            const head = signal(0);
+            const head = c.signal(0);
             let current = head;
             for (let i = 0; i < 50; i++) {
                 const prev = current;
-                current = derive(() => prev.val() + 1);
+                current = c.derive(c => c.val(prev) + 1);
             }
 
-            expect(current.val()).toBe(50);
+            expect(current.peek()).toBe(50);
             head.set(1);
-            expect(current.val()).toBe(51);
+            expect(current.peek()).toBe(51);
         });
     });
 
     describe("stress: wide fan-out", () => {
         test("50 effects on one signal", () => {
-            const s1 = signal(0);
+            const s1 = c.signal(0);
             let total = 0;
 
             for (let i = 0; i < 50; i++) {
-                effect(() => { total += s1.val(); });
+                c.effect(c => { total += c.val(s1); });
             }
 
             expect(total).toBe(0);
@@ -867,16 +860,16 @@ describe("edge cases", () => {
 
     describe("interleaved reads", () => {
         test("compute reading another compute during evaluation", () => {
-            const s1 = signal(1);
-            const s2 = signal(2);
+            const s1 = c.signal(1);
+            const s2 = c.signal(2);
 
-            const c1 = derive(() => s1.val() + s2.val());
-            const c2 = derive(() => c1.val() * 2);
-            const c3 = derive(() => c1.val() + c2.val());
+            const c1 = c.derive(c => c.val(s1) + c.val(s2));
+            const c2 = c.derive(c => c.val(c1) * 2);
+            const c3 = c.derive(c => c.val(c1) + c.val(c2));
 
-            expect(c3.val()).toBe(9);
+            expect(c3.peek()).toBe(9);
             s1.set(3);
-            expect(c3.val()).toBe(15);
+            expect(c3.peek()).toBe(15);
         });
     });
 });

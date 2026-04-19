@@ -1,18 +1,18 @@
 import { describe, test, expect } from "bun:test";
-import { root, signal, compute, effect } from "../src/index.js";
+import { c } from "../";
 
 describe("root", () => {
     test("allows subcomputations to escape their parents via nested scope", () => {
-        root(() => {
-            const s1 = signal(0);
-            const s2 = signal(0);
+        c.root(r => {
+            const s1 = c.signal(0);
+            const s2 = c.signal(0);
             let count = 0;
 
-            effect(() => {
-                s1.val();
-                root(() => {
-                    effect(() => {
-                        s2.val();
+            r.effect(c => {
+                c.val(s1);
+                c.root(r2 => {
+                    r2.effect(c2 => {
+                        c2.val(s2);
                         count++;
                     });
                 });
@@ -30,15 +30,15 @@ describe("root", () => {
     });
 
     test("does not batch updates within scope", () => {
-        root(() => {
-            const s1 = signal(1);
-            const c1 = compute(() => s1.val());
+        c.root(r => {
+            const s1 = c.signal(1);
+            const c1 = c.compute(c => c.val(s1));
 
-            expect(c1.val()).toBe(1);
+            expect(c1.peek()).toBe(1);
             s1.set(2);
-            expect(c1.val()).toBe(2);
+            expect(c1.peek()).toBe(2);
             s1.set(3);
-            expect(c1.val()).toBe(3);
+            expect(c1.peek()).toBe(3);
         });
     });
 });

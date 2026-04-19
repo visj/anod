@@ -1,9 +1,9 @@
 import { describe, test, expect } from "bun:test";
-import { signal, compute, effect, root } from "../src/index.js";
+import { c } from "../";
 
 /**
  * Collects garbage after an event-loop turn. Mirrors the helper in
- * garbage.test.js — the setTimeout lets the microtask queue drain before
+ * garbage.test.js -- the setTimeout lets the microtask queue drain before
  * we force a full stop-the-world GC.
  */
 function collect(callback) {
@@ -20,7 +20,7 @@ function collectAsync() {
 /**
  * Runs `fn` in a child scope and returns WeakRefs to everything `fn`
  * returns. After this helper returns the only strong references should
- * be whatever the library itself still holds — the caller can GC and
+ * be whatever the library itself still holds -- the caller can GC and
  * inspect what leaked.
  */
 function capture(fn) {
@@ -34,29 +34,29 @@ describe("stack retention after disposal", () => {
          * Setup-mode _read pushes (sender, subslot) onto DSTACK for every
          * read past the first (the first goes to _dep1). After the compute
          * finishes setup, DCOUNT is reset but the sender slots are never
-         * cleared — those senders remain rooted in DSTACK until the same
+         * cleared -- those senders remain rooted in DSTACK until the same
          * slot is overwritten by another setup.
          */
         const refs = capture(() => {
-            const s1 = signal(1);
-            const s2 = signal(2);
-            const s3 = signal(3);
-            const s4 = signal(4);
-            const s5 = signal(5);
-            const c = compute(() => s1.val() + s2.val() + s3.val() + s4.val() + s5.val());
+            const s1 = c.signal(1);
+            const s2 = c.signal(2);
+            const s3 = c.signal(3);
+            const s4 = c.signal(4);
+            const s5 = c.signal(5);
+            const cx = c.compute(c => c.val(s1) + c.val(s2) + c.val(s3) + c.val(s4) + c.val(s5));
             // Trigger setup.
-            c.val();
-            c.dispose();
+            cx.peek();
+            cx.dispose();
             s1.dispose();
             s2.dispose();
             s3.dispose();
             s4.dispose();
             s5.dispose();
-            return [s1, s2, s3, s4, s5, c];
+            return [s1, s2, s3, s4, s5, cx];
         });
 
         await collectAsync();
-        // Everything disposed and unreferenced — nothing should be retained.
+        // Everything disposed and unreferenced -- nothing should be retained.
         for (const r of refs) {
             expect(r.deref()).toBeUndefined();
         }
@@ -68,28 +68,28 @@ describe("stack retention after disposal", () => {
          * another running node in this transaction (`stamp > TRANSACTION`).
          * This happens when a nested compute re-reads a signal that the
          * outer compute already read. After the outer _update restores
-         * the saved tags it resets VCOUNT — but the sender slots still
+         * the saved tags it resets VCOUNT -- but the sender slots still
          * hold the references.
          */
         const refs = capture(() => {
             const holders = [];
-            root((r) => {
-                const s1 = signal(1);
-                const s2 = signal(2);
-                const s3 = signal(3);
+            c.root(r => {
+                const s1 = c.signal(1);
+                const s2 = c.signal(2);
+                const s3 = c.signal(3);
                 holders.push(s1, s2, s3);
 
-                effect(() => {
-                    // Outer reads — tag each signal with outer's RVER.
-                    s1.val();
-                    s2.val();
-                    s3.val();
+                r.effect(r2 => {
+                    // Outer reads -- tag each signal with outer's RVER.
+                    r2.val(s1);
+                    r2.val(s2);
+                    r2.val(s3);
 
                     // Nested compute re-reads each signal. For every
                     // nested read `stamp = sN._version = outer.RVER`
                     // and `stamp > TRANSACTION`, so each pushes onto
                     // VSTACK.
-                    compute(() => s1.val() + s2.val() + s3.val()).val();
+                    c.compute(c2 => c2.val(s1) + c2.val(s2) + c2.val(s3)).peek();
                 });
 
                 holders.push(r);
@@ -113,7 +113,7 @@ describe("stack retention after disposal", () => {
         /**
          * checkRun's fast-descent loop and scan branches push the current
          * node onto CSTACK before recursing. CTOP is decremented on the
-         * way back up but the slot is never nulled — so every compute
+         * way back up but the slot is never nulled -- so every compute
          * that participated in a PENDING propagation stays rooted in
          * CSTACK until another call overwrites the slot.
          *
@@ -129,14 +129,14 @@ describe("stack retention after disposal", () => {
          */
         const holders = capture(() => {
             let s1, s2, c1, c2, c3, c4;
-            const r = root(() => {
-                s1 = signal(1);
-                s2 = signal(10);
-                c1 = compute(() => s1.val());
-                c2 = compute(() => c1.val());
-                c3 = compute(() => s2.val());
-                c4 = compute(() => c2.val() + c3.val());
-                effect(() => c4.val());
+            const r = c.root(r => {
+                s1 = c.signal(1);
+                s2 = c.signal(10);
+                c1 = c.compute(c => c.val(s1));
+                c2 = c.compute(c => c.val(c1));
+                c3 = c.compute(c => c.val(s2));
+                c4 = c.compute(c => c.val(c2) + c.val(c3));
+                r.effect(c => c.val(c4));
                 s1.set(2);   // effect re-runs in transaction, drives checkRun
             });
             r.dispose();
@@ -160,24 +160,24 @@ describe("stack retention after disposal", () => {
          * outer so the shared signal is dropped from its dep set.
          */
         const refs = capture(() => {
-            const sGate = signal(true);
-            const sShared = signal("shared");
-            const sOther = signal("other");
+            const sGate = c.signal(true);
+            const sShared = c.signal("shared");
+            const sOther = c.signal("other");
 
-            const outer = compute(() => {
-                if (sGate.val()) {
-                    sShared.val();
+            const outer = c.compute(cx => {
+                if (cx.val(sGate)) {
+                    cx.val(sShared);
                 } else {
-                    sOther.val();
+                    cx.val(sOther);
                 }
                 // Nested compute that re-reads sShared to drive the
                 // conflict path.
-                compute(() => sShared.val()).val();
+                c.compute(c2 => c2.val(sShared)).peek();
             });
 
-            outer.val();
+            outer.peek();
             sGate.set(false);  // outer re-runs dynamically; sShared dropped
-            outer.val();
+            outer.peek();
 
             outer.dispose();
             sGate.dispose();

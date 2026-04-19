@@ -1,14 +1,14 @@
 import { describe, test, expect } from "bun:test";
-import { signal, compute, effect, root } from "../src/index.js";
+import { c } from "../src";
 
 /**
  * Tests for dynamic dep reconciliation (patchDeps) in compute() and
  * effect(). Drops at head/middle/tail, full replacement, shuffle, add
- * to end, splice, single↔many transitions, and chained re-runs.
+ * to end, splice, single<->many transitions, and chained re-runs.
  *
  * Invariants every test asserts via {@link verifyDepSet} +
  * {@link verifyIntegrity}:
- *   1. `_dep1` ∪ `_deps` exactly equals the senders read in the last run.
+ *   1. `_dep1` U `_deps` exactly equals the senders read in the last run.
  *   2. Every kept dep has a back-pointer (sub1/subs) to the node.
  *   3. Every dropped sender no longer has the node in its sub list.
  *   4. `FLAG_SINGLE` iff the node has exactly one dep total.
@@ -17,7 +17,7 @@ import { signal, compute, effect, root } from "../src/index.js";
  *      formula `(depCount-1)*2` mis-accounts on the following re-run.
  */
 
-const FLAG_SINGLE = 1 << 12;
+const FLAG_SINGLE = 1 << 11;
 
 function collectDeps(node) {
     const deps = [];
@@ -94,25 +94,25 @@ function verifyDropped(node, droppedSenders) {
 /**
  * Build a test harness: N signals, an externally-mutable mode, and the
  * node under test. The `pattern(mode, signals)` returns the list of
- * signal indices to read — in order, so the caller controls dep1.
+ * signal indices to read -- in order, so the caller controls dep1.
  *
  * To trigger a re-run we bump whichever signal is currently `_dep1`.
  */
 function harness(kind, pattern, n = 10) {
-    const signals = Array.from({ length: n }, (_, i) => signal(i));
+    const signals = Array.from({ length: n }, (_, i) => c.signal(i));
     let modeVar = 'A';
     let node;
-    const fn = () => {
+    const fn = cx => {
         const idx = pattern(modeVar, signals);
         for (const i of idx) {
-            signals[i].val();
+            cx.val(signals[i]);
         }
     };
-    const r = root(() => {
-        node = kind === 'compute' ? compute(fn) : effect(fn);
+    const r = c.root(r => {
+        node = kind === 'compute' ? c.compute(fn) : r.effect(fn);
     });
     if (kind === 'compute') {
-        node.val();
+        node.peek();
     }
     return {
         signals,
@@ -120,7 +120,7 @@ function harness(kind, pattern, n = 10) {
         root: r,
         setMode(next) {
             modeVar = next;
-            /** Bumping dep1 is the most general way to force a re-run —
+            /** Bumping dep1 is the most general way to force a re-run --
              *  even if dep1 is about to be dropped, the stale flag
              *  reaches the node first. */
             const trigger = node._dep1;
@@ -129,7 +129,7 @@ function harness(kind, pattern, n = 10) {
             }
             trigger.set(trigger._value + 1);
             if (kind === 'compute') {
-                node.val();
+                node.peek();
             }
         },
     };
@@ -148,7 +148,9 @@ for (const kind of ['compute', 'effect']) {
 
         test("drop dep1 with one dep remaining (promote path)", () => {
             const h = harness(kind, (m, s) => {
-                if (m === 'A') return [0, 1];
+                if (m === 'A') {
+                    return [0, 1];
+                }
                 return [1];
             }, 3);
             expect(h.node._dep1).toBe(h.signals[0]);
@@ -162,11 +164,13 @@ for (const kind of ['compute', 'effect']) {
             /**
              * Setup: dep1 = s0, _deps = [s1, s2]. After dropping s0,
              * patchDeps currently leaves `_dep1 === null` with `_deps`
-             * still holding s1 & s2 — violating the invariant that
+             * still holding s1 & s2 -- violating the invariant that
              * `checkRun` and `existingLen` both assume.
              */
             const h = harness(kind, (m, s) => {
-                if (m === 'A') return [0, 1, 2];
+                if (m === 'A') {
+                    return [0, 1, 2];
+                }
                 return [1, 2];
             }, 4);
             expect(h.node._dep1).toBe(h.signals[0]);
@@ -181,8 +185,12 @@ for (const kind of ['compute', 'effect']) {
              *  test corrupts the next patchDeps call via the off-by-2
              *  `existingLen` formula. */
             const h = harness(kind, (m, s) => {
-                if (m === 'A') return [0, 1, 2];
-                if (m === 'B') return [1, 2];
+                if (m === 'A') {
+                    return [0, 1, 2];
+                }
+                if (m === 'B') {
+                    return [1, 2];
+                }
                 return [1, 2, 3];
             }, 5);
             h.setMode('B');
@@ -194,7 +202,9 @@ for (const kind of ['compute', 'effect']) {
 
         test("drop middle dep", () => {
             const h = harness(kind, (m, s) => {
-                if (m === 'A') return [0, 1, 2, 3];
+                if (m === 'A') {
+                    return [0, 1, 2, 3];
+                }
                 return [0, 1, 3];
             }, 5);
             h.setMode('B');
@@ -205,7 +215,9 @@ for (const kind of ['compute', 'effect']) {
 
         test("drop last dep", () => {
             const h = harness(kind, (m, s) => {
-                if (m === 'A') return [0, 1, 2, 3];
+                if (m === 'A') {
+                    return [0, 1, 2, 3];
+                }
                 return [0, 1, 2];
             }, 5);
             h.setMode('B');
@@ -216,7 +228,9 @@ for (const kind of ['compute', 'effect']) {
 
         test("drop all deps", () => {
             const h = harness(kind, (m, s) => {
-                if (m === 'A') return [0, 1, 2, 3];
+                if (m === 'A') {
+                    return [0, 1, 2, 3];
+                }
                 return [];
             }, 5);
             h.setMode('B');
@@ -227,7 +241,9 @@ for (const kind of ['compute', 'effect']) {
 
         test("add a dep at the end", () => {
             const h = harness(kind, (m, s) => {
-                if (m === 'A') return [0, 1];
+                if (m === 'A') {
+                    return [0, 1];
+                }
                 return [0, 1, 2];
             }, 5);
             h.setMode('B');
@@ -237,7 +253,9 @@ for (const kind of ['compute', 'effect']) {
 
         test("add many deps at the end", () => {
             const h = harness(kind, (m, s) => {
-                if (m === 'A') return [0];
+                if (m === 'A') {
+                    return [0];
+                }
                 return [0, 1, 2, 3, 4, 5, 6, 7];
             }, 10);
             h.setMode('B');
@@ -247,7 +265,9 @@ for (const kind of ['compute', 'effect']) {
 
         test("splice new deps between existing", () => {
             const h = harness(kind, (m, s) => {
-                if (m === 'A') return [0, 1, 2];
+                if (m === 'A') {
+                    return [0, 1, 2];
+                }
                 return [0, 5, 6, 7, 1, 2];
             }, 10);
             h.setMode('B');
@@ -260,7 +280,9 @@ for (const kind of ['compute', 'effect']) {
 
         test("replace all deps with new set (same size)", () => {
             const h = harness(kind, (m, s) => {
-                if (m === 'A') return [0, 1, 2];
+                if (m === 'A') {
+                    return [0, 1, 2];
+                }
                 return [5, 6, 7];
             }, 10);
             h.setMode('B');
@@ -271,7 +293,9 @@ for (const kind of ['compute', 'effect']) {
 
         test("replace all deps with fewer deps", () => {
             const h = harness(kind, (m, s) => {
-                if (m === 'A') return [0, 1, 2, 3, 4];
+                if (m === 'A') {
+                    return [0, 1, 2, 3, 4];
+                }
                 return [5, 6];
             }, 10);
             h.setMode('B');
@@ -282,7 +306,9 @@ for (const kind of ['compute', 'effect']) {
 
         test("replace all deps with more deps", () => {
             const h = harness(kind, (m, s) => {
-                if (m === 'A') return [0, 1];
+                if (m === 'A') {
+                    return [0, 1];
+                }
                 return [5, 6, 7, 8, 9];
             }, 10);
             h.setMode('B');
@@ -293,7 +319,9 @@ for (const kind of ['compute', 'effect']) {
 
         test("shuffle deps (same set, different read order)", () => {
             const h = harness(kind, (m, s) => {
-                if (m === 'A') return [0, 1, 2, 3];
+                if (m === 'A') {
+                    return [0, 1, 2, 3];
+                }
                 return [3, 0, 2, 1];
             }, 5);
             h.setMode('B');
@@ -303,7 +331,9 @@ for (const kind of ['compute', 'effect']) {
 
         test("keep every other dep (0, 2, 4 of 0..5)", () => {
             const h = harness(kind, (m, s) => {
-                if (m === 'A') return [0, 1, 2, 3, 4, 5];
+                if (m === 'A') {
+                    return [0, 1, 2, 3, 4, 5];
+                }
                 return [0, 2, 4];
             }, 7);
             h.setMode('B');
@@ -315,7 +345,9 @@ for (const kind of ['compute', 'effect']) {
         test("keep every other dep including dep1 drop", () => {
             /** dep1 = s0, drop s0, s2, s4. Keep s1, s3, s5. */
             const h = harness(kind, (m, s) => {
-                if (m === 'A') return [0, 1, 2, 3, 4, 5];
+                if (m === 'A') {
+                    return [0, 1, 2, 3, 4, 5];
+                }
                 return [1, 3, 5];
             }, 7);
             h.setMode('B');
@@ -324,10 +356,14 @@ for (const kind of ['compute', 'effect']) {
             verifyDropped(h.node, [h.signals[0], h.signals[2], h.signals[4]]);
         });
 
-        test("transition many → 1 → many (FLAG_SINGLE flips)", () => {
+        test("transition many -> 1 -> many (FLAG_SINGLE flips)", () => {
             const h = harness(kind, (m, s) => {
-                if (m === 'A') return [0, 1, 2, 3];
-                if (m === 'B') return [2];
+                if (m === 'A') {
+                    return [0, 1, 2, 3];
+                }
+                if (m === 'B') {
+                    return [2];
+                }
                 return [4, 5, 6, 7];
             }, 10);
             h.setMode('B');
@@ -340,10 +376,14 @@ for (const kind of ['compute', 'effect']) {
             expect((h.node._flag & FLAG_SINGLE) !== 0).toBe(false);
         });
 
-        test("transition 2-dep ↔ 1-dep", () => {
+        test("transition 2-dep <-> 1-dep", () => {
             const h = harness(kind, (m, s) => {
-                if (m === 'A') return [0, 1];
-                if (m === 'B') return [0];
+                if (m === 'A') {
+                    return [0, 1];
+                }
+                if (m === 'B') {
+                    return [0];
+                }
                 return [0, 1];
             }, 3);
             verifyIntegrity(h.node);
@@ -362,7 +402,9 @@ for (const kind of ['compute', 'effect']) {
             /** Setup: dep1 = s0, _deps = [s1, s2]. Re-run: drop s0, add
              *  s3 and s4. The new deps should fill dep1 + _deps cleanly. */
             const h = harness(kind, (m, s) => {
-                if (m === 'A') return [0, 1, 2];
+                if (m === 'A') {
+                    return [0, 1, 2];
+                }
                 return [3, 1, 2, 4];
             }, 6);
             h.setMode('B');
@@ -373,9 +415,15 @@ for (const kind of ['compute', 'effect']) {
 
         test("three consecutive re-runs with different dep sets", () => {
             const h = harness(kind, (m, s) => {
-                if (m === 'A') return [0, 1, 2];
-                if (m === 'B') return [2, 3, 4];
-                if (m === 'C') return [5];
+                if (m === 'A') {
+                    return [0, 1, 2];
+                }
+                if (m === 'B') {
+                    return [2, 3, 4];
+                }
+                if (m === 'C') {
+                    return [5];
+                }
                 return [0, 3, 5, 7];
             }, 10);
             h.setMode('B');
@@ -391,7 +439,9 @@ for (const kind of ['compute', 'effect']) {
 
         test("dep1 drop + simultaneous new deps (fill from new)", () => {
             const h = harness(kind, (m, s) => {
-                if (m === 'A') return [0];
+                if (m === 'A') {
+                    return [0];
+                }
                 return [1, 2, 3];
             }, 5);
             h.setMode('B');
@@ -402,31 +452,31 @@ for (const kind of ['compute', 'effect']) {
     });
 }
 
-describe("patchDeps — post-drop notify (checkRun must tolerate state)", () => {
+describe("patchDeps -- post-drop notify (checkRun must tolerate state)", () => {
     test("compute: re-notify after dep1 drop with multi-dep array", () => {
         /**
          * The failure mode: after a dep1-drop leaves `_dep1 === null`
          * with `_deps.length > 0`, the node is still subscribed to a
          * compute dep. When that compute goes PENDING, reading this
          * node in a non-IDLE context hits `checkRun`, which reads
-         * `node._dep1._flag` directly — NPE.
+         * `node._dep1._flag` directly -- NPE.
          */
-        const sX = signal(1);
-        const sY = signal(2);
-        const cX = compute(() => sX.val());
-        const cY = compute(() => sY.val());
+        const sX = c.signal(1);
+        const sY = c.signal(2);
+        const cX = c.compute(cx => cx.val(sX));
+        const cY = c.compute(cx => cx.val(sY));
 
         let mode = 'A';
         let test2;
-        const r = root(() => {
-            test2 = compute(() => {
+        const r = c.root(r => {
+            test2 = c.compute(cx => {
                 if (mode === 'A') {
-                    sX.val();
+                    cx.val(sX);
                 }
-                cX.val();
-                cY.val();
+                cx.val(cX);
+                cx.val(cY);
             });
-            effect(() => test2.val());
+            r.effect(cx => cx.val(test2));
         });
 
         mode = 'B';
@@ -437,19 +487,19 @@ describe("patchDeps — post-drop notify (checkRun must tolerate state)", () => 
     });
 
     test("effect: re-notify after dep1 drop with multi-dep array", () => {
-        const sX = signal(1);
-        const sY = signal(2);
-        const cX = compute(() => sX.val());
-        const cY = compute(() => sY.val());
+        const sX = c.signal(1);
+        const sY = c.signal(2);
+        const cX = c.compute(cx => cx.val(sX));
+        const cY = c.compute(cx => cx.val(sY));
 
         let mode = 'A';
-        const r = root(() => {
-            effect(() => {
+        const r = c.root(r => {
+            r.effect(cx => {
                 if (mode === 'A') {
-                    sX.val();
+                    cx.val(sX);
                 }
-                cX.val();
-                cY.val();
+                cx.val(cX);
+                cx.val(cY);
             });
         });
 

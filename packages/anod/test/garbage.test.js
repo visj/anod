@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { signal, compute } from "../src/";
+import { c } from "../";
 
 function collect(callback) {
     // We use a small timeout to allow the event loop to turn
@@ -12,11 +12,11 @@ function collect(callback) {
 
 describe("garbage collection", () => {
     test("should not be collected when referenced", async () => {
-        const s1 = signal(1);
-        const ref = new WeakRef(compute(() => s1.val()));
+        const s1 = c.signal(1);
+        const ref = new WeakRef(c.compute(c => c.val(s1)));
 
         // Bind dependencies to ensure bidirectional link exists.
-        ref.deref()?.val();
+        ref.deref()?.peek();
 
         await new Promise((resolve) => {
             collect(() => {
@@ -27,10 +27,10 @@ describe("garbage collection", () => {
     });
 
     test("should be collected when disposed", async () => {
-        const s1 = signal(1);
-        const c1 = new WeakRef(compute(() => s1.val()));
+        const s1 = c.signal(1);
+        const c1 = new WeakRef(c.compute(c => c.val(s1)));
 
-        c1.deref()?.val();
+        c1.deref()?.peek();
 
         // Severing the hard link back to c1.
         s1.dispose();

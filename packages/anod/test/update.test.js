@@ -1,18 +1,18 @@
 import { describe, test, expect } from "bun:test";
-import { root, signal, compute, effect, cleanup } from "../";
+import { c } from "../";
 
 describe("update", () => {
     test("does not register a dependency on the subcomputation", () => {
-        root(() => {
-            const s1 = signal(1);
+        c.root(r => {
+            const s1 = c.signal(1);
             let outerCount = 0;
             let innerCount = 0;
 
-            effect(() => {
+            r.effect(c => {
                 outerCount++;
-                effect(() => {
+                c.effect(c2 => {
                     innerCount++;
-                    s1.val();
+                    c2.val(s1);
                 });
             });
 
@@ -26,46 +26,46 @@ describe("update", () => {
 
     describe("may update", () => {
         test("does not trigger downstream computations unless changed", () => {
-            const s1 = signal(1);
+            const s1 = c.signal(1);
             let order = "";
-            const c1 = compute(() => {
+            const c1 = c.compute(c => {
                 order += "c1";
-                return s1.val() > 0;
+                return c.val(s1) > 0;
             });
-            const c2 = compute(() => {
+            const c2 = c.compute(c => {
                 order += "c2";
-                return c1.val();
+                return c.val(c1);
             });
 
             order = "";
             s1.set(2);
-            c2.val();
+            c2.peek();
             expect(order).toBe("c1"); // "c1 runs, but c2 should be skipped as value is same"
 
             order = "";
             s1.set(-1);
-            c2.val();
+            c2.peek();
             expect(order).toBe("c1c2"); // "c2 runs because value changed"
         });
 
         test("updates downstream pending nodes", () => {
-            const s1 = signal(0);
-            const s2 = signal(0);
+            const s1 = c.signal(0);
+            const s2 = c.signal(0);
             let order = "";
 
-            const c1 = compute(() => {
+            const c1 = c.compute(c => {
                 order += "c1";
-                return s1.val() === 0;
+                return c.val(s1) === 0;
             });
 
-            root(() => {
-                effect(() => {
-                    c1.val();
+            c.root(r => {
+                r.effect(c => {
+                    c.val(c1);
                     order += "e1";
-                    effect(() => {
+                    c.effect(c2 => {
                         order += "e2";
-                        s2.val();
-                        cleanup(() => { order += "cl1"; });
+                        c2.val(s2);
+                        c2.cleanup(() => { order += "cl1"; });
                     });
                 });
             });

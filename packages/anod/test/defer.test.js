@@ -1,127 +1,55 @@
 import { describe, test, expect } from "bun:test";
-import { signal, compute, derive, watch, effect, root, OPT_DEFER } from "../";
+import { c, OPT_DEFER } from "../";
 
 describe("OPT_DEFER", () => {
     describe("compute", () => {
         test("does not run fn until val() is read", () => {
             let runs = 0;
-            const c1 = compute(() => { runs++; return 1; }, undefined, OPT_DEFER);
+            const c1 = c.compute(() => { runs++; return 1; }, undefined, OPT_DEFER);
             expect(runs).toBe(0);
-            expect(c1.val()).toBe(1);
+            expect(c1.peek()).toBe(1);
             expect(runs).toBe(1);
         });
     });
 
-    describe("derive (dynamic)", () => {
+    describe("derive (stable)", () => {
         test("defers initial run", () => {
-            const s1 = signal(1);
+            const s1 = c.signal(1);
             let runs = 0;
-            const c1 = derive(() => { runs++; return s1.val() * 2; }, undefined, OPT_DEFER);
+            const c1 = c.derive(c => { runs++; return c.val(s1) * 2; }, undefined, OPT_DEFER);
             expect(runs).toBe(0);
-            expect(c1.val()).toBe(2);
+            expect(c1.peek()).toBe(2);
             expect(runs).toBe(1);
         });
     });
 
-    describe("derive (bound)", () => {
-        test("defers initial run; dep change triggers first run", () => {
-            const s1 = signal(5);
+    describe("task (async stable)", () => {
+        test("defers async compute until read", () => {
+            const s1 = c.signal(3);
             let runs = 0;
-            const c1 = s1.derive((v) => { runs++; return v + 1; }, undefined, OPT_DEFER);
+            const c1 = c.derive(c => { runs++; return c.val(s1); }, undefined, OPT_DEFER);
             expect(runs).toBe(0);
-            /** First val() still defers to lazy run. */
-            expect(c1.val()).toBe(6);
-            expect(runs).toBe(1);
-        });
-    });
-
-    describe("task (bound)", () => {
-        test("defers bound async compute until read", () => {
-            const s1 = signal(3);
-            let runs = 0;
-            const c1 = s1.task(async (v) => { runs++; return v; }, undefined, OPT_DEFER);
-            expect(runs).toBe(0);
-        });
-    });
-
-    describe("watch (bound)", () => {
-        test("does not run on creation; first run happens on dep change", async () => {
-            let runs = 0;
-            let observed;
-            root(() => {
-                const s1 = signal(1);
-                s1.watch((v) => { runs++; observed = v; }, OPT_DEFER);
-                expect(runs).toBe(0);
-                expect(observed).toBeUndefined();
-
-                s1.set(2);
-                expect(runs).toBe(1);
-                expect(observed).toBe(2);
-
-                s1.set(3);
-                expect(runs).toBe(2);
-                expect(observed).toBe(3);
-            });
-        });
-    });
-
-    describe("spawn (bound)", () => {
-        test("does not run on creation; first run happens on dep change", () => {
-            let runs = 0;
-            root(() => {
-                const s1 = signal(1);
-                s1.spawn(async (v) => { runs++; }, OPT_DEFER);
-                expect(runs).toBe(0);
-
-                s1.set(2);
-                expect(runs).toBe(1);
-            });
         });
     });
 
     describe("unbound effect", () => {
-        test("ignores OPT_DEFER — always runs initially", () => {
+        test("ignores OPT_DEFER -- always runs initially", () => {
             let runs = 0;
-            root(() => {
-                effect(() => { runs++; }, OPT_DEFER);
+            c.root(r => {
+                r.effect(c => { runs++; }, OPT_DEFER);
                 expect(runs).toBe(1);
             });
         });
     });
 
-    describe("unbound watch", () => {
-        test("ignores OPT_DEFER — must run once to register deps", () => {
-            let runs = 0;
-            root(() => {
-                const s1 = signal(1);
-                watch(() => { runs++; s1.val(); }, OPT_DEFER);
-                expect(runs).toBe(1);
-
-                s1.set(2);
-                expect(runs).toBe(2);
-            });
-        });
-    });
-
-    describe("owned variants via proto", () => {
-        test("derive(dep, fn, seed, OPT_DEFER) defers", () => {
-            root(() => {
-                const s1 = signal(10);
+    describe("owned variants via root", () => {
+        test("derive(fn, seed, OPT_DEFER) defers", () => {
+            c.root(r => {
+                const s1 = c.signal(10);
                 let runs = 0;
-                const c1 = s1.derive((v) => { runs++; return v * 2; }, undefined, OPT_DEFER);
+                const c1 = r.derive(c => { runs++; return c.val(s1) * 2; }, undefined, OPT_DEFER);
                 expect(runs).toBe(0);
-                expect(c1.val()).toBe(20);
-                expect(runs).toBe(1);
-            });
-        });
-
-        test("watch(dep, fn, OPT_DEFER) defers until dep changes", () => {
-            root(() => {
-                const s1 = signal("a");
-                let runs = 0;
-                s1.watch(() => { runs++; }, OPT_DEFER);
-                expect(runs).toBe(0);
-                s1.set("b");
+                expect(c1.peek()).toBe(20);
                 expect(runs).toBe(1);
             });
         });
