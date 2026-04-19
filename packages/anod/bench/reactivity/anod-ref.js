@@ -5,7 +5,7 @@
  * same way as alien-signals, preact-signals, etc.
  */
 import { bench, run } from 'mitata';
-import { EXPECTED, OVERRIDES_ANOD } from './expected.js';
+import { EXPECTED } from './expected.js';
 import { c } from '../../dist/index.mjs';
 import { saveRun } from './save-run.js';
 

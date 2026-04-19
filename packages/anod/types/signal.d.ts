@@ -1,38 +1,28 @@
-declare const ANOD: unique symbol;
-
-declare const enum TypeFlag {
-    MASK = 7,
-    SEND = 8,
-    RECEIVE = 16,
-    OWNER = 32
-}
-
-export declare const enum Type {
-    ROOT = 1 | TypeFlag.OWNER,
-    SIGNAL = 2 | TypeFlag.SEND,
-    COMPUTE = 3 | TypeFlag.SEND | TypeFlag.RECEIVE,
-    EFFECT = 4 | TypeFlag.RECEIVE | TypeFlag.OWNER
-}
-
 export const enum Flag {
-    STALE = 8,
-    PENDING = 16,
-    RUNNING = 32,
-    DISPOSED = 64,
-    LOADING = 128,
-    ERROR = 256,
-    RECOVER = 512,
-    BOUND = 1024,
-    COMPSUB = 2048,
-    SCOPE = 4096,
-    EQUAL = 8192,
-    LIST = 16384
+    STALE = 1,
+    PENDING = 2,
+    SCHEDULED = 4,
+    DISPOSED = 8,
+    INIT = 16,
+    SETUP = 32,
+    LOADING = 64,
+    ERROR = 128,
+    DEFER = 256,
+    STABLE = 512,
+    SINGLE = 2048,
+    DERIVED = 4096,
+    WEAK = 8192,
+    EQUAL = 16384,
+    NOTEQUAL = 32768,
+    ASYNC = 65536,
+    BOUND = 131072
 }
 
 export const enum Opt {
-    DEFER = 1,
-    STABLE = 2,
-    SETUP = 4
+    DEFER = 256,
+    STABLE = 512,
+    SETUP = 32,
+    WEAK = 8192
 }
 
 export type Resolve<T> =
@@ -41,257 +31,125 @@ export type Resolve<T> =
     T extends AsyncIterator<infer U, any, any> ? U :
     T;
 
-export interface Anod<TYPE extends number> {
-    readonly t: TYPE;
-    readonly [ANOD]: never;
-}
+// ─── Reader (context object passed to compute/effect fns) ─────────────
 
-export interface IDispose<TYPE extends number> extends Anod<TYPE> {
-    dispose(): void;
-}
-
-export interface IReceiver { }
-
-export interface IReader extends IReceiver {
-    read<R>(signal: IReadonlySignal<R, Type.COMPUTE | Type.SIGNAL>): R;
+export interface IReader {
+    val<R>(signal: ISignal<R>): R;
+    val<R>(signal: ICompute<R>): R;
     equal(equal?: boolean): void;
-    async(type: number): void;
     stable(): void;
     error(): boolean;
     loading(): boolean;
     cleanup(fn: () => void): void;
     recover(fn: (error: any) => boolean): void;
+}
 
+// ─── Node interfaces ──────────────────────────────────────────────────
+
+export interface ISignal<T> {
+    peek(): T;
+    set(value: T): void;
+    dispose(): void;
+}
+
+export interface ICompute<T> extends ISignal<T> {
+    error(): boolean;
+    loading(): boolean;
+}
+
+export interface IGate<T> extends ISignal<T> {
+    check(fn: (newVal: T, oldVal: T) => boolean): IGate<T>;
+    guard(fn: (value: T) => boolean): IGate<T>;
+}
+
+export interface IEffect {
+    dispose(): void;
+    error(): boolean;
+    loading(): boolean;
+}
+
+export interface IRoot {
+    dispose(): void;
+    recover(fn: (error: any) => boolean): void;
+    cleanup(fn: () => void): void;
+}
+
+// ─── Owner interface (shared by IRoot, IEffect, and c) ────────────────
+
+export interface IOwner {
     signal<T>(value: T): ISignal<T>;
+
+    gate<T>(value: T): IGate<T>;
 
     compute<U>(fn: (c: IReader) => U): ICompute<Resolve<U>>;
     compute<U>(fn: (c: IReader, prev: Resolve<U>) => U, seed: Resolve<U>): ICompute<Resolve<U>>;
     compute<U, W>(fn: (c: IReader, prev: Resolve<U>, args: W) => U, seed: Resolve<U>, opts?: number, args?: W): ICompute<Resolve<U>>;
     compute<U, W>(fn: (c: IReader, prev: Resolve<U> | undefined, args: W) => U, seed?: Resolve<U>, opts?: number, args?: W): ICompute<Resolve<U>>;
-
-    derive<U>(fn: (c: IReader, prev: Resolve<U>) => U, seed?: Resolve<U>): ICompute<Resolve<U>>;
-    derive<U, W>(fn: (c: IReader, prev: Resolve<U>, args: W) => U, seed?: Resolve<U>, args?: W): ICompute<Resolve<U>>;
-
-    effect(fn: (c: IReader) => (() => void) | void, opts?: number): IEffect;
-    effect<W>(fn: (c: IReader, args: W) => void | (() => void), opts?: number, args?: W): IEffect;
-
-    watch(fn: (c: IReader) => void | (() => void)): IEffect;
-    watch<W>(fn: (c: IReader, args: W) => void | (() => void), args?: W): IEffect;
-
-    scope(fn: (c: IReader) => void | (() => void), opts?: number): IEffect;
-    scope<W>(fn: (c: IReader, args: W) => void | (() => void), opts?: number, args?: W): IEffect;
+    compute<T, U>(dep: ISignal<T> | ICompute<T>, fn: (val: T) => U): ICompute<Resolve<U>>;
+    compute<T, U>(dep: ISignal<T> | ICompute<T>, fn: (val: T, prev: Resolve<U>) => U, seed: Resolve<U>): ICompute<Resolve<U>>;
+    compute<T, U, W>(dep: ISignal<T> | ICompute<T>, fn: (val: T, prev: Resolve<U>, args: W) => U, seed: Resolve<U>, opts?: number, args?: W): ICompute<Resolve<U>>;
 
     task<U>(fn: (c: IReader, prev: Resolve<U>) => Promise<U>, seed?: Resolve<U>, opts?: number): ICompute<Resolve<U>>;
     task<U, W>(fn: (c: IReader, prev: Resolve<U>, args: W) => Promise<U>, seed?: Resolve<U>, opts?: number, args?: W): ICompute<Resolve<U>>;
+    task<T, U>(dep: ISignal<T> | ICompute<T>, fn: (val: T, prev: Resolve<U>) => Promise<U>, seed?: Resolve<U>, opts?: number): ICompute<Resolve<U>>;
+
+    effect(fn: (c: IReader) => (() => void) | void, opts?: number): IEffect;
+    effect<W>(fn: (c: IReader, args: W) => void | (() => void), opts?: number, args?: W): IEffect;
+    effect<T>(dep: ISignal<T> | ICompute<T>, fn: (val: T) => void | (() => void), opts?: number): IEffect;
 
     spawn(fn: (c: IReader) => Promise<(() => void) | void>, opts?: number): IEffect;
     spawn<W>(fn: (c: IReader, args: W) => Promise<(() => void) | void>, opts?: number, args?: W): IEffect;
+    spawn<T>(dep: ISignal<T> | ICompute<T>, fn: (val: T) => Promise<(() => void) | void>, opts?: number): IEffect;
 
-    root(fn: () => void): IRoot;
+    root(fn: (r: IRoot & IOwner) => void | (() => void)): IRoot;
 }
 
-export interface IReadonlySignal<T, TYPE extends number = number> extends IDispose<TYPE> {
-    val(): T;
+// ─── Concrete classes ─────────────────────────────────────────────────
 
-    derive<U>(
-        fn: (c: IReader, src: T, prev: Resolve<U>) => U,
-        seed: Resolve<U>
-    ): ICompute<Resolve<U>>;
-
-    derive<U, W>(
-        fn: (c: IReader, src: T, prev: Resolve<U>, args: W) => U,
-        seed: Resolve<U>,
-        opts?: number,
-        args?: W
-    ): ICompute<Resolve<U>>;
-
-    derive<U, W>(
-        fn: (c: IReader, src: T, prev: Resolve<U> | undefined, args: W) => U,
-        seed?: Resolve<U>,
-        opts?: number,
-        args?: W
-    ): ICompute<Resolve<U>>;
-}
-
-export interface IAwaitable {
-    error(): boolean;
-    loading(): boolean;
-}
-
-export interface IRoot extends IDispose<Type.ROOT> {
-    recover(fn: (error: any) => boolean): void;
-    cleanup(fn: () => void): void;
-}
-
-export interface ISignal<T> extends IReadonlySignal<T, Type.SIGNAL> {
-    set(value: T): void;
-}
-
-export interface ICompute<T> extends IReadonlySignal<T, Type.COMPUTE>, IAwaitable {
-    set(value: T): void;
-}
-
-export interface IEffect extends IDispose<Type.EFFECT> { }
-
-export declare function root(fn: (c: IReader) => void | (() => void)): IRoot;
-
-export declare function signal<T>(value: T): ISignal<T>;
-
-export declare function compute<U>(
-    fn: (c: IReader) => U
-): ICompute<Resolve<U>>;
-
-export declare function compute<U>(
-    fn: (c: IReader, prev: Resolve<U>) => U,
-    seed: Resolve<U>
-): ICompute<Resolve<U>>;
-
-export declare function compute<U, W>(
-    fn: (c: IReader, prev: Resolve<U>, args: W) => U,
-    seed: Resolve<U>,
-    opts?: number,
-    args?: W
-): ICompute<Resolve<U>>;
-
-export declare function compute<U, W>(
-    fn: (c: IReader, prev: Resolve<U> | undefined, args: W) => U,
-    seed?: Resolve<U>,
-    opts?: number,
-    args?: W
-): ICompute<Resolve<U>>;
-
-export declare function effect(
-    fn: (c: IReader) => (() => void) | void,
-    opts?: number
-): IEffect;
-
-export declare function effect<W>(
-    fn: (c: IReader, args: W) => void | (() => void),
-    opts?: number,
-    args?: W
-): IEffect;
-
-export declare function scope(
-    fn: (c: IReader) => void | (() => void),
-    opts?: number
-): IEffect;
-
-export declare function scope<W>(
-    fn: (c: IReader, args: W) => void | (() => void),
-    opts?: number,
-    args?: W
-): IEffect;
-
-export declare function derive<U>(
-    senders: IReadonlySignal<any>[],
-    fn: (c: IReader, prev: Resolve<U>) => U,
-    seed?: Resolve<U>,
-    opts?: number,
-): ICompute<Resolve<U>>;
-
-export declare function derive<U, W>(
-    senders: IReadonlySignal<any>[],
-    fn: (c: IReader, prev: Resolve<U>, args: W) => U,
-    seed?: Resolve<U>,
-    opts?: number,
-    args?: W,
-): ICompute<Resolve<U>>;
-
-export declare function watch(
-    senders: IReadonlySignal<any>[],
-    fn: (c: IReader) => void | (() => void),
-    opts?: number,
-): IEffect;
-
-export declare function watch<W>(
-    senders: IReadonlySignal<any>[],
-    fn: (c: IReader, args: W) => void | (() => void),
-    opts?: number,
-    args?: W,
-): IEffect;
-
-export declare function batch(fn: () => void): void;
-
-export declare function cleanup(fn: () => void): void;
-
-export declare class Context {
-    resume<T>(fn: () => T): T;
-}
-
-export declare class Root implements IRoot {
-    readonly [ANOD]: never;
-    readonly t: Type.ROOT;
+export declare class Root implements IRoot, IOwner {
     dispose(): void;
     recover(fn: (error: any) => boolean): void;
     cleanup(fn: () => void): void;
+
+    signal<T>(value: T): ISignal<T>;
+    gate<T>(value: T): IGate<T>;
+    compute: IOwner['compute'];
+    task: IOwner['task'];
+    effect: IOwner['effect'];
+    spawn: IOwner['spawn'];
+    root: IOwner['root'];
 }
 
 export declare class Signal<T> implements ISignal<T> {
-    readonly [ANOD]: never;
-    readonly t: Type.SIGNAL;
-    constructor(value: T, opts?: number);
-    val(): T;
-    derive<U>(
-        fn: (c: IReader, src: T, prev: Resolve<U>) => U,
-        seed: Resolve<U>
-    ): ICompute<Resolve<U>>;
-
-    derive<U, W>(
-        fn: (c: IReader, src: T, prev: Resolve<U>, args: W) => U,
-        seed: Resolve<U>,
-        opts?: number,
-        args?: W
-    ): ICompute<Resolve<U>>;
-
-    derive<U, W>(
-        fn: (c: IReader, src: T, prev: Resolve<U> | undefined, args: W) => U,
-        seed?: Resolve<U>,
-        opts?: number,
-        args?: W
-    ): ICompute<Resolve<U>>;
+    constructor(value: T);
+    peek(): T;
     set(value: T): void;
     dispose(): void;
 }
 
-export declare class Compute<T, U = any, W = any> implements ICompute<T> {
-    readonly [ANOD]: never;
-    readonly t: Type.COMPUTE;
+export declare class Gate<T> extends Signal<T> implements IGate<T> {
+    constructor(value: T);
+    check(fn: (newVal: T, oldVal: T) => boolean): this;
+    guard(fn: (value: T) => boolean): this;
+}
 
-    constructor(opts: number, fn: (c: IReader, prev: T, args: W) => any, dep1: null, seed?: T, args?: W);
-    constructor(opts: number, fn: (c: IReader, u: U, prev: T, args: W, mod: number) => any, dep1: IReadonlySignal<U>, seed?: T, args?: W);
+export declare class Compute<T = any> extends Signal<T> implements ICompute<T> {
+    constructor(opts: number, fn: Function, dep1: any, seed?: T, args?: any);
+    error(): boolean;
+    loading(): boolean;
+}
 
-    val(): T;
-    derive<U>(
-        fn: (c: IReader, src: T, prev: Resolve<U>) => U,
-        seed: Resolve<U>
-    ): ICompute<Resolve<U>>;
-
-    derive<U, W>(
-        fn: (c: IReader, src: T, prev: Resolve<U>, args: W) => U,
-        seed: Resolve<U>,
-        opts?: number,
-        args?: W
-    ): ICompute<Resolve<U>>;
-
-    derive<U, W>(
-        fn: (c: IReader, src: T, prev: Resolve<U> | undefined, args: W) => U,
-        seed?: Resolve<U>,
-        opts?: number,
-        args?: W
-    ): ICompute<Resolve<U>>;
+export declare class Effect implements IEffect {
+    constructor(opts: number, fn: Function, dep1: any, owner: any, args?: any);
     dispose(): void;
     error(): boolean;
     loading(): boolean;
 }
 
-export declare class Effect<U = any, W = any> implements IEffect {
-    readonly [ANOD]: never;
-    readonly t: Type.EFFECT;
+// ─── Top-level API ────────────────────────────────────────────────────
 
-    constructor(opts: number, fn: (c: IReader, args: W) => void | (() => void), dep1: null, args?: W);
-    constructor(opts: number, fn: (c: IReader, u: U, args: W) => void | (() => void), dep1: IReadonlySignal<U>, args?: W);
+export declare const c: IOwner & {
+    batch(fn: () => void): void;
+};
 
-    dispose(): void;
-    error(): boolean;
-    loading(): boolean;
-}
+export declare function batch(fn: () => void): void;

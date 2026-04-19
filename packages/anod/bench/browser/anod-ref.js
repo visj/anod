@@ -2010,7 +2010,7 @@ const EXPECTED = {
 	dynUpdateWideDense: 244,
 	dynUpdateDeep: 2493,
 	dynUpdateVeryDynamic: 539
-}, W = 1024, Yl = 2048, C = 9792;
+}, Yl = 2048, C = 8992;
 var li = [], ei = 0, Sl = 0, Ki = [], Li = [], Mi = 0, Ni = [], Pi = 0, Qi = 0, bi = 1, mi = !0, xn = 1, Ai = 0, Oi = 0, pn = [], Rn = 0, Ei = [], vn = [], Sn = 0, ti = [
 	0,
 	0,
@@ -2023,23 +2023,59 @@ var li = [], ei = 0, Sl = 0, Ki = [], Li = [], Mi = 0, Ni = [], Pi = 0, Qi = 0, 
 	[]
 ], jn = 0, _n = [], gn = 0;
 function s() {
-	this.j = 0, this.H = null, this.J = null, this.M = null;
+	this.H = null, this.J = null, this.M = null;
 }
 function p(t) {
 	this.j = 0, this.W = t, this.u = 0, this.O = null, this.P = 0, this.T = null;
 }
 function x(t, i, l, n, e) {
-	this.j = 49 | t, this.W = n, this.u = 0, this.O = null, this.P = 0, this.T = null, this.V = i, this.C = l, this.F = 0, this.A = null, this.i = 0, this.it = 0, this.Y = e;
+	this.j = 17 | t, this.W = n, this.u = 0, this.O = null, this.P = 0, this.T = null, this.V = i, this.C = l, this.F = 0, this.A = null, this.i = 0, this.it = 0, this.Y = e;
 }
 function z(t, i, l, n, e) {
-	this.j = 32 | t, this.V = i, this.C = l, this.F = 0, this.A = null, this.i = 0, this.H = null, this.J = null, this.$ = 0, this.L = n, this.M = null, this.Y = e;
+	this.j = 16 | t, this.V = i, this.C = l, this.F = 0, this.A = null, this.i = 0, this.H = null, this.J = null, this.$ = 0, this.L = n, this.M = null, this.Y = e;
 }
 function ba(t) {
 	this.tt = t, this.j = t.j, this.u = xn += 2;
 }
+function In(t) {
+	this.j = 0, this.W = t, this.u = 0, this.O = null, this.P = 0, this.T = null, this.Kt = null, this.Ot = null;
+}
+function Bn(t) {
+	let i = Ai;
+	if (t.u === i) return t.W;
+	if (3 & t.j && t.Tt(), 512 == (544 & this.j)) {
+		if (128 & t.j) throw t.W;
+		return t.W;
+	}
+	let l = t.u;
+	if (t.u = i, l === i - 1 ? Sl++ : this.Jt(t, l), 128 & t.j) throw t.W;
+	return t.W;
+}
+function Ln(t) {
+	if (this.W !== t) if (mi) this.W = t, this.it = bi + 1, this.j &= -20, h(this, 1), Et();
+	else {
+		this.j |= 4;
+		let i = Sn++;
+		Ei[i] = this, vn[i] = t;
+	}
+}
+function Kn(t) {
+	return t instanceof Error || null != t && "string" == typeof t.message ? t : { message: "Compute threw error: " + t };
+}
+function a(t) {
+	return new p(t);
+}
+function w(t) {
+	let i = new s();
+	return Tt(i, t), i;
+}
+function Jn(t) {
+	return new In(t);
+}
+In.prototype = Object.create(p.prototype);
 {
-	let t = s.prototype, i = p.prototype, l = x.prototype, n = z.prototype, u = ba.prototype;
-	function f(t) {
+	let t = s.prototype, i = p.prototype, l = x.prototype, n = z.prototype, f = ba.prototype;
+	function u(t) {
 		let i = this.H;
 		null === i ? this.H = t : "function" == typeof i ? this.H = [i, t] : i.push(t);
 	}
@@ -2050,52 +2086,13 @@ function ba(t) {
 	function c(t) {
 		this.j = !1 === t ? -16385 & this.j | 32768 : -32769 & this.j | 16384;
 	}
-	function a() {
-		this.j |= W;
+	function y() {
+		this.j |= 512;
 	}
-	function y(t, i, l, n) {
-		let e = 64 | (0 | l) & C, s = new x(e, t, null, i, n);
-		return jt(this, s), 512 & e || bt(s), s;
-	}
-	function w(t, i, l, n) {
-		let e = 1088 | (0 | l) & C, s = new x(e, t, null, i, n);
-		return jt(this, s), 512 & e || bt(s), s;
-	}
-	function d(t, i, l, n) {
-		let e = 65600 | (0 | l) & C, s = new x(e, t, null, i, null);
-		return s.Y = {
-			ct: new ba(s),
-			Y: n
-		}, jt(this, s), 512 & e || bt(s), s;
-	}
-	function v(t) {
-		return new p(t);
-	}
-	function b(t) {
-		let i = new s();
-		return Tt(i, t), i;
-	}
-	function k(t, i, l) {
-		let n = new z(64 | (0 | i) & C, t, null, this, l), e = this.$ + 1;
-		return this.$ > 2 && e >= ti.length && (ti.push(0), ii.push([])), n.$ = e, jt(this, n), vt(n), n;
-	}
-	function _(t, i, l) {
-		let n = new z(1088 | (0 | i) & C, t, null, this, l), e = this.$ + 1;
-		return this.$ > 2 && e >= ti.length && (ti.push(0), ii.push([])), n.$ = e, jt(this, n), vt(n), n;
-	}
-	function R(t, i, l) {
-		let n = new z(65600 | (0 | i) & C, t, null, this, null);
-		n.Y = {
-			ct: new ba(n),
-			Y: l
-		};
-		let e = this.$ + 1;
-		return this.$ > 2 && e >= ti.length && (ti.push(0), ii.push([])), n.$ = e, jt(this, n), vt(n), n;
-	}
-	i.it = 0, t.L = null, t.$ = -1, t.dispose = i.dispose = l.dispose = n.dispose = function() {
+	t.j = 0, t.L = null, t.$ = -1, i.it = 0, t.dispose = i.dispose = l.dispose = n.dispose = function() {
 		8 & this.j || (mi ? this.S() : pn[Rn++] = this);
 	}, l.Jt = n.Jt = function(t, i) {
-		if (i > Oi && (li[ei++] = t, li[ei++] = i), 64 & this.j) if (null === this.C) {
+		if (i > Oi && (li[ei++] = t, li[ei++] = i), 32 & this.j) if (null === this.C) {
 			let i = M(t, this, -1);
 			this.C = t, this.F = i;
 		} else {
@@ -2104,10 +2101,10 @@ function ba(t) {
 		}
 		else null === this.A ? (this.A = [t, 0], this.j &= -2049) : this.A.push(t, 0);
 	}, l.error = n.error = function() {
-		return !!(256 & this.j);
-	}, l.loading = n.loading = function() {
 		return !!(128 & this.j);
-	}, t.Mt = n.Mt = f, t.Nt = n.Nt = o, t.cleanup = n.cleanup = f, t.recover = n.recover = o, l.equal = n.equal = u.equal = c, l.stable = n.stable = a, t.S = function() {
+	}, l.loading = n.loading = function() {
+		return !!(64 & this.j);
+	}, t.Mt = n.Mt = u, t.Nt = n.Nt = o, t.cleanup = n.cleanup = u, t.recover = n.recover = o, l.equal = n.equal = f.equal = c, l.stable = n.stable = y, t.S = function() {
 		this.j = 8, null !== this.H && Fl(this), null !== this.J && Ct(this), this.J = this.M = null;
 	}, i.peek = function() {
 		return this.W;
@@ -2131,49 +2128,43 @@ function ba(t) {
 			} finally {
 				mi = !0;
 			}
-		} else 1 & t ? this.ot(bi) : t & Yl ? Zl(this, bi) : qn(this, bi);
-		if (256 & this.j) throw this.W;
+		} else this.Tt();
+		if (128 & this.j) throw this.W;
 		return this.W;
-	}, l.val = function(t) {
-		3 & t.j && t.Tt();
-		let i = t.u;
-		if (i !== Ai && (t.u = Ai, i === Ai - 1 ? Sl++ : this.Jt(t, i)), 256 & t.j) throw t.W;
-		return t.W;
-	}, l.set = function(t) {
-		if (this.W !== t) if (mi) this.W = t, this.it = bi + 1, this.j &= -36, h(this, 1), Et();
-		else {
-			this.j |= 4;
-			let i = Sn++;
-			Ei[i] = this, vn[i] = t;
-		}
-	}, l.Gt = function(t) {
-		this.W = t, 4 & this.j && (this.j &= -37, this.it = bi, h(this, 1));
+	}, l.val = Bn, l.set = Ln, l.Gt = function(t) {
+		this.W = t, 4 & this.j && (this.j &= -21, this.it = bi, h(this, 1));
 	}, l.Tt = function() {
 		let t = this.j;
 		1 & t ? this.ot(bi) : t & Yl ? Zl(this, bi) : qn(this, bi);
 	}, l.S = function() {
 		let t = this.j;
-		this.j = 8, gt(this), Wt(this), 65536 & t && this.Y.ct.S(), this.V = this.W = this.Y = null;
+		this.j = 8, gt(this), Wt(this), 65536 & t && !(131072 & t) && this.Y.ct.S(), this.V = this.W = this.Y = null;
 	}, l.ot = function(t) {
 		let i, l = this.j;
-		if (this.i = t, this.j = -49314 & l, 65536 & l) return this.yt(t);
-		if (1024 == (1088 & l)) try {
-			i = this.V(this, this.W, this.Y);
-		} catch (i) {
-			this.W = i, this.j = -100 & this.j | 256, this.it = t;
-			return;
-		}
-		else {
+		if (this.i = t, this.j = -49234 & l, 65536 & l) return this.yt(t);
+		if (512 == (544 & l)) {
+			let n;
+			if (131072 & l) {
+				let t = this.C;
+				3 & t.j && t.Tt(), n = t.W;
+			} else n = this;
+			try {
+				i = this.V(n, this.W, this.Y);
+			} catch (i) {
+				this.W = Kn(i), this.j = -20 & this.j | 128, this.it = t;
+				return;
+			}
+		} else {
 			let t = Ai, n = xn += 2;
 			Ai = n;
-			let e, s, h = ei, u = 0, f = 0;
-			64 & l ? (e = Qi, Qi = Pi) : (s = Sl, Sl = 0, f = bn(n - 1, this.C, this.A), u = null !== this.A ? this.A.length : 0);
+			let e, s, h = ei, f = 0, u = 0;
+			32 & l ? (e = Qi, Qi = Pi) : (s = Sl, Sl = 0, u = bn(n - 1, this.C, this.A), f = null !== this.A ? this.A.length : 0);
 			try {
-				i = this.V(this, this.W, this.Y), this.j &= -257;
+				i = this.V(this, this.W, this.Y), this.j &= -129;
 			} catch (t) {
-				i = t, this.j |= 256;
+				i = Kn(t), this.j |= 128;
 			}
-			if (64 & l) {
+			if (32 & l) {
 				if (Pi > Qi) {
 					let t = Ni;
 					this.A = t.slice(Qi, Pi);
@@ -2183,7 +2174,7 @@ function ba(t) {
 				Qi = e;
 			} else {
 				let t = null !== this.A ? this.A.length : 0;
-				Sl === f && t === u || Ql(this, n, f, t), Sl = s;
+				Sl === u && t === f || Ql(this, n, u, t), Sl = s;
 			}
 			if (ei > h) {
 				let t = ei, i = li;
@@ -2192,55 +2183,73 @@ function ba(t) {
 			}
 			Ai = t;
 		}
-		l = this.j &= -100, 256 & l ? (this.W = i, this.it = t) : i !== this.W ? (this.W = i, 16384 & l || (this.it = t)) : 32768 & l && (this.it = t);
+		l = this.j &= -52, 128 & l ? (this.W = i, this.it = t) : i !== this.W ? (this.W = i, 16384 & l || (this.it = t)) : 32768 & l && (this.it = t);
 	}, l.yt = function(t) {
-		let i, l, n = this.j, e = this.Y;
-		if (1088 & n) l = e.ct, l.j &= -49153;
-		else {
-			e.ct.S(), null !== this.C && (St(this.C, this.F), this.C = null, this.F = 0);
-			let t = this.A;
-			if (null !== t) {
-				let i = t.length >> 1;
-				for (; i-- > 0;) {
-					let i = t.pop();
-					St(t.pop(), i);
-				}
+		let i, l = this.j;
+		if (131072 & l) {
+			let l = this.C;
+			3 & l.j && l.Tt();
+			try {
+				i = this.V(l.W, this.W, this.Y), this.j &= -129;
+			} catch (i) {
+				this.W = Kn(i), this.j = -20 & this.j | 128, this.it = t;
+				return;
 			}
-			l = e.ct = new ba(this);
+		} else {
+			let n, e = this.Y;
+			if (544 & l) n = e.ct, n.j &= -49153;
+			else {
+				e.ct.S(), null !== this.C && (St(this.C, this.F), this.C = null, this.F = 0);
+				let t = this.A;
+				if (null !== t) {
+					let i = t.length >> 1;
+					for (; i-- > 0;) {
+						let i = t.pop();
+						St(t.pop(), i);
+					}
+				}
+				n = e.ct = new ba(this);
+			}
+			try {
+				i = this.V(n, this.W, e.Y), this.j = -129 & this.j | 49664 & n.j;
+			} catch (i) {
+				this.W = Kn(i), this.j = -52 & this.j | 128, this.it = t;
+				return;
+			}
 		}
-		try {
-			i = this.V(l, this.W, e.Y), this.j = -257 & this.j | 50176 & l.j;
-		} catch (i) {
-			this.W = i, this.j = -100 & this.j | 256, this.it = t;
-			return;
-		}
-		this.j &= -100;
-		let s = Nl(i);
-		3 === s ? (n = this.j, i !== this.W ? (this.W = i, 16384 & n || (this.it = t)) : 32768 & n && (this.it = t)) : (this.j |= 128, 1 === s ? Xt(new WeakRef(this), i, t) : Yt(new WeakRef(this), i, t));
+		this.j &= -52;
+		let n = Nl(i);
+		3 === n ? (l = this.j, i !== this.W ? (this.W = i, 16384 & l || (this.it = t)) : 32768 & l && (this.it = t)) : (this.j |= 64, 1 === n ? Xt(new WeakRef(this), i, t) : Yt(new WeakRef(this), i, t));
 	}, l.ut = function() {
 		h(this, 2);
-	}, n.val = function(t) {
-		3 & t.j && t.Tt();
-		let i = t.u;
-		if (i !== Ai && 1024 != (1088 & this.j) && (t.u = Ai, i === Ai - 1 ? Sl++ : this.Jt(t, i)), 256 & t.j) throw t.W;
-		return t.W;
-	}, n.ot = function(t) {
+	}, n.val = Bn, n.ot = function(t) {
 		let i, l = this.j;
-		if (this.i = t, 64 & l || (null !== this.H && Fl(this), null !== this.J && Ct(this), this.M = null), 65536 & l) return this.j &= -129, this.yt(t);
-		if (1024 == (1088 & l)) try {
-			i = this.V(this, this.Y);
-		} finally {
-			this.j &= -4;
-		}
-		else {
+		if (this.i = t, 16 & l || (null !== this.H && Fl(this), null !== this.J && Ct(this), this.M = null), 65536 & l) return this.j &= -65, this.yt(t);
+		if (512 == (544 & l)) {
+			let t;
+			if (131072 & l) {
+				let i = this.C;
+				3 & i.j && i.Tt(), t = i.W;
+			} else t = this;
+			try {
+				i = this.V(t, this.Y);
+			} finally {
+				this.j &= -20;
+			}
+		} else {
 			let t = Ai, n = xn += 2;
 			Ai = n;
-			let e, s, h = ei, u = 0, f = 0;
-			64 & l ? (e = Qi, Qi = Pi) : (s = Sl, Sl = 0, u = bn(n - 1, this.C, this.A), f = null !== this.A ? this.A.length : 0);
+			let e, s, h = ei, f = 0, u = 0;
+			if (32 & l) e = Qi, Qi = Pi;
+			else {
+				s = Sl, Sl = 0;
+				let t = this.A;
+				f = bn(n - 1, this.C, t), u = null !== t ? t.length : 0;
+			}
 			try {
 				i = this.V(this, this.Y);
 			} finally {
-				if (64 & l) {
+				if (32 & l) {
 					if (Pi > Qi) {
 						let t = Ni;
 						this.A = t.slice(Qi, Pi);
@@ -2250,64 +2259,77 @@ function ba(t) {
 					Qi = e;
 				} else {
 					let t = null !== this.A ? this.A.length : 0;
-					Sl === u && t === f || Ql(this, n, u, t), Sl = s;
+					Sl === f && t === u || Ql(this, n, f, t), Sl = s;
 				}
 				if (ei > h) {
 					let t = ei, i = li;
 					for (let l = h; l < t; l += 2) i[l].u = i[l + 1], i[l] = null;
 					ei = h;
 				}
-				Ai = t, this.j &= -100;
+				Ai = t, this.j &= -52;
 			}
 		}
 		"function" == typeof i && this.Mt(i);
 	}, n.yt = function(t) {
-		let i, l, n = this.j, e = this.Y;
-		if (!(1088 & n)) {
-			e.ct.S(), null !== this.C && (St(this.C, this.F), this.C = null);
-			let t = this.A;
-			if (null !== t) {
-				let i = t.length >> 1;
-				for (; i-- > 0;) {
-					let i = t.pop();
-					St(t.pop(), i);
-				}
+		let i, l = this.j;
+		if (131072 & l) {
+			let t = this.C;
+			3 & t.j && t.Tt();
+			try {
+				i = this.V(t.W, this.Y);
+			} finally {
+				this.j &= -20;
 			}
-			e.ct = new ba(this);
+		} else {
+			let t, n = this.Y;
+			if (!(544 & l)) {
+				n.ct.S(), null !== this.C && (St(this.C, this.F), this.C = null);
+				let t = this.A;
+				if (null !== t) {
+					let i = t.length >> 1;
+					for (; i-- > 0;) {
+						let i = t.pop();
+						St(t.pop(), i);
+					}
+				}
+				n.ct = new ba(this);
+			}
+			t = n.ct;
+			try {
+				i = this.V(t, n.Y), this.j = this.j | 512 & t.j;
+			} finally {
+				this.j &= -52;
+			}
 		}
-		l = e.ct;
-		try {
-			i = this.V(l, e.Y), this.j = this.j | l.j & W;
-		} finally {
-			this.j &= -100;
-		}
-		let s = Nl(i);
-		var h;
-		3 === s ? "function" == typeof i && this.Mt(i) : (this.j |= 128, 1 === s ? (h = new WeakRef(this), i.then((t) => {
-			let i = h.deref();
+		let n = Nl(i);
+		var e;
+		3 === n ? "function" == typeof i && this.Mt(i) : (this.j |= 64, 1 === n ? (e = new WeakRef(this), i.then((t) => {
+			let i = e.deref();
 			if (void 0 !== i && !(8 & i.j)) {
-				i.j &= -129;
-				let l = i.Y.ct;
-				i.j |= l.j & W, l.j &= -65, "function" == typeof t && i.Mt(t);
+				if (i.j &= -65, !(131072 & i.j)) {
+					let t = i.Y.ct;
+					i.j |= 512 & t.j, t.j &= -33;
+				}
+				"function" == typeof t && i.Mt(t);
 			}
 		}, (t) => {
-			let i = h.deref();
-			void 0 === i || 8 & i.j || (i.j &= -129, qt(i, t) || i.S());
+			let i = e.deref();
+			void 0 === i || 8 & i.j || (i.j &= -65, qt(i, t) || i.S());
 		})) : Zt(new WeakRef(this), i));
 	}, n.S = function() {
 		let t = this.j;
-		this.j = 8, Wt(this), null !== this.H && Fl(this), null !== this.J && Ct(this), 65536 & t && this.Y.ct.S(), this.V = this.Y = this.J = this.L = this.M = null;
+		this.j = 8, Wt(this), null !== this.H && Fl(this), null !== this.J && Ct(this), 65536 & t && !(131072 & t) && this.Y.ct.S(), this.V = this.Y = this.J = this.L = this.M = null;
 	}, n.ut = function() {
 		if (null === this.J) _n[gn++] = this;
 		else {
 			let t = this.$, i = ti[t];
 			ii[t][i] = this, ti[t] = i + 1, jn++;
 		}
-	}, u.val = function(t) {
+	}, f.val = function(t) {
 		let i = this.j;
 		if (8 & i) throw Error("Reader disposed");
 		let l = t.W;
-		if (1024 == (1088 & i)) return l;
+		if (512 == (544 & i)) return l;
 		if (t.u === this.u) return l;
 		t.u = this.u;
 		let n = this.tt;
@@ -2317,17 +2339,70 @@ function ba(t) {
 			null === i ? n.A = [t, l] : i.push(t, l);
 		}
 		return l;
-	}, u.S = function() {
+	}, f.S = function() {
 		this.j = 8, this.tt = null;
-	}, u.stable = function() {
-		this.j = -65 & this.j | 1024;
-	}, u.cleanup = function(t) {
+	}, f.stable = function() {
+		this.j = -33 & this.j | 512;
+	}, f.cleanup = function(t) {
 		if (8 & this.j) throw Error("Reader disposed");
 		this.tt.Mt(t);
-	}, u.recover = function(t) {
+	}, f.recover = function(t) {
 		if (8 & this.j) throw Error("Reader disposed");
 		this.tt.Nt(t);
-	}, t.signal = n.signal = v, t.compute = n.compute = y, t.derive = n.derive = w, t.task = n.task = d, t.effect = n.effect = k, t.watch = n.watch = _, t.spawn = n.spawn = R, t.root = n.root = b;
+	};
+	let d = In.prototype;
+	function b(t, i, l, n, e) {
+		let s, h;
+		return "function" == typeof t ? (s = 32 | (0 | l) & C, h = new x(s, t, null, i, n)) : (s = 133632 | (0 | n) & C, h = new x(s, i, t, l, e), h.F = M(t, h, -1)), jt(this, h), 256 & s || bt(h), h;
+	}
+	function v(t, i, l, n, e) {
+		let s, h;
+		return "function" == typeof t ? (s = 65568 | (0 | l) & C, h = new x(s, t, null, i, null), h.Y = {
+			ct: new ba(h),
+			Y: n
+		}) : (s = 199168 | (0 | n) & C, h = new x(s, i, t, l, e), h.F = M(t, h, -1)), jt(this, h), 256 & s || bt(h), h;
+	}
+	function k(t, i, l, n) {
+		let e, s;
+		"function" == typeof t ? (e = 32 | (0 | i) & C, s = new z(e, t, null, this, l)) : (e = 133632 | (0 | l) & C, s = new z(e, i, t, this, n), s.F = M(t, s, -1));
+		let h = this.$ + 1;
+		return this.$ > 2 && h >= ti.length && (ti.push(0), ii.push([])), s.$ = h, jt(this, s), vt(s), s;
+	}
+	function g(t, i, l, n) {
+		let e, s;
+		"function" == typeof t ? (e = 65568 | (0 | i) & C, s = new z(e, t, null, this, null), s.Y = {
+			ct: new ba(s),
+			Y: l
+		}) : (e = 199168 | (0 | l) & C, s = new z(e, i, t, this, n), s.F = M(t, s, -1));
+		let h = this.$ + 1;
+		return this.$ > 2 && h >= ti.length && (ti.push(0), ii.push([])), s.$ = h, jt(this, s), vt(s), s;
+	}
+	d.set = function(t) {
+		let i = this.Ot;
+		if (null !== i) if ("function" == typeof i) {
+			if (!i(t)) throw Error(i.name);
+		} else {
+			let l = i.length;
+			for (let n = 0; n < l; n++) if (!i[n](t)) throw Error(i[n].name);
+		}
+		let l = this.Kt;
+		t: if (null !== l) {
+			let i = this.W;
+			if ("function" != typeof l) {
+				let n = l.length;
+				for (let e = 0; e < n; e++) if (!l[e](t, i)) break t;
+				return;
+			}
+			if (l(t, i)) return;
+		}
+		Ln.call(this, t);
+	}, d.check = function(t) {
+		let i = this.Kt;
+		return null === i ? this.Kt = t : "function" == typeof i ? this.Kt = [i, t] : i.push(t), this;
+	}, d.guard = function(t) {
+		let i = this.Ot;
+		return null === i ? this.Ot = t : "function" == typeof i ? this.Ot = [i, t] : i.push(t), this;
+	}, t.signal = n.signal = a, t.gate = n.gate = Jn, t.compute = n.compute = b, t.task = n.task = v, t.effect = n.effect = k, t.spawn = n.spawn = g, t.root = n.root = w;
 }
 function M(t, i, l) {
 	let n = -1;
@@ -2400,55 +2475,55 @@ function tn(t) {
 	return null === t.C && (null === t.A || 0 === t.A.length);
 }
 function Ql(t, i, l, n) {
-	let e = t.A, s = l > 1 ? 2 * (l - 1) : 0, h = s, u = t.C;
-	if (null !== u && u.u !== i) if (St(u, t.F), h < n) {
+	let e = t.A, s = l > 1 ? 2 * (l - 1) : 0, h = s, f = t.C;
+	if (null !== f && f.u !== i) if (St(f, t.F), h < n) {
 		let i = e[h];
 		t.C = i, t.F = M(i, t, -1), h += 2;
 	} else t.C = null, t.F = 0;
 	if (null === e) return void (null !== t.C && (t.j |= Yl));
-	let f = s, o = 0;
-	for (; o < f;) {
-		let l = e[o];
-		if (l.u !== i) if (St(l, e[o + 1]), h < n) {
-			let i = e[h], l = M(i, t, o);
-			e[o] = i, e[o + 1] = l, h += 2, o += 2;
+	let u = 0, o = s;
+	for (; u < o;) {
+		let l = e[u];
+		if (l.u !== i) if (St(l, e[u + 1]), h < n) {
+			let i = e[h], l = M(i, t, u);
+			e[u] = i, e[u + 1] = l, h += 2, u += 2;
 		} else {
 			let t = 0;
-			for (; f > o + 2;) {
-				f -= 2;
-				let l = e[f];
+			for (; o > u + 2;) {
+				o -= 2;
+				let l = e[o];
 				if (l.u === i) {
-					let i = e[f + 1];
-					e[o] = l, e[o + 1] = i, -1 === i ? l.P = o : l.T[i + 1] = o, t = 1;
+					let i = e[o + 1];
+					e[u] = l, e[u + 1] = i, -1 === i ? l.P = u : l.T[i + 1] = u, t = 1;
 					break;
 				}
-				St(l, e[f + 1]);
+				St(l, e[o + 1]);
 			}
-			t ? o += 2 : f = o;
+			t ? u += 2 : o = u;
 		}
-		else o += 2;
+		else u += 2;
 	}
 	if (h < n) {
 		if (null === t.C) {
-			let i = e[h], l = M(i, t, o);
-			e[o] = i, e[o + 1] = l, h += 2;
+			let i = e[h], l = M(i, t, u);
+			e[u] = i, e[u + 1] = l, h += 2;
 		}
 		for (; h < n;) {
-			let i = e[h], l = M(i, t, f);
-			e[f] = i, e[f + 1] = l, f += 2, h += 2;
+			let i = e[h], l = M(i, t, o);
+			e[o] = i, e[o + 1] = l, o += 2, h += 2;
 		}
 	}
-	if (null === t.C && f > 0) {
-		f -= 2;
-		let i = e[f], l = e[f + 1];
+	if (null === t.C && o > 0) {
+		o -= 2;
+		let i = e[o], l = e[o + 1];
 		t.C = i, t.F = l, -1 === l ? i.P = -1 : i.T[l + 1] = -1;
 	}
-	if (0 === f) t.A = null, null !== t.C && (t.j |= Yl);
+	if (0 === o) t.A = null, null !== t.C && (t.j |= Yl);
 	else {
 		t.j &= -2049;
-		let i = e.length - f;
+		let i = e.length - o;
 		if (i > 0) if (i < 20) for (; i-- > 0;) e.pop();
-		else e.length = f;
+		else e.length = o;
 	}
 }
 function bn(t, i, l) {
@@ -2460,8 +2535,8 @@ function bn(t, i, l) {
 	if (null !== l) {
 		let i = l.length;
 		for (let n = 0; n < i; n += 2) {
-			let i = l[n], u = i.u;
-			u > h && (e[s++] = i, e[s++] = u), i.u = t;
+			let i = l[n], f = i.u;
+			f > h && (e[s++] = i, e[s++] = f), i.u = t;
 		}
 		n += i >> 1;
 	}
@@ -2542,12 +2617,12 @@ function qn(t, i) {
 			}
 			let l = t.A;
 			if (null !== l) {
-				let u = l.length;
-				for (; s < u; s += 2) {
+				let f = l.length;
+				for (; s < f; s += 2) {
 					n = l[s];
-					let u = n.j;
-					if (1 & u) n.ot(i);
-					else if (2 & u) {
+					let f = n.j;
+					if (1 & f) n.ot(i);
+					else if (2 & f) {
 						Ki[Mi] = t, Li[Mi] = s, Mi++, t = n, e = -2;
 						continue t;
 					}
@@ -2587,28 +2662,28 @@ function Nl(t) {
 function Xt(t, i, l) {
 	i.then((i) => {
 		let n = t.deref();
-		void 0 === n || 8 & n.j || n.i !== l || (n.j &= -257, dt(n, i));
+		void 0 === n || 8 & n.j || n.i !== l || (n.j &= -129, dt(n, i));
 	}, (i) => {
 		let n = t.deref();
-		void 0 === n || 8 & n.j || n.i !== l || (n.j |= 256, dt(n, i));
+		void 0 === n || 8 & n.j || n.i !== l || (n.j |= 128, dt(n, i));
 	});
 }
 function Yt(t, i, l) {
 	let n = "function" == typeof i[Symbol.asyncIterator] ? i[Symbol.asyncIterator]() : i, e = (i) => {
 		let h = t.deref();
-		void 0 === h || 8 & h.j || h.i !== l ? "function" == typeof n.return && n.return() : i.done || (n.next().then(e, s), h.j &= -257, dt(h, i.value));
+		void 0 === h || 8 & h.j || h.i !== l ? "function" == typeof n.return && n.return() : i.done || (n.next().then(e, s), h.j &= -129, dt(h, i.value));
 	}, s = (i) => {
 		let n = t.deref();
-		void 0 === n || 8 & n.j || n.i !== l || (n.j |= 256, dt(n, i));
+		void 0 === n || 8 & n.j || n.i !== l || (n.j |= 128, dt(n, i));
 	};
 	n.next().then(e, s);
 }
 function dt(t, i) {
-	if (t.j &= -129, 65536 & t.j) {
+	if (t.j &= -65, 65536 & t.j && !(131072 & t.j)) {
 		let i = t.Y.ct;
-		t.j |= 50176 & i.j, i.j &= -65;
+		t.j |= 49664 & i.j, i.j &= -33;
 	}
-	(i !== t.W || 256 & t.j) && (t.W = i, t.it = bi + 1, 65536 & t.j ? null !== t.A && Hi(t) : tn(t) && (t.V = t.Y = null), h(t, 1), Et());
+	(i !== t.W || 128 & t.j) && (t.W = i, t.it = bi + 1, 65536 & t.j ? null !== t.A && Hi(t) : tn(t) && (t.V = t.Y = null), h(t, 1), Et());
 }
 function Hi(t) {
 	let i = xn += 2, l = t.C, n = t.A;
@@ -2627,19 +2702,22 @@ function Hi(t) {
 function Zt(t, i) {
 	let l = "function" == typeof i[Symbol.asyncIterator] ? i[Symbol.asyncIterator]() : i, n = (i) => {
 		let s = t.deref();
-		if (void 0 === s || 8 & s.j) return void ("function" == typeof l.return && l.return());
-		if (i.done) {
-			s.j &= -129;
-			let t = s.Y.ct;
-			s.j |= t.j & W, t.j &= -65;
-			return;
+		if (void 0 === s || 8 & s.j) "function" == typeof l.return && l.return();
+		else if (i.done) {
+			if (s.j &= -65, !(131072 & s.j)) {
+				let t = s.Y.ct;
+				s.j |= 512 & t.j, t.j &= -33;
+			}
+		} else {
+			if (l.next().then(n, e), s.j &= -65, !(131072 & s.j)) {
+				let t = s.Y.ct;
+				s.j |= 512 & t.j, t.j &= -33;
+			}
+			"function" == typeof i.value && s.Mt(i.value);
 		}
-		l.next().then(n, e), s.j &= -129;
-		let h = s.Y.ct;
-		s.j |= h.j & W, h.j &= -65, "function" == typeof i.value && s.Mt(i.value);
 	}, e = (i) => {
 		let l = t.deref();
-		void 0 === l || 8 & l.j || (l.j &= -129, qt(l, i) || l.S());
+		void 0 === l || 8 & l.j || (l.j &= -65, qt(l, i) || l.S());
 	};
 	l.next().then(n, e);
 }
@@ -2739,43 +2817,31 @@ function Et() {
 	}
 }
 const wa = {
-	signal: function(t) {
-		return new p(t);
+	signal: a,
+	gate: Jn,
+	compute: function(t, i, l, n, e) {
+		let s, h;
+		return "function" == typeof t ? (s = 32 | (0 | l) & C, h = new x(s, t, null, i, n)) : (s = 133632 | (0 | n) & C, h = new x(s, i, t, l, e), h.F = M(t, h, -1)), 256 & s || bt(h), h;
 	},
-	compute: function(t, i, l, n) {
-		let e = 64 | (0 | l) & C, s = new x(e, t, null, i, n);
-		return 512 & e || bt(s), s;
-	},
-	derive: function(t, i, l, n) {
-		let e = 1088 | (0 | l) & C, s = new x(e, t, null, i, n);
-		return 512 & e || bt(s), s;
-	},
-	task: function(t, i, l, n) {
-		let e = 65600 | (0 | l) & C, s = new x(e, t, null, i, null);
-		return s.Y = {
-			ct: new ba(s),
+	task: function(t, i, l, n, e) {
+		let s, h;
+		return "function" == typeof t ? (s = 65568 | (0 | l) & C, h = new x(s, t, null, i, null), h.Y = {
+			ct: new ba(h),
 			Y: n
-		}, 512 & e || bt(s), s;
+		}) : (s = 199168 | (0 | n) & C, h = new x(s, i, t, l, e), h.F = M(t, h, -1)), 256 & s || bt(h), h;
 	},
-	effect: function(t, i, l) {
-		let n = new z(64 | (0 | i) & C, t, null, null, l);
-		return vt(n), n;
+	effect: function(t, i, l, n) {
+		let e, s;
+		return "function" == typeof t ? (e = 32 | (0 | i) & C, s = new z(e, t, null, null, l)) : (e = 133632 | (0 | l) & C, s = new z(e, i, t, null, n), s.F = M(t, s, -1)), vt(s), s;
 	},
-	watch: function(t, i, l) {
-		let n = new z(1088 | (0 | i) & C, t, null, null, l);
-		return vt(n), n;
-	},
-	spawn: function(t, i, l) {
-		let n = new z(65600 | (0 | i) & C, t, null, null, null);
-		return n.Y = {
-			ct: new ba(n),
+	spawn: function(t, i, l, n) {
+		let e, s;
+		return "function" == typeof t ? (e = 65568 | (0 | i) & C, s = new z(e, t, null, null, null), s.Y = {
+			ct: new ba(s),
 			Y: l
-		}, vt(n), n;
+		}) : (e = 199168 | (0 | l) & C, s = new z(e, i, t, null, n), s.F = M(t, s, -1)), vt(s), s;
 	},
-	root: function(t) {
-		let i = new s();
-		return Tt(i, t), i;
-	},
+	root: w,
 	batch: function(t) {
 		if (mi) {
 			mi = !1;

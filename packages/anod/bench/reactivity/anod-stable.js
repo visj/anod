@@ -1,3 +1,9 @@
+/**
+ * Benchmark using c.compute()/c.effect() with cx.stable() for multi-dep
+ * nodes that always read the same set of deps. Single-dep nodes use the
+ * bound variant: c.compute(dep, fn). Dynamic nodes (conditional reads)
+ * stay fully dynamic.
+ */
 import { bench, run } from 'mitata';
 import { EXPECTED } from './expected.js';
 import { c } from '../../dist/index.mjs';
@@ -71,6 +77,7 @@ function setupDiamond() {
         }));
     }
     const sum = c.compute(cx => {
+        cx.stable();
         counter++;
         return branches.reduce((a, b) => a + cx.val(b), 0);
     });
@@ -99,6 +106,7 @@ function setupTriangle() {
     }
     list.push(current);
     const sum = c.compute(cx => {
+        cx.stable();
         counter++;
         return list.reduce((a, b) => a + cx.val(b), 0);
     });
@@ -115,6 +123,7 @@ function setupTriangle() {
 function setupMux() {
     const heads = new Array(100).fill(null).map(() => c.signal(0));
     const mux = c.compute(cx => {
+        cx.stable();
         counter++;
         return heads.map(h => cx.val(h));
     });
@@ -239,10 +248,12 @@ function setupCellx(layers) {
                 return val;
             }),
             prop2: c.compute(cx => {
+                cx.stable();
                 counter++;
                 return cx.val(m.prop1) - cx.val(m.prop3);
             }),
             prop3: c.compute(cx => {
+                cx.stable();
                 counter++;
                 return cx.val(m.prop2) + cx.val(m.prop4);
             }),
@@ -285,14 +296,17 @@ function setupMolWire() {
     const A = c.signal(0);
     const B = c.signal(0);
     const C = c.compute(cx => {
+        cx.stable();
         counter++;
         return (cx.val(A) % 2) + (cx.val(B) % 2);
     });
     const D = c.compute(cx => {
+        cx.stable();
         counter++;
         return numbers.map(i => ({ x: i + (cx.val(A) % 2) - (cx.val(B) % 2) }));
     });
     const E = c.compute(cx => {
+        cx.stable();
         counter++;
         return hard(cx.val(C) + cx.val(A) + cx.val(D)[0].x, 'E');
     });
@@ -433,6 +447,7 @@ function makeDynGraph(width, totalLayers, staticFraction, nSources) {
             }
             if (random() < staticFraction) {
                 row[myDex] = c.compute(cx => {
+                    cx.stable();
                     counter++;
                     let sum = 0;
                     for (let s = 0; s < mySources.length; s++) {
@@ -572,4 +587,4 @@ bench('Dynamic update: very dynamic', setupDynUpdate(100, 15, 0.5, 6, 1));
 
 const results = await run();
 
-saveRun('anod', results);
+saveRun('anod-stable', results);

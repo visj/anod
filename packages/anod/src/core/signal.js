@@ -9,14 +9,13 @@ const FLAG_SCHEDULED = 1 << 2;
 const FLAG_DISPOSED = 1 << 3;
 
 /* Receiver flags */
-const FLAG_COMPUTE = 1 << 4;
-const FLAG_INIT = 1 << 5;
-const FLAG_SETUP = 1 << 6;
+const FLAG_INIT = 1 << 4;
+const FLAG_SETUP = 1 << 5;
 
-const FLAG_LOADING = 1 << 7;
-const FLAG_ERROR = 1 << 8;
-const FLAG_DEFER = 1 << 9;
-const FLAG_STABLE = 1 << 10;
+const FLAG_LOADING = 1 << 6;
+const FLAG_ERROR = 1 << 7;
+const FLAG_DEFER = 1 << 8;
+const FLAG_STABLE = 1 << 9;
 
 const FLAG_SINGLE = 1 << 11;
 const FLAG_DERIVED = 1 << 12;
@@ -24,6 +23,7 @@ const FLAG_WEAK = 1 << 13;
 const FLAG_EQUAL = 1 << 14;
 const FLAG_NOTEQUAL = 1 << 15;
 const FLAG_ASYNC = 1 << 16;
+const FLAG_BOUND = 1 << 17;
 
 /* Option flags */
 const OPT_DEFER = FLAG_DEFER;
@@ -153,8 +153,6 @@ var RECEIVER_COUNT = 0;
  * @implements {Owner}
  */
 function Root() {
-    /** @type {number} */
-    this._flag = 0;
     /** @type {(function(): void) | Array<(function(): void)> | null} */
     this._cleanup = null;
     /** @type {Array<Receiver> | null} */
@@ -196,7 +194,7 @@ function Signal(value) {
  */
 function Compute(opts, fn, dep1, seed, args) {
     /** @type {number} */
-    this._flag = FLAG_COMPUTE | FLAG_INIT | FLAG_STALE | opts;
+    this._flag = FLAG_INIT | FLAG_STALE | opts;
     /** @type {T} */
     this._value = seed;
     /** @type {number} */
@@ -279,6 +277,35 @@ function Reader(node) {
     this._version = SEED += 2;
 }
 
+/**
+ * Guarded signal. Subclass of Signal with type guards (validated
+ * on set) and custom equality checks (skip set when equal).
+ * Copies all Signal fields inline to avoid prototype chain overhead.
+ * @constructor
+ * @template T
+ * @param {T} value
+ */
+function Gate(value) {
+    /** @type {number} */
+    this._flag = 0;
+    /** @type {T} */
+    this._value = value;
+    /** @type {number} */
+    this._version = 0;
+    /** @type {Receiver} */
+    this._sub1 = null;
+    /** @type {number} */
+    this._sub1slot = 0;
+    /** @type {Array<Receiver | number> | null} */
+    this._subs = null;
+    /** @type {(function(T,T): boolean) | Array<(function(T,T): boolean)> | null} */
+    this._check = null;
+    /** @type {(function(T): boolean) | Array<(function(T): boolean)> | null} */
+    this._guard = null;
+}
+
+Gate.prototype = Object.create(Signal.prototype);
+
 // ─── Prototype method implementations ──────────────────────────────────────
 // Top-level named functions so they aren't anonymous closures and can be
 // shared between prototypes. Installed onto prototypes in the single
@@ -318,6 +345,67 @@ function loading() {
 }
 
 /**
+ * @throws
+ * @template T
+ * @this {Receiver}
+ * @param {Sender<T>} sender 
+ * @returns {T}
+ */
+function val(sender) {
+    let version = VERSION;
+    if (sender._version === version) {
+        return sender._value;
+    }
+    if (sender._flag & (FLAG_STALE | FLAG_PENDING)) {
+        sender._refresh();
+    }
+    if ((this._flag & (FLAG_STABLE | FLAG_SETUP)) === FLAG_STABLE) {
+        if (sender._flag & FLAG_ERROR) {
+            throw sender._value;
+        }
+        return sender._value;
+    }
+    let stamp = sender._version;
+    sender._version = version;
+    if (stamp === version - 1) {
+        REUSED++;
+    } else {
+        this._read(sender, stamp);
+    }
+    if (sender._flag & FLAG_ERROR) {
+        throw sender._value;
+    }
+    return sender._value;
+};
+
+/**
+ * @template T 
+ * @this {Sender<T>}
+ * @param {T} value
+ * @returns {void}
+ */
+function set(value) {
+    if (this._value !== value) {
+        if (IDLE) {
+            this._value = value;
+            this._ctime = TIME + 1;
+            /** The manual value is now canonical: clear any pending
+             *  re-run so `val()` returns it directly instead of
+             *  invoking fn and clobbering. The next upstream change
+             *  will re-mark STALE via notify and fn runs again. */
+            this._flag &= ~(FLAG_STALE | FLAG_PENDING | FLAG_INIT);
+            notify(this, FLAG_STALE);
+            start();
+        } else {
+            this._flag |= FLAG_SCHEDULED;
+            let index = SENDER_COUNT++;
+            SENDERS[index] = this;
+            PAYLOADS[index] = value;
+        }
+    }
+};
+
+/**
  * Registers a dependency link from sender -> this (the tracking node).
  * Called from val() only for non-reuse cases (new dep or conflict).
  * The common reuse case (stamp === RVER - 1) is handled inline in val().
@@ -355,6 +443,51 @@ function _read(sender, stamp) {
     }
 }
 
+/**
+ * 
+ * @param {*} err 
+ * @returns {{ message: string }}
+ */
+function normalize(err) {
+    if (err instanceof Error || (
+        err != null && typeof err.message === 'string'
+    )) {
+        return err;
+    }
+    return { message: 'Compute threw error: ' + String(err) };
+}
+
+// ─── Shared factories (used by both `c` and prototypes) ───────────────────
+
+/**
+ * @param {*} value
+ * @returns {!Signal}
+ */
+function signal(value) {
+    return new Signal(value);
+}
+
+/**
+ * @param {function(!Root): ((function(): void) | void)} fn
+ * @returns {!Root}
+ */
+function root(fn) {
+    let node = new Root();
+    startRoot(node, fn);
+    return node;
+}
+
+/**
+ * Creates a guarded signal. Use `.guard(fn)` to add type validation
+ * and `.check(fn)` for custom equality.
+ * @template T
+ * @param {T} value
+ * @returns {!Gate<T>}
+ */
+function gate(value) {
+    return new Gate(value);
+}
+
 // ─── Prototype assignments ─────────────────────────────────────────────────
 
 {
@@ -371,25 +504,29 @@ function _read(sender, stamp) {
 
     // ─── Prototype-level default fields ────────────────────────────────────
 
-    SignalProto._ctime = 0;
+    RootProto._flag = 0;
     RootProto._owner = null;
-    /** Root's children start at level 0, so we seed Root's `_level` at -1.
-     *  This lets the shared `_ownEffect`/`_ownWatch`/`_ownSpawn` delegates
-     *  compute the child level uniformly as `this._level + 1` for both
-     *  Root and Effect owners — no branch, no instanceof check. */
     RootProto._level = -1;
+
+    SignalProto._ctime = 0;
 
     // ─── Shared methods ────────────────────────────────────────────────────
 
     // Disposer#dispose — shared by all four node types
-    RootProto.dispose = SignalProto.dispose = ComputeProto.dispose = EffectProto.dispose = dispose;
+    RootProto.dispose =
+        SignalProto.dispose =
+        ComputeProto.dispose =
+        EffectProto.dispose = dispose;
 
     // Receiver#_read — internal dep tracking, called from val() when listening
-    ComputeProto._read = EffectProto._read = _read;
+    ComputeProto._read =
+        EffectProto._read = _read;
 
     // IAwaitable — Compute + Effect
-    ComputeProto.error = EffectProto.error = error;
-    ComputeProto.loading = EffectProto.loading = loading;
+    ComputeProto.error =
+        EffectProto.error = error;
+    ComputeProto.loading =
+        EffectProto.loading = loading;
 
     // ─── Shared owner methods — Root + Effect ──────────────────────────────
 
@@ -401,13 +538,13 @@ function _read(sender, stamp) {
      * @returns {void}
      */
     function _addCleanup(fn) {
-        let c = this._cleanup;
-        if (c === null) {
+        let cleanup = this._cleanup;
+        if (cleanup === null) {
             this._cleanup = fn;
-        } else if (typeof c === 'function') {
-            this._cleanup = [c, fn];
+        } else if (typeof cleanup === 'function') {
+            this._cleanup = [cleanup, fn];
         } else {
-            c.push(fn);
+            cleanup.push(fn);
         }
     }
 
@@ -418,13 +555,13 @@ function _read(sender, stamp) {
      * @returns {void}
      */
     function _addRecover(fn) {
-        let rec = this._recover;
-        if (rec === null) {
+        let recover = this._recover;
+        if (recover === null) {
             this._recover = fn;
-        } else if (typeof rec === 'function') {
-            this._recover = [rec, fn];
+        } else if (typeof recover === 'function') {
+            this._recover = [recover, fn];
         } else {
-            rec.push(fn);
+            recover.push(fn);
         }
     }
 
@@ -559,13 +696,7 @@ function _read(sender, stamp) {
                     IDLE = true;
                 }
             } else {
-                if (flag & FLAG_STALE) {
-                    this._update(TIME);
-                } else if (flag & FLAG_SINGLE) {
-                    checkSingle(this, TIME);
-                } else {
-                    checkRun(this, TIME);
-                }
+                this._refresh();
             }
         }
         if (this._flag & FLAG_ERROR) {
@@ -581,24 +712,7 @@ function _read(sender, stamp) {
      * @param {!Sender} sender
      * @returns {*}
      */
-    ComputeProto.val = function (sender) {
-        if (sender._flag & (FLAG_STALE | FLAG_PENDING)) {
-            sender._refresh();
-        }
-        let stamp = sender._version;
-        if (stamp !== VERSION) {
-            sender._version = VERSION;
-            if (stamp === VERSION - 1) {
-                REUSED++;
-            } else {
-                this._read(sender, stamp);
-            }
-        }
-        if (sender._flag & FLAG_ERROR) {
-            throw sender._value;
-        }
-        return sender._value;
-    };
+    ComputeProto.val = val;
 
     /**
      * Writable-compute entry point. Mirrors `SignalProto.set` so a Compute
@@ -616,26 +730,7 @@ function _read(sender, stamp) {
      * @param {T} value
      * @returns {void}
      */
-    ComputeProto.set = function (value) {
-        if (this._value !== value) {
-            if (IDLE) {
-                this._value = value;
-                this._ctime = TIME + 1;
-                /** The manual value is now canonical: clear any pending
-                 *  re-run so `val()` returns it directly instead of
-                 *  invoking fn and clobbering. The next upstream change
-                 *  will re-mark STALE via notify and fn runs again. */
-                this._flag &= ~(FLAG_STALE | FLAG_PENDING | FLAG_INIT);
-                notify(this, FLAG_STALE);
-                start();
-            } else {
-                this._flag |= FLAG_SCHEDULED;
-                let index = SENDER_COUNT++;
-                SENDERS[index] = this;
-                PAYLOADS[index] = value;
-            }
-        }
-    };
+    ComputeProto.set = set;
 
     /**
      * Batch-drain counterpart of `set`. Runs inside `start()` after TIME
@@ -678,7 +773,7 @@ function _read(sender, stamp) {
         this._flag = FLAG_DISPOSED;
         clearSubs(this);
         clearDeps(this);
-        if (flag & FLAG_ASYNC) {
+        if ((flag & FLAG_ASYNC) && !(flag & FLAG_BOUND)) {
             this._args._reader._dispose();
         }
         this._fn =
@@ -706,12 +801,21 @@ function _read(sender, stamp) {
 
         let value;
         if ((flag & (FLAG_STABLE | FLAG_SETUP)) === FLAG_STABLE) {
-            /** Stable: no tracking, no dep management */
+            let context;
+            if (flag & FLAG_BOUND) {
+                let dep = this._dep1;
+                if (dep._flag & (FLAG_STALE | FLAG_PENDING)) {
+                    dep._refresh();
+                }
+                context = dep._value;
+            } else {
+                context = this;
+            }
             try {
-                value = this._fn(this, this._value, this._args);
+                value = this._fn(context, this._value, this._args);
             } catch (err) {
-                this._value = err;
-                this._flag = (this._flag & ~(FLAG_STALE | FLAG_PENDING | FLAG_INIT | FLAG_SETUP)) | FLAG_ERROR;
+                this._value = normalize(err);
+                this._flag = (this._flag & ~(FLAG_STALE | FLAG_PENDING | FLAG_INIT)) | FLAG_ERROR;
                 this._ctime = time;
                 return;
             }
@@ -739,7 +843,7 @@ function _read(sender, stamp) {
                 value = this._fn(this, this._value, this._args);
                 this._flag &= ~FLAG_ERROR;
             } catch (err) {
-                value = err;
+                value = normalize(err);
                 this._flag |= FLAG_ERROR;
             }
 
@@ -802,41 +906,60 @@ function _read(sender, stamp) {
     ComputeProto._updateAsync = function (time) {
         let flag = this._flag;
         let value;
-        let reader;
-        /** _args is always { _reader, _args } for async nodes. */
-        let context = this._args;
-        if (!(flag & (FLAG_STABLE | FLAG_SETUP))) {
-            /** Subsequent non-stable run: dispose old reader, tear down
-             *  deps, mint fresh reader. */
-            context._reader._dispose();
-            if (this._dep1 !== null) {
-                clearReceiver(this._dep1, this._dep1slot);
-                this._dep1 = null;
-                this._dep1slot = 0;
-            }
-            let deps = this._deps;
-            if (deps !== null) {
-                let count = deps.length >> 1;
-                while (count-- > 0) {
-                    let slot = deps.pop();
-                    let node = deps.pop();
-                    clearReceiver(node, slot);
-                }
-            }
-            reader = context._reader = new Reader(this);
-        } else {
-            reader = context._reader;
-            reader._flag &= ~(FLAG_EQUAL | FLAG_NOTEQUAL);
-        }
 
-        try {
-            value = this._fn(reader, this._value, context._args);
-            this._flag = this._flag & ~FLAG_ERROR | (reader._flag & (FLAG_STABLE | FLAG_EQUAL | FLAG_NOTEQUAL));
-        } catch (err) {
-            this._value = err;
-            this._flag = (this._flag & ~(FLAG_STALE | FLAG_PENDING | FLAG_INIT | FLAG_SETUP)) | FLAG_ERROR;
-            this._ctime = time;
-            return;
+        if (flag & FLAG_BOUND) {
+            /** Bound async: single dep, no reader, no context wrapper.
+             *  fn receives (depValue, prev, args) directly. */
+            let dep = this._dep1;
+            if (dep._flag & (FLAG_STALE | FLAG_PENDING)) {
+                dep._refresh();
+            }
+            try {
+                value = this._fn(dep._value, this._value, this._args);
+                this._flag &= ~FLAG_ERROR;
+            } catch (err) {
+                this._value = normalize(err);
+                this._flag = (this._flag & ~(FLAG_STALE | FLAG_PENDING | FLAG_INIT)) | FLAG_ERROR;
+                this._ctime = time;
+                return;
+            }
+        } else {
+            let reader;
+            /** _args is always { _reader, _args } for non-bound async nodes. */
+            let context = this._args;
+            if (!(flag & (FLAG_STABLE | FLAG_SETUP))) {
+                /** Subsequent non-stable run: dispose old reader, tear down
+                 *  deps, mint fresh reader. */
+                context._reader._dispose();
+                if (this._dep1 !== null) {
+                    clearReceiver(this._dep1, this._dep1slot);
+                    this._dep1 = null;
+                    this._dep1slot = 0;
+                }
+                let deps = this._deps;
+                if (deps !== null) {
+                    let count = deps.length >> 1;
+                    while (count-- > 0) {
+                        let slot = deps.pop();
+                        let node = deps.pop();
+                        clearReceiver(node, slot);
+                    }
+                }
+                reader = context._reader = new Reader(this);
+            } else {
+                reader = context._reader;
+                reader._flag &= ~(FLAG_EQUAL | FLAG_NOTEQUAL);
+            }
+
+            try {
+                value = this._fn(reader, this._value, context._args);
+                this._flag = this._flag & ~FLAG_ERROR | (reader._flag & (FLAG_STABLE | FLAG_EQUAL | FLAG_NOTEQUAL));
+            } catch (err) {
+                this._value = normalize(err);
+                this._flag = (this._flag & ~(FLAG_STALE | FLAG_PENDING | FLAG_INIT | FLAG_SETUP)) | FLAG_ERROR;
+                this._ctime = time;
+                return;
+            }
         }
 
         this._flag &= ~(FLAG_STALE | FLAG_PENDING | FLAG_INIT | FLAG_SETUP);
@@ -877,24 +1000,7 @@ function _read(sender, stamp) {
      * @param {!Sender} sender
      * @returns {*}
      */
-    EffectProto.val = function (sender) {
-        if (sender._flag & (FLAG_STALE | FLAG_PENDING)) {
-            sender._refresh();
-        }
-        let stamp = sender._version;
-        if (stamp !== VERSION && ((this._flag & (FLAG_STABLE | FLAG_SETUP)) !== FLAG_STABLE)) {
-            sender._version = VERSION;
-            if (stamp === VERSION - 1) {
-                REUSED++;
-            } else {
-                this._read(sender, stamp);
-            }
-        }
-        if (sender._flag & FLAG_ERROR) {
-            throw sender._value;
-        }
-        return sender._value;
-    };
+    EffectProto.val = val;
 
     /**
      * Sync update for effect nodes. Two branches:
@@ -909,7 +1015,7 @@ function _read(sender, stamp) {
         let flag = this._flag;
 
         this._time = time;
-        if (!(flag & FLAG_SETUP)) {
+        if (!(flag & FLAG_INIT)) {
             if (this._cleanup !== null) {
                 clearCleanup(this);
             }
@@ -929,15 +1035,24 @@ function _read(sender, stamp) {
         let value;
 
         if ((flag & (FLAG_STABLE | FLAG_SETUP)) === FLAG_STABLE) {
-            /** Stable: no tracking */
+            let context;
+            if (flag & FLAG_BOUND) {
+                let dep = this._dep1;
+                if (dep._flag & (FLAG_STALE | FLAG_PENDING)) {
+                    dep._refresh();
+                }
+                context = dep._value;
+            } else {
+                context = this;
+            }
             try {
-                value = this._fn(this, this._args);
+                value = this._fn(context, this._args);
             } finally {
-                this._flag &= ~(FLAG_STALE | FLAG_PENDING);
+                this._flag &= ~(FLAG_INIT | FLAG_STALE | FLAG_PENDING);
             }
         } else {
             /** Setup or dynamic: bump VERSION for dep tracking */
-            let prevRVer = VERSION;
+            let current = VERSION;
             let version = SEED += 2;
             VERSION = version;
             let saveStart = VCOUNT;
@@ -951,8 +1066,9 @@ function _read(sender, stamp) {
             } else {
                 reused = REUSED;
                 REUSED = 0;
-                depCount = sweepDeps(version - 1, this._dep1, this._deps);
-                depsLen = this._deps !== null ? this._deps.length : 0;
+                let deps = this._deps;
+                depCount = sweepDeps(version - 1, this._dep1, deps);
+                depsLen = deps !== null ? deps.length : 0;
             }
 
             try {
@@ -986,11 +1102,10 @@ function _read(sender, stamp) {
                     }
                     VCOUNT = saveStart;
                 }
-                VERSION = prevRVer;
-                this._flag &= ~(FLAG_STALE | FLAG_PENDING | FLAG_INIT | FLAG_SETUP);
+                VERSION = current;
+                this._flag &= ~(FLAG_INIT | FLAG_SETUP | FLAG_STALE | FLAG_PENDING);
             }
         }
-
         if (typeof value === 'function') {
             this._addCleanup(value);
         }
@@ -1005,32 +1120,46 @@ function _read(sender, stamp) {
     EffectProto._updateAsync = function (time) {
         let flag = this._flag;
         let value;
-        let reader;
-        let context = this._args;
-        if (!(flag & (FLAG_STABLE | FLAG_SETUP))) {
-            context._reader._dispose();
-            if (this._dep1 !== null) {
-                clearReceiver(this._dep1, this._dep1slot);
-                this._dep1 = null;
-            }
-            let deps = this._deps;
-            if (deps !== null) {
-                let count = deps.length >> 1;
-                while (count-- > 0) {
-                    let slot = deps.pop();
-                    let node = deps.pop();
-                    clearReceiver(node, slot);
-                }
-            }
-            context._reader = new Reader(this);
-        }
 
-        reader = context._reader;
-        try {
-            value = this._fn(reader, context._args);
-            this._flag = this._flag | (reader._flag & FLAG_STABLE);
-        } finally {
-            this._flag &= ~(FLAG_STALE | FLAG_PENDING | FLAG_INIT | FLAG_SETUP);
+        if (flag & FLAG_BOUND) {
+            /** Bound async: single dep, no reader, no context wrapper. */
+            let dep = this._dep1;
+            if (dep._flag & (FLAG_STALE | FLAG_PENDING)) {
+                dep._refresh();
+            }
+            try {
+                value = this._fn(dep._value, this._args);
+            } finally {
+                this._flag &= ~(FLAG_STALE | FLAG_PENDING | FLAG_INIT);
+            }
+        } else {
+            let reader;
+            let context = this._args;
+            if (!(flag & (FLAG_STABLE | FLAG_SETUP))) {
+                context._reader._dispose();
+                if (this._dep1 !== null) {
+                    clearReceiver(this._dep1, this._dep1slot);
+                    this._dep1 = null;
+                }
+                let deps = this._deps;
+                if (deps !== null) {
+                    let count = deps.length >> 1;
+                    while (count-- > 0) {
+                        let slot = deps.pop();
+                        let node = deps.pop();
+                        clearReceiver(node, slot);
+                    }
+                }
+                context._reader = new Reader(this);
+            }
+
+            reader = context._reader;
+            try {
+                value = this._fn(reader, context._args);
+                this._flag = this._flag | (reader._flag & FLAG_STABLE);
+            } finally {
+                this._flag &= ~(FLAG_STALE | FLAG_PENDING | FLAG_INIT | FLAG_SETUP);
+            }
         }
 
         let kind = asyncKind(value);
@@ -1062,7 +1191,7 @@ function _read(sender, stamp) {
         if (this._owned !== null) {
             clearOwned(this);
         }
-        if (flag & FLAG_ASYNC) {
+        if ((flag & FLAG_ASYNC) && !(flag & FLAG_BOUND)) {
             this._args._reader._dispose();
         }
         this._fn =
@@ -1173,15 +1302,110 @@ function _read(sender, stamp) {
         this._node._addRecover(fn);
     };
 
-    // ─── IOwner/IClock factory methods on Root + Effect ────────────────────
+    // ─── Gate — guarded signal subclass ────────────────────────────────
+    // Inherits peek, dispose, _assign, _dispose from Signal.prototype.
+    // Only set() is overridden with guard + check logic.
+
+    /** @const */
+    let GateProto = Gate.prototype;
 
     /**
-     * Creates an owned compute inside this owner scope.
-     * @this {!Root | !Effect}
+     * Guarded set. Runs all guards first — throws if any reject the
+     * value. Then runs equality checks — skips set when all checks
+     * return true (values equal). When no checks are registered,
+     * falls through to Signal's default !== comparison.
+     * @this {!Gate<T>}
+     * @param {T} value
+     * @returns {void}
      */
-    function _ownCompute(fn, seed, opts, args) {
-        let flag = FLAG_SETUP | ((0 | opts) & OPTIONS);
-        let node = new Compute(flag, fn, null, seed, args);
+    GateProto.set = function (value) {
+        let guard = this._guard;
+        if (guard !== null) {
+            if (typeof guard === 'function') {
+                if (!guard(value)) {
+                    throw new Error(guard.name);
+                }
+            } else {
+                let count = guard.length;
+                for (let i = 0; i < count; i++) {
+                    if (!guard[i](value)) {
+                        throw new Error(guard[i].name);
+                    }
+                }
+            }
+        }
+        let check = this._check;
+        runChecks: if (check !== null) {
+            let prev = this._value;
+            if (typeof check === 'function') {
+                if (check(value, prev)) {
+                    return;
+                }
+            } else {
+                let count = check.length;
+                for (let i = 0; i < count; i++) {
+                    if (!check[i](value, prev)) {
+                        break runChecks;
+                    }
+                }
+                return;
+            }
+        }
+        set.call(this, value);
+    };
+
+    /**
+     * Adds a custom equality check. If all checks return true
+     * for (newValue, oldValue), the set is skipped. Chainable.
+     * @this {!Gate<T>}
+     * @param {function(T,T): boolean} fn
+     * @returns {!Gate<T>}
+     */
+    GateProto.check = function (fn) {
+        let check = this._check;
+        if (check === null) {
+            this._check = fn;
+        } else if (typeof check === 'function') {
+            this._check = [check, fn];
+        } else {
+            check.push(fn);
+        }
+        return this;
+    };
+
+    /**
+     * Adds a type guard. If the guard returns false for the
+     * incoming value, set() throws using the guard's `.name`.
+     * Chainable.
+     * @this {!Gate<T>}
+     * @param {function(T): boolean} fn
+     * @returns {!Gate<T>}
+     */
+    GateProto.guard = function (fn) {
+        let guard = this._guard;
+        if (guard === null) {
+            this._guard = fn;
+        } else if (typeof guard === 'function') {
+            this._guard = [guard, fn];
+        } else {
+            guard.push(fn);
+        }
+        return this;
+    };
+
+    // ─── Owned factory methods (Root + Effect prototypes) ───────────────
+
+    /** @this {!Root | !Effect} */
+    function _compute(a, b, c, d, e) {
+        let flag, node;
+        if (typeof a === 'function') {
+            flag = FLAG_SETUP | ((0 | c) & OPTIONS);
+            node = new Compute(flag, a, null, b, d);
+        } else {
+            flag = FLAG_STABLE | FLAG_BOUND | FLAG_SINGLE | ((0 | d) & OPTIONS);
+            node = new Compute(flag, b, a, c, e);
+            node._dep1slot = subscribe(a, node, -1);
+        }
         addOwned(this, node);
         if (!(flag & FLAG_DEFER)) {
             startCompute(node);
@@ -1189,13 +1413,18 @@ function _read(sender, stamp) {
         return node;
     }
 
-    /**
-     * Creates an owned stable compute inside this owner scope.
-     * @this {!Root | !Effect}
-     */
-    function _ownDerive(fn, seed, opts, args) {
-        let flag = FLAG_STABLE | FLAG_SETUP | ((0 | opts) & OPTIONS);
-        let node = new Compute(flag, fn, null, seed, args);
+    /** @this {!Root | !Effect} */
+    function _task(a, b, c, d, e) {
+        let flag, node;
+        if (typeof a === 'function') {
+            flag = FLAG_ASYNC | FLAG_SETUP | ((0 | c) & OPTIONS);
+            node = new Compute(flag, a, null, b, null);
+            node._args = { _reader: new Reader(node), _args: d };
+        } else {
+            flag = FLAG_ASYNC | FLAG_STABLE | FLAG_BOUND | FLAG_SINGLE | ((0 | d) & OPTIONS);
+            node = new Compute(flag, b, a, c, e);
+            node._dep1slot = subscribe(a, node, -1);
+        }
         addOwned(this, node);
         if (!(flag & FLAG_DEFER)) {
             startCompute(node);
@@ -1203,46 +1432,17 @@ function _read(sender, stamp) {
         return node;
     }
 
-    /**
-     * Creates an owned async compute inside this owner scope.
-     * @this {!Root | !Effect}
-     */
-    function _ownTask(fn, seed, opts, args) {
-        let flag = FLAG_ASYNC | FLAG_SETUP | ((0 | opts) & OPTIONS);
-        let node = new Compute(flag, fn, null, seed, null);
-        node._args = { _reader: new Reader(node), _args: args };
-        addOwned(this, node);
-        if (!(flag & FLAG_DEFER)) {
-            startCompute(node);
+    /** @this {!Root | !Effect} */
+    function _effect(a, b, c, d) {
+        let flag, node;
+        if (typeof a === 'function') {
+            flag = FLAG_SETUP | ((0 | b) & OPTIONS);
+            node = new Effect(flag, a, null, this, c);
+        } else {
+            flag = FLAG_STABLE | FLAG_BOUND | FLAG_SINGLE | ((0 | c) & OPTIONS);
+            node = new Effect(flag, b, a, this, d);
+            node._dep1slot = subscribe(a, node, -1);
         }
-        return node;
-    }
-
-    /**
-     * Creates an owned signal inside this owner scope.
-     * @this {!Root | !Effect}
-     */
-    function _ownSignal(value) {
-        return new Signal(value);
-    }
-
-    /**
-     * Creates an owned root inside this owner scope.
-     * @this {!Root | !Effect}
-     */
-    function _ownRoot(fn) {
-        let node = new Root();
-        startRoot(node, fn);
-        return node;
-    }
-
-    /**
-     * Creates an owned effect inside this owner scope.
-     * @this {!Root | !Effect}
-     */
-    function _ownEffect(fn, opts, args) {
-        let flag = FLAG_SETUP | ((0 | opts) & OPTIONS);
-        let node = new Effect(flag, fn, null, this, args);
         let level = this._level + 1;
         if (this._level > 2 && level >= LEVELS.length) {
             LEVELS.push(0);
@@ -1254,13 +1454,18 @@ function _read(sender, stamp) {
         return node;
     }
 
-    /**
-     * Creates an owned stable effect inside this owner scope.
-     * @this {!Root | !Effect}
-     */
-    function _ownWatch(fn, opts, args) {
-        let flag = FLAG_STABLE | FLAG_SETUP | ((0 | opts) & OPTIONS);
-        let node = new Effect(flag, fn, null, this, args);
+    /** @this {!Root | !Effect} */
+    function _spawn(a, b, c, d) {
+        let flag, node;
+        if (typeof a === 'function') {
+            flag = FLAG_ASYNC | FLAG_SETUP | ((0 | b) & OPTIONS);
+            node = new Effect(flag, a, null, this, null);
+            node._args = { _reader: new Reader(node), _args: c };
+        } else {
+            flag = FLAG_ASYNC | FLAG_STABLE | FLAG_BOUND | FLAG_SINGLE | ((0 | c) & OPTIONS);
+            node = new Effect(flag, b, a, this, d);
+            node._dep1slot = subscribe(a, node, -1);
+        }
         let level = this._level + 1;
         if (this._level > 2 && level >= LEVELS.length) {
             LEVELS.push(0);
@@ -1272,34 +1477,14 @@ function _read(sender, stamp) {
         return node;
     }
 
-    /**
-     * Creates an owned async effect inside this owner scope.
-     * @this {!Root | !Effect}
-     */
-    function _ownSpawn(fn, opts, args) {
-        let flag = FLAG_ASYNC | FLAG_SETUP | ((0 | opts) & OPTIONS);
-        let node = new Effect(flag, fn, null, this, null);
-        node._args = { _reader: new Reader(node), _args: args };
-        let level = this._level + 1;
-        if (this._level > 2 && level >= LEVELS.length) {
-            LEVELS.push(0);
-            SCOPES.push([]);
-        }
-        node._level = level;
-        addOwned(this, node);
-        startEffect(node);
-        return node;
-    }
-
-    /** IClock factories on Root (IOwner extends IClock) */
-    RootProto.signal = EffectProto.signal = _ownSignal;
-    RootProto.compute = EffectProto.compute = _ownCompute;
-    RootProto.derive = EffectProto.derive = _ownDerive;
-    RootProto.task = EffectProto.task = _ownTask;
-    RootProto.effect = EffectProto.effect = _ownEffect;
-    RootProto.watch = EffectProto.watch = _ownWatch;
-    RootProto.spawn = EffectProto.spawn = _ownSpawn;
-    RootProto.root = EffectProto.root = _ownRoot;
+    /** Install factory methods on Root and Effect prototypes */
+    RootProto.signal = EffectProto.signal = signal;
+    RootProto.gate = EffectProto.gate = gate;
+    RootProto.compute = EffectProto.compute = _compute;
+    RootProto.task = EffectProto.task = _task;
+    RootProto.effect = EffectProto.effect = _effect;
+    RootProto.spawn = EffectProto.spawn = _spawn;
+    RootProto.root = EffectProto.root = root;
 }
 
 // ─── Global helpers (non-prototype) ────────────────────────────────────────
@@ -1520,14 +1705,6 @@ function unbound(node) {
     )
 }
 
-/**
- * Setup-mode dependency connection. Writes deps to DSTACK instead
- * of creating/growing _deps arrays directly. After the fn returns,
- * _update slices DSTACK to create an exact-capacity _deps array.
- * @param {Receiver} receiver
- * @param {Sender} sender
- */
-
 // ─── patchDeps ─────────────────────────────────────────────────────────────
 
 /**
@@ -1550,7 +1727,7 @@ function patchDeps(node, version, depCount, newLen) {
     let deps = node._deps;
     let existingLen = depCount > 1 ? (depCount - 1) * 2 : 0;
     /** ni = index of next new dep to consume (unsubscribed, slot 0) */
-    let ni = existingLen;
+    let newidx = existingLen;
 
     /** Check dep1 — always exists when depCount >= 1, and _read never
      *  writes new deps into dep1 (only setup does), so the only
@@ -1559,12 +1736,12 @@ function patchDeps(node, version, depCount, newLen) {
     if (dep1 !== null) {
         if (dep1._version !== version) {
             clearReceiver(dep1, node._dep1slot);
-            if (ni < newLen) {
+            if (newidx < newLen) {
                 /** Fill dep1 with a new dep */
-                let newDep = /** @type {Sender} */(deps[ni]);
+                let newDep = /** @type {Sender} */(deps[newidx]);
                 node._dep1 = newDep;
                 node._dep1slot = subscribe(newDep, node, -1);
-                ni += 2;
+                newidx += 2;
             } else {
                 node._dep1 = null;
                 node._dep1slot = 0;
@@ -1591,8 +1768,8 @@ function patchDeps(node, version, depCount, newLen) {
      *      Any dropped deps found during backward scan are also cleared.
      *      When forward and backward pointers meet, we're done.
      */
-    let tail = existingLen;
     let i = 0;
+    let tail = existingLen;
     while (i < tail) {
         let dep = /** @type {Sender} */(deps[i]);
         if (dep._version === version) {
@@ -1602,13 +1779,13 @@ function patchDeps(node, version, depCount, newLen) {
         }
         /** Dropped — unbind (read slot only on the drop path) */
         clearReceiver(dep, /** @type {number} */(deps[i + 1]));
-        if (ni < newLen) {
+        if (newidx < newLen) {
             /** Fill hole with next new dep */
-            let newDep = /** @type {Sender} */(deps[ni]);
+            let newDep = /** @type {Sender} */(deps[newidx]);
             let subslot = subscribe(newDep, node, i);
             deps[i] = newDep;
             deps[i + 1] = subslot;
-            ni += 2;
+            newidx += 2;
             i += 2;
         } else {
             /**
@@ -1644,23 +1821,23 @@ function patchDeps(node, version, depCount, newLen) {
             }
         }
     }
-    if (ni < newLen) {
+    if (newidx < newLen) {
         if (node._dep1 === null) {
             /** Fill hole with next new dep */
-            let newDep = /** @type {Sender} */(deps[ni]);
+            let newDep = /** @type {Sender} */(deps[newidx]);
             let subslot = subscribe(newDep, node, i);
             deps[i] = newDep;
             deps[i + 1] = subslot;
-            ni += 2;
+            newidx += 2;
         }
         /** Remaining new deps — subscribe at the end of the live region */
-        while (ni < newLen) {
-            let dep = /** @type {Sender} */(deps[ni]);
+        while (newidx < newLen) {
+            let dep = /** @type {Sender} */(deps[newidx]);
             let subslot = subscribe(dep, node, tail);
             deps[tail] = dep;
             deps[tail + 1] = subslot;
             tail += 2;
-            ni += 2;
+            newidx += 2;
         }
     }
 
@@ -2107,8 +2284,8 @@ function settle(node, value) {
     node._flag &= ~FLAG_LOADING;
     /** Fold the Reader's stable/equal/notequal bits into the node
      *  and clear its SETUP so subsequent val() calls on a stable
-     *  reader short-circuit. Async nodes always have a Reader. */
-    if (node._flag & FLAG_ASYNC) {
+     *  reader short-circuit. Bound async nodes have no Reader. */
+    if ((node._flag & FLAG_ASYNC) && !(node._flag & FLAG_BOUND)) {
         let reader = node._args._reader;
         node._flag |= reader._flag & (FLAG_STABLE | FLAG_EQUAL | FLAG_NOTEQUAL);
         reader._flag &= ~FLAG_SETUP;
@@ -2194,9 +2371,11 @@ function resolveEffectPromise(ref, promise) {
         let node = ref.deref();
         if (node !== void 0 && !(node._flag & FLAG_DISPOSED)) {
             node._flag &= ~FLAG_LOADING;
-            let reader = node._args._reader;
-            node._flag |= reader._flag & FLAG_STABLE;
-            reader._flag &= ~FLAG_SETUP;
+            if (!(node._flag & FLAG_BOUND)) {
+                let reader = node._args._reader;
+                node._flag |= reader._flag & FLAG_STABLE;
+                reader._flag &= ~FLAG_SETUP;
+            }
             if (typeof val === 'function') {
                 node._addCleanup(val);
             }
@@ -2234,16 +2413,20 @@ function resolveEffectIterator(ref, iterable) {
         }
         if (result.done) {
             node._flag &= ~FLAG_LOADING;
-            let reader = node._args._reader;
-            node._flag |= reader._flag & FLAG_STABLE;
-            reader._flag &= ~FLAG_SETUP;
+            if (!(node._flag & FLAG_BOUND)) {
+                let reader = node._args._reader;
+                node._flag |= reader._flag & FLAG_STABLE;
+                reader._flag &= ~FLAG_SETUP;
+            }
             return;
         }
         iterator.next().then(onNext, onError);
         node._flag &= ~FLAG_LOADING;
-        let reader = node._args._reader;
-        node._flag |= reader._flag & FLAG_STABLE;
-        reader._flag &= ~FLAG_SETUP;
+        if (!(node._flag & FLAG_BOUND)) {
+            let reader = node._args._reader;
+            node._flag |= reader._flag & FLAG_STABLE;
+            reader._flag &= ~FLAG_SETUP;
+        }
         if (typeof result.value === 'function') {
             node._addCleanup(result.value);
         }
@@ -2446,127 +2629,68 @@ function start() {
 
 // ─── Public API ────────────────────────────────────────────────────────────
 
-/**
- * @param {function(): ((function(): void) | void)} fn
- * @returns {Root}
- */
-function root(fn) {
-    let node = new Root();
-    startRoot(node, fn);
-    return node;
-}
-
-/**
- * @template T
- * @param {T} value
- * @returns {Signal<T>}
- */
-function signal(value) {
-    return new Signal(value);
-}
-
-/**
- * @template T,W
- * @param {function(T,W): T} fn
- * @param {T=} seed
- * @param {number=} opts
- * @param {W=} args
- * @returns {Compute<T,W>}
- */
-function compute(fn, seed, opts, args) {
-    let flag = FLAG_SETUP | ((0 | opts) & OPTIONS);
-    let node = new Compute(flag, fn, null, seed, args);
+/** Unowned compute. */
+function compute(a, b, c, d, e) {
+    let flag, node;
+    if (typeof a === 'function') {
+        flag = FLAG_SETUP | ((0 | c) & OPTIONS);
+        node = new Compute(flag, a, null, b, d);
+    } else {
+        flag = FLAG_STABLE | FLAG_BOUND | FLAG_SINGLE | ((0 | d) & OPTIONS);
+        node = new Compute(flag, b, a, c, e);
+        node._dep1slot = subscribe(a, node, -1);
+    }
     if (!(flag & FLAG_DEFER)) {
         startCompute(node);
     }
     return node;
 }
 
-/**
- * Stable compute (unowned).
- * derive(fn, seed?, opts?, args?) — fn receives (c: IReader, prev, args).
- * Deps frozen after first run.
- * Honors `OPT_DEFER`.
- * @param {function} fn
- * @param {*=} seed
- * @param {number=} opts
- * @param {*=} args
- * @returns {!Compute}
- */
-function derive(fn, seed, opts, args) {
-    let flag = FLAG_STABLE | FLAG_SETUP | ((0 | opts) & OPTIONS);
-    let node = new Compute(flag, fn, null, seed, args);
+/** Unowned async compute. */
+function task(a, b, c, d, e) {
+    let flag, node;
+    if (typeof a === 'function') {
+        flag = FLAG_ASYNC | FLAG_SETUP | ((0 | c) & OPTIONS);
+        node = new Compute(flag, a, null, b, null);
+        node._args = { _reader: new Reader(node), _args: d };
+    } else {
+        flag = FLAG_ASYNC | FLAG_STABLE | FLAG_BOUND | FLAG_SINGLE | ((0 | d) & OPTIONS);
+        node = new Compute(flag, b, a, c, e);
+        node._dep1slot = subscribe(a, node, -1);
+    }
     if (!(flag & FLAG_DEFER)) {
         startCompute(node);
     }
     return node;
 }
 
-/**
- * Async compute (unowned).
- * task(fn, seed?, opts?, args?) — fn receives (c: Reader, prev, args).
- * Tears down and rebuilds deps each run.
- * Honors `OPT_DEFER`.
- * @param {function} fn
- * @param {*=} seed
- * @param {number=} opts
- * @param {*=} args
- * @returns {!Compute}
- */
-function task(fn, seed, opts, args) {
-    let flag = FLAG_ASYNC | FLAG_SETUP | ((0 | opts) & OPTIONS);
-    let node = new Compute(flag, fn, null, seed, null);
-    node._args = { _reader: new Reader(node), _args: args };
-    if (!(flag & FLAG_DEFER)) {
-        startCompute(node);
+/** Unowned effect. */
+function effect(a, b, c, d) {
+    let flag, node;
+    if (typeof a === 'function') {
+        flag = FLAG_SETUP | ((0 | b) & OPTIONS);
+        node = new Effect(flag, a, null, null, c);
+    } else {
+        flag = FLAG_STABLE | FLAG_BOUND | FLAG_SINGLE | ((0 | c) & OPTIONS);
+        node = new Effect(flag, b, a, null, d);
+        node._dep1slot = subscribe(a, node, -1);
     }
-    return node;
-}
-
-/**
- * Dynamic effect (unowned).
- * effect(fn, opts?, args?) — fn receives (c: IScope, args).
- * @param {function} fn
- * @param {number=} opts
- * @param {*=} args
- * @returns {!Effect}
- */
-function effect(fn, opts, args) {
-    let flag = FLAG_SETUP | ((0 | opts) & OPTIONS);
-    let node = new Effect(flag, fn, null, null, args);
     startEffect(node);
     return node;
 }
 
-/**
- * Stable effect (unowned).
- * watch(fn, opts?, args?) — fn receives (c: IScope, args).
- * Deps frozen after first run.
- * @param {function} fn
- * @param {number=} opts
- * @param {*=} args
- * @returns {!Effect}
- */
-function watch(fn, opts, args) {
-    let flag = FLAG_STABLE | FLAG_SETUP | ((0 | opts) & OPTIONS);
-    let node = new Effect(flag, fn, null, null, args);
-    startEffect(node);
-    return node;
-}
-
-/**
- * Async effect (unowned).
- * spawn(fn, opts?, args?) — fn receives (c: Reader, args).
- * Tears down and rebuilds deps each run.
- * @param {function} fn
- * @param {number=} opts
- * @param {*=} args
- * @returns {!Effect}
- */
-function spawn(fn, opts, args) {
-    let flag = FLAG_ASYNC | FLAG_SETUP | ((0 | opts) & OPTIONS);
-    let node = new Effect(flag, fn, null, null, null);
-    node._args = { _reader: new Reader(node), _args: args };
+/** Unowned async effect. */
+function spawn(a, b, c, d) {
+    let flag, node;
+    if (typeof a === 'function') {
+        flag = FLAG_ASYNC | FLAG_SETUP | ((0 | b) & OPTIONS);
+        node = new Effect(flag, a, null, null, null);
+        node._args = { _reader: new Reader(node), _args: c };
+    } else {
+        flag = FLAG_ASYNC | FLAG_STABLE | FLAG_BOUND | FLAG_SINGLE | ((0 | c) & OPTIONS);
+        node = new Effect(flag, b, a, null, d);
+        node._dep1slot = subscribe(a, node, -1);
+    }
     startEffect(node);
     return node;
 }
@@ -2593,16 +2717,14 @@ function batch(fn) {
 
 /**
  * Top-level clock object. The entry point to the library.
- * Exposes factory methods for creating unowned reactive nodes.
  * @const
  */
 const c = {
     signal,
+    gate,
     compute,
-    derive,
     task,
     effect,
-    watch,
     spawn,
     root,
     batch,
@@ -2612,7 +2734,7 @@ export {
     FLAG_DEFER, FLAG_STABLE, FLAG_SETUP,
     FLAG_STALE, FLAG_PENDING,
     FLAG_DISPOSED, FLAG_LOADING, FLAG_ERROR,
-    FLAG_DERIVED, FLAG_EQUAL,
+    FLAG_DERIVED, FLAG_EQUAL, FLAG_BOUND,
     FLAG_WEAK, FLAG_INIT, FLAG_ASYNC,
     OPT_DEFER, OPT_STABLE, OPT_SETUP,
     OPT_WEAK, OPTIONS,
@@ -2624,14 +2746,7 @@ export {
     Signal,
     Compute,
     Effect,
+    Gate,
     c,
-    root,
-    signal,
-    compute,
-    derive,
-    task,
-    effect,
-    watch,
-    spawn,
     batch,
 }

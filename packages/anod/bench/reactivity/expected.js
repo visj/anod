@@ -30,25 +30,6 @@ export const EXPECTED = {
     dynUpdateVeryDynamic: 539,
 };
 
-/**
- * Anod uses eager push evaluation: computes re-evaluate whenever a dependency
- * changes, even if no downstream consumer reads the result in this cycle.
- * This causes higher counts when readFraction < 1 (partial leaf reads) or
- * when conditional reads skip a branch (unstable, molWire).
- */
-export const OVERRIDES_ANOD = {
-};
-
-/**
- * anod-stable inherits anod's push overrides plus its own bound-compute
- * difference: .derive() for mux splits evaluates 102 vs 103 for compute().
- */
-export const OVERRIDES_ANOD_STABLE = {
-    unstable: 4,
-    molWire: 14,
-    dynUpdateSimple: 14,
-    dynUpdateDynamic: 86,
-};
 
 /**
  * usignal does not skip propagation when a compute returns a value equal to

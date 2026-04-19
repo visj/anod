@@ -2881,7 +2881,13 @@ function saveRun(name, raw) {
 	if (typeof window.__onBenchDone === "function") window.__onBenchDone(output);
 }
 //#endregion
-//#region bench/reactivity/anod.js
+//#region bench/reactivity/anod-stable.js
+/**
+* Benchmark using c.compute()/c.effect() with cx.stable() for multi-dep
+* nodes that always read the same set of deps. Single-dep nodes use the
+* bound variant: c.compute(dep, fn). Dynamic nodes (conditional reads)
+* stay fully dynamic.
+*/
 let sink = 0;
 let counter = 0;
 const fib = (n) => {
@@ -2940,6 +2946,7 @@ function setupDiamond() {
 		return val + 1;
 	}));
 	const sum = wa.compute((cx) => {
+		cx.stable();
 		counter++;
 		return branches.reduce((a, b) => a + cx.val(b), 0);
 	});
@@ -2967,6 +2974,7 @@ function setupTriangle() {
 	}
 	list.push(current);
 	const sum = wa.compute((cx) => {
+		cx.stable();
 		counter++;
 		return list.reduce((a, b) => a + cx.val(b), 0);
 	});
@@ -2982,6 +2990,7 @@ function setupTriangle() {
 function setupMux() {
 	const heads = new Array(100).fill(null).map(() => wa.signal(0));
 	const mux = wa.compute((cx) => {
+		cx.stable();
 		counter++;
 		return heads.map((h) => cx.val(h));
 	});
@@ -3091,10 +3100,12 @@ function setupCellx(layers) {
 				return val;
 			}),
 			prop2: wa.compute((cx) => {
+				cx.stable();
 				counter++;
 				return cx.val(m.prop1) - cx.val(m.prop3);
 			}),
 			prop3: wa.compute((cx) => {
+				cx.stable();
 				counter++;
 				return cx.val(m.prop2) + cx.val(m.prop4);
 			}),
@@ -3158,14 +3169,17 @@ function setupMolWire() {
 	const A = wa.signal(0);
 	const B = wa.signal(0);
 	const C = wa.compute((cx) => {
+		cx.stable();
 		counter++;
 		return cx.val(A) % 2 + cx.val(B) % 2;
 	});
 	const D = wa.compute((cx) => {
+		cx.stable();
 		counter++;
 		return numbers.map((i) => ({ x: i + cx.val(A) % 2 - cx.val(B) % 2 }));
 	});
 	const E = wa.compute((cx) => {
+		cx.stable();
 		counter++;
 		return hard(cx.val(C) + cx.val(A) + cx.val(D)[0].x, "E");
 	});
@@ -3293,6 +3307,7 @@ function makeDynGraph(width, totalLayers, staticFraction, nSources) {
 			const mySources = new Array(nSources);
 			for (let s = 0; s < nSources; s++) mySources[s] = prevRow[(myDex + s) % width];
 			if (random() < staticFraction) row[myDex] = wa.compute((cx) => {
+				cx.stable();
 				counter++;
 				let sum = 0;
 				for (let s = 0; s < mySources.length; s++) sum += cx.val(mySources[s]);
@@ -3409,5 +3424,5 @@ bench("Dynamic update: large web app", setupDynUpdate(1e3, 12, .95, 4, 1));
 bench("Dynamic update: wide dense", setupDynUpdate(1e3, 5, 1, 25, 1));
 bench("Dynamic update: deep", setupDynUpdate(5, 500, 1, 3, 1));
 bench("Dynamic update: very dynamic", setupDynUpdate(100, 15, .5, 6, 1));
-saveRun("anod", await run());
+saveRun("anod-stable", await run());
 //#endregion

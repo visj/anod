@@ -83,15 +83,16 @@ describe("ptime guard: correct usage patterns", () => {
         });
     });
 
-    describe("stable effect (watch) with fixed deps", () => {
+    describe("stable effect with fixed deps", () => {
 
-        test("watch always reads all deps -- compute is always pulled", () => {
+        test("stable effect always reads all deps -- compute is always pulled", () => {
             const s = c.signal(0);
-            const comp = c.derive(r => r.val(s) + 1);
+            const comp = c.compute(r => { r.stable(); return r.val(s) + 1; });
 
             let effectRuns = 0;
             let lastVal = 0;
-            c.watch(r => {
+            c.effect(r => {
+                r.stable();
                 effectRuns++;
                 lastVal = r.val(comp);
             });
@@ -107,15 +108,16 @@ describe("ptime guard: correct usage patterns", () => {
             expect(lastVal).toBe(3);
         });
 
-        test("watch with two deps always pulls both", () => {
+        test("stable effect with two deps always pulls both", () => {
             const s1 = c.signal(0);
             const s2 = c.signal(10);
-            const c1 = c.derive(r => r.val(s1) + 1);
-            const c2 = c.derive(r => r.val(s2) + 1);
+            const c1 = c.compute(r => { r.stable(); return r.val(s1) + 1; });
+            const c2 = c.compute(r => { r.stable(); return r.val(s2) + 1; });
 
             let effectRuns = 0;
             let lastVal = 0;
-            c.watch(r => {
+            c.effect(r => {
+                r.stable();
                 effectRuns++;
                 lastVal = r.val(c1) + r.val(c2);
             });
@@ -136,9 +138,9 @@ describe("ptime guard: correct usage patterns", () => {
 
         test("diamond: both arms stale in same round", () => {
             const s = c.signal(0);
-            const left = c.derive(r => r.val(s) + 1);
-            const right = c.derive(r => r.val(s) * 10);
-            const join = c.derive(r => r.val(left) + r.val(right));
+            const left = c.compute(r => { r.stable(); return r.val(s) + 1; });
+            const right = c.compute(r => { r.stable(); return r.val(s) * 10; });
+            const join = c.compute(r => { r.stable(); return r.val(left) + r.val(right); });
 
             let effectRuns = 0;
             c.effect(r => {
@@ -159,9 +161,9 @@ describe("ptime guard: correct usage patterns", () => {
 
         test("deep diamond with pending/stale split", () => {
             const s = c.signal(0);
-            const a = c.derive(r => r.val(s) + 1);
-            const b = c.derive(r => r.val(a) + 1);
-            const d = c.derive(r => r.val(a) + r.val(b));
+            const a = c.compute(r => { r.stable(); return r.val(s) + 1; });
+            const b = c.compute(r => { r.stable(); return r.val(a) + 1; });
+            const d = c.compute(r => { r.stable(); return r.val(a) + r.val(b); });
 
             let effectRuns = 0;
             c.effect(r => {
@@ -364,7 +366,7 @@ describe("ptime guard: correct usage patterns", () => {
             let current = head;
             for (let i = 0; i < 20; i++) {
                 let prev = current;
-                current = c.derive(r => r.val(prev) + 1);
+                current = c.compute(prev, val => val + 1);
             }
 
             let effectRuns = 0;
@@ -391,9 +393,9 @@ describe("ptime guard: correct usage patterns", () => {
                 r.val(head);
                 return 0;
             });
-            const c2 = c.derive(r => r.val(c1) + 1);
-            const c3 = c.derive(r => r.val(c2) + 1);
-            const c4 = c.derive(r => r.val(c3) + 1);
+            const c2 = c.compute(c1, val => val + 1);
+            const c3 = c.compute(c2, val => val + 1);
+            const c4 = c.compute(c3, val => val + 1);
 
             let effectRuns = 0;
             c.effect(r => {

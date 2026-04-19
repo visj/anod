@@ -181,13 +181,14 @@ describe("edge cases", () => {
         });
     });
 
-    describe("derive (was memo)", () => {
+    describe("stable compute", () => {
         test("tracks deps on first run only", () => {
             const s1 = c.signal(1);
             const s2 = c.signal(10);
             let runs = 0;
 
-            const d = c.derive(c => {
+            const d = c.compute(c => {
+                c.stable();
                 runs++;
                 return c.val(s1) + c.val(s2);
             });
@@ -208,7 +209,8 @@ describe("edge cases", () => {
             const s1 = c.signal(1);
             let runs = 0;
 
-            const d = c.derive(c => {
+            const d = c.compute(c => {
+                c.stable();
                 runs++;
                 c.val(s1);
                 return 42;
@@ -218,18 +220,18 @@ describe("edge cases", () => {
             expect(runs).toBe(1);
 
             s1.set(2);
-            /** derive runs because s1 changed, but value is still 42 */
+            /** compute runs because s1 changed, but value is still 42 */
             expect(d.peek()).toBe(42);
             expect(runs).toBe(2);
         });
     });
 
-    describe("watch (was reaction)", () => {
+    describe("stable effect", () => {
         test("runs when dependency changes", () => {
             const s1 = c.signal(1);
             let last = 0;
 
-            c.watch(c => { last = c.val(s1); });
+            c.effect(c => { c.stable(); last = c.val(s1); });
 
             expect(last).toBe(1);
             s1.set(2);
@@ -470,8 +472,8 @@ describe("edge cases", () => {
     describe("diamond dependency", () => {
         test("effect runs once for diamond update", () => {
             const s1 = c.signal(0);
-            const c1 = c.derive(c => c.val(s1) + 1);
-            const c2 = c.derive(c => c.val(s1) + 10);
+            const c1 = c.compute(s1, val => val + 1);
+            const c2 = c.compute(s1, val => val + 10);
             let runs = 0;
 
             c.effect(c => {
@@ -487,9 +489,9 @@ describe("edge cases", () => {
 
         test("compute evaluates correctly in diamond", () => {
             const s1 = c.signal(1);
-            const left = c.derive(c => c.val(s1) * 2);
-            const right = c.derive(c => c.val(s1) * 3);
-            const sum = c.derive(c => c.val(left) + c.val(right));
+            const left = c.compute(s1, val => val * 2);
+            const right = c.compute(s1, val => val * 3);
+            const sum = c.compute(c => { c.stable(); return c.val(left) + c.val(right); });
 
             expect(sum.peek()).toBe(5);
             s1.set(2);
@@ -500,9 +502,9 @@ describe("edge cases", () => {
 
         test("deep diamond with pending/stale split", () => {
             const s1 = c.signal(0);
-            const a = c.derive(c => c.val(s1) + 1);
-            const b = c.derive(c => c.val(a) + 1);
-            const c1 = c.derive(c => c.val(a) + c.val(b));
+            const a = c.compute(s1, val => val + 1);
+            const b = c.compute(a, val => val + 1);
+            const c1 = c.compute(c => { c.stable(); return c.val(a) + c.val(b); });
             let runs = 0;
 
             c.effect(c => {
@@ -524,10 +526,10 @@ describe("edge cases", () => {
             let c2Runs = 0;
 
             /** c1 absorbs: always returns 0 regardless of s1 */
-            const c1 = c.derive(c => { c1Runs++; c.val(s1); return 0; });
-            const c2 = c.derive(c => { c2Runs++; return c.val(c1) + 1; });
+            const c1 = c.compute(s1, val => { c1Runs++; return 0; });
+            const c2 = c.compute(c1, val => { c2Runs++; return val + 1; });
 
-            c.effect(c => { c.val(c2); });
+            c.effect(c2, () => { });
 
             expect(c1Runs).toBe(1);
             expect(c2Runs).toBe(1);
@@ -540,13 +542,13 @@ describe("edge cases", () => {
 
         test("deep chain avoids unnecessary work", () => {
             const s1 = c.signal(0);
-            const c1 = c.derive(c => { c.val(s1); return 0; });
-            const c2 = c.derive(c => c.val(c1) + 1);
-            const c3 = c.derive(c => c.val(c2) + 1);
-            const c4 = c.derive(c => c.val(c3) + 1);
+            const c1 = c.compute(s1, val => 0);
+            const c2 = c.compute(c1, val => val + 1);
+            const c3 = c.compute(c2, val => val + 1);
+            const c4 = c.compute(c3, val => val + 1);
             let runs = 0;
 
-            c.effect(c => { runs++; c.val(c4); });
+            c.effect(c4, val => { runs++; });
 
             expect(runs).toBe(1);
             s1.set(1);
@@ -609,7 +611,7 @@ describe("edge cases", () => {
     describe("dispose", () => {
         test("disposed compute returns last value", () => {
             const s1 = c.signal(1);
-            const c1 = c.derive(c => c.val(s1) * 2);
+            const c1 = c.compute(s1, val => val * 2);
 
             expect(c1.peek()).toBe(2);
             c1.dispose();
@@ -762,9 +764,10 @@ describe("edge cases", () => {
             expect(received).toBe(10);
         });
 
-        test("derive receives seed", () => {
+        test("stable compute receives seed", () => {
             let received;
-            const d = c.derive((c, prev) => {
+            const d = c.compute((c, prev) => {
+                c.stable();
                 received = prev;
                 return 42;
             }, 99);
@@ -833,7 +836,7 @@ describe("edge cases", () => {
             let current = head;
             for (let i = 0; i < 50; i++) {
                 const prev = current;
-                current = c.derive(c => c.val(prev) + 1);
+                current = c.compute(prev, val => val + 1);
             }
 
             expect(current.peek()).toBe(50);
@@ -863,9 +866,9 @@ describe("edge cases", () => {
             const s1 = c.signal(1);
             const s2 = c.signal(2);
 
-            const c1 = c.derive(c => c.val(s1) + c.val(s2));
-            const c2 = c.derive(c => c.val(c1) * 2);
-            const c3 = c.derive(c => c.val(c1) + c.val(c2));
+            const c1 = c.compute(c => { c.stable(); return c.val(s1) + c.val(s2); });
+            const c2 = c.compute(c1, val => val * 2);
+            const c3 = c.compute(c => { c.stable(); return c.val(c1) + c.val(c2); });
 
             expect(c3.peek()).toBe(9);
             s1.set(3);
