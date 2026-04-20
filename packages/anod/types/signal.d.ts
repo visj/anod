@@ -17,7 +17,7 @@ export const enum Flag {
     ASYNC = 65536,
     BOUND = 131072,
     SUSPEND = 262144,
-    CONTEXT = 524288,
+    FIBER = 524288,
     PROMISE = 1048576
 }
 

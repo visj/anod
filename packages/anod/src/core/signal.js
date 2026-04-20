@@ -33,7 +33,7 @@ const FLAG_NOTEQUAL = 1 << 15;
 const FLAG_ASYNC = 1 << 16;
 const FLAG_BOUND = 1 << 17;
 const FLAG_SUSPEND = 1 << 18;
-const FLAG_CONTEXT = 1 << 19;
+const FLAG_FIBER = 1 << 19;
 const FLAG_PROMISE = 1 << 20;
 
 /* Option flags */
@@ -402,7 +402,7 @@ function loading() {
 function val(sender) {
   let flag = this._flag;
 
-  if (flag & FLAG_ASYNC) {
+  if (flag & FLAG_LOADING) {
     return this._readAsync(sender);
   }
   /** Sync path: version-tagged dep tracking with VSTACK restore. */
@@ -846,11 +846,11 @@ function gate(value) {
    * @returns {!Channel}
    */
   function _ensureChannel() {
-    if (!(this._flag & FLAG_CONTEXT)) {
+    if (!(this._flag & FLAG_FIBER)) {
       let fiber = new Fiber();
       fiber._channel = new Channel();
       this._args = { _args: this._args, _context: fiber };
-      this._flag |= FLAG_CONTEXT;
+      this._flag |= FLAG_FIBER;
       return fiber._channel;
     }
     let fiber = this._args._context;
@@ -872,12 +872,12 @@ function gate(value) {
    */
   function _controller() {
     let context;
-    if (this._flag & FLAG_CONTEXT) {
+    if (this._flag & FLAG_FIBER) {
       context = this._args._context;
     } else {
       context = new Fiber();
       this._args = { _args: this._args, _context: context };
-      this._flag |= FLAG_CONTEXT;
+      this._flag |= FLAG_FIBER;
     }
     let controller = new AbortController();
     context._controller = controller;
@@ -903,12 +903,12 @@ function gate(value) {
     }
     let value = sender._value;
     let context;
-    if (this._flag & FLAG_CONTEXT) {
+    if (this._flag & FLAG_FIBER) {
       context = this._args._context;
     } else {
       context = new Fiber();
       this._args = { _args: this._args, _context: context };
-      this._flag |= FLAG_CONTEXT;
+      this._flag |= FLAG_FIBER;
     }
     let defers = context._defers;
     if (defers === null) {
@@ -1145,7 +1145,7 @@ function gate(value) {
     this._flag = FLAG_DISPOSED;
     clearSubs(this);
     clearDeps(this);
-    if (flag & FLAG_CONTEXT) {
+    if (flag & FLAG_FIBER) {
       let ctx = this._args._context;
       if (ctx._controller !== null) {
         ctx._controller.abort();
@@ -1158,10 +1158,14 @@ function gate(value) {
   };
 
   /**
-   * Sync update for compute nodes. Two branches:
-   * 1. Stable (no SETUP) — no dep tracking, fn receives (this, prev, args)
-   * 2. Setup/dynamic — version bump, dep tracking, fn receives (this, prev, args)
-   * Async nodes delegate to _updateAsync.
+   * Unified update for compute nodes. Two branches:
+   * 1. Stable — no dep tracking, fn receives (val, this, prev, args) or (this, prev, args)
+   * 2. Setup/dynamic — version-tracked dep reconciliation
+   *
+   * Async nodes share the same path. During fn execution FLAG_ASYNC is
+   * temporarily cleared so val() uses the normal VERSION tracking. After
+   * fn returns, FLAG_ASYNC is restored and the result is routed to either
+   * the sync value-comparison path or the async promise/iterator path.
    * @this {!Compute<T,U,V,W>}
    * @param {number} time
    */
@@ -1172,12 +1176,17 @@ function gate(value) {
       flag &
       ~(FLAG_STALE | FLAG_LOADING | FLAG_EQUAL | FLAG_NOTEQUAL);
 
-    /** Async nodes delegate to _updateAsync — completely separate path. */
+    /** Async prep: reset fiber state. */
     if (flag & FLAG_ASYNC) {
-      return this._updateAsync(time);
+      if (flag & FLAG_FIBER) {
+        resetFiber(this);
+      }
+      this._flag &= ~FLAG_SUSPEND;
     }
 
     let value;
+    let args = (flag & FLAG_FIBER) ? this._args._args : this._args;
+
     if ((flag & (FLAG_STABLE | FLAG_SETUP)) === FLAG_STABLE) {
       try {
         if (flag & FLAG_BOUND) {
@@ -1185,9 +1194,9 @@ function gate(value) {
           if (dep._flag & (FLAG_STALE | FLAG_PENDING)) {
             dep._refresh();
           }
-          value = this._fn(dep._value, this, this._value, this._args);
+          value = this._fn(dep._value, this, this._value, args);
         } else {
-          value = this._fn(this, this._value, this._args);
+          value = this._fn(this, this._value, args);
         }
       } catch (err) {
         this._value = normalize(err);
@@ -1217,7 +1226,7 @@ function gate(value) {
       }
 
       try {
-        value = this._fn(this, this._value, this._args);
+        value = this._fn(this, this._value, args);
         this._flag &= ~FLAG_ERROR;
       } catch (err) {
         value = normalize(err);
@@ -1256,130 +1265,45 @@ function gate(value) {
       VERSION = prevRVer;
     }
 
-    flag = this._flag &= ~(FLAG_STALE | FLAG_PENDING | FLAG_INIT | FLAG_SETUP);
+    this._flag &= ~(FLAG_STALE | FLAG_PENDING | FLAG_INIT | FLAG_SETUP);
 
-    if (flag & FLAG_ERROR) {
+    /** Async: if fn returned a promise/iterator, dispatch and return. */
+    if (flag & FLAG_ASYNC) {
+      let kind = asyncKind(value);
+      if (kind !== ASYNC_SYNC) {
+        if (kind === ASYNC_PROMISE && !(this._flag & FLAG_SUSPEND)) {
+          throw ASSERT_SUSPEND;
+        }
+        this._flag |= FLAG_LOADING;
+        if (kind === ASYNC_PROMISE) {
+          resolvePromise(
+            new WeakRef(this),
+            /** @type {IThenable} */ (value),
+            time
+          );
+        } else {
+          resolveIterator(
+            new WeakRef(this),
+            /** @type {AsyncIterator | AsyncIterable} */ (value),
+            time
+          );
+        }
+        return;
+      }
+    }
+
+    /** Value comparison (shared by sync and async SYNC_SYNC). */
+    let f = this._flag;
+    if (f & FLAG_ERROR) {
       this._value = value;
       this._ctime = time;
     } else if (value !== this._value) {
       this._value = value;
-      if (!(flag & FLAG_EQUAL)) {
+      if (!(f & FLAG_EQUAL)) {
         this._ctime = time;
       }
-    } else if (flag & FLAG_NOTEQUAL) {
+    } else if (f & FLAG_NOTEQUAL) {
       this._ctime = time;
-    }
-  };
-
-  /**
-   * Async update for compute nodes. Passes `this` directly as context.
-   * - On re-run (not SETUP, not STABLE): tear down all deps.
-   * - Clears FLAG_SUSPEND before fn, asserts it after if async.
-   * - Bound: fn(depValue, this, prev, args)
-   * - Unbound: fn(this, prev, args)
-   * @this {!Compute<T,U,V,W>}
-   * @param {number} time
-   */
-  ComputeProto._updateAsync = function (time) {
-    let flag = this._flag;
-    let value;
-    let kind;
-    let args = (flag & FLAG_CONTEXT) ? this._args._args : this._args;
-
-    /** Abort previous controller, clear stale defers and channel. */
-    if (flag & FLAG_CONTEXT) {
-      let ctx = this._args._context;
-      if (ctx._controller !== null) {
-        ctx._controller.abort();
-        ctx._controller = null;
-      }
-      ctx._defers = null;
-      if (ctx._channel !== null && ctx._channel._res1 !== null) {
-        clearChannel(ctx._channel);
-      }
-    }
-
-    if (flag & FLAG_BOUND) {
-      /** Bound async: single dep, fn receives (depValue, this, prev, args). */
-      let dep = this._dep1;
-      if (dep._flag & (FLAG_STALE | FLAG_PENDING)) {
-        dep._refresh();
-      }
-      this._flag &= ~FLAG_SUSPEND;
-      try {
-        value = this._fn(dep._value, this, this._value, args);
-        kind = asyncKind(value);
-        this._flag &= ~FLAG_ERROR;
-      } catch (err) {
-        this._value = normalize(err);
-        this._flag =
-          (this._flag & ~(FLAG_STALE | FLAG_PENDING | FLAG_INIT)) | FLAG_ERROR;
-        this._ctime = time;
-        return;
-      }
-    } else {
-      if (!(flag & (FLAG_STABLE | FLAG_SETUP))) {
-        /** Subsequent non-stable run: tear down all deps. */
-        if (this._dep1 !== null) {
-          clearReceiver(this._dep1, this._dep1slot);
-          this._dep1 = null;
-          this._dep1slot = 0;
-        }
-        let deps = this._deps;
-        if (deps !== null) {
-          let count = deps.length >> 1;
-          while (count-- > 0) {
-            let slot = deps.pop();
-            let node = deps.pop();
-            clearReceiver(node, slot);
-          }
-        }
-      }
-
-      this._flag &= ~FLAG_SUSPEND;
-      try {
-        value = this._fn(this, this._value, args);
-        kind = asyncKind(value);
-        this._flag &= ~FLAG_ERROR;
-      } catch (err) {
-        this._value = normalize(err);
-        this._flag =
-          (this._flag & ~(FLAG_STALE | FLAG_PENDING | FLAG_INIT | FLAG_SETUP)) |
-          FLAG_ERROR;
-        this._ctime = time;
-        return;
-      }
-    }
-
-    this._flag &= ~(FLAG_STALE | FLAG_PENDING | FLAG_INIT | FLAG_SETUP);
-    if (kind === ASYNC_SYNC) {
-      flag = this._flag;
-      if (value !== this._value) {
-        this._value = value;
-        if (!(flag & FLAG_EQUAL)) {
-          this._ctime = time;
-        }
-      } else if (flag & FLAG_NOTEQUAL) {
-        this._ctime = time;
-      }
-    } else {
-      if (kind === ASYNC_PROMISE && !(this._flag & FLAG_SUSPEND)) {
-        throw ASSERT_SUSPEND;
-      }
-      this._flag |= FLAG_LOADING;
-      if (kind === ASYNC_PROMISE) {
-        resolvePromise(
-          new WeakRef(this),
-          /** @type {IThenable} */ (value),
-          time
-        );
-      } else {
-        resolveIterator(
-          new WeakRef(this),
-          /** @type {AsyncIterator | AsyncIterable} */ (value),
-          time
-        );
-      }
     }
   };
 
@@ -1399,12 +1323,10 @@ function gate(value) {
    * @returns {void}
    */
   ComputeProto._receive = function () {
-    if (!(this._flag & FLAG_ASYNC)) {
+    if (!(this._flag & FLAG_PROMISE)) {
       notify(this, FLAG_PENDING);
-    } else if (this._flag & FLAG_PROMISE) {
-      TASKS[TASK_COUNT++] = this;
     } else {
-      notify(this, FLAG_PENDING);
+      TASKS[TASK_COUNT++] = this;
     }
   };
 
@@ -1427,6 +1349,11 @@ function gate(value) {
    * @this {!Effect<U,V,W>}
    * @param {number} time
    */
+  /**
+   * Unified update for effect nodes. Handles both sync and async.
+   * @this {!Effect<U,V,W>}
+   * @param {number} time
+   */
   EffectProto._update = function (time) {
     let flag = this._flag;
 
@@ -1441,13 +1368,17 @@ function gate(value) {
       this._recover = null;
     }
 
-    /** Async nodes delegate after pre-exec cleanup. */
+    /** Async prep: reset fiber state. */
     if (flag & FLAG_ASYNC) {
-      return this._updateAsync(time);
+      if (flag & FLAG_FIBER) {
+        resetFiber(this);
+      }
+      this._flag &= ~FLAG_SUSPEND;
     }
 
     /** @type {(function(): void) | null | undefined} */
     let value;
+    let args = (flag & FLAG_FIBER) ? this._args._args : this._args;
 
     if ((flag & (FLAG_STABLE | FLAG_SETUP)) === FLAG_STABLE) {
       try {
@@ -1456,9 +1387,9 @@ function gate(value) {
           if (dep._flag & (FLAG_STALE | FLAG_PENDING)) {
             dep._refresh();
           }
-          value = this._fn(dep._value, this, this._args);
+          value = this._fn(dep._value, this, args);
         } else {
-          value = this._fn(this, this._args);
+          value = this._fn(this, args);
         }
       } finally {
         this._flag &= ~(FLAG_INIT | FLAG_STALE | FLAG_PENDING);
@@ -1485,7 +1416,7 @@ function gate(value) {
       }
 
       try {
-        value = this._fn(this, this._args);
+        value = this._fn(this, args);
       } finally {
         if (flag & FLAG_SETUP) {
           if (DCOUNT > DBASE) {
@@ -1519,93 +1450,29 @@ function gate(value) {
         this._flag &= ~(FLAG_INIT | FLAG_SETUP | FLAG_STALE | FLAG_PENDING);
       }
     }
-    if (typeof value === "function") {
-      this._addCleanup(value);
-    }
-  };
 
-  /**
-   * Async update for effect nodes. Passes `this` directly as context.
-   * - On re-run (not SETUP, not STABLE): tear down all deps.
-   * - Clears FLAG_SUSPEND before fn, asserts it after if async.
-   * - Bound: fn(depValue, this, args)
-   * - Unbound: fn(this, args)
-   * @this {!Effect<U,V,W>}
-   * @param {number} time
-   */
-  EffectProto._updateAsync = function (time) {
-    let flag = this._flag;
-    let value;
-    let kind;
-    let args = (flag & FLAG_CONTEXT) ? this._args._args : this._args;
-
-    /** Abort previous controller, clear stale defers and channel. */
-    if (flag & FLAG_CONTEXT) {
-      let ctx = this._args._context;
-      if (ctx._controller !== null) {
-        ctx._controller.abort();
-        ctx._controller = null;
-      }
-      ctx._defers = null;
-      if (ctx._channel !== null && ctx._channel._res1 !== null) {
-        clearChannel(ctx._channel);
-      }
-    }
-
-    if (flag & FLAG_BOUND) {
-      /** Bound async: single dep, fn receives (depValue, this, args). */
-      let dep = this._dep1;
-      if (dep._flag & (FLAG_STALE | FLAG_PENDING)) {
-        dep._refresh();
-      }
-      this._flag &= ~FLAG_SUSPEND;
-      try {
-        value = this._fn(dep._value, this, args);
-        kind = asyncKind(value);
-      } finally {
-        this._flag &= ~(FLAG_STALE | FLAG_PENDING | FLAG_INIT);
+    if (flag & FLAG_ASYNC) {
+      /** Async result handling. */
+      let kind = asyncKind(value);
+      if (kind === ASYNC_SYNC) {
+        if (typeof value === "function") {
+          this._addCleanup(value);
+        }
+      } else {
+        if (kind === ASYNC_PROMISE && !(this._flag & FLAG_SUSPEND)) {
+          throw ASSERT_SUSPEND;
+        }
+        this._flag |= FLAG_LOADING;
+        if (kind === ASYNC_PROMISE) {
+          resolveEffectPromise(new WeakRef(this), value);
+        } else {
+          resolveEffectIterator(new WeakRef(this), value);
+        }
       }
     } else {
-      if (!(flag & (FLAG_STABLE | FLAG_SETUP))) {
-        /** Subsequent non-stable run: tear down all deps. */
-        if (this._dep1 !== null) {
-          clearReceiver(this._dep1, this._dep1slot);
-          this._dep1 = null;
-        }
-        let deps = this._deps;
-        if (deps !== null) {
-          let count = deps.length >> 1;
-          while (count-- > 0) {
-            let slot = deps.pop();
-            let node = deps.pop();
-            clearReceiver(node, slot);
-          }
-        }
-      }
-
-      this._flag &= ~FLAG_SUSPEND;
-      try {
-        value = this._fn(this, args);
-        kind = asyncKind(value);
-      } finally {
-        this._flag &= ~(FLAG_STALE | FLAG_PENDING | FLAG_INIT | FLAG_SETUP);
-      }
-    }
-
-    if (kind === ASYNC_SYNC) {
-      this._flag &= ~FLAG_LOADING;
+      /** Sync result handling. */
       if (typeof value === "function") {
         this._addCleanup(value);
-      }
-    } else {
-      if (kind === ASYNC_PROMISE && !(this._flag & FLAG_SUSPEND)) {
-        throw ASSERT_SUSPEND;
-      }
-      this._flag |= FLAG_LOADING;
-      if (kind === ASYNC_PROMISE) {
-        resolveEffectPromise(new WeakRef(this), value);
-      } else {
-        resolveEffectIterator(new WeakRef(this), value);
       }
     }
   };
@@ -1624,7 +1491,7 @@ function gate(value) {
     if (this._owned !== null) {
       clearOwned(this);
     }
-    if (flag & FLAG_CONTEXT) {
+    if (flag & FLAG_FIBER) {
       let ctx = this._args._context;
       if (ctx._controller !== null) {
         ctx._controller.abort();
@@ -2692,7 +2559,7 @@ function settle(node, value) {
 
     let stale = false;
     if (node._flag & FLAG_ASYNC) {
-      let hasDefers = (node._flag & FLAG_CONTEXT) &&
+      let hasDefers = (node._flag & FLAG_FIBER) &&
         node._args._context._defers !== null;
       if (node._deps !== null || hasDefers) {
         stale = settleDeps(node);
@@ -2702,7 +2569,7 @@ function settle(node, value) {
     }
 
     /** Resolve any awaiters waiting on this task. */
-    if (node._flag & FLAG_CONTEXT) {
+    if (node._flag & FLAG_FIBER) {
       let ch = node._args._context._channel;
       if (ch !== null && ch._waiters !== null) {
         resolveWaiters(node, ch, value, !!(node._flag & FLAG_ERROR));
@@ -2735,7 +2602,7 @@ function settleDeps(node) {
   /** Grab defers before clearing. */
   let defers = null;
   let deferLen = 0;
-  if (node._flag & FLAG_CONTEXT) {
+  if (node._flag & FLAG_FIBER) {
     let ctx = node._args._context;
     defers = ctx._defers;
     if (defers !== null) {
@@ -2838,6 +2705,25 @@ function settleDeps(node) {
   }
 
   return changed;
+}
+
+/**
+ * Resets async fiber state before re-execution. Aborts the previous
+ * controller, clears stale defers, and removes channel bindings.
+ * Shared between Compute and Effect _update paths.
+ * @param {!Receiver} node
+ * @returns {void}
+ */
+function resetFiber(node) {
+  let ctx = node._args._context;
+  if (ctx._controller !== null) {
+    ctx._controller.abort();
+    ctx._controller = null;
+  }
+  ctx._defers = null;
+  if (ctx._channel !== null && ctx._channel._res1 !== null) {
+    clearChannel(ctx._channel);
+  }
 }
 
 // ─── Awaiter/Responder two-way binding ────────────────────────────────────
@@ -2979,7 +2865,7 @@ function resolveEffectPromise(ref, promise) {
         if (typeof val === "function") {
           node._addCleanup(val);
         }
-        if (node._flag & FLAG_CONTEXT && node._args._context._defers !== null) {
+        if (node._flag & FLAG_FIBER && node._args._context._defers !== null) {
           let stale = settleDeps(node);
           if (stale) {
             notify(node, FLAG_STALE);
@@ -3025,7 +2911,7 @@ function resolveEffectIterator(ref, iterable) {
     }
     if (result.done) {
       node._flag &= ~FLAG_LOADING;
-      if (node._flag & FLAG_CONTEXT && node._args._context._defers !== null) {
+      if (node._flag & FLAG_FIBER && node._args._context._defers !== null) {
         let stale = settleDeps(node);
         if (stale) {
           notify(node, FLAG_STALE);
