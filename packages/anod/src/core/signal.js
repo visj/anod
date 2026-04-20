@@ -34,6 +34,7 @@ const FLAG_ASYNC = 1 << 16;
 const FLAG_BOUND = 1 << 17;
 const FLAG_SUSPEND = 1 << 18;
 const FLAG_CONTEXT = 1 << 19;
+const FLAG_PROMISE = 1 << 20;
 
 /* Option flags */
 const OPT_DEFER = FLAG_DEFER;
@@ -815,6 +816,7 @@ function gate(value) {
     }
 
     /** Slow-path: task is loading — create two-way awaiter binding. */
+    taskNode._flag |= FLAG_PROMISE;
     let awaiterCh = this._ensureChannel();
     let responderCh = taskNode._ensureChannel();
 
@@ -952,6 +954,41 @@ function gate(value) {
   }
 
   ComputeProto.defer = EffectProto.defer = _defer;
+
+  /**
+   * Checks if one or more tasks are currently loading. Subscribes to
+   * each task as a dep (so the caller re-runs when they settle).
+   * Accepts a single task or an array of tasks.
+   *
+   * Usage: `if (c.pending([taskA, taskB])) return;`
+   *
+   * @this {!Compute | !Effect}
+   * @param {!Compute | !Array<!Compute>} tasks
+   * @returns {boolean} true if any task has FLAG_LOADING set
+   */
+  function _pending(tasks) {
+    let loading = false;
+    if (tasks._flag !== undefined) {
+      /** Single task. */
+      val.call(this, tasks);
+      if (tasks._flag & FLAG_LOADING) {
+        loading = true;
+      }
+    } else {
+      /** Array of tasks. */
+      let count = tasks.length;
+      for (let i = 0; i < count; i++) {
+        let t = tasks[i];
+        val.call(this, t);
+        if (t._flag & FLAG_LOADING) {
+          loading = true;
+        }
+      }
+    }
+    return loading;
+  }
+
+  ComputeProto.pending = EffectProto.pending = _pending;
 
   // ─── Root — single-use methods ─────────────────────────────────────────
 
@@ -1381,11 +1418,24 @@ function gate(value) {
    * @this {Compute}
    * @returns {void}
    */
+  /**
+   * Compute notification handler. Three cases:
+   * 1. Sync compute: just propagate PENDING downstream (pure pull).
+   * 2. Async + FLAG_PROMISE (someone awaiting us): eagerly enqueue to
+   *    TASKS so we re-run and can settle the waiting promise. Do NOT
+   *    notify — downstream will be notified at settle time.
+   * 3. Async + no promise waiters: propagate PENDING. Stay pull-based.
+   *    If nobody reads us, we don't waste work.
+   * @this {Compute}
+   * @returns {void}
+   */
   ComputeProto._receive = function () {
-    if (this._flag & FLAG_ASYNC) {
-        TASKS[TASK_COUNT++] = this;
+    if (!(this._flag & FLAG_ASYNC)) {
+      notify(this, FLAG_PENDING);
+    } else if (this._flag & FLAG_PROMISE) {
+      TASKS[TASK_COUNT++] = this;
     } else {
-        notify(this, FLAG_PENDING);
+      notify(this, FLAG_PENDING);
     }
   };
 
@@ -2852,7 +2902,7 @@ function addWaiter(responderCh, awaiter, awaiterResSlot, resolve, reject) {
  * @param {number} slot
  * @returns {void}
  */
-function removeWaiter(responderCh, slot) {
+function removeWaiter(responderCh, responderNode, slot) {
   let waiters = responderCh._waiters;
   let lastReject = waiters.pop();
   let lastResolve = waiters.pop();
@@ -2870,6 +2920,10 @@ function removeWaiter(responderCh, slot) {
       ch._responds[lastResSlot + 1] = slot;
     }
   }
+  if (waiters.length === 0) {
+    responderCh._waiters = null;
+    responderNode._flag &= ~FLAG_PROMISE;
+  }
 }
 
 /**
@@ -2880,7 +2934,7 @@ function removeWaiter(responderCh, slot) {
 function clearChannel(channel) {
   let res = channel._res1;
   if (res !== null) {
-    removeWaiter(res._args._context._channel, channel._res1slot);
+    removeWaiter(res._args._context._channel, res, channel._res1slot);
     channel._res1 = null;
   }
   let responds = channel._responds;
@@ -2888,7 +2942,7 @@ function clearChannel(channel) {
     for (let i = 0; i < responds.length; i += 2) {
       let responder = responds[i];
       let slot = responds[i + 1];
-      removeWaiter(responder._args._context._channel, slot);
+      removeWaiter(responder._args._context._channel, responder, slot);
     }
     channel._responds = null;
   }
@@ -2937,6 +2991,7 @@ function resolveWaiters(responder, responderCh, value, isError) {
     }
   }
   responderCh._waiters = null;
+  responder._flag &= ~FLAG_PROMISE;
 }
 
 /**

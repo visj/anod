@@ -1238,4 +1238,117 @@ describe("async", () => {
       expect(runs).toBe(2);
     });
   });
+
+  describe("pending", () => {
+    test("returns true when task is loading", async () => {
+      let resolve;
+      const taskA = c.task((c) => {
+        return c.suspend(new Promise((r) => { resolve = r; }));
+      });
+      let result = null;
+
+      c.effect((c) => {
+        result = c.pending(taskA);
+      });
+
+      expect(result).toBe(true);
+
+      resolve(42);
+      await settle();
+
+      expect(result).toBe(false);
+    });
+
+    test("returns false when task is settled", async () => {
+      const taskA = c.task((c) => c.suspend(Promise.resolve(10)));
+      await settle();
+
+      let result = null;
+      c.effect((c) => {
+        result = c.pending(taskA);
+      });
+      expect(result).toBe(false);
+    });
+
+    test("subscribes to the task: effect re-runs on settle", async () => {
+      let resolve;
+      const taskA = c.task((c) => {
+        return c.suspend(new Promise((r) => { resolve = r; }));
+      });
+      let runs = 0;
+      let observed = null;
+
+      c.effect((c) => {
+        runs++;
+        if (c.pending(taskA)) {
+          return;
+        }
+        observed = c.val(taskA);
+      });
+
+      expect(runs).toBe(1);
+      expect(observed).toBe(null);
+
+      resolve(42);
+      await settle();
+
+      expect(runs).toBe(2);
+      expect(observed).toBe(42);
+    });
+
+    test("works with array of tasks", async () => {
+      let resolveA, resolveB;
+      const taskA = c.task((c) => c.suspend(new Promise((r) => { resolveA = r; })));
+      const taskB = c.task((c) => c.suspend(new Promise((r) => { resolveB = r; })));
+
+      let runs = 0;
+      let observed = null;
+
+      c.effect((c) => {
+        runs++;
+        if (c.pending([taskA, taskB])) {
+          return;
+        }
+        observed = c.val(taskA) + c.val(taskB);
+      });
+
+      expect(runs).toBe(1);
+      expect(observed).toBe(null);
+
+      resolveA(10);
+      await settle();
+      /** Still pending because taskB is loading. */
+      expect(runs).toBe(2);
+      expect(observed).toBe(null);
+
+      resolveB(20);
+      await settle();
+      expect(runs).toBe(3);
+      expect(observed).toBe(30);
+    });
+
+    test("task stays pull-based when no promise waiters", async () => {
+      const s1 = c.signal(1);
+      let taskRuns = 0;
+
+      const taskA = c.task((c) => {
+        taskRuns++;
+        return c.suspend(Promise.resolve(c.val(s1) * 10));
+      });
+      await settle();
+      expect(taskRuns).toBe(1);
+      expect(taskA.peek()).toBe(10);
+
+      /** Change dep but don't read taskA — should NOT re-run (pull). */
+      s1.set(2);
+      await tick();
+      expect(taskRuns).toBe(1);
+
+      /** Reading it pulls the update. */
+      taskA.peek();
+      await settle();
+      expect(taskRuns).toBe(2);
+      expect(taskA.peek()).toBe(20);
+    });
+  });
 });
