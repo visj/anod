@@ -125,7 +125,7 @@ export declare class Signal<T> implements ISignal<T> {
     peek(): T;
     set(value: T): void;
     dispose(): void;
-}
+} 
 
 export declare class Gate<T> extends Signal<T> implements IGate<T> {
     constructor(value: T);

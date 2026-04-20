@@ -383,27 +383,6 @@ describe("async", () => {
             expect(c2.peek()).toBe(21);
         });
 
-        test("disposed context throws on val after node re-updates", async () => {
-            const s1 = c.signal(1);
-            let captured;
-            const c1 = c.task(async (c) => {
-                if (captured === undefined) {
-                    captured = c;
-                }
-                return c.val(s1);
-            });
-            await tick();
-            await tick();
-            expect(c1.peek()).toBe(1);
-
-            s1.set(2);
-            c1.peek();
-            await tick();
-            await tick();
-
-            expect(() => captured.val(s1)).toThrow('Reader disposed');
-        });
-
         test("task with bound signal dependency", async () => {
             const s1 = c.signal(5);
             const c1 = c.task(async (c) => c.val(s1) * 2);
@@ -546,6 +525,117 @@ describe("async", () => {
             await tick();
             expect(runs).toBe(1);
             expect(c1.peek()).toBe(1);
+        });
+    });
+
+    describe("loading suppresses downstream", () => {
+        test("effect does not re-run when a task dependency changes while loading", async () => {
+            let resolve1, resolve2;
+            const s1 = c.signal(1);
+            let taskRuns = 0;
+            const c1 = c.task((c) => {
+                taskRuns++;
+                const v = c.val(s1);
+                if (v === 1) {
+                    return new Promise(r => { resolve1 = r; });
+                }
+                return new Promise(r => { resolve2 = r; });
+            }, 0);
+            let effectRuns = 0;
+
+            c.effect(c => {
+                c.val(c1);
+                effectRuns++;
+            });
+
+            expect(effectRuns).toBe(1);
+            expect(c1.loading()).toBe(true);
+            expect(taskRuns).toBe(1);
+
+            /**
+             * Update s1 while the task is still loading. The task
+             * re-executes (fires a new promise), but the downstream
+             * effect must NOT be notified because the task is still
+             * loading — its value hasn't settled yet.
+             */
+            s1.set(2);
+            await tick();
+
+            expect(taskRuns).toBe(2);
+            expect(effectRuns).toBe(1);
+
+            resolve2(42);
+            await tick();
+
+            /** Now the task has settled — the effect should run. */
+            expect(effectRuns).toBe(2);
+        });
+
+        test("chained computes: intermediate task loading blocks downstream effect", async () => {
+            let resolve;
+            const s1 = c.signal(1);
+            const c1 = c.task((c) => {
+                const v = c.val(s1);
+                return new Promise(r => { resolve = r; });
+            }, 0);
+            const c2 = c.compute(c => c.val(c1) * 10);
+            let runs = 0;
+            let observed = void 0;
+
+            c.effect(c => {
+                observed = c.val(c2);
+                runs++;
+            });
+
+            expect(runs).toBe(1);
+            expect(observed).toBe(0);
+
+            /** Changing s1 while task is loading should not propagate. */
+            s1.set(2);
+            await tick();
+
+            expect(runs).toBe(1);
+
+            resolve(5);
+            await tick();
+
+            expect(runs).toBe(2);
+            expect(observed).toBe(50);
+        });
+
+        test("multiple dep changes while loading do not cause multiple effect runs", async () => {
+            let resolve;
+            const s1 = c.signal(1);
+            const s2 = c.signal(10);
+            const c1 = c.task((c) => {
+                const a = c.val(s1);
+                const b = c.val(s2);
+                return new Promise(r => { resolve = r; });
+            }, 0);
+            let runs = 0;
+
+            c.effect(c => {
+                c.val(c1);
+                runs++;
+            });
+
+            expect(runs).toBe(1);
+
+            /**
+             * Two dependency updates while loading — neither should
+             * cause an extra effect run.
+             */
+            s1.set(2);
+            await tick();
+            s2.set(20);
+            await tick();
+
+            expect(runs).toBe(1);
+
+            resolve(99);
+            await tick();
+
+            expect(runs).toBe(2);
         });
     });
 });

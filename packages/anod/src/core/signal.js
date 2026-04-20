@@ -138,6 +138,11 @@ var SCOPES = [[], [], [], []];
 
 var SCOPE_COUNT = 0;
 
+/** @const @type {Array<Compute>} */
+var TASKS = [];
+
+var TASK_COUNT = 0;
+
 /** @const @type {Array<Effect>} */
 var RECEIVERS = [];
 
@@ -773,7 +778,7 @@ function gate(value) {
         this._flag = FLAG_DISPOSED;
         clearSubs(this);
         clearDeps(this);
-        if ((flag & FLAG_ASYNC) && !(flag & FLAG_BOUND)) {
+        if ((flag & (FLAG_ASYNC | FLAG_BOUND)) === FLAG_ASYNC) {
             this._args._reader._dispose();
         }
         this._fn =
@@ -792,7 +797,7 @@ function gate(value) {
     ComputeProto._update = function (time) {
         let flag = this._flag;
         this._time = time;
-        this._flag = flag & ~(FLAG_STALE | FLAG_INIT | FLAG_LOADING | FLAG_EQUAL | FLAG_NOTEQUAL);
+        this._flag = flag & ~(FLAG_STALE | FLAG_INIT | FLAG_EQUAL | FLAG_NOTEQUAL);
 
         /** Async nodes delegate to _updateAsync — completely separate path. */
         if (flag & FLAG_ASYNC) {
@@ -924,13 +929,9 @@ function gate(value) {
                 return;
             }
         } else {
-            let reader;
-            /** _args is always { _reader, _args } for non-bound async nodes. */
             let context = this._args;
+            let reader = context._reader;
             if (!(flag & (FLAG_STABLE | FLAG_SETUP))) {
-                /** Subsequent non-stable run: dispose old reader, tear down
-                 *  deps, mint fresh reader. */
-                context._reader._dispose();
                 if (this._dep1 !== null) {
                     clearReceiver(this._dep1, this._dep1slot);
                     this._dep1 = null;
@@ -945,9 +946,13 @@ function gate(value) {
                         clearReceiver(node, slot);
                     }
                 }
-                reader = context._reader = new Reader(this);
+                if (flag & FLAG_LOADING) {
+                    reader._dispose();
+                    reader = context._reader = new Reader(this);
+                } else {
+                    reader._reset();
+                }
             } else {
-                reader = context._reader;
                 reader._flag &= ~(FLAG_EQUAL | FLAG_NOTEQUAL);
             }
 
@@ -965,7 +970,7 @@ function gate(value) {
         this._flag &= ~(FLAG_STALE | FLAG_PENDING | FLAG_INIT | FLAG_SETUP);
         let kind = asyncKind(value);
         if (kind === ASYNC_SYNC) {
-            flag = this._flag;
+            flag = this._flag &= ~FLAG_LOADING;
             if (value !== this._value) {
                 this._value = value;
                 if (!(flag & FLAG_EQUAL)) {
@@ -989,7 +994,11 @@ function gate(value) {
      * @returns {void}
      */
     ComputeProto._receive = function () {
-        notify(this, FLAG_PENDING);
+        if (this._flag & FLAG_LOADING) {
+            TASKS[TASK_COUNT++] = this;
+        } else {
+            notify(this, FLAG_PENDING);
+        }
     };
 
     // ─── Effect — single-use methods ───────────────────────────────────────
@@ -1027,7 +1036,6 @@ function gate(value) {
 
         /** Async nodes delegate after pre-exec cleanup. */
         if (flag & FLAG_ASYNC) {
-            this._flag &= ~FLAG_LOADING;
             return this._updateAsync(time);
         }
 
@@ -1136,7 +1144,6 @@ function gate(value) {
             let reader;
             let context = this._args;
             if (!(flag & (FLAG_STABLE | FLAG_SETUP))) {
-                context._reader._dispose();
                 if (this._dep1 !== null) {
                     clearReceiver(this._dep1, this._dep1slot);
                     this._dep1 = null;
@@ -1150,7 +1157,12 @@ function gate(value) {
                         clearReceiver(node, slot);
                     }
                 }
-                context._reader = new Reader(this);
+                if (flag & FLAG_LOADING) {
+                    context._reader._dispose();
+                    context._reader = new Reader(this);
+                } else {
+                    context._reader._reset();
+                }
             }
 
             reader = context._reader;
@@ -1164,6 +1176,7 @@ function gate(value) {
 
         let kind = asyncKind(value);
         if (kind === ASYNC_SYNC) {
+            this._flag &= ~FLAG_LOADING;
             if (typeof value === 'function') {
                 this._addCleanup(value);
             }
@@ -1191,7 +1204,7 @@ function gate(value) {
         if (this._owned !== null) {
             clearOwned(this);
         }
-        if ((flag & FLAG_ASYNC) && !(flag & FLAG_BOUND)) {
+        if ((flag & (FLAG_ASYNC | FLAG_BOUND)) === FLAG_ASYNC) {
             this._args._reader._dispose();
         }
         this._fn =
@@ -1267,6 +1280,14 @@ function gate(value) {
     ReaderProto._dispose = function () {
         this._flag = FLAG_DISPOSED;
         this._node = null;
+    };
+
+    /**
+     * @this {Reader}
+     */
+    ReaderProto._reset = function() {
+        this._flag = 0;
+        this._version = SEED += 2;
     };
 
     /**
@@ -2552,6 +2573,19 @@ function start() {
                 }
                 SENDER_COUNT = 0;
             }
+            if (TASK_COUNT > 0) {
+                let count = TASK_COUNT;
+                for (let i = 0; i < count; i++) {
+                    let node = TASKS[i];
+                    TASKS[i] = null;
+                    if ((node._flag & FLAG_STALE) || ((node._flag & FLAG_PENDING) && needsUpdate(node, time))) {
+                        node._update(time);
+                    } else {
+                        node._flag &= ~(FLAG_STALE | FLAG_PENDING);
+                    }
+                }
+                TASK_COUNT = 0;
+            }
             if (SCOPE_COUNT > 0) {
                 let levels = LEVELS.length;
                 for (let i = 0; i < levels; i++) {
@@ -2619,6 +2653,7 @@ function start() {
         IDLE = true;
         DISPOSER_COUNT =
             SENDER_COUNT =
+            TASK_COUNT =
             SCOPE_COUNT =
             RECEIVER_COUNT = 0;
         if (thrown) {

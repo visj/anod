@@ -2021,7 +2021,7 @@ var li = [], ei = 0, Sl = 0, Ki = [], Li = [], Mi = 0, Ni = [], Pi = 0, Qi = 0, 
 	[],
 	[],
 	[]
-], jn = 0, _n = [], gn = 0;
+], jn = 0, Mn = [], Nn = 0, _n = [], gn = 0;
 function s() {
 	this.H = null, this.J = null, this.M = null;
 }
@@ -2138,10 +2138,10 @@ In.prototype = Object.create(p.prototype);
 		1 & t ? this.ot(bi) : t & Yl ? Zl(this, bi) : qn(this, bi);
 	}, l.S = function() {
 		let t = this.j;
-		this.j = 8, gt(this), Wt(this), 65536 & t && !(131072 & t) && this.Y.ct.S(), this.V = this.W = this.Y = null;
+		this.j = 8, gt(this), Wt(this), 65536 == (196608 & t) && this.Y.ct.S(), this.V = this.W = this.Y = null;
 	}, l.ot = function(t) {
 		let i, l = this.j;
-		if (this.i = t, this.j = -49234 & l, 65536 & l) return this.yt(t);
+		if (this.i = t, this.j = -49170 & l, 65536 & l) return this.yt(t);
 		if (512 == (544 & l)) {
 			let n;
 			if (131072 & l) {
@@ -2196,10 +2196,10 @@ In.prototype = Object.create(p.prototype);
 				return;
 			}
 		} else {
-			let n, e = this.Y;
-			if (544 & l) n = e.ct, n.j &= -49153;
+			let n = this.Y, e = n.ct;
+			if (544 & l) e.j &= -49153;
 			else {
-				e.ct.S(), null !== this.C && (St(this.C, this.F), this.C = null, this.F = 0);
+				null !== this.C && (St(this.C, this.F), this.C = null, this.F = 0);
 				let t = this.A;
 				if (null !== t) {
 					let i = t.length >> 1;
@@ -2208,10 +2208,10 @@ In.prototype = Object.create(p.prototype);
 						St(t.pop(), i);
 					}
 				}
-				n = e.ct = new ba(this);
+				64 & l ? (e.S(), e = n.ct = new ba(this)) : e.Pt();
 			}
 			try {
-				i = this.V(n, this.W, e.Y), this.j = -129 & this.j | 49664 & n.j;
+				i = this.V(e, this.W, n.Y), this.j = -129 & this.j | 49664 & e.j;
 			} catch (i) {
 				this.W = Kn(i), this.j = -52 & this.j | 128, this.it = t;
 				return;
@@ -2219,12 +2219,12 @@ In.prototype = Object.create(p.prototype);
 		}
 		this.j &= -52;
 		let n = Nl(i);
-		3 === n ? (l = this.j, i !== this.W ? (this.W = i, 16384 & l || (this.it = t)) : 32768 & l && (this.it = t)) : (this.j |= 64, 1 === n ? Xt(new WeakRef(this), i, t) : Yt(new WeakRef(this), i, t));
+		3 === n ? (l = this.j &= -65, i !== this.W ? (this.W = i, 16384 & l || (this.it = t)) : 32768 & l && (this.it = t)) : (this.j |= 64, 1 === n ? Xt(new WeakRef(this), i, t) : Yt(new WeakRef(this), i, t));
 	}, l.ut = function() {
-		h(this, 2);
+		64 & this.j ? Mn[Nn++] = this : h(this, 2);
 	}, n.val = Bn, n.ot = function(t) {
 		let i, l = this.j;
-		if (this.i = t, 16 & l || (null !== this.H && Fl(this), null !== this.J && Ct(this), this.M = null), 65536 & l) return this.j &= -65, this.yt(t);
+		if (this.i = t, 16 & l || (null !== this.H && Fl(this), null !== this.J && Ct(this), this.M = null), 65536 & l) return this.yt(t);
 		if (512 == (544 & l)) {
 			let t;
 			if (131072 & l) {
@@ -2283,7 +2283,7 @@ In.prototype = Object.create(p.prototype);
 		} else {
 			let t, n = this.Y;
 			if (!(544 & l)) {
-				n.ct.S(), null !== this.C && (St(this.C, this.F), this.C = null);
+				null !== this.C && (St(this.C, this.F), this.C = null);
 				let t = this.A;
 				if (null !== t) {
 					let i = t.length >> 1;
@@ -2292,7 +2292,7 @@ In.prototype = Object.create(p.prototype);
 						St(t.pop(), i);
 					}
 				}
-				n.ct = new ba(this);
+				64 & l ? (n.ct.S(), n.ct = new ba(this)) : n.ct.Pt();
 			}
 			t = n.ct;
 			try {
@@ -2303,7 +2303,7 @@ In.prototype = Object.create(p.prototype);
 		}
 		let n = Nl(i);
 		var e;
-		3 === n ? "function" == typeof i && this.Mt(i) : (this.j |= 64, 1 === n ? (e = new WeakRef(this), i.then((t) => {
+		3 === n ? (this.j &= -65, "function" == typeof i && this.Mt(i)) : (this.j |= 64, 1 === n ? (e = new WeakRef(this), i.then((t) => {
 			let i = e.deref();
 			if (void 0 !== i && !(8 & i.j)) {
 				if (i.j &= -65, !(131072 & i.j)) {
@@ -2318,7 +2318,7 @@ In.prototype = Object.create(p.prototype);
 		})) : Zt(new WeakRef(this), i));
 	}, n.S = function() {
 		let t = this.j;
-		this.j = 8, Wt(this), null !== this.H && Fl(this), null !== this.J && Ct(this), 65536 & t && !(131072 & t) && this.Y.ct.S(), this.V = this.Y = this.J = this.L = this.M = null;
+		this.j = 8, Wt(this), null !== this.H && Fl(this), null !== this.J && Ct(this), 65536 == (196608 & t) && this.Y.ct.S(), this.V = this.Y = this.J = this.L = this.M = null;
 	}, n.ut = function() {
 		if (null === this.J) _n[gn++] = this;
 		else {
@@ -2341,6 +2341,8 @@ In.prototype = Object.create(p.prototype);
 		return l;
 	}, f.S = function() {
 		this.j = 8, this.tt = null;
+	}, f.Pt = function() {
+		this.j = 0, this.u = xn += 2;
 	}, f.stable = function() {
 		this.j = -33 & this.j | 512;
 	}, f.cleanup = function(t) {
@@ -2774,6 +2776,14 @@ function Et() {
 				for (let i = 0; i < t; i++) Ei[i].Gt(vn[i]), Ei[i] = vn[i] = null;
 				Sn = 0;
 			}
+			if (Nn > 0) {
+				let i = Nn;
+				for (let l = 0; l < i; l++) {
+					let i = Mn[l];
+					Mn[l] = null, 1 & i.j || 2 & i.j && Ut(i, t) ? i.ot(t) : i.j &= -4;
+				}
+				Nn = 0;
+			}
 			if (jn > 0) {
 				let i = ti.length;
 				for (let e = 0; e < i; e++) {
@@ -2813,7 +2823,7 @@ function Et() {
 			}
 		} while (!n && (Sn > 0 || Rn > 0));
 	} finally {
-		if (mi = !0, Rn = Sn = jn = gn = 0, n) throw l;
+		if (mi = !0, Rn = Sn = Nn = jn = gn = 0, n) throw l;
 	}
 }
 const wa = {

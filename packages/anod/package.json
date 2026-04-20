@@ -2,7 +2,7 @@
   "name": "anod",
   "version": "0.5.0",
   "type": "module",
-  "main": "./dist/index.mjs",
+  "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "scripts": {
     "make": "bun scripts/build.js && bun scripts/bench-browser.js",
