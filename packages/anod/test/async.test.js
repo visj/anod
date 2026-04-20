@@ -552,9 +552,9 @@ describe("async", () => {
                 taskRuns++;
                 const v = c.val(s1);
                 if (v === 1) {
-                    return new Promise(r => { resolve1 = r; });
+                    return c.suspend(new Promise(r => { resolve1 = r; }));
                 }
-                return new Promise(r => { resolve2 = r; });
+                return c.suspend(new Promise(r => { resolve2 = r; }));
             }, 0);
             let effectRuns = 0;
 
@@ -591,7 +591,7 @@ describe("async", () => {
             const s1 = c.signal(1);
             const c1 = c.task((c) => {
                 const v = c.val(s1);
-                return new Promise(r => { resolve = r; });
+                return c.suspend(new Promise(r => { resolve = r; }));
             }, 0);
             const c2 = c.compute(c => c.val(c1) * 10);
             let runs = 0;
@@ -625,7 +625,7 @@ describe("async", () => {
             const c1 = c.task((c) => {
                 const a = c.val(s1);
                 const b = c.val(s2);
-                return new Promise(r => { resolve = r; });
+                return c.suspend(new Promise(r => { resolve = r; }));
             }, 0);
             let runs = 0;
 
