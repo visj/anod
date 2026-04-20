@@ -15,7 +15,10 @@ export const enum Flag {
     EQUAL = 16384,
     NOTEQUAL = 32768,
     ASYNC = 65536,
-    BOUND = 131072
+    BOUND = 131072,
+    SUSPEND = 262144,
+    CONTEXT = 524288,
+    PROMISE = 1048576
 }
 
 export const enum Opt {
@@ -31,15 +34,32 @@ export type Resolve<T> =
     T extends AsyncIterator<infer U, any, any> ? U :
     T;
 
-// ─── Reader (context object passed to compute/effect fns) ─────────────
+type Sender<T = any> = ISignal<T> | ICompute<T>;
 
-export interface IReader {
-    val<R>(signal: ISignal<R>): R;
-    val<R>(signal: ICompute<R>): R;
+// ─── Context interfaces (passed to compute/effect fns) ───────────────
+
+/**
+ * Base context for bound callbacks. Does NOT expose val() or defer()
+ * because bound nodes have a fixed single dep — no dynamic tracking.
+ */
+export interface IContext {
     equal(equal?: boolean): void;
     stable(): void;
     error(): boolean;
     loading(): boolean;
+    suspend<T>(promise: Promise<T>): Promise<T>;
+    suspend<T>(task: ICompute<T>): T | Promise<T>;
+    controller(): AbortController;
+    pending(tasks: ICompute<any> | ICompute<any>[]): boolean;
+}
+
+/**
+ * Full reader context for unbound callbacks. Extends IContext with
+ * dependency tracking methods.
+ */
+export interface IReader extends IContext {
+    val<R>(signal: Sender<R>): R;
+    defer<R>(signal: Sender<R>): R;
     cleanup(fn: () => void): void;
     recover(fn: (error: any) => boolean): void;
 }
@@ -81,25 +101,33 @@ export interface IOwner {
 
     gate<T>(value: T): IGate<T>;
 
+    // Unbound compute
     compute<U>(fn: (c: IReader) => U): ICompute<Resolve<U>>;
     compute<U>(fn: (c: IReader, prev: Resolve<U>) => U, seed: Resolve<U>): ICompute<Resolve<U>>;
     compute<U, W>(fn: (c: IReader, prev: Resolve<U>, args: W) => U, seed: Resolve<U>, opts?: number, args?: W): ICompute<Resolve<U>>;
     compute<U, W>(fn: (c: IReader, prev: Resolve<U> | undefined, args: W) => U, seed?: Resolve<U>, opts?: number, args?: W): ICompute<Resolve<U>>;
-    compute<T, U>(dep: ISignal<T> | ICompute<T>, fn: (val: T) => U): ICompute<Resolve<U>>;
-    compute<T, U>(dep: ISignal<T> | ICompute<T>, fn: (val: T, prev: Resolve<U>) => U, seed: Resolve<U>): ICompute<Resolve<U>>;
-    compute<T, U, W>(dep: ISignal<T> | ICompute<T>, fn: (val: T, prev: Resolve<U>, args: W) => U, seed: Resolve<U>, opts?: number, args?: W): ICompute<Resolve<U>>;
+    // Bound compute
+    compute<T, U>(dep: Sender<T>, fn: (val: T, c: IContext) => U): ICompute<Resolve<U>>;
+    compute<T, U>(dep: Sender<T>, fn: (val: T, c: IContext, prev: Resolve<U>) => U, seed: Resolve<U>): ICompute<Resolve<U>>;
+    compute<T, U, W>(dep: Sender<T>, fn: (val: T, c: IContext, prev: Resolve<U>, args: W) => U, seed: Resolve<U>, opts?: number, args?: W): ICompute<Resolve<U>>;
 
+    // Unbound task
     task<U>(fn: (c: IReader, prev: Resolve<U>) => Promise<U>, seed?: Resolve<U>, opts?: number): ICompute<Resolve<U>>;
     task<U, W>(fn: (c: IReader, prev: Resolve<U>, args: W) => Promise<U>, seed?: Resolve<U>, opts?: number, args?: W): ICompute<Resolve<U>>;
-    task<T, U>(dep: ISignal<T> | ICompute<T>, fn: (val: T, prev: Resolve<U>) => Promise<U>, seed?: Resolve<U>, opts?: number): ICompute<Resolve<U>>;
+    // Bound task
+    task<T, U>(dep: Sender<T>, fn: (val: T, c: IContext, prev: Resolve<U>) => Promise<U>, seed?: Resolve<U>, opts?: number): ICompute<Resolve<U>>;
 
+    // Unbound effect
     effect(fn: (c: IReader) => (() => void) | void, opts?: number): IEffect;
     effect<W>(fn: (c: IReader, args: W) => void | (() => void), opts?: number, args?: W): IEffect;
-    effect<T>(dep: ISignal<T> | ICompute<T>, fn: (val: T) => void | (() => void), opts?: number): IEffect;
+    // Bound effect
+    effect<T>(dep: Sender<T>, fn: (val: T, c: IContext) => void | (() => void), opts?: number): IEffect;
 
+    // Unbound spawn
     spawn(fn: (c: IReader) => Promise<(() => void) | void>, opts?: number): IEffect;
     spawn<W>(fn: (c: IReader, args: W) => Promise<(() => void) | void>, opts?: number, args?: W): IEffect;
-    spawn<T>(dep: ISignal<T> | ICompute<T>, fn: (val: T) => Promise<(() => void) | void>, opts?: number): IEffect;
+    // Bound spawn
+    spawn<T>(dep: Sender<T>, fn: (val: T, c: IContext) => Promise<(() => void) | void>, opts?: number): IEffect;
 
     root(fn: (r: IRoot & IOwner) => void | (() => void)): IRoot;
 }
@@ -110,7 +138,6 @@ export declare class Root implements IRoot, IOwner {
     dispose(): void;
     recover(fn: (error: any) => boolean): void;
     cleanup(fn: () => void): void;
-
     signal<T>(value: T): ISignal<T>;
     gate<T>(value: T): IGate<T>;
     compute: IOwner['compute'];
@@ -125,7 +152,7 @@ export declare class Signal<T> implements ISignal<T> {
     peek(): T;
     set(value: T): void;
     dispose(): void;
-} 
+}
 
 export declare class Gate<T> extends Signal<T> implements IGate<T> {
     constructor(value: T);

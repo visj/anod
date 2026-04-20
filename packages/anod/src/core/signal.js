@@ -334,16 +334,16 @@ function Fiber() {
   this._controller = null;
   /** @type {Array<Sender | *> | null} Paired [sender, value] entries. */
   this._defers = null;
-  /** @type {Task | Spawn | null} Async channel for awaiter/responder bindings. */
+  /** @type {Channel | null} Async channel for awaiter/responder bindings. */
   this._channel = null;
 }
 
 /**
- * Channel for Compute (task) nodes. Implements both IAwaiter (can await
- * other tasks) and IResponder (can be awaited by others).
+ * Unified async channel. Implements both IAwaiter (can await other tasks)
+ * and IResponder (can be awaited by others).
  * @constructor
  */
-function Task() {
+function Channel() {
   /** @type {Compute | null} First responder we're waiting on. */
   this._res1 = null;
   /** @type {number} Our slot in _res1's _waiters (index into 4-stride). */
@@ -352,20 +352,6 @@ function Task() {
   this._responds = null;
   /** @type {Array | null} 4-stride: [awaiter, awaiterResSlot, resolve, reject]. */
   this._waiters = null;
-}
-
-/**
- * Channel for Effect (spawn) nodes. IAwaiter only — can await tasks but
- * cannot itself be awaited.
- * @constructor
- */
-function Spawn() {
-  /** @type {Compute | null} First responder we're waiting on. */
-  this._res1 = null;
-  /** @type {number} Our slot in _res1's _waiters (index into 4-stride). */
-  this._res1slot = 0;
-  /** @type {Array<Compute | number> | null} Additional [responder, slot] pairs. */
-  this._responds = null;
 }
 
 // ─── Prototype method implementations ──────────────────────────────────────
@@ -855,43 +841,26 @@ function gate(value) {
   ComputeProto.suspend = EffectProto.suspend = _suspend;
 
   /**
-   * Lazily allocates a Fiber + channel. Returns the channel.
-   * @this {!Compute}
-   * @returns {!Task}
+   * Lazily allocates a Fiber + Channel. Returns the channel.
+   * @this {!Compute | !Effect}
+   * @returns {!Channel}
    */
-  ComputeProto._ensureChannel = function () {
+  function _ensureChannel() {
     if (!(this._flag & FLAG_CONTEXT)) {
       let fiber = new Fiber();
-      fiber._channel = new Task();
+      fiber._channel = new Channel();
       this._args = { _args: this._args, _context: fiber };
       this._flag |= FLAG_CONTEXT;
       return fiber._channel;
     }
     let fiber = this._args._context;
     if (fiber._channel === null) {
-      fiber._channel = new Task();
+      fiber._channel = new Channel();
     }
     return fiber._channel;
-  };
+  }
 
-  /**
-   * @this {!Effect}
-   * @returns {!Spawn}
-   */
-  EffectProto._ensureChannel = function () {
-    if (!(this._flag & FLAG_CONTEXT)) {
-      let fiber = new Fiber();
-      fiber._channel = new Spawn();
-      this._args = { _args: this._args, _context: fiber };
-      this._flag |= FLAG_CONTEXT;
-      return fiber._channel;
-    }
-    let fiber = this._args._context;
-    if (fiber._channel === null) {
-      fiber._channel = new Spawn();
-    }
-    return fiber._channel;
-  };
+  ComputeProto._ensureChannel = EffectProto._ensureChannel = _ensureChannel;
 
   /**
    * Creates a fresh AbortController for this async activation. If this
@@ -2875,7 +2844,7 @@ function settleDeps(node) {
 
 /**
  * Adds a waiter entry to a responder's _waiters array (4-stride).
- * @param {!Task} responderCh
+ * @param {!Channel} responderCh
  * @param {!Receiver} awaiter
  * @param {number} awaiterResSlot
  * @param {function} resolve
@@ -2898,7 +2867,7 @@ function addWaiter(responderCh, awaiter, awaiterResSlot, resolve, reject) {
 /**
  * Removes a single waiter entry (4-stride swap-with-last).
  * Updates the swapped awaiter's back-reference.
- * @param {!Task} responderCh
+ * @param {!Channel} responderCh
  * @param {number} slot
  * @returns {void}
  */
@@ -2928,7 +2897,7 @@ function removeWaiter(responderCh, responderNode, slot) {
 
 /**
  * Removes this awaiter from all responders it's waiting on.
- * @param {!Task | !Spawn} channel
+ * @param {!Channel} channel
  * @returns {void}
  */
 function clearChannel(channel) {
@@ -2952,7 +2921,7 @@ function clearChannel(channel) {
  * Resolves (or rejects) all waiters of a responder, subscribes each
  * awaiter as a dep of the responder, and clears their channel references.
  * @param {!Compute} responder
- * @param {!Task} responderCh
+ * @param {!Channel} responderCh
  * @param {*} value
  * @param {boolean} isError
  * @returns {void}
