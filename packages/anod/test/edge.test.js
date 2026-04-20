@@ -261,7 +261,7 @@ describe("edge cases", () => {
 
             const t = c.task(c => {
                 runs++;
-                return Promise.resolve(c.val(s1) + c.val(s2));
+                return c.suspend(Promise.resolve(c.val(s1) + c.val(s2)));
             }, 0);
 
             expect(runs).toBe(1);
@@ -269,11 +269,12 @@ describe("edge cases", () => {
         });
 
         test("settles to resolved value", async () => {
-            const t = c.task(() => Promise.resolve(42), 0);
+            const t = c.task((c) => c.suspend(Promise.resolve(42)), 0);
 
             expect(t.peek()).toBe(0);
             expect(t.loading()).toBe(true);
 
+            await tick();
             await tick();
 
             expect(t.peek()).toBe(42);
@@ -281,19 +282,21 @@ describe("edge cases", () => {
         });
 
         test("notifies downstream on settle", async () => {
-            const t = c.task(() => Promise.resolve(42), 0);
+            const t = c.task((c) => c.suspend(Promise.resolve(42)), 0);
             let received = 0;
 
             c.effect(c => { received = c.val(t); });
 
             expect(received).toBe(0);
             await tick();
+            await tick();
             expect(received).toBe(42);
         });
 
         test("sets error flag on rejection", async () => {
-            const t = c.task(() => Promise.reject(new Error("fail")), 0);
+            const t = c.task((c) => c.suspend(Promise.reject(new Error("fail"))), 0);
 
+            await tick();
             await tick();
 
             expect(t.error()).toBe(true);
@@ -302,13 +305,15 @@ describe("edge cases", () => {
 
         test("re-evaluates when dep changes", async () => {
             const s1 = c.signal(1);
-            const t = c.task(c => Promise.resolve(c.val(s1) * 10), 0);
+            const t = c.task(c => c.suspend(Promise.resolve(c.val(s1) * 10)), 0);
 
+            await tick();
             await tick();
             expect(t.peek()).toBe(10);
 
             s1.set(2);
             t.peek();
+            await tick();
             await tick();
             expect(t.peek()).toBe(20);
         });
@@ -321,15 +326,17 @@ describe("edge cases", () => {
 
             const t = c.task(c => {
                 runs++;
-                return Promise.resolve(c.val(s1) ? c.val(s2) : c.val(s3));
+                return c.suspend(Promise.resolve(c.val(s1) ? c.val(s2) : c.val(s3)));
             });
 
+            await tick();
             await tick();
             expect(t.peek()).toBe("a");
             expect(runs).toBe(1);
 
             s1.set(false);
             t.peek();
+            await tick();
             await tick();
             expect(t.peek()).toBe("b");
             expect(runs).toBe(2);
@@ -338,12 +345,14 @@ describe("edge cases", () => {
             s2.set("x");
             t.peek();
             await tick();
+            await tick();
             expect(t.peek()).toBe("b");
             expect(runs).toBe(2);
 
             /** s3 should be tracked */
             s3.set("y");
             t.peek();
+            await tick();
             await tick();
             expect(t.peek()).toBe("y");
             expect(runs).toBe(3);
@@ -355,12 +364,13 @@ describe("edge cases", () => {
             let ran = false;
 
             c.spawn(c => {
-                return new Promise((resolve) => {
+                return c.suspend(new Promise((resolve) => {
                     ran = true;
                     resolve();
-                });
+                }));
             });
 
+            await tick();
             await tick();
             expect(ran).toBe(true);
         });
@@ -372,10 +382,11 @@ describe("edge cases", () => {
             const r = c.root(r => {
                 r.spawn(c => {
                     c.val(s1);
-                    return Promise.resolve(() => { cleaned = false; });
+                    return c.suspend(Promise.resolve(() => { cleaned = false; }));
                 });
             });
 
+            await tick();
             await tick();
             /** Cleanup registered; dispose should call it */
             r.dispose();
@@ -391,7 +402,7 @@ describe("edge cases", () => {
                 runs++;
                 c.val(s1);
                 c.val(s2);
-                return Promise.resolve();
+                return c.suspend(Promise.resolve());
             });
 
             expect(runs).toBe(1);
@@ -405,7 +416,7 @@ describe("edge cases", () => {
              *  but we verify the effect doesn't crash */
             c.spawn(c => {
                 c.val(s1);
-                return new Promise((r) => setTimeout(r, 100));
+                return c.suspend(new Promise((r) => setTimeout(r, 100)));
             });
         });
     });
