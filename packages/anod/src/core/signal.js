@@ -1179,7 +1179,7 @@ function gate(value) {
      * @returns {void}
      */
     ComputeProto._receive = function () {
-        if (this._flag & FLAG_LOADING) {
+        if (this._flag & FLAG_ASYNC) {
             TASKS[TASK_COUNT++] = this;
         } else {
             notify(this, FLAG_PENDING);
