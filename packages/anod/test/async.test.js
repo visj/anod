@@ -1,41 +1,50 @@
 import { describe, test, expect } from "bun:test";
-import { c, OPT_STABLE } from "../";
+import { c } from "../";
 
 const tick = () => Promise.resolve();
+/** suspend() adds one extra microtask layer; settle needs 2 ticks for
+ *  non-async fns returning suspend promises, 3 for async fns. */
+const settle = () => tick().then(tick).then(tick);
 
 describe("async", () => {
     describe("promise", () => {
         test("is loading while the promise is pending", async () => {
             let resolve;
-            const c1 = c.task(() => { return new Promise(r => { resolve = r; }); });
+            const c1 = c.task((c) => {
+                return c.suspend(new Promise(r => { resolve = r; }));
+            });
 
             expect(c1.loading()).toBe(true);
 
             resolve(42);
-            await tick();
+            await settle();
 
             expect(c1.loading()).toBe(false);
         });
 
         test("returns seed value while loading", async () => {
             let resolve;
-            const c1 = c.task(() => { return new Promise(r => { resolve = r; }); }, 0);
+            const c1 = c.task((c) => {
+                return c.suspend(new Promise(r => { resolve = r; }));
+            }, 0);
 
             expect(c1.peek()).toBe(0);
             expect(c1.loading()).toBe(true);
 
             resolve(99);
-            await tick();
+            await settle();
 
             expect(c1.peek()).toBe(99);
             expect(c1.loading()).toBe(false);
         });
 
         test("settles to the resolved value", async () => {
-            const c1 = c.task(() => { return Promise.resolve(42); });
+            const c1 = c.task((c) => {
+                return c.suspend(Promise.resolve(42));
+            });
 
             expect(c1.loading()).toBe(true);
-            await tick();
+            await settle();
 
             expect(c1.peek()).toBe(42);
             expect(c1.loading()).toBe(false);
@@ -43,18 +52,22 @@ describe("async", () => {
         });
 
         test("sets error flag on rejection", async () => {
-            const c1 = c.task(() => { return Promise.reject(new Error("async error")); });
+            const c1 = c.task((c) => {
+                return c.suspend(Promise.reject(new Error("async error")));
+            });
 
-            await tick();
+            await settle();
 
             expect(c1.error()).toBe(true);
             expect(c1.loading()).toBe(false);
         });
 
         test("rethrows the error when read after rejection", async () => {
-            const c1 = c.task(() => { return Promise.reject(new Error("async error")); });
+            const c1 = c.task((c) => {
+                return c.suspend(Promise.reject(new Error("async error")));
+            });
 
-            await tick();
+            await settle();
 
             expect(() => c1.peek()).toThrow("async error");
         });
@@ -63,29 +76,31 @@ describe("async", () => {
             const s1 = c.signal(true);
             const c1 = c.task(c => {
                 return c.val(s1)
-                    ? Promise.reject(new Error("fail"))
-                    : Promise.resolve(42);
+                    ? c.suspend(Promise.reject(new Error("fail")))
+                    : c.suspend(Promise.resolve(42));
             });
 
-            await tick();
+            await settle();
             expect(c1.error()).toBe(true);
 
             s1.set(false);
             c1.peek(); // Pull to trigger re-evaluation
-            await tick();
+            await settle();
 
             expect(c1.error()).toBe(false);
             expect(c1.peek()).toBe(42);
         });
 
         test("notifies downstream effect when promise settles", async () => {
-            const c1 = c.task(() => { return Promise.resolve(42); });
+            const c1 = c.task((c) => {
+                return c.suspend(Promise.resolve(42));
+            });
             let received = void 0;
 
             c.effect(c => { received = c.val(c1); });
 
             expect(received).toBeUndefined(); // seed while loading
-            await tick();
+            await settle();
 
             expect(received).toBe(42);
         });
@@ -96,7 +111,7 @@ describe("async", () => {
 
             const c1 = c.task(c => {
                 const v = c.val(s1);
-                return new Promise(r => { resolvers[v] = r; });
+                return c.suspend(new Promise(r => { resolvers[v] = r; }));
             });
 
             // Trigger a second promise by updating the signal
@@ -105,13 +120,13 @@ describe("async", () => {
 
             // Resolve the stale (first) promise — should be ignored
             resolvers[0](100);
-            await tick();
+            await settle();
 
             expect(c1.loading()).toBe(true); // still loading; second promise not yet resolved
 
             // Resolve the current (second) promise
             resolvers[1](200);
-            await tick();
+            await settle();
 
             expect(c1.peek()).toBe(200);
             expect(c1.loading()).toBe(false);
@@ -146,8 +161,6 @@ describe("async", () => {
             const c1 = c.task(() => { return iter; });
             const values = [];
 
-            // Always call c1.peek() so the effect subscribes to c1 as a dependency;
-            // without this, c1 is never tracked and the effect won't re-run on settle.
             c.effect(c => {
                 const v = c.val(c1);
                 if (!c1.loading()) {
@@ -155,7 +168,6 @@ describe("async", () => {
                 }
             });
 
-            // Each resolver[n] is created by the previous onNext calling iterator.next()
             resolvers[0]({ value: 1, done: false });
             await tick();
             expect(values).toEqual([1]);
@@ -205,7 +217,6 @@ describe("async", () => {
             let resolveStale;
             let returnCalled = false;
 
-            // An iterator whose first next() won't resolve until we manually trigger it
             const staleIter = {
                 [Symbol.asyncIterator]() { return this; },
                 next() { return new Promise(r => { resolveStale = r; }); },
@@ -223,21 +234,18 @@ describe("async", () => {
                 return (async function*() { yield 99; })();
             });
 
-            // Signal update — c1 re-runs, picks up the new generator; staleIter is now stale
             s1.set(false);
-            c1.peek(); // Pull to trigger re-evaluation
-            // Async generators need 2 microtask steps to resolve a yield in JSC/Bun
+            c1.peek();
             await tick();
             await tick();
 
             expect(c1.peek()).toBe(99);
 
-            // staleIter's pending next() now resolves — return() must be called
             resolveStale({ value: 42, done: false });
             await tick();
 
             expect(returnCalled).toBe(true);
-            expect(c1.peek()).toBe(99); // value unchanged by the stale yield
+            expect(c1.peek()).toBe(99);
         });
     });
 
@@ -247,12 +255,11 @@ describe("async", () => {
             const s2 = c.signal(10);
             const c1 = c.task(async (c) => {
                 let a = c.val(s1);
-                await tick();
+                await c.suspend(tick());
                 let b = c.val(s2);
                 return a + b;
             });
-            await tick();
-            await tick();
+            await settle();
             expect(c1.peek()).toBe(11);
         });
 
@@ -263,18 +270,16 @@ describe("async", () => {
             const c1 = c.task(async (c) => {
                 runs++;
                 c.val(s1);
-                await tick();
+                await c.suspend(tick());
                 return c.val(s2);
             });
-            await tick();
-            await tick();
+            await settle();
             expect(c1.peek()).toBe(10);
             expect(runs).toBe(1);
 
             s2.set(20);
             c1.peek();
-            await tick();
-            await tick();
+            await settle();
             expect(c1.peek()).toBe(20);
             expect(runs).toBe(2);
         });
@@ -287,11 +292,10 @@ describe("async", () => {
             const c1 = c.task(async (c) => {
                 runs++;
                 let sel = c.val(s1);
-                await tick();
+                await c.suspend(tick());
                 return sel ? c.val(sA) : c.val(sB);
             });
-            await tick();
-            await tick();
+            await settle();
             expect(c1.peek()).toBe('a');
 
             // sB is not a current dep — changing it must NOT trigger a re-run.
@@ -302,8 +306,7 @@ describe("async", () => {
             // Flip: now sB becomes the dep, sA is torn down.
             s1.set(false);
             c1.peek();
-            await tick();
-            await tick();
+            await settle();
             expect(c1.peek()).toBe('B');
             expect(runs).toBe(2);
 
@@ -313,34 +316,28 @@ describe("async", () => {
             expect(runs).toBe(2);
         });
 
-        test("duplicate reads in same sync chunk are deduped", async () => {
+        test("duplicate reads in same sync chunk are cleaned by checkDeps", async () => {
             const s1 = c.signal(5);
             let runs = 0;
             const c1 = c.task(async (c) => {
                 runs++;
                 let sum = 0;
-                // Read s1 ten times in the same sync chunk.
                 for (let i = 0; i < 10; i++) {
                     sum += c.val(s1);
                 }
+                await c.suspend(tick());
                 return sum;
             });
-            await tick();
-            await tick();
+            await settle();
             expect(c1.peek()).toBe(50);
             expect(runs).toBe(1);
 
             s1.set(6);
             c1.peek();
-            await tick();
-            await tick();
+            await settle();
             expect(c1.peek()).toBe(60);
             expect(runs).toBe(2);
 
-            // Disposing c1 unsubscribes exactly once from s1 (if duplicates
-            // leaked, clearDeps would over-release). Then a fresh compute on
-            // s1 must still work — sanity check that s1's sub graph isn't
-            // corrupt.
             c1.dispose();
             const c2 = c.compute(c => c.val(s1) + 1);
             expect(c2.peek()).toBe(7);
@@ -351,7 +348,6 @@ describe("async", () => {
         test("cross-compute pollution: same signal read twice across await is deduped", async () => {
             const s1 = c.signal(1);
             const s2 = c.signal(10);
-            // Unrelated compute also reading s2 — its first read sets s2._version.
             const c0 = c.compute(c => c.val(s2) * 100);
             expect(c0.peek()).toBe(1000);
 
@@ -360,22 +356,19 @@ describe("async", () => {
                 runs++;
                 c.val(s1);
                 c.val(s2);
-                await tick();
+                await c.suspend(tick());
                 return c.val(s2);
             });
-            await tick();
-            await tick();
+            await settle();
             expect(c1.peek()).toBe(10);
             expect(runs).toBe(1);
 
             s2.set(20);
             c1.peek();
-            await tick();
-            await tick();
+            await settle();
             expect(c1.peek()).toBe(20);
             expect(runs).toBe(2);
 
-            // Sanity: dispose c1, a fresh compute on s2 must still work
             c1.dispose();
             const c2 = c.compute(c => c.val(s2));
             expect(c2.peek()).toBe(20);
@@ -383,48 +376,47 @@ describe("async", () => {
             expect(c2.peek()).toBe(21);
         });
 
-        test("disposed context throws on val after node re-updates", async () => {
+        test("captured context is the node itself", async () => {
             const s1 = c.signal(1);
             let captured;
             const c1 = c.task(async (c) => {
                 if (captured === undefined) {
                     captured = c;
                 }
+                await c.suspend(tick());
                 return c.val(s1);
             });
-            await tick();
-            await tick();
+            await settle();
             expect(c1.peek()).toBe(1);
-
-            s1.set(2);
-            c1.peek();
-            await tick();
-            await tick();
-
-            expect(() => captured.val(s1)).toThrow('Reader disposed');
+            /** Without Reader, captured context IS the node object. */
+            expect(captured).toBe(c1);
         });
 
         test("task with bound signal dependency", async () => {
             const s1 = c.signal(5);
-            const c1 = c.task(async (c) => c.val(s1) * 2);
-            await tick();
+            const c1 = c.task(s1, async (val, c) => {
+                return await c.suspend(Promise.resolve(val * 2));
+            });
+            await settle();
             expect(c1.peek()).toBe(10);
 
             s1.set(6);
             c1.peek();
-            await tick();
+            await settle();
             expect(c1.peek()).toBe(12);
         });
 
         test("spawn with bound signal dependency", async () => {
             const s1 = c.signal(1);
             let observed = null;
-            c.spawn(async (c) => { observed = c.val(s1); });
-            await tick();
+            c.spawn(s1, async (val, c) => {
+                observed = await c.suspend(Promise.resolve(val));
+            });
+            await settle();
             expect(observed).toBe(1);
 
             s1.set(2);
-            await tick();
+            await settle();
             expect(observed).toBe(2);
         });
 
@@ -434,17 +426,15 @@ describe("async", () => {
             let observed = null;
             c.spawn(async (c) => {
                 let a = c.val(s1);
-                await tick();
+                await c.suspend(tick());
                 let b = c.val(s2);
                 observed = a + b;
             });
-            await tick();
-            await tick();
+            await settle();
             expect(observed).toBe(11);
 
             s2.set(20);
-            await tick();
-            await tick();
+            await settle();
             expect(observed).toBe(21);
         });
     });
@@ -459,14 +449,13 @@ describe("async", () => {
                 const v1 = c.val(s1);
                 c.stable();
                 const v2 = c.val(s2);
+                await c.suspend(tick());
                 return v1 + v2;
             });
-            await tick(); await tick();
+            await settle();
             expect(c1.peek()).toBe(11);
             expect(runs).toBe(1);
 
-            // s2 was read after stable() — not tracked. Changing it
-            // should NOT cause a rerun.
             s2.set(99);
             await tick();
             expect(runs).toBe(1);
@@ -481,15 +470,16 @@ describe("async", () => {
                 const v1 = c.val(s1);
                 c.stable();
                 const v2 = c.val(s2);
+                await c.suspend(tick());
                 return v1 + v2;
             });
-            await tick(); await tick();
+            await settle();
             expect(c1.peek()).toBe(11);
 
             s1.set(2);
             c1.peek();
-            await tick(); await tick();
-            expect(c1.peek()).toBe(12); // v1=2, v2=10 (s2 not tracked)
+            await settle();
+            expect(c1.peek()).toBe(12);
             expect(runs).toBe(2);
         });
 
@@ -498,9 +488,10 @@ describe("async", () => {
             const c1 = c.task(async (c) => {
                 const v = c.val(src);
                 c.equal(true);
+                await c.suspend(tick());
                 return v;
             });
-            await tick(); await tick();
+            await settle();
             expect(c1.peek()).toBe(0);
         });
 
@@ -514,9 +505,10 @@ describe("async", () => {
                 const v1 = c.val(s1);
                 c.stable();
                 const v2 = c.val(s2);
+                await c.suspend(tick());
                 observed = v1 + v2;
             });
-            await tick(); await tick();
+            await settle();
             expect(observed).toBe(101);
             expect(runs).toBe(1);
 
@@ -525,7 +517,7 @@ describe("async", () => {
             expect(runs).toBe(1);
 
             s1.set(2); // tracked
-            await tick(); await tick();
+            await settle();
             expect(observed).toBe(202);
             expect(runs).toBe(2);
         });
@@ -536,9 +528,11 @@ describe("async", () => {
             const c1 = c.task(async (c) => {
                 runs++;
                 c.stable();
-                return c.val(s1); // post-stable — no subscribe
+                const v = c.val(s1);
+                await c.suspend(tick());
+                return v;
             });
-            await tick(); await tick();
+            await settle();
             expect(c1.peek()).toBe(1);
             expect(runs).toBe(1);
 
@@ -546,6 +540,109 @@ describe("async", () => {
             await tick();
             expect(runs).toBe(1);
             expect(c1.peek()).toBe(1);
+        });
+    });
+
+    describe("suspend", () => {
+        test("resolves value when node is still alive", async () => {
+            const c1 = c.task(async (c) => {
+                const val = await c.suspend(Promise.resolve(42));
+                return val;
+            });
+            await settle();
+            expect(c1.peek()).toBe(42);
+        });
+
+        test("never resumes when node is disposed", async () => {
+            let continued = false;
+            let resolve;
+            const c1 = c.task(async (c) => {
+                await c.suspend(new Promise(r => { resolve = r; }));
+                continued = true;
+                return 99;
+            });
+
+            c1.dispose();
+            resolve(42);
+            await settle();
+
+            expect(continued).toBe(false);
+        });
+
+        test("never resumes when node re-runs (stale activation)", async () => {
+            const s1 = c.signal(1);
+            let firstContinued = false;
+            let firstResolve;
+            let runs = 0;
+
+            const c1 = c.task(async (c) => {
+                runs++;
+                const v = c.val(s1);
+                if (runs === 1) {
+                    await c.suspend(new Promise(r => { firstResolve = r; }));
+                    firstContinued = true;
+                    return v;
+                }
+                return await c.suspend(Promise.resolve(v * 10));
+            });
+
+            expect(c1.loading()).toBe(true);
+            expect(runs).toBe(1);
+
+            s1.set(2);
+            c1.peek();
+            await settle();
+
+            expect(runs).toBe(2);
+            expect(c1.peek()).toBe(20);
+
+            firstResolve(999);
+            await settle();
+
+            expect(firstContinued).toBe(false);
+            expect(c1.peek()).toBe(20);
+        });
+
+        test("throws ASSERT_SUSPEND when async fn returns promise without suspend", () => {
+            expect(() => {
+                c.task(() => {
+                    return Promise.resolve(42);
+                });
+            }).toThrow("Async node must call c.suspend() on all awaited promises");
+        });
+
+        test("suspend propagates rejections when node is current", async () => {
+            const c1 = c.task(async (c) => {
+                return await c.suspend(Promise.reject(new Error("boom")));
+            });
+            await settle();
+
+            expect(c1.error()).toBe(true);
+            expect(() => c1.peek()).toThrow("boom");
+        });
+
+        test("suspend works with bound task", async () => {
+            const s1 = c.signal(5);
+            const c1 = c.task(s1, async (val, c) => {
+                const result = await c.suspend(Promise.resolve(val + 1));
+                return result;
+            });
+            await settle();
+            expect(c1.peek()).toBe(6);
+
+            s1.set(10);
+            c1.peek();
+            await settle();
+            expect(c1.peek()).toBe(11);
+        });
+
+        test("suspend works with spawn", async () => {
+            let observed = null;
+            c.spawn(async (c) => {
+                observed = await c.suspend(Promise.resolve(42));
+            });
+            await settle();
+            expect(observed).toBe(42);
         });
     });
 });

@@ -16,22 +16,23 @@ if (myStatement) { return false; } // BAD
 ### Allocation
 Never use anything other than `boolean` or `number`, if those suffice. For enums, matching, etc, always create a const value at top level, like this:
 ```ts
-// Outside registry
-const KIND_MATCH = 0;
-const KIND_TUPLE = 1;
-/** @param {number} kind */
-function allocOnSlab(types, volatile, kind) { }
+const FLAG_STALE = 1;
+const FLAG_PENDING = 2;
+/** @param {number} flag */
+function setFlag(node, flag) { }
 ```
 Do *not* write code like this:
 ```ts
-/** @param {string} kind - 'tuple' or 'match' */
-function allocOnSlab(types, volatile, kind) { }
+/** @param {string} flag - 'stale' or 'pending' */
+function setFlag(node, flag) { }
 ```
 Always avoid heap allocations when possible. Prefer code duplication over heap allocs. Never allocate strings, arrays, destructured return arguments unless absolutely necessary.
+
+Anod is extremely sensitive to V8 optimization. Code that looks equivalent often isn't — prototype methods beat free functions in polymorphic dispatch, `Array.prototype.pop()` beats `arr.length--` for swap-remove, and multiple call sites can prevent inlining that a single call site with an intermediate variable enables. Always prefer small flat structs with inline fields for the common case and arrays only on overflow.
 ### Comments
 Always write meaningful comments about how the code works. Do not insert meaningless section comments. Prefer JSDoc style comments over regular // comments.
 ### JSDoc
-If you can, add correct JSDoc type definitions. Because we "fake" a lot of typescript features, this project is built on javascript and uses jsdoc for type safety, instead of Typescript. That way, we can fully create a virtual API through typescript that fakes the number as a Complex/Type etc.
+If you can, add correct JSDoc type definitions. Because we "fake" a lot of typescript features, this project is built on javascript and uses jsdoc for type safety, instead of Typescript. That way, we can fully create a virtual API through typescript that fakes the node types, flags etc.
 
 ## Library overview
 
@@ -39,122 +40,158 @@ Anod is a fine-grained reactive signal library for JavaScript. It belongs to the
 
 The monorepo contains two packages:
 
-- **`anod`** — the core reactive engine (production-ready)
+- **`anod`** — the core reactive engine (approaching 1.0)
 - **`anod-list`** — reactive array methods built on top of the signal primitives (work in progress)
 
 ### Core primitives
 
-There are four node types, distinguished by bit-flag type tags (`Type._ROOT`, `Type._SIGNAL`, `Type._COMPUTE`, `Type._EFFECT`). Type flags encode capabilities: `_SEND` (can broadcast changes), `_RECEIVE` (can subscribe to changes), `_OWNER` (can own child nodes for hierarchical disposal).
+There are four sync node types plus two async variants, distinguished by bit-flag type tags. Type flags encode capabilities: `_SEND` (can broadcast changes), `_RECEIVE` (can subscribe to changes), `_OWNER` (can own child nodes for hierarchical disposal).
 
-**Signal** — a writable reactive cell. Holds a value, notifies subscribers on `set()` when the value changes (`!==`). Has no dependencies, only subscribers. Created via `signal(value)`.
+**Signal** — a writable reactive cell. Holds a value, notifies subscribers on `set()` when the value changes (`!==` or custom equality). Has no dependencies, only subscribers. Created via `signal(value)`.
 
-**Compute** — a derived reactive value. Runs a function to produce its value, automatically tracking which signals/computes it reads. Memoized: only re-runs when dependencies change, and only propagates downstream when its own output changes. Created via `compute(fn, seed?, opts?, args?)` or `sender.derive(fn, seed?, opts?, args?)`.
+**Compute** — a derived reactive value. Runs a function to produce its value, automatically tracking which senders it reads. **Purely pull-based**: notifications mark it stale/pending but it does not re-execute until something reads it. Created via `compute(fn)` (unbound, dynamic deps) or `compute(dep, fn)` (bound, single dep).
 
-**Effect** — a side-effect node. Similar to Compute in dependency tracking, but doesn't produce a value for others to read. Instead it runs side effects and can return a cleanup function. Can own child nodes (scoped effects). Created via `effect(fn, opts?, args?)` or `sender.watch(fn, opts?, args?)`.
+**Effect** — a side-effect sink. Tracks dependencies like Compute but produces no value. Re-runs eagerly via the transaction loop when any dependency changes. Can own child nodes and register cleanup functions. Created via `effect(fn)` or `effect(dep, fn)`.
 
-**Root** — an ownership scope. Groups effects and computes for batch disposal. Created via `root(fn)`.
+**Task** — async Compute. Same shape as Compute with `FLAG_ASYNC` set. Runs a function that returns a Promise. While pending it holds `FLAG_LOADING`; on resolution it settles its value and pushes notification to its subscribers. Created via `task(fn)` or `task(dep, fn)`.
 
-### Dependency tracking
+**Spawn** — async Effect. Async counterpart of Effect — side-effectful, owns cleanups, runs async work. Created via `spawn(fn)` or `spawn(dep, fn)`.
 
-Dependency tracking is **dynamic** and happens at runtime via the `read(sender)` method on Compute and Effect nodes. When a node's function executes, every `read()` call registers a bidirectional link between the sender and the receiver.
-
-Links are stored in a **dual-pointer + overflow array** layout to minimize allocations in the common case:
-
-- **Sender side**: `_sub1` (first subscriber), `_subs[]` (packed array of `[receiver, depslot]` pairs for additional subscribers)
-- **Receiver side**: `_dep1`, `_dep2` (first two dependencies), `_deps[]` (packed array of `[sender, subslot]` pairs for 3+ dependencies)
-
-On re-execution, dependencies are reconciled via `pruneDeps()`. This uses a **version-tagging algorithm** to efficiently handle three cases:
-
-1. **Recycled deps** — re-accessed in the same order; no action needed
-2. **Stale deps** — not re-accessed; unsubscribed and removed
-3. **Re-accessed stale deps** — existed before but accessed out of order; detected by version tag and moved rather than unsubscribed then resubscribed
-
-Unsubscription uses **swap-with-last** for O(1) removal from packed arrays — no splice, no null gaps.
+**Root** / **scope** — ownership boundaries. `root(fn)` creates a top-level ownership scope; `scope()` creates a nested one. Disposing an owner recursively disposes owned nodes and runs their cleanups.
 
 ### Propagation model
 
-Anod uses a **push-based notification with lazy compute evaluation**.
+Anod separates notification from evaluation:
 
-When a signal changes:
-1. `notifyStale()` walks all subscribers, setting them STALE and queuing them
-2. Computes go to `COMPUTE_QUEUE`; effects go to `EFFECT_QUEUE` or `SCOPE_QUEUE[level]`
-3. The `start()` transaction loop processes queues in order: disposals → signal updates → computes → scoped effects (by level) → flat effects
-4. Computes only actually re-execute when still STALE at processing time (may have been refreshed earlier by a downstream read)
+- **Notification is push**: when a Signal writes, it walks its subscriber list and marks each receiver `FLAG_STALE` (direct dep) or `FLAG_PENDING` (transitive). Stale/pending propagation stops at nodes already marked for the current transaction time.
+- **Compute evaluation is pull**: Computes never re-run as part of notification. They re-run on the next read that finds them stale. This avoids work for values nobody reads.
+- **Effects are pushed to queues**: flat effects go to `RECEIVERS`, scoped effects go to `SCOPES[level]` (level = owner depth). The transaction loop drains these in order after signals settle.
+- **Tasks push on resolve**: when a task's promise settles, it pushes its update into the `TASKS` queue of the current transaction. The loop processes tasks that resolved mid-flight — they don't need to be pulled by effects, since they notify their subscribers when they have an actual value to deliver. If no active transaction exists, settling a task starts a new one.
 
-**Time-based deduplication**: a global clock (`CLOCK._time`) increments each transaction cycle. Each node tracks `_time` of last update — if a node has already been marked stale for the current time, it's skipped. This prevents diamond-dependency nodes from being processed multiple times.
+### The `start()` transaction loop
 
-**Pending/refresh optimization**: when a Compute has only been marked PENDING (not STALE), reading it triggers `refresh()` which walks upstream to check if any actual dependency changed. If none did, the compute skips re-execution entirely. This avoids unnecessary work in deep chains where an upstream compute's value didn't actually change.
+`start(fn)` runs `fn()` and then drains all queues. Nested `start()` calls are no-ops (inline execution). The loop order each cycle:
 
-### Batching
+1. **Disposals** — nodes queued for disposal
+2. **Signal updates** — `SENDERS` / `PAYLOADS` (batched senders)
+3. **Tasks** — `TASKS` queue (async results that resolved during this cycle)
+4. **Scoped effects by level** — `SCOPES[0]`, `[1]`, `[2]`, ... parent-before-child
+5. **Flat effects** — `RECEIVERS`
 
-`batch(fn)` defers all propagation until `fn` completes. Multiple `set()` calls within a batch are coalesced — signals queue their updates in `SIGNAL_QUEUE` / `SIGNAL_OPS` and the transaction loop processes them all at once. Nested batches are no-ops (just execute the function inline).
+After each queue drains, `CLOCK._time` advances. Any node that runs writes that schedule new work brings the loop back to step 1. A runaway guard caps iterations at 100,000 and throws `"Runaway cycle"` if exceeded.
+
+### Dependency tracking
+
+Tracking is dynamic at runtime. When a receiver's function calls `read(sender)`, a bidirectional link is created.
+
+Links use a **dual-pointer + overflow array** layout to avoid allocations in the common case:
+
+- **Sender side**: `_sub1` (first subscriber), `_subs[]` (packed array of `[receiver, depslot]` pairs for additional subscribers).
+- **Receiver side**: `_dep1`, `_dep2` (first two deps inline), `_deps[]` (packed array of `[sender, subslot]` pairs for 3+ deps).
+
+Reconciliation on re-run uses `pruneDeps()` with version-tagging to handle three cases in one pass:
+
+1. **Recycled deps** — re-accessed in the same order; no action needed
+2. **Stale deps** — not re-accessed; unsubscribed and swap-removed
+3. **Reordered deps** — accessed out of order; detected by version tag, moved rather than resubscribed
+
+Unsubscription uses **swap-with-last** (`Array.prototype.pop()`) for O(1) removal. Arrays are always kept packed, no null gaps.
 
 ### Bound vs. unbound nodes
 
-**Bound** nodes (`Flag._BOUND`) are created via `.derive()` / `.watch()`. They have a fixed set of dependencies (1 or 2 senders passed at construction time) and use `Flag._STABLE` by default — the function receives the dependency values directly without calling `read()`, so no dynamic tracking overhead.
+**Bound** nodes (`FLAG_BOUND`) are created via `compute(dep, fn)` / `effect(dep, fn)` / `task(dep, fn)` / `spawn(dep, fn)`. They have a fixed single dep passed at construction. The callback receives the dep's value directly as the first argument — no `read()` call needed, no setup, no reconciliation.
 
-**Unbound** nodes are created via the top-level `compute()` / `effect()` functions. They use dynamic dependency tracking — the function receives the node itself as the first argument (typed as `IReader`) and calls `c.read(signal)` to subscribe.
+This is **critical for performance**: V8 must see both bound and unbound paths exercised from program start. Without real bound-dep callsites, V8 dead-code-eliminates the bound fast path and the later transition causes deopt. Measured: adding a stable-fast-path branch without exercising it caused 1.08μs → 1.28μs regression with IPC dropping from 6.19 → 4.52. The bound path is 30-50% faster and uses 60-90% less memory than unbound for the single-dep case.
 
-### Evaluation modes
+**Unbound** nodes are created via `compute(fn)` / `effect(fn)` / etc. The callback receives the node itself as first argument, exposing `read()` for dynamic dep tracking.
 
-- **Default**: dynamic dependency tracking with full `pruneDeps()` reconciliation
-- **`Opt.STABLE`**: no dependency tracking; the function only receives the previous value (or for bound nodes, the sender values). Faster but can't change dependencies
-- **`Opt.SETUP`**: runs the setup pass on first execution (used internally to register signal arguments in `@anod/list`)
-- **`Opt.DEFER`**: don't auto-start the node on creation; it remains STALE until explicitly read
+Callback signatures:
+- **Bound sync**: `(val, c, prev, args) => ...` — `val` first so `compute(age, a => a > 18)` is natural; `c` second when helpers are needed.
+- **Unbound sync**: `(c, prev, args) => ...` — `c` is the node itself.
+- **Bound async**: `(val, c, prev, args) => ...` — same as sync. `c` is always needed for async because of cleanup / future suspend.
+- **Unbound async**: `(c, prev, args) => ...` — same as sync unbound.
 
-### Async support
+### Evaluation modes (`Opt` flags)
 
-Computes can return Promises or AsyncIterables. The library detects these via `isAsync()` and:
+- **Default**: dynamic dependency tracking with full reconciliation
+- **`Opt.STABLE`**: no dependency tracking at read time; the bound callback just receives the dep's value. Fastest but can't change deps
+- **`Opt.DEFER`**: don't auto-start on creation; remain STALE until explicitly read
+- **`Opt.DISABLED`**: node starts in a paused state. `FLAG_DISABLED` lives only on the root node of a scope; `_setStale` stops propagation when it sees DISABLED, marking FLAG_STALE but not enqueuing. Re-enable directly enqueues since FLAG_STALE is already set. O(1) enable/disable without tree walks.
 
-- Sets `Flag._LOADING` on the node
-- Uses `WeakRef` to hold the node reference, allowing GC if the node is disposed before resolution
-- On resolution, calls `settle()` which clears LOADING, updates the value, and triggers a new propagation cycle
-- Async iterators are consumed incrementally — each yielded value triggers a settle
+### Gate (validation wrapper)
+
+`Gate` extends `Signal` to add validation. Created via `gate(value).check(eqFn).guard(validator)`. It overrides `.set()` to run through user-supplied equality (`_equals` array) and validation (`_guards` array) functions before accepting a new value. Shared prototype with Signal for `_value`, `_version`, `_flag` access.
+
+Gate-on-Compute is possible but rare (users do `new Gate(compute, ...)` directly).
+
+### Async
+
+Tasks and spawns are async nodes. The body returns a Promise (or async iterable). The library:
+
+- Sets `FLAG_LOADING` on the node while the promise is pending.
+- Stores the old value during loading; `.val()` returns the last-known value (stale-while-revalidate).
+- Uses `WeakRef` to hold the node reference from the resolution handler, allowing GC if the node is disposed before the promise settles.
+- On invalidate mid-flight, pushes to the `TASKS` queue of the current (or new) transaction, does not notify subscribers, it only notifies on settle.
+- Exposes `task.loading()` and `task.error()` as separate observable flags.
+
+**Stale activation semantics**: if a task re-runs before its previous promise resolves, the old activation is logically abandoned. When the old promise resolves, the library checks the node's current activation id — if it doesn't match, the resolution is discarded. This prevents stale values from overwriting newer results.
+
+**Not yet implemented** (design decided but not built):
+- `c.suspend(promise)` — wrap a native promise so its continuation never runs if the node is disposed / stale. Planned design: WeakRef + activation id check, returns a shared `NOOP` thenable on stale/disposed so the continuation is silently dropped and GC'd.
+- `c.wait(task)` with two-way slot binding for `await task` ergonomics — may or may not ship; the shape is uncertain.
+- `c.when([tasks], callback)` derived-compute helper.
+- `c.resolved([tasks])` zero-alloc subscribe+check.
+
+### Batching
+
+`batch(fn)` defers propagation until `fn` completes. Signal sets within a batch coalesce via `SIGNAL_QUEUE` / `SIGNAL_OPS`. Nested `batch()` calls inline. `batch` is distinct from `start` — `batch` is pure coalescing within an existing transaction, while `start` is the transaction loop itself.
 
 ### Scoped effects and hierarchical disposal
 
-Effects created with `Flag._SCOPE` (via `scope()`) participate in **topological level-based execution**. Each scoped effect tracks its `_level` (depth in the ownership tree). `SCOPE_QUEUE` is an array of arrays indexed by level (initially 4 slots, extended on demand). Parent-level effects always execute before child-level effects, ensuring proper cleanup ordering.
+Effects can have owned child nodes.
 
-Owner nodes (`Root`, scoped `Effect`) track `_owned` children. Disposing an owner recursively disposes all owned nodes. Cleanup functions are stored compactly: a single function for count=1, an array for count>1, with slot recycling.
+Owner nodes track `_owned` children. Disposal is recursive. Cleanup functions are stored compactly: single function for count=1, array with slot recycling for count>1. Scoped effects track `_level` (owner depth) and execute via `SCOPE_QUEUE[level]`, parent-before-child, without a full topological sort.
 
 ### Error handling
 
-Errors in compute functions are caught and stored as the node's value with `Flag._ERROR` set. Reading an errored compute via `.val()` rethrows. Errors in effects cause the effect to be disposed. The `error()` method on Compute/Effect returns whether the node is in an error state.
+Errors in compute bodies are caught and stored with `FLAG_ERROR` set. Reading an errored compute via `.val()` rethrows. Errors in effects dispose the effect. `recover(fn)` on a compute/effect intercepts errors: return true to swallow, false or throw to propagate.
 
-### Cycle detection
-
-The `start()` loop has a hard limit of 100,000 iterations. If exceeded, it throws a `"Runaway cycle"` error. Circular dependency reads are detected immediately — if a compute reads itself while already running (`Flag._RUNNING`), it throws `"Circular dependency"`.
+Errors are normalized — if the thrown value isn't an `Error`, it's wrapped with a descriptive message and the original value stored as `cause`.
 
 ### The `@anod/list` package
 
-`@anod/list` extends `Signal.prototype` and `Compute.prototype` with reactive array methods. It provides two categories of operations:
+The list package is currently completely out of date. We do not make any changes to that package at the moment. Any breaking change in the core library, just leave it. Don't run tests, don't patch anything. We will fix that later when the core stabilizes.
 
-**Read methods** (return a Compute that re-runs when the source array changes):
+`@anod/list` extends `Signal.prototype` and `Compute.prototype` with reactive array methods. Two categories:
+
+**Read methods** (return a bound Compute that re-runs when the source array changes):
 `at`, `concat`, `entries`, `every`, `filter`, `find`, `findIndex`, `findLast`, `findLastIndex`, `flat`, `flatMap`, `includes`, `indexOf`, `join`, `keys`, `map`, `reduce`, `reduceRight`, `slice`, `some`, `values`
 
-**Mutation methods** (only on Signal, mutate the array in-place and trigger notification):
+**Mutation methods** (only on Signal, mutate in place and notify):
 `copyWithin`, `fill`, `pop`, `push`, `reverse`, `shift`, `sort`, `splice`, `unshift`
 
-Read methods are implemented as bound computes via `computeArray()` (internally uses `computeOne()`). They support **reactive parameters** — arguments can be plain values, Signals, or functions, resolved at execution time via `getVal()`. For example, `.slice(signal(0), signal(5))` creates a reactive slice that updates when either bound changes.
+Read methods support **reactive parameters** — args can be plain values, Signals, or functions, resolved at execution time via `getVal()`. Example: `.slice(signal(0), signal(5))` creates a reactive slice that updates when either bound changes.
 
-`forEach` is special — it creates an Effect rather than a Compute, since it's inherently side-effectful.
+`forEach` is special — creates an Effect rather than a Compute, since it's inherently side-effectful.
 
-The `list(value)` factory creates a Signal with `Flag.LIST` set, which is the entry point for the list API.
+The `list(value)` factory creates a Signal with `FLAG_LIST` set, the entry point for the list API.
 
-### Key design differences from other signal libraries
+### Key design principles
 
-1. **Hybrid push/pull**: notifications are pushed eagerly, but compute re-evaluation is lazy (only on read or when queued by the transaction loop). This avoids wasted work while keeping the graph consistent.
+1. **Pure pull for computes, push for effects and tasks.** Computes never run unread; effects run when queued; tasks push their settled results. This minimizes wasted work without sacrificing responsiveness.
 
-2. **Dual-pointer dependency storage**: the first two dependencies and the first subscriber use dedicated fields instead of arrays, avoiding allocations in the ~80% common case.
+2. **Dual-pointer dep storage.** First dep/sub inline, overflow into packed arrays. Avoids allocation in the ~80% common case.
 
-3. **Version-tag based dep pruning**: instead of diffing old and new dependency sets, version tags enable O(n) reconciliation with in-place array compaction.
+3. **Bound-dep fast path.** `compute(dep, fn)` skips all setup/reconciliation. 30-50% faster than unbound for single-dep cases. Must be exercised from startup or V8 dead-codes it.
 
-4. **Topological effect levels**: scoped effects execute parent-before-child via level-indexed queues, without needing a full topological sort.
+4. **Version-tag reconciliation.** One-pass dep pruning with in-place compaction. No diff, no splice, no nulls.
 
-5. **Bit-flag state machine**: all node state (stale, pending, running, disposed, loading, error, bound, stable, etc.) is packed into a single 32-bit integer, enabling fast branching with bitwise ops.
+5. **Topological effect levels.** Scoped effects execute parent-before-child via level-indexed queues.
 
-6. **Zero-allocation-path design**: the library avoids strings, closures, and object allocations on the hot path. Enums are numeric constants, queues are pre-allocated arrays, and arrays are always kept packed (no null gaps).
+6. **Bit-packed state.** All node state in a single 32-bit flag field. Fast branching with bitwise ops.
 
-7. **WeakRef-based async**: async resolution holds nodes via WeakRef, so disposed nodes can be GC'd even if their promise hasn't resolved yet.
+7. **Zero-allocation hot paths.** No strings, no closures on reads/writes. Queues pre-allocated. Arrays kept packed.
 
-8. **JSDoc + TypeScript declarations**: the source is plain JavaScript with JSDoc annotations for Closure Compiler compatibility. A separate `.d.ts` file provides the public TypeScript API, using branded types (`unique symbol`) to prevent accidental structural matching.
+8. **WeakRef async.** Async resolution handlers hold nodes weakly, so disposed nodes GC even if their promise is still pending.
+
+9. **JSDoc + TypeScript declarations.** Source is plain JS with JSDoc for Closure Compiler; public API is a separate `.d.ts`.
