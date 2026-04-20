@@ -161,17 +161,17 @@ var SENDERS = [];
 var PAYLOADS = [];
 var SENDER_COUNT = 0;
 
+/** @const @type {Array<Compute>} */
+var TASKS = [];
+
+var TASK_COUNT = 0;
+
 /** @const @type {Array<number>} */
 var LEVELS = [0, 0, 0, 0];
 /** @const @type {Array<Array<Effect>>} */
 var SCOPES = [[], [], [], []];
 
 var SCOPE_COUNT = 0;
-
-/** @const @type {Array<Compute>} */
-var TASKS = [];
-
-var TASK_COUNT = 0;
 
 /** @const @type {Array<Effect>} */
 var RECEIVERS = [];
@@ -323,27 +323,48 @@ function Gate(value) {
 Gate.prototype = Object.create(Signal.prototype);
 
 /**
- * Async context for Compute (task) nodes. Created lazily on first call
- * to a context utility (e.g. controller()). Stored in the _args wrapper
- * as { _args, _context: TaskContext }.
+ * Async execution context for task/spawn nodes. Created lazily on first
+ * call to a context utility (e.g. controller(), defer()). Stored in the
+ * _args wrapper as { _args, _context: Fiber }.
  * @constructor
  */
-function TaskContext() {
+function Fiber() {
   /** @type {AbortController | null} */
   this._controller = null;
-  /** @type {Array | null} */
+  /** @type {Array<Sender | *> | null} Paired [sender, value] entries. */
   this._defers = null;
+  /** @type {Task | Spawn | null} Async channel for awaiter/responder bindings. */
+  this._channel = null;
 }
 
 /**
- * Async context for Effect (spawn) nodes. Same shape as TaskContext.
+ * Channel for Compute (task) nodes. Implements both IAwaiter (can await
+ * other tasks) and IResponder (can be awaited by others).
  * @constructor
  */
-function SpawnContext() {
-  /** @type {AbortController | null} */
-  this._controller = null;
-  /** @type {Array | null} */
-  this._defers = null;
+function Task() {
+  /** @type {Compute | null} First responder we're waiting on. */
+  this._res1 = null;
+  /** @type {number} Our slot in _res1's _waiters (index into 4-stride). */
+  this._res1slot = 0;
+  /** @type {Array<Compute | number> | null} Additional [responder, slot] pairs. */
+  this._responds = null;
+  /** @type {Array | null} 4-stride: [awaiter, awaiterResSlot, resolve, reject]. */
+  this._waiters = null;
+}
+
+/**
+ * Channel for Effect (spawn) nodes. IAwaiter only — can await tasks but
+ * cannot itself be awaited.
+ * @constructor
+ */
+function Spawn() {
+  /** @type {Compute | null} First responder we're waiting on. */
+  this._res1 = null;
+  /** @type {number} Our slot in _res1's _waiters (index into 4-stride). */
+  this._res1slot = 0;
+  /** @type {Array<Compute | number> | null} Additional [responder, slot] pairs. */
+  this._responds = null;
 }
 
 // ─── Prototype method implementations ──────────────────────────────────────
@@ -711,11 +732,24 @@ function gate(value) {
    * @param {!Promise<T>} promise
    * @returns {!Promise<T>}
    */
-  function _suspend(promise) {
+  /**
+   * @this {!Compute | !Effect}
+   * @param {!Promise | !Compute} promiseOrTask
+   * @returns {*}
+   */
+  function _suspend(promiseOrTask) {
+    /** Branch: Compute node with FLAG_ASYNC → task-await path. */
+    if (
+      promiseOrTask._flag !== undefined &&
+      promiseOrTask._flag & FLAG_ASYNC
+    ) {
+      return _suspendTask.call(this, promiseOrTask);
+    }
+    /** Existing promise path. */
     let ref = new WeakRef(this);
     let time = this._time;
     this._flag |= FLAG_SUSPEND;
-    return promise.then(
+    return promiseOrTask.then(
       function (val) {
         let node = ref.deref();
         if (
@@ -741,34 +775,183 @@ function gate(value) {
     );
   }
 
+  /**
+   * Awaits an async Compute (task) node. Two paths:
+   *
+   * **Fast-path** (task already settled): subscribes as a dep and returns
+   * the raw value immediately. `await nonThenable` costs one microtask.
+   *
+   * **Slow-path** (task is loading): creates a two-way binding between
+   * this node (IAwaiter) and the task (IResponder). Returns a Promise
+   * that resolves when the task settles. At settle time, the task also
+   * subscribes the awaiter as a dep for future reactive updates.
+   *
+   * @this {!Compute | !Effect}
+   * @param {!Compute} taskNode
+   * @returns {*}
+   */
+  function _suspendTask(taskNode) {
+    this._flag |= FLAG_SUSPEND;
+
+    /** Fast-path: task is settled — subscribe and return value. */
+    if (!(taskNode._flag & FLAG_LOADING)) {
+      if (this._dep1 === null) {
+        this._dep1 = taskNode;
+        this._dep1slot = subscribe(taskNode, this, -1);
+      } else {
+        let deps = this._deps;
+        let depslot = deps === null ? 0 : deps.length;
+        let slot = subscribe(taskNode, this, depslot);
+        if (deps === null) {
+          this._deps = [taskNode, slot];
+        } else {
+          deps.push(taskNode, slot);
+        }
+      }
+      if (taskNode._flag & FLAG_ERROR) {
+        throw taskNode._value;
+      }
+      return taskNode._value;
+    }
+
+    /** Slow-path: task is loading — create two-way awaiter binding. */
+    let awaiterCh = this._ensureChannel();
+    let responderCh = taskNode._ensureChannel();
+
+    let awaiterResSlot;
+    if (awaiterCh._res1 === null) {
+      awaiterResSlot = -1;
+    } else if (awaiterCh._responds === null) {
+      awaiterResSlot = 0;
+    } else {
+      awaiterResSlot = awaiterCh._responds.length;
+    }
+
+    let self = this;
+    let promise = new Promise(function (resolve, reject) {
+      let waiterSlot = addWaiter(
+        responderCh,
+        self,
+        awaiterResSlot,
+        resolve,
+        reject
+      );
+
+      if (awaiterResSlot === -1) {
+        awaiterCh._res1 = taskNode;
+        awaiterCh._res1slot = waiterSlot;
+      } else if (awaiterCh._responds === null) {
+        awaiterCh._responds = [taskNode, waiterSlot];
+      } else {
+        awaiterCh._responds.push(taskNode, waiterSlot);
+      }
+    });
+
+    return promise;
+  }
+
   ComputeProto.suspend = EffectProto.suspend = _suspend;
 
   /**
-   * Creates a fresh AbortController for this async activation. If this
-   * is the first call, lazily allocates the context wrapper (TaskContext
-   * or SpawnContext) and lifts _args into { _args, _context }.
-   * The controller is automatically aborted on re-run or dispose.
-   * @param {function} ContextCtor - TaskContext or SpawnContext
-   * @returns {function(): !AbortController}
+   * Lazily allocates a Fiber + channel. Returns the channel.
+   * @this {!Compute}
+   * @returns {!Task}
    */
-  function _makeController(ContextCtor) {
-    return function () {
-      let context;
-      if (this._flag & FLAG_CONTEXT) {
-        context = this._args._context;
-      } else {
-        context = new ContextCtor();
-        this._args = { _args: this._args, _context: context };
-        this._flag |= FLAG_CONTEXT;
-      }
-      let controller = new AbortController();
-      context._controller = controller;
-      return controller;
-    };
+  ComputeProto._ensureChannel = function () {
+    if (!(this._flag & FLAG_CONTEXT)) {
+      let fiber = new Fiber();
+      fiber._channel = new Task();
+      this._args = { _args: this._args, _context: fiber };
+      this._flag |= FLAG_CONTEXT;
+      return fiber._channel;
+    }
+    let fiber = this._args._context;
+    if (fiber._channel === null) {
+      fiber._channel = new Task();
+    }
+    return fiber._channel;
+  };
+
+  /**
+   * @this {!Effect}
+   * @returns {!Spawn}
+   */
+  EffectProto._ensureChannel = function () {
+    if (!(this._flag & FLAG_CONTEXT)) {
+      let fiber = new Fiber();
+      fiber._channel = new Spawn();
+      this._args = { _args: this._args, _context: fiber };
+      this._flag |= FLAG_CONTEXT;
+      return fiber._channel;
+    }
+    let fiber = this._args._context;
+    if (fiber._channel === null) {
+      fiber._channel = new Spawn();
+    }
+    return fiber._channel;
+  };
+
+  /**
+   * Creates a fresh AbortController for this async activation. If this
+   * is the first call, lazily allocates the Fiber context and lifts
+   * _args into { _args, _context }.
+   * The controller is automatically aborted on re-run or dispose.
+   * @this {!Compute | !Effect}
+   * @returns {!AbortController}
+   */
+  function _controller() {
+    let context;
+    if (this._flag & FLAG_CONTEXT) {
+      context = this._args._context;
+    } else {
+      context = new Fiber();
+      this._args = { _args: this._args, _context: context };
+      this._flag |= FLAG_CONTEXT;
+    }
+    let controller = new AbortController();
+    context._controller = controller;
+    return controller;
   }
 
-  ComputeProto.controller = _makeController(TaskContext);
-  EffectProto.controller = _makeController(SpawnContext);
+  ComputeProto.controller = EffectProto.controller = _controller;
+
+  /**
+   * Reads a sender's current value without subscribing immediately.
+   * The subscription is deferred until settle time. For sync nodes
+   * (FLAG_ASYNC not set), falls back to val().
+   * @this {!Compute | !Effect}
+   * @param {!Sender} sender
+   * @returns {*}
+   */
+  function _defer(sender) {
+    if (!(this._flag & FLAG_ASYNC)) {
+      return val.call(this, sender);
+    }
+    if (sender._flag & (FLAG_STALE | FLAG_PENDING)) {
+      sender._refresh();
+    }
+    let value = sender._value;
+    let context;
+    if (this._flag & FLAG_CONTEXT) {
+      context = this._args._context;
+    } else {
+      context = new Fiber();
+      this._args = { _args: this._args, _context: context };
+      this._flag |= FLAG_CONTEXT;
+    }
+    let defers = context._defers;
+    if (defers === null) {
+      context._defers = [sender, value];
+    } else {
+      defers.push(sender, value);
+    }
+    if (sender._flag & FLAG_ERROR) {
+      throw value;
+    }
+    return value;
+  }
+
+  ComputeProto.defer = EffectProto.defer = _defer;
 
   // ─── Root — single-use methods ─────────────────────────────────────────
 
@@ -837,6 +1020,17 @@ function gate(value) {
    * @this {!Signal<T>}
    * @returns {void}
    */
+  /**
+   * Returns true if the sender's current value differs from `value`.
+   * Used by deferred dep settlement to detect changes.
+   * @this {!Signal<T> | !Compute<T>}
+   * @param {T} value
+   * @returns {boolean}
+   */
+  SignalProto._changed = ComputeProto._changed = function (value) {
+    return this._value !== value;
+  };
+
   SignalProto._dispose = function () {
     this._flag = FLAG_DISPOSED;
     clearSubs(this);
@@ -946,26 +1140,31 @@ function gate(value) {
     clearSubs(this);
     clearDeps(this);
     if (flag & FLAG_CONTEXT) {
-      let ctrl = this._args._context._controller;
-      if (ctrl !== null) {
-        ctrl.abort();
+      let ctx = this._args._context;
+      if (ctx._controller !== null) {
+        ctx._controller.abort();
+      }
+      if (ctx._channel !== null && ctx._channel._res1 !== null) {
+        clearChannel(ctx._channel);
       }
     }
     this._fn = this._value = this._args = null;
   };
 
-    /**
-     * Sync update for compute nodes. Two branches:
-     * 1. Stable (no SETUP) — no dep tracking, fn receives (this, prev, args)
-     * 2. Setup/dynamic — version bump, dep tracking, fn receives (this, prev, args)
-     * Async nodes delegate to _updateAsync.
-     * @this {!Compute<T,U,V,W>}
-     * @param {number} time
-     */
-    ComputeProto._update = function (time) {
-        let flag = this._flag;
-        this._time = time;
-        this._flag = flag & ~(FLAG_STALE | FLAG_INIT | FLAG_EQUAL | FLAG_NOTEQUAL);
+  /**
+   * Sync update for compute nodes. Two branches:
+   * 1. Stable (no SETUP) — no dep tracking, fn receives (this, prev, args)
+   * 2. Setup/dynamic — version bump, dep tracking, fn receives (this, prev, args)
+   * Async nodes delegate to _updateAsync.
+   * @this {!Compute<T,U,V,W>}
+   * @param {number} time
+   */
+  ComputeProto._update = function (time) {
+    let flag = this._flag;
+    this._time = time;
+    this._flag =
+      flag &
+      ~(FLAG_STALE | FLAG_INIT | FLAG_LOADING | FLAG_EQUAL | FLAG_NOTEQUAL);
 
     /** Async nodes delegate to _updateAsync — completely separate path. */
     if (flag & FLAG_ASYNC) {
@@ -1081,12 +1280,16 @@ function gate(value) {
     let kind;
     let args = (flag & FLAG_CONTEXT) ? this._args._args : this._args;
 
-    /** Abort previous activation's controller if present. */
+    /** Abort previous controller, clear stale defers and channel. */
     if (flag & FLAG_CONTEXT) {
-      let ctrl = this._args._context._controller;
-      if (ctrl !== null) {
-        ctrl.abort();
-        this._args._context._controller = null;
+      let ctx = this._args._context;
+      if (ctx._controller !== null) {
+        ctx._controller.abort();
+        ctx._controller = null;
+      }
+      ctx._defers = null;
+      if (ctx._channel !== null && ctx._channel._res1 !== null) {
+        clearChannel(ctx._channel);
       }
     }
 
@@ -1174,17 +1377,17 @@ function gate(value) {
     }
   };
 
-    /**
-     * @this {Compute}
-     * @returns {void}
-     */
-    ComputeProto._receive = function () {
-        if (this._flag & FLAG_ASYNC) {
-            TASKS[TASK_COUNT++] = this;
-        } else {
-            notify(this, FLAG_PENDING);
-        }
-    };
+  /**
+   * @this {Compute}
+   * @returns {void}
+   */
+  ComputeProto._receive = function () {
+    if (this._flag & FLAG_ASYNC) {
+        TASKS[TASK_COUNT++] = this;
+    } else {
+        notify(this, FLAG_PENDING);
+    }
+  };
 
   // ─── Effect — single-use methods ───────────────────────────────────────
 
@@ -1219,10 +1422,10 @@ function gate(value) {
       this._recover = null;
     }
 
-        /** Async nodes delegate after pre-exec cleanup. */
-        if (flag & FLAG_ASYNC) {
-            return this._updateAsync(time);
-        }
+    /** Async nodes delegate after pre-exec cleanup. */
+    if (flag & FLAG_ASYNC) {
+      return this._updateAsync(time);
+    }
 
     /** @type {(function(): void) | null | undefined} */
     let value;
@@ -1317,12 +1520,16 @@ function gate(value) {
     let kind;
     let args = (flag & FLAG_CONTEXT) ? this._args._args : this._args;
 
-    /** Abort previous activation's controller if present. */
+    /** Abort previous controller, clear stale defers and channel. */
     if (flag & FLAG_CONTEXT) {
-      let ctrl = this._args._context._controller;
-      if (ctrl !== null) {
-        ctrl.abort();
-        this._args._context._controller = null;
+      let ctx = this._args._context;
+      if (ctx._controller !== null) {
+        ctx._controller.abort();
+        ctx._controller = null;
+      }
+      ctx._defers = null;
+      if (ctx._channel !== null && ctx._channel._res1 !== null) {
+        clearChannel(ctx._channel);
       }
     }
 
@@ -1367,6 +1574,7 @@ function gate(value) {
     }
 
     if (kind === ASYNC_SYNC) {
+      this._flag &= ~FLAG_LOADING;
       if (typeof value === "function") {
         this._addCleanup(value);
       }
@@ -1398,9 +1606,12 @@ function gate(value) {
       clearOwned(this);
     }
     if (flag & FLAG_CONTEXT) {
-      let ctrl = this._args._context._controller;
-      if (ctrl !== null) {
-        ctrl.abort();
+      let ctx = this._args._context;
+      if (ctx._controller !== null) {
+        ctx._controller.abort();
+      }
+      if (ctx._channel !== null && ctx._channel._res1 !== null) {
+        clearChannel(ctx._channel);
       }
     }
     this._fn = this._args = this._owned = this._owner = this._recover = null;
@@ -1511,6 +1722,30 @@ function gate(value) {
       guard.push(fn);
     }
     return this;
+  };
+
+  /**
+   * Gate equality check: uses custom _check fns if present.
+   * Returns true if the value changed (i.e., NOT equal to current).
+   * @this {!Gate<T>}
+   * @param {T} value
+   * @returns {boolean}
+   */
+  GateProto._changed = function (value) {
+    let check = this._check;
+    if (check === null) {
+      return this._value !== value;
+    }
+    if (typeof check === "function") {
+      return !check(this._value, value);
+    }
+    let count = check.length;
+    for (let i = 0; i < count; i++) {
+      if (!check[i](this._value, value)) {
+        return true;
+      }
+    }
+    return false;
   };
 
   // ─── Owned factory methods (Root + Effect prototypes) ───────────────
@@ -2435,68 +2670,273 @@ function settle(node, value) {
     node._value = value;
     let time = TIME + 1;
     node._ctime = time;
-    /** val() across await boundaries may insert duplicate deps.
-     *  Sweep them now before notifying downstream. */
+
+    let stale = false;
     if (node._flag & FLAG_ASYNC) {
-      if (node._deps !== null) {
-        checkDeps(node);
+      let hasDefers = (node._flag & FLAG_CONTEXT) &&
+        node._args._context._defers !== null;
+      if (node._deps !== null || hasDefers) {
+        stale = settleDeps(node);
       }
     } else if (unbound(node)) {
       node._fn = node._args = null;
     }
+
+    /** Resolve any awaiters waiting on this task. */
+    if (node._flag & FLAG_CONTEXT) {
+      let ch = node._args._context._channel;
+      if (ch !== null && ch._waiters !== null) {
+        resolveWaiters(node, ch, value, !!(node._flag & FLAG_ERROR));
+      }
+    }
+
     notify(node, FLAG_STALE);
     start();
+
+    if (stale) {
+      node._flag |= FLAG_STALE;
+      node._update(TIME);
+    }
   }
 }
 
 /**
- * Remove duplicate senders from node._dep1/_deps (added by val()
- * across await boundaries when another compute re-tagged sender._version
- * between our reads). Uses a fresh VERSION bump as the sweep stamp so it
- * cannot collide with any existing tag. Unsubscribes redundant slots.
+ * Unified dep sweep for async nodes at settle time.
+ * 1. Deduplicates _deps (val() across awaits can insert duplicates).
+ * 2. If deferred deps exist, subscribes unique deferred senders and
+ *    checks if any changed. Returns true if node needs to re-run.
  * @param {!Receiver} node
- * @returns {void}
+ * @returns {boolean}
  */
-function checkDeps(node) {
+function settleDeps(node) {
   let stamp = (SEED += 2);
   let dep1 = node._dep1;
   let deps = node._deps;
+
+  /** Grab defers before clearing. */
+  let defers = null;
+  let deferLen = 0;
+  if (node._flag & FLAG_CONTEXT) {
+    let ctx = node._args._context;
+    defers = ctx._defers;
+    if (defers !== null) {
+      deferLen = defers.length;
+      ctx._defers = null;
+    }
+  }
+
+  /** Stamp dep1. */
   if (dep1 !== null) {
     dep1._version = stamp;
   }
-  /**
-   * Walk backward. First occurrence we hit (at the tail) is the one we
-   * keep — it gets stamped. Any earlier occurrence of the same sender
-   * then reads as already-stamped and is removed via swap-with-last +
-   * pop. This way only the dups cost a move (one each); kept entries
-   * in the unique-prefix region stay put. Forward-walk would instead
-   * shift every kept entry after the first dup, which is wasteful when
-   * dups are rare (the common case).
-   */
-  let i = deps.length - 2;
-  while (i >= 0) {
-    let dep = /** @type {!Sender} */ (deps[i]);
-    if (dep._version === stamp) {
-      /** Duplicate — unsubscribe and compact via swap-with-last+pop. */
-      clearReceiver(dep, /** @type {number} */ (deps[i + 1]));
-      let lastSlot = /** @type {number} */ (deps.pop());
-      let lastDep = /** @type {!Sender} */ (deps.pop());
-      if (i !== deps.length) {
-        /** Not the current end — put the popped pair at i and
-         *  fix its sender's subs entry to point at the new depslot. */
-        deps[i] = lastDep;
-        deps[i + 1] = lastSlot;
-        if (lastSlot === -1) {
-          lastDep._sub1slot = i;
+
+  /** Dedup scan of _deps. */
+  if (deps !== null) {
+    let i = deps.length - 2;
+    if (deferLen > 0) {
+      /** Write-pointer compaction when defers need appending. */
+      let write = deps.length;
+      while (i >= 0) {
+        let dep = /** @type {!Sender} */ (deps[i]);
+        if (dep._version === stamp) {
+          clearReceiver(dep, /** @type {number} */ (deps[i + 1]));
+          write -= 2;
+          if (i !== write) {
+            deps[i] = deps[write];
+            deps[i + 1] = deps[write + 1];
+            let movedSlot = /** @type {number} */ (deps[i + 1]);
+            if (movedSlot === -1) {
+              /** @type {Sender} */ (deps[i])._sub1slot = i;
+            } else {
+              /** @type {Sender} */ (deps[i])._subs[movedSlot + 1] = i;
+            }
+          }
         } else {
-          lastDep._subs[lastSlot + 1] = i;
+          dep._version = stamp;
         }
+        i -= 2;
+      }
+      if (write < deps.length) {
+        deps.length = write;
       }
     } else {
-      dep._version = stamp;
+      /** No defers — pop-based compaction. */
+      while (i >= 0) {
+        let dep = /** @type {!Sender} */ (deps[i]);
+        if (dep._version === stamp) {
+          clearReceiver(dep, /** @type {number} */ (deps[i + 1]));
+          let lastSlot = /** @type {number} */ (deps.pop());
+          let lastDep = /** @type {!Sender} */ (deps.pop());
+          if (i !== deps.length) {
+            deps[i] = lastDep;
+            deps[i + 1] = lastSlot;
+            if (lastSlot === -1) {
+              lastDep._sub1slot = i;
+            } else {
+              lastDep._subs[lastSlot + 1] = i;
+            }
+          }
+        } else {
+          dep._version = stamp;
+        }
+        i -= 2;
+      }
     }
-    i -= 2;
   }
+
+  /** Phase 2: subscribe deferred deps and detect changes. */
+  if (deferLen === 0) {
+    return false;
+  }
+
+  let changed = false;
+  for (let i = 0; i < deferLen; i += 2) {
+    let sender = defers[i];
+    let snapshot = defers[i + 1];
+    if (sender._version === stamp) {
+      if (sender._changed(snapshot)) {
+        changed = true;
+      }
+      continue;
+    }
+    sender._version = stamp;
+    if (node._dep1 === null) {
+      node._dep1 = sender;
+      node._dep1slot = subscribe(sender, node, -1);
+    } else {
+      let d = node._deps;
+      let depslot = d === null ? 0 : d.length;
+      let slot = subscribe(sender, node, depslot);
+      if (d === null) {
+        node._deps = [sender, slot];
+      } else {
+        d.push(sender, slot);
+      }
+    }
+    if (sender._changed(snapshot)) {
+      changed = true;
+    }
+  }
+
+  return changed;
+}
+
+// ─── Awaiter/Responder two-way binding ────────────────────────────────────
+
+/**
+ * Adds a waiter entry to a responder's _waiters array (4-stride).
+ * @param {!Task} responderCh
+ * @param {!Receiver} awaiter
+ * @param {number} awaiterResSlot
+ * @param {function} resolve
+ * @param {function} reject
+ * @returns {number} slot in _waiters
+ */
+function addWaiter(responderCh, awaiter, awaiterResSlot, resolve, reject) {
+  let waiters = responderCh._waiters;
+  let slot;
+  if (waiters === null) {
+    responderCh._waiters = [awaiter, awaiterResSlot, resolve, reject];
+    slot = 0;
+  } else {
+    slot = waiters.length;
+    waiters.push(awaiter, awaiterResSlot, resolve, reject);
+  }
+  return slot;
+}
+
+/**
+ * Removes a single waiter entry (4-stride swap-with-last).
+ * Updates the swapped awaiter's back-reference.
+ * @param {!Task} responderCh
+ * @param {number} slot
+ * @returns {void}
+ */
+function removeWaiter(responderCh, slot) {
+  let waiters = responderCh._waiters;
+  let lastReject = waiters.pop();
+  let lastResolve = waiters.pop();
+  let lastResSlot = waiters.pop();
+  let lastAwaiter = waiters.pop();
+  if (slot !== waiters.length) {
+    waiters[slot] = lastAwaiter;
+    waiters[slot + 1] = lastResSlot;
+    waiters[slot + 2] = lastResolve;
+    waiters[slot + 3] = lastReject;
+    let ch = lastAwaiter._args._context._channel;
+    if (lastResSlot === -1) {
+      ch._res1slot = slot;
+    } else {
+      ch._responds[lastResSlot + 1] = slot;
+    }
+  }
+}
+
+/**
+ * Removes this awaiter from all responders it's waiting on.
+ * @param {!Task | !Spawn} channel
+ * @returns {void}
+ */
+function clearChannel(channel) {
+  let res = channel._res1;
+  if (res !== null) {
+    removeWaiter(res._args._context._channel, channel._res1slot);
+    channel._res1 = null;
+  }
+  let responds = channel._responds;
+  if (responds !== null) {
+    for (let i = 0; i < responds.length; i += 2) {
+      let responder = responds[i];
+      let slot = responds[i + 1];
+      removeWaiter(responder._args._context._channel, slot);
+    }
+    channel._responds = null;
+  }
+}
+
+/**
+ * Resolves (or rejects) all waiters of a responder, subscribes each
+ * awaiter as a dep of the responder, and clears their channel references.
+ * @param {!Compute} responder
+ * @param {!Task} responderCh
+ * @param {*} value
+ * @param {boolean} isError
+ * @returns {void}
+ */
+function resolveWaiters(responder, responderCh, value, isError) {
+  let waiters = responderCh._waiters;
+  let count = waiters.length;
+  for (let i = 0; i < count; i += 4) {
+    let awaiter = waiters[i];
+    let resSlot = waiters[i + 1];
+    if (isError) {
+      waiters[i + 3](value);
+    } else {
+      waiters[i + 2](value);
+    }
+    /** Subscribe responder as a dep of the awaiter. */
+    if (awaiter._dep1 === null) {
+      awaiter._dep1 = responder;
+      awaiter._dep1slot = subscribe(responder, awaiter, -1);
+    } else {
+      let deps = awaiter._deps;
+      let depslot = deps === null ? 0 : deps.length;
+      let slot = subscribe(responder, awaiter, depslot);
+      if (deps === null) {
+        awaiter._deps = [responder, slot];
+      } else {
+        deps.push(responder, slot);
+      }
+    }
+    /** Clear the awaiter's back-reference to this responder. */
+    let awaiterCh = awaiter._args._context._channel;
+    if (resSlot === -1) {
+      awaiterCh._res1 = null;
+    } else {
+      awaiterCh._responds[resSlot] = null;
+    }
+  }
+  responderCh._waiters = null;
 }
 
 /**
@@ -2514,6 +2954,15 @@ function resolveEffectPromise(ref, promise) {
         node._flag &= ~FLAG_LOADING;
         if (typeof val === "function") {
           node._addCleanup(val);
+        }
+        if (node._flag & FLAG_CONTEXT && node._args._context._defers !== null) {
+          let stale = settleDeps(node);
+          if (stale) {
+            notify(node, FLAG_STALE);
+            start();
+            node._flag |= FLAG_STALE;
+            node._update(TIME);
+          }
         }
       }
     },
@@ -2552,6 +3001,15 @@ function resolveEffectIterator(ref, iterable) {
     }
     if (result.done) {
       node._flag &= ~FLAG_LOADING;
+      if (node._flag & FLAG_CONTEXT && node._args._context._defers !== null) {
+        let stale = settleDeps(node);
+        if (stale) {
+          notify(node, FLAG_STALE);
+          start();
+          node._flag |= FLAG_STALE;
+          node._update(TIME);
+        }
+      }
       return;
     }
     iterator.next().then(onNext, onError);
@@ -2653,121 +3111,119 @@ function startEffect(node) {
  * @returns {void}
  */
 function start() {
-    /** @type {number} */
-    let time = 0;
-    /** @type {number} */
-    let cycle = 0;
-    /** @type {*} */
-    let error = null;
-    /** @type {boolean} */
-    let thrown = false;
-    IDLE = false;
-    try {
-        do {
-            time = ++TIME;
-            if (DISPOSER_COUNT > 0) {
-                let count = DISPOSER_COUNT;
-                for (let i = 0; i < count; i++) {
-                    DISPOSES[i]._dispose();
-                    DISPOSES[i] = null;
-                }
-                DISPOSER_COUNT = 0;
-            }
-            if (SENDER_COUNT > 0) {
-                let count = SENDER_COUNT;
-                for (let i = 0; i < count; i++) {
-                    SENDERS[i]._assign(PAYLOADS[i]);
-                    SENDERS[i] = PAYLOADS[i] = null;
-                }
-                SENDER_COUNT = 0;
-            }
-            if (TASK_COUNT > 0) {
-                let count = TASK_COUNT;
-                for (let i = 0; i < count; i++) {
-                    let node = TASKS[i];
-                    TASKS[i] = null;
-                    if ((node._flag & FLAG_STALE) || ((node._flag & FLAG_PENDING) && needsUpdate(node, time))) {
-                        node._update(time);
-                    } else {
-                        node._flag &= ~(FLAG_STALE | FLAG_PENDING);
-                    }
-                }
-                TASK_COUNT = 0;
-            }
-            if (SCOPE_COUNT > 0) {
-                let levels = LEVELS.length;
-                for (let i = 0; i < levels; i++) {
-                    let count = LEVELS[i];
-                    let effects = SCOPES[i];
-                    for (let j = 0; j < count; j++) {
-                        let node = effects[j];
-                        if ((node._flag & FLAG_STALE) || ((node._flag & FLAG_PENDING) && needsUpdate(node, time))) {
-                            try {
-                                TRANSACTION = SEED;
-                                node._update(time);
-                            } catch (err) {
-                                if (!thrown) {
-                                    if (!tryRecover(node, err)) {
-                                        error = err;
-                                        thrown = true;
-                                    }
-                                }
-                                node._dispose();
-                            }
-                        } else {
-                            node._flag &= ~(FLAG_STALE | FLAG_PENDING);
-                        }
-                        effects[j] = null;
-                    }
-                    LEVELS[i] = 0;
-                }
-                SCOPE_COUNT = 0;
-            }
-            if (RECEIVER_COUNT > 0) {
-                let count = RECEIVER_COUNT;
-                for (let i = 0; i < count; i++) {
-                    let node = RECEIVERS[i];
-                    RECEIVERS[i] = null;
-                    if ((node._flag & FLAG_STALE) || ((node._flag & FLAG_PENDING) && needsUpdate(node, time))) {
-                        TRANSACTION = SEED;
-                        try {
-                            node._update(time);
-                        } catch (err) {
-                            if (!thrown) {
-                                if (!tryRecover(node, err)) {
-                                    error = err;
-                                    thrown = true;
-                                }
-                            }
-                            node._dispose();
-                        }
-                    } else {
-                        node._flag &= ~(FLAG_STALE | FLAG_PENDING);
-                    }
-                }
-                RECEIVER_COUNT = 0;
-            }
-            if (cycle++ === 1e5) {
-                error = new Error('Runaway cycle');
-                thrown = true;
-                break;
-            }
-        } while (
-            !thrown &&
-            (SENDER_COUNT > 0 ||
-                DISPOSER_COUNT > 0)
-        );
-    } finally {
-        IDLE = true;
-        DISPOSER_COUNT =
-            SENDER_COUNT =
-            TASK_COUNT =
-            SCOPE_COUNT =
-            RECEIVER_COUNT = 0;
-        if (thrown) {
-            throw error;
+  /** @type {number} */
+  let time = 0;
+  /** @type {number} */
+  let cycle = 0;
+  /** @type {*} */
+  let error = null;
+  /** @type {boolean} */
+  let thrown = false;
+  IDLE = false;
+  try {
+    do {
+      time = ++TIME;
+      if (DISPOSER_COUNT > 0) {
+        let count = DISPOSER_COUNT;
+        for (let i = 0; i < count; i++) {
+          DISPOSES[i]._dispose();
+          DISPOSES[i] = null;
         }
+        DISPOSER_COUNT = 0;
+      }
+      if (SENDER_COUNT > 0) {
+        let count = SENDER_COUNT;
+        for (let i = 0; i < count; i++) {
+          SENDERS[i]._assign(PAYLOADS[i]);
+          SENDERS[i] = PAYLOADS[i] = null;
+        }
+        SENDER_COUNT = 0;
+      }
+      if (TASK_COUNT > 0) {
+          let count = TASK_COUNT;
+          for (let i = 0; i < count; i++) {
+              let node = TASKS[i];
+              TASKS[i] = null;
+              if ((node._flag & FLAG_STALE) || ((node._flag & FLAG_PENDING) && needsUpdate(node, time))) {
+                  node._update(time);
+              } else {
+                  node._flag &= ~(FLAG_STALE | FLAG_PENDING);
+              }
+          }
+          TASK_COUNT = 0;
+      }
+      if (SCOPE_COUNT > 0) {
+        let levels = LEVELS.length;
+        for (let i = 0; i < levels; i++) {
+          let count = LEVELS[i];
+          let effects = SCOPES[i];
+          for (let j = 0; j < count; j++) {
+            let node = effects[j];
+            if (
+              node._flag & FLAG_STALE ||
+              (node._flag & FLAG_PENDING && needsUpdate(node, time))
+            ) {
+              try {
+                TRANSACTION = SEED;
+                node._update(time);
+              } catch (err) {
+                if (!thrown) {
+                  if (!tryRecover(node, err)) {
+                    error = err;
+                    thrown = true;
+                  }
+                }
+                node._dispose();
+              }
+            } else {
+              node._flag &= ~(FLAG_STALE | FLAG_PENDING);
+            }
+            effects[j] = null;
+          }
+          LEVELS[i] = 0;
+        }
+        SCOPE_COUNT = 0;
+      }
+      if (RECEIVER_COUNT > 0) {
+        let count = RECEIVER_COUNT;
+        for (let i = 0; i < count; i++) {
+          let node = RECEIVERS[i];
+          RECEIVERS[i] = null;
+          if (
+            node._flag & FLAG_STALE ||
+            (node._flag & FLAG_PENDING && needsUpdate(node, time))
+          ) {
+            TRANSACTION = SEED;
+            try {
+              node._update(time);
+            } catch (err) {
+              if (!thrown) {
+                if (!tryRecover(node, err)) {
+                  error = err;
+                  thrown = true;
+                }
+              }
+              node._dispose();
+            }
+          } else {
+            node._flag &= ~(FLAG_STALE | FLAG_PENDING);
+          }
+        }
+        RECEIVER_COUNT = 0;
+      }
+      if (cycle++ === 1e5) {
+        error = new Error("Runaway cycle");
+        thrown = true;
+        break;
+      }
+    } while (!thrown && (SENDER_COUNT > 0 || DISPOSER_COUNT > 0));
+  } finally {
+    IDLE = true;
+    DISPOSER_COUNT = SENDER_COUNT = SCOPE_COUNT = RECEIVER_COUNT = 0;
+    if (thrown) {
+      throw error;
     }
+  }
 }
 
 // ─── Public API ────────────────────────────────────────────────────────────
