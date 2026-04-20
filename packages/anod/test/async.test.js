@@ -645,4 +645,98 @@ describe("async", () => {
             expect(observed).toBe(42);
         });
     });
+
+    describe("controller", () => {
+        test("returns an AbortController", async () => {
+            const c1 = c.task(async (c) => {
+                const ctrl = c.controller();
+                expect(ctrl).toBeInstanceOf(AbortController);
+                expect(ctrl.signal.aborted).toBe(false);
+                return await c.suspend(Promise.resolve(42));
+            });
+            await settle();
+            expect(c1.peek()).toBe(42);
+        });
+
+        test("controller is aborted on re-run", async () => {
+            const s1 = c.signal(1);
+            let captured = null;
+
+            const c1 = c.task(async (c) => {
+                const ctrl = c.controller();
+                if (captured === null) {
+                    captured = ctrl;
+                }
+                const v = c.val(s1);
+                return await c.suspend(Promise.resolve(v));
+            });
+            await settle();
+            expect(c1.peek()).toBe(1);
+            expect(captured.signal.aborted).toBe(false);
+
+            s1.set(2);
+            c1.peek();
+            /** The old controller should be aborted on re-run. */
+            expect(captured.signal.aborted).toBe(true);
+
+            await settle();
+            expect(c1.peek()).toBe(2);
+        });
+
+        test("controller is aborted on dispose", async () => {
+            let captured = null;
+
+            const c1 = c.task(async (c) => {
+                captured = c.controller();
+                return await c.suspend(Promise.resolve(1));
+            });
+            await settle();
+            expect(captured.signal.aborted).toBe(false);
+
+            c1.dispose();
+            expect(captured.signal.aborted).toBe(true);
+        });
+
+        test("controller works with spawn", async () => {
+            const s1 = c.signal(1);
+            let captured = null;
+
+            c.spawn(async (c) => {
+                const ctrl = c.controller();
+                if (captured === null) {
+                    captured = ctrl;
+                }
+                c.val(s1);
+                await c.suspend(tick());
+            });
+            await settle();
+            expect(captured.signal.aborted).toBe(false);
+
+            s1.set(2);
+            await settle();
+            /** Previous controller aborted on re-run. */
+            expect(captured.signal.aborted).toBe(true);
+        });
+
+        test("each run gets a fresh controller", async () => {
+            const s1 = c.signal(1);
+            let controllers = [];
+
+            const c1 = c.task(async (c) => {
+                controllers.push(c.controller());
+                const v = c.val(s1);
+                return await c.suspend(Promise.resolve(v));
+            });
+            await settle();
+
+            s1.set(2);
+            c1.peek();
+            await settle();
+
+            expect(controllers.length).toBe(2);
+            expect(controllers[0]).not.toBe(controllers[1]);
+            expect(controllers[0].signal.aborted).toBe(true);
+            expect(controllers[1].signal.aborted).toBe(false);
+        });
+    });
 });

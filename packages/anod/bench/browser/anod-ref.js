@@ -2010,7 +2010,7 @@ const EXPECTED = {
 	dynUpdateWideDense: 244,
 	dynUpdateDeep: 2493,
 	dynUpdateVeryDynamic: 539
-}, vl = 2048, gl = 1 << 18, C = 8992, Wl = { then: function() {} }, jl = { message: "Async node must call c.suspend() on all awaited promises" };
+}, vl = 2048, gl = 1 << 18, xl = 1 << 19, C = 8992, Wl = { then: function() {} }, jl = { message: "Async node must call c.suspend() on all awaited promises" };
 var ni = [], li = 0, ei = 0, Fi = [], Gi = [], Hi = 0, Mi = [], Ni = 0, Pi = 0, si = 1, ri = !0, Cl = 1, hi = 0, ii = 0, ui = [], Al = 0, $i = [], ci = [], Nl = 0, pi = [
 	0,
 	0,
@@ -2099,6 +2099,17 @@ ql.prototype = Object.create(p.prototype);
 			return Wl;
 		});
 	}
+	function d(t) {
+		return function() {
+			let i;
+			this.j & xl ? i = this.Y.wt : (i = new t(), this.Y = {
+				Y: this.Y,
+				wt: i
+			}, this.j |= xl);
+			let l = new AbortController();
+			return i.St = l, l;
+		};
+	}
 	t.j = 0, t.K = null, t.$ = -1, i.st = 0, t.dispose = i.dispose = l.dispose = n.dispose = function() {
 		8 & this.j || (ri ? this.S() : ui[Al++] = this);
 	}, l.yt = n.yt = function(t, i) {
@@ -2128,7 +2139,11 @@ ql.prototype = Object.create(p.prototype);
 		return !!(128 & this.j);
 	}, l.loading = n.loading = function() {
 		return !!(64 & this.j);
-	}, t.kt = n.kt = f, t.gt = n.gt = u, t.cleanup = n.cleanup = f, t.recover = n.recover = u, l.equal = n.equal = o, l.stable = n.stable = c, l.suspend = n.suspend = y, t.S = function() {
+	}, t.kt = n.kt = f, t.gt = n.gt = u, t.cleanup = n.cleanup = f, t.recover = n.recover = u, l.equal = n.equal = o, l.stable = n.stable = c, l.suspend = n.suspend = y, l.controller = d(function() {
+		this.St = null, this.Et = null;
+	}), n.controller = d(function() {
+		this.St = null, this.Et = null;
+	}), t.S = function() {
 		this.j = 8, null !== this.G && Yi(this), null !== this.I && Ct(this), this.I = this.L = null;
 	}, i.peek = function() {
 		return this.N;
@@ -2161,7 +2176,12 @@ ql.prototype = Object.create(p.prototype);
 		let t = this.j;
 		1 & t ? this.rt(si) : t & vl ? kl(this, si) : Di(this, si);
 	}, l.S = function() {
-		this.j = 8, gt(this), Wt(this), this.V = this.N = this.Y = null;
+		let t = this.j;
+		if (this.j = 8, gt(this), Wt(this), t & xl) {
+			let t = this.Y.wt.St;
+			null !== t && t.abort();
+		}
+		this.V = this.N = this.Y = null;
 	}, l.rt = function(t) {
 		let i, l = this.j;
 		if (this.i = t, this.j = -49234 & l, 65536 & l) return this.ht(t);
@@ -2205,12 +2225,16 @@ ql.prototype = Object.create(p.prototype);
 		}
 		l = this.j &= -52, 128 & l ? (this.N = i, this.st = t) : i !== this.N ? (this.N = i, 16384 & l || (this.st = t)) : 32768 & l && (this.st = t);
 	}, l.ht = function(t) {
-		let i, l, n = this.j;
+		let i, l, n = this.j, s = n & xl ? this.Y.Y : this.Y;
+		if (n & xl) {
+			let t = this.Y.wt.St;
+			null !== t && (t.abort(), this.Y.wt.St = null);
+		}
 		if (131072 & n) {
 			let n = this.W;
 			3 & n.j && n.bt(), this.j &= -262145;
 			try {
-				i = this.V(n.N, this, this.N, this.Y), l = yl(i), this.j &= -129;
+				i = this.V(n.N, this, this.N, s), l = yl(i), this.j &= -129;
 			} catch (i) {
 				this.N = Dl(i), this.j = -20 & this.j | 128, this.st = t;
 				return;
@@ -2229,7 +2253,7 @@ ql.prototype = Object.create(p.prototype);
 			}
 			this.j &= -262145;
 			try {
-				i = this.V(this, this.N, this.Y), l = yl(i), this.j &= -129;
+				i = this.V(this, this.N, s), l = yl(i), this.j &= -129;
 			} catch (i) {
 				this.N = Dl(i), this.j = -52 & this.j | 128, this.st = t;
 				return;
@@ -2288,12 +2312,16 @@ ql.prototype = Object.create(p.prototype);
 		}
 		"function" == typeof i && this.kt(i);
 	}, n.ht = function(t) {
-		let i, l, n = this.j;
+		let i, l, n = this.j, s = n & xl ? this.Y.Y : this.Y;
+		if (n & xl) {
+			let t = this.Y.wt.St;
+			null !== t && (t.abort(), this.Y.wt.St = null);
+		}
 		if (131072 & n) {
 			let t = this.W;
 			3 & t.j && t.bt(), this.j &= -262145;
 			try {
-				i = this.V(t.N, this, this.Y), l = yl(i);
+				i = this.V(t.N, this, s), l = yl(i);
 			} finally {
 				this.j &= -20;
 			}
@@ -2311,7 +2339,7 @@ ql.prototype = Object.create(p.prototype);
 			}
 			this.j &= -262145;
 			try {
-				i = this.V(this, this.Y), l = yl(i);
+				i = this.V(this, s), l = yl(i);
 			} finally {
 				this.j &= -52;
 			}
@@ -2319,17 +2347,22 @@ ql.prototype = Object.create(p.prototype);
 		if (3 === l) "function" == typeof i && this.kt(i);
 		else {
 			if (1 === l && !(this.j & gl)) throw jl;
-			this.j |= 64, 1 === l ? (s = new WeakRef(this), i.then((t) => {
-				let i = s.deref();
+			this.j |= 64, 1 === l ? (e = new WeakRef(this), i.then((t) => {
+				let i = e.deref();
 				void 0 === i || 8 & i.j || (i.j &= -65, "function" == typeof t && i.kt(t));
 			}, (t) => {
-				let i = s.deref();
+				let i = e.deref();
 				void 0 === i || 8 & i.j || (i.j &= -65, qt(i, t) || i.S());
 			})) : ol(new WeakRef(this), i);
 		}
-		var s;
+		var e;
 	}, n.S = function() {
-		this.j = 8, Wt(this), null !== this.G && Yi(this), null !== this.I && Ct(this), this.V = this.Y = this.I = this.K = this.L = null;
+		let t = this.j;
+		if (this.j = 8, Wt(this), null !== this.G && Yi(this), null !== this.I && Ct(this), t & xl) {
+			let t = this.Y.wt.St;
+			null !== t && t.abort();
+		}
+		this.V = this.Y = this.I = this.K = this.L = null;
 	}, n.ot = function() {
 		if (null === this.I) Tl[_l++] = this;
 		else {
@@ -2337,28 +2370,28 @@ ql.prototype = Object.create(p.prototype);
 			di[t][i] = this, pi[t] = i + 1, Ol++;
 		}
 	};
-	let d = ql.prototype;
+	let b = ql.prototype;
 	function v(t, i, l, n, s) {
 		let e, h;
 		return "function" == typeof t ? (e = 32 | (0 | l) & C, h = new x(e, t, null, i, n)) : (e = 133632 | (0 | n) & C, h = new x(e, i, t, l, s), h.D = M(t, h, -1)), jt(this, h), 256 & e || bt(h), h;
 	}
-	function b(t, i, l, n, s) {
+	function k(t, i, l, n, s) {
 		let e, h;
 		return "function" == typeof t ? (e = 65568 | (0 | l) & C, h = new x(e, t, null, i, n)) : (e = 199168 | (0 | n) & C, h = new x(e, i, t, l, s), h.D = M(t, h, -1)), jt(this, h), 256 & e || bt(h), h;
 	}
-	function k(t, i, l, n) {
+	function g(t, i, l, n) {
 		let s, e;
 		"function" == typeof t ? (s = 32 | (0 | i) & C, e = new z(s, t, null, this, l)) : (s = 133632 | (0 | l) & C, e = new z(s, i, t, this, n), e.D = M(t, e, -1));
 		let h = this.$ + 1;
 		return this.$ > 2 && h >= pi.length && (pi.push(0), di.push([])), e.$ = h, jt(this, e), vt(e), e;
 	}
-	function g(t, i, l, n) {
+	function R(t, i, l, n) {
 		let s, e;
 		"function" == typeof t ? (s = 65568 | (0 | i) & C, e = new z(s, t, null, this, l)) : (s = 199168 | (0 | l) & C, e = new z(s, i, t, this, n), e.D = M(t, e, -1));
 		let h = this.$ + 1;
 		return this.$ > 2 && h >= pi.length && (pi.push(0), di.push([])), e.$ = h, jt(this, e), vt(e), e;
 	}
-	d.set = function(t) {
+	b.set = function(t) {
 		let i = this.vt;
 		if (null !== i) if ("function" == typeof i) {
 			if (!i(t)) throw Error(i.name);
@@ -2377,13 +2410,13 @@ ql.prototype = Object.create(p.prototype);
 			if (l(t, i)) return;
 		}
 		Bl.call(this, t);
-	}, d.check = function(t) {
+	}, b.check = function(t) {
 		let i = this.dt;
 		return null === i ? this.dt = t : "function" == typeof i ? this.dt = [i, t] : i.push(t), this;
-	}, d.guard = function(t) {
+	}, b.guard = function(t) {
 		let i = this.vt;
 		return null === i ? this.vt = t : "function" == typeof i ? this.vt = [i, t] : i.push(t), this;
-	}, t.signal = n.signal = a, t.gate = n.gate = Fl, t.compute = n.compute = v, t.task = n.task = b, t.effect = n.effect = k, t.spawn = n.spawn = g, t.root = n.root = w;
+	}, t.signal = n.signal = a, t.gate = n.gate = Fl, t.compute = n.compute = v, t.task = n.task = k, t.effect = n.effect = g, t.spawn = n.spawn = R, t.root = n.root = w;
 }
 function M(t, i, l) {
 	let n = -1;

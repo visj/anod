@@ -33,6 +33,7 @@ const FLAG_NOTEQUAL = 1 << 15;
 const FLAG_ASYNC = 1 << 16;
 const FLAG_BOUND = 1 << 17;
 const FLAG_SUSPEND = 1 << 18;
+const FLAG_CONTEXT = 1 << 19;
 
 /* Option flags */
 const OPT_DEFER = FLAG_DEFER;
@@ -315,6 +316,30 @@ function Gate(value) {
 }
 
 Gate.prototype = Object.create(Signal.prototype);
+
+/**
+ * Async context for Compute (task) nodes. Created lazily on first call
+ * to a context utility (e.g. controller()). Stored in the _args wrapper
+ * as { _args, _context: TaskContext }.
+ * @constructor
+ */
+function TaskContext() {
+  /** @type {AbortController | null} */
+  this._controller = null;
+  /** @type {Array | null} */
+  this._defers = null;
+}
+
+/**
+ * Async context for Effect (spawn) nodes. Same shape as TaskContext.
+ * @constructor
+ */
+function SpawnContext() {
+  /** @type {AbortController | null} */
+  this._controller = null;
+  /** @type {Array | null} */
+  this._defers = null;
+}
 
 // ─── Prototype method implementations ──────────────────────────────────────
 // Top-level named functions so they aren't anonymous closures and can be
@@ -713,6 +738,33 @@ function gate(value) {
 
   ComputeProto.suspend = EffectProto.suspend = _suspend;
 
+  /**
+   * Creates a fresh AbortController for this async activation. If this
+   * is the first call, lazily allocates the context wrapper (TaskContext
+   * or SpawnContext) and lifts _args into { _args, _context }.
+   * The controller is automatically aborted on re-run or dispose.
+   * @param {function} ContextCtor - TaskContext or SpawnContext
+   * @returns {function(): !AbortController}
+   */
+  function _makeController(ContextCtor) {
+    return function () {
+      let context;
+      if (this._flag & FLAG_CONTEXT) {
+        context = this._args._context;
+      } else {
+        context = new ContextCtor();
+        this._args = { _args: this._args, _context: context };
+        this._flag |= FLAG_CONTEXT;
+      }
+      let controller = new AbortController();
+      context._controller = controller;
+      return controller;
+    };
+  }
+
+  ComputeProto.controller = _makeController(TaskContext);
+  EffectProto.controller = _makeController(SpawnContext);
+
   // ─── Root — single-use methods ─────────────────────────────────────────
 
   /**
@@ -884,9 +936,16 @@ function gate(value) {
    * @returns {void}
    */
   ComputeProto._dispose = function () {
+    let flag = this._flag;
     this._flag = FLAG_DISPOSED;
     clearSubs(this);
     clearDeps(this);
+    if (flag & FLAG_CONTEXT) {
+      let ctrl = this._args._context._controller;
+      if (ctrl !== null) {
+        ctrl.abort();
+      }
+    }
     this._fn = this._value = this._args = null;
   };
 
@@ -1017,6 +1076,16 @@ function gate(value) {
     let flag = this._flag;
     let value;
     let kind;
+    let args = (flag & FLAG_CONTEXT) ? this._args._args : this._args;
+
+    /** Abort previous activation's controller if present. */
+    if (flag & FLAG_CONTEXT) {
+      let ctrl = this._args._context._controller;
+      if (ctrl !== null) {
+        ctrl.abort();
+        this._args._context._controller = null;
+      }
+    }
 
     if (flag & FLAG_BOUND) {
       /** Bound async: single dep, fn receives (depValue, this, prev, args). */
@@ -1026,7 +1095,7 @@ function gate(value) {
       }
       this._flag &= ~FLAG_SUSPEND;
       try {
-        value = this._fn(dep._value, this, this._value, this._args);
+        value = this._fn(dep._value, this, this._value, args);
         kind = asyncKind(value);
         this._flag &= ~FLAG_ERROR;
       } catch (err) {
@@ -1057,7 +1126,7 @@ function gate(value) {
 
       this._flag &= ~FLAG_SUSPEND;
       try {
-        value = this._fn(this, this._value, this._args);
+        value = this._fn(this, this._value, args);
         kind = asyncKind(value);
         this._flag &= ~FLAG_ERROR;
       } catch (err) {
@@ -1240,6 +1309,16 @@ function gate(value) {
     let flag = this._flag;
     let value;
     let kind;
+    let args = (flag & FLAG_CONTEXT) ? this._args._args : this._args;
+
+    /** Abort previous activation's controller if present. */
+    if (flag & FLAG_CONTEXT) {
+      let ctrl = this._args._context._controller;
+      if (ctrl !== null) {
+        ctrl.abort();
+        this._args._context._controller = null;
+      }
+    }
 
     if (flag & FLAG_BOUND) {
       /** Bound async: single dep, fn receives (depValue, this, args). */
@@ -1249,7 +1328,7 @@ function gate(value) {
       }
       this._flag &= ~FLAG_SUSPEND;
       try {
-        value = this._fn(dep._value, this, this._args);
+        value = this._fn(dep._value, this, args);
         kind = asyncKind(value);
       } finally {
         this._flag &= ~(FLAG_STALE | FLAG_PENDING | FLAG_INIT);
@@ -1274,7 +1353,7 @@ function gate(value) {
 
       this._flag &= ~FLAG_SUSPEND;
       try {
-        value = this._fn(this, this._args);
+        value = this._fn(this, args);
         kind = asyncKind(value);
       } finally {
         this._flag &= ~(FLAG_STALE | FLAG_PENDING | FLAG_INIT | FLAG_SETUP);
@@ -1303,6 +1382,7 @@ function gate(value) {
    * @returns {void}
    */
   EffectProto._dispose = function () {
+    let flag = this._flag;
     this._flag = FLAG_DISPOSED;
     clearDeps(this);
     if (this._cleanup !== null) {
@@ -1310,6 +1390,12 @@ function gate(value) {
     }
     if (this._owned !== null) {
       clearOwned(this);
+    }
+    if (flag & FLAG_CONTEXT) {
+      let ctrl = this._args._context._controller;
+      if (ctrl !== null) {
+        ctrl.abort();
+      }
     }
     this._fn = this._args = this._owned = this._owner = this._recover = null;
   };
