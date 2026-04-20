@@ -803,20 +803,25 @@ describe("async", () => {
       const s1 = c.signal(1);
       const s2 = c.signal(10);
       let runs = 0;
+      let resolve;
 
       const c1 = c.task((c) => {
         runs++;
         const a = c.val(s1);
         const b = c.defer(s2);
-        return c.suspend(Promise.resolve(a + b));
+        return c.suspend(new Promise((r) => { resolve = r; }));
       });
-      await settle();
-      expect(c1.peek()).toBe(11);
       expect(runs).toBe(1);
 
+      /** s2 was deferred — changing it while loading should NOT
+       *  cause a re-run because we haven't subscribed yet. */
       s2.set(20);
       await tick();
       expect(runs).toBe(1);
+
+      resolve(11);
+      await settle();
+      expect(c1.peek()).toBe(11);
     });
 
     test("re-runs after settle if deferred dep changed", async () => {

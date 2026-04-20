@@ -1164,7 +1164,7 @@ function gate(value) {
     this._time = time;
     this._flag =
       flag &
-      ~(FLAG_STALE | FLAG_INIT | FLAG_LOADING | FLAG_EQUAL | FLAG_NOTEQUAL);
+      ~(FLAG_STALE | FLAG_LOADING | FLAG_EQUAL | FLAG_NOTEQUAL);
 
     /** Async nodes delegate to _updateAsync — completely separate path. */
     if (flag & FLAG_ASYNC) {
@@ -2664,9 +2664,9 @@ function resolveIterator(ref, iterable, time) {
  * @returns {void}
  */
 function settle(node, value) {
-  node._flag &= ~FLAG_LOADING;
+  let flag = node._flag &= ~FLAG_LOADING;
 
-  if (value !== node._value || node._flag & FLAG_ERROR) {
+  if (value !== node._value || node._ctime === 0 || (flag & FLAG_ERROR)) {
     node._value = value;
     let time = TIME + 1;
     node._ctime = time;
