@@ -168,6 +168,11 @@ var SCOPES = [[], [], [], []];
 
 var SCOPE_COUNT = 0;
 
+/** @const @type {Array<Compute>} */
+var TASKS = [];
+
+var TASK_COUNT = 0;
+
 /** @const @type {Array<Effect>} */
 var RECEIVERS = [];
 
@@ -949,20 +954,18 @@ function gate(value) {
     this._fn = this._value = this._args = null;
   };
 
-  /**
-   * Sync update for compute nodes. Two branches:
-   * 1. Stable (no SETUP) — no dep tracking, fn receives (this, prev, args)
-   * 2. Setup/dynamic — version bump, dep tracking, fn receives (this, prev, args)
-   * Async nodes delegate to _updateAsync.
-   * @this {!Compute<T,U,V,W>}
-   * @param {number} time
-   */
-  ComputeProto._update = function (time) {
-    let flag = this._flag;
-    this._time = time;
-    this._flag =
-      flag &
-      ~(FLAG_STALE | FLAG_INIT | FLAG_LOADING | FLAG_EQUAL | FLAG_NOTEQUAL);
+    /**
+     * Sync update for compute nodes. Two branches:
+     * 1. Stable (no SETUP) — no dep tracking, fn receives (this, prev, args)
+     * 2. Setup/dynamic — version bump, dep tracking, fn receives (this, prev, args)
+     * Async nodes delegate to _updateAsync.
+     * @this {!Compute<T,U,V,W>}
+     * @param {number} time
+     */
+    ComputeProto._update = function (time) {
+        let flag = this._flag;
+        this._time = time;
+        this._flag = flag & ~(FLAG_STALE | FLAG_INIT | FLAG_EQUAL | FLAG_NOTEQUAL);
 
     /** Async nodes delegate to _updateAsync — completely separate path. */
     if (flag & FLAG_ASYNC) {
@@ -1171,13 +1174,17 @@ function gate(value) {
     }
   };
 
-  /**
-   * @this {Compute}
-   * @returns {void}
-   */
-  ComputeProto._receive = function () {
-    notify(this, FLAG_PENDING);
-  };
+    /**
+     * @this {Compute}
+     * @returns {void}
+     */
+    ComputeProto._receive = function () {
+        if (this._flag & FLAG_LOADING) {
+            TASKS[TASK_COUNT++] = this;
+        } else {
+            notify(this, FLAG_PENDING);
+        }
+    };
 
   // ─── Effect — single-use methods ───────────────────────────────────────
 
@@ -1212,11 +1219,10 @@ function gate(value) {
       this._recover = null;
     }
 
-    /** Async nodes delegate after pre-exec cleanup. */
-    if (flag & FLAG_ASYNC) {
-      this._flag &= ~FLAG_LOADING;
-      return this._updateAsync(time);
-    }
+        /** Async nodes delegate after pre-exec cleanup. */
+        if (flag & FLAG_ASYNC) {
+            return this._updateAsync(time);
+        }
 
     /** @type {(function(): void) | null | undefined} */
     let value;
@@ -2647,106 +2653,121 @@ function startEffect(node) {
  * @returns {void}
  */
 function start() {
-  /** @type {number} */
-  let time = 0;
-  /** @type {number} */
-  let cycle = 0;
-  /** @type {*} */
-  let error = null;
-  /** @type {boolean} */
-  let thrown = false;
-  IDLE = false;
-  try {
-    do {
-      time = ++TIME;
-      if (DISPOSER_COUNT > 0) {
-        let count = DISPOSER_COUNT;
-        for (let i = 0; i < count; i++) {
-          DISPOSES[i]._dispose();
-          DISPOSES[i] = null;
-        }
-        DISPOSER_COUNT = 0;
-      }
-      if (SENDER_COUNT > 0) {
-        let count = SENDER_COUNT;
-        for (let i = 0; i < count; i++) {
-          SENDERS[i]._assign(PAYLOADS[i]);
-          SENDERS[i] = PAYLOADS[i] = null;
-        }
-        SENDER_COUNT = 0;
-      }
-      if (SCOPE_COUNT > 0) {
-        let levels = LEVELS.length;
-        for (let i = 0; i < levels; i++) {
-          let count = LEVELS[i];
-          let effects = SCOPES[i];
-          for (let j = 0; j < count; j++) {
-            let node = effects[j];
-            if (
-              node._flag & FLAG_STALE ||
-              (node._flag & FLAG_PENDING && needsUpdate(node, time))
-            ) {
-              try {
-                TRANSACTION = SEED;
-                node._update(time);
-              } catch (err) {
-                if (!thrown) {
-                  if (!tryRecover(node, err)) {
-                    error = err;
-                    thrown = true;
-                  }
+    /** @type {number} */
+    let time = 0;
+    /** @type {number} */
+    let cycle = 0;
+    /** @type {*} */
+    let error = null;
+    /** @type {boolean} */
+    let thrown = false;
+    IDLE = false;
+    try {
+        do {
+            time = ++TIME;
+            if (DISPOSER_COUNT > 0) {
+                let count = DISPOSER_COUNT;
+                for (let i = 0; i < count; i++) {
+                    DISPOSES[i]._dispose();
+                    DISPOSES[i] = null;
                 }
-                node._dispose();
-              }
-            } else {
-              node._flag &= ~(FLAG_STALE | FLAG_PENDING);
+                DISPOSER_COUNT = 0;
             }
-            effects[j] = null;
-          }
-          LEVELS[i] = 0;
-        }
-        SCOPE_COUNT = 0;
-      }
-      if (RECEIVER_COUNT > 0) {
-        let count = RECEIVER_COUNT;
-        for (let i = 0; i < count; i++) {
-          let node = RECEIVERS[i];
-          RECEIVERS[i] = null;
-          if (
-            node._flag & FLAG_STALE ||
-            (node._flag & FLAG_PENDING && needsUpdate(node, time))
-          ) {
-            TRANSACTION = SEED;
-            try {
-              node._update(time);
-            } catch (err) {
-              if (!thrown) {
-                if (!tryRecover(node, err)) {
-                  error = err;
-                  thrown = true;
+            if (SENDER_COUNT > 0) {
+                let count = SENDER_COUNT;
+                for (let i = 0; i < count; i++) {
+                    SENDERS[i]._assign(PAYLOADS[i]);
+                    SENDERS[i] = PAYLOADS[i] = null;
                 }
-              }
-              node._dispose();
+                SENDER_COUNT = 0;
             }
-          } else {
-            node._flag &= ~(FLAG_STALE | FLAG_PENDING);
-          }
+            if (TASK_COUNT > 0) {
+                let count = TASK_COUNT;
+                for (let i = 0; i < count; i++) {
+                    let node = TASKS[i];
+                    TASKS[i] = null;
+                    if ((node._flag & FLAG_STALE) || ((node._flag & FLAG_PENDING) && needsUpdate(node, time))) {
+                        node._update(time);
+                    } else {
+                        node._flag &= ~(FLAG_STALE | FLAG_PENDING);
+                    }
+                }
+                TASK_COUNT = 0;
+            }
+            if (SCOPE_COUNT > 0) {
+                let levels = LEVELS.length;
+                for (let i = 0; i < levels; i++) {
+                    let count = LEVELS[i];
+                    let effects = SCOPES[i];
+                    for (let j = 0; j < count; j++) {
+                        let node = effects[j];
+                        if ((node._flag & FLAG_STALE) || ((node._flag & FLAG_PENDING) && needsUpdate(node, time))) {
+                            try {
+                                TRANSACTION = SEED;
+                                node._update(time);
+                            } catch (err) {
+                                if (!thrown) {
+                                    if (!tryRecover(node, err)) {
+                                        error = err;
+                                        thrown = true;
+                                    }
+                                }
+                                node._dispose();
+                            }
+                        } else {
+                            node._flag &= ~(FLAG_STALE | FLAG_PENDING);
+                        }
+                        effects[j] = null;
+                    }
+                    LEVELS[i] = 0;
+                }
+                SCOPE_COUNT = 0;
+            }
+            if (RECEIVER_COUNT > 0) {
+                let count = RECEIVER_COUNT;
+                for (let i = 0; i < count; i++) {
+                    let node = RECEIVERS[i];
+                    RECEIVERS[i] = null;
+                    if ((node._flag & FLAG_STALE) || ((node._flag & FLAG_PENDING) && needsUpdate(node, time))) {
+                        TRANSACTION = SEED;
+                        try {
+                            node._update(time);
+                        } catch (err) {
+                            if (!thrown) {
+                                if (!tryRecover(node, err)) {
+                                    error = err;
+                                    thrown = true;
+                                }
+                            }
+                            node._dispose();
+                        }
+                    } else {
+                        node._flag &= ~(FLAG_STALE | FLAG_PENDING);
+                    }
+                }
+                RECEIVER_COUNT = 0;
+            }
+            if (cycle++ === 1e5) {
+                error = new Error('Runaway cycle');
+                thrown = true;
+                break;
+            }
+        } while (
+            !thrown &&
+            (SENDER_COUNT > 0 ||
+                DISPOSER_COUNT > 0)
+        );
+    } finally {
+        IDLE = true;
+        DISPOSER_COUNT =
+            SENDER_COUNT =
+            TASK_COUNT =
+            SCOPE_COUNT =
+            RECEIVER_COUNT = 0;
+        if (thrown) {
+            throw error;
         }
-        RECEIVER_COUNT = 0;
-      }
-      if (cycle++ === 1e5) {
-        error = new Error("Runaway cycle");
-        thrown = true;
-        break;
-      }
-    } while (!thrown && (SENDER_COUNT > 0 || DISPOSER_COUNT > 0));
-  } finally {
-    IDLE = true;
-    DISPOSER_COUNT = SENDER_COUNT = SCOPE_COUNT = RECEIVER_COUNT = 0;
-    if (thrown) {
-      throw error;
     }
-  }
 }
 
 // ─── Public API ────────────────────────────────────────────────────────────

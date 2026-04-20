@@ -231,7 +231,7 @@ describe("async", () => {
                 if (c.val(s1)) {
                     return staleIter;
                 }
-                return (async function*() { yield 99; })();
+                return (async function* () { yield 99; })();
             });
 
             s1.set(false);
@@ -543,6 +543,116 @@ describe("async", () => {
         });
     });
 
+    describe("loading suppresses downstream", () => {
+        test("effect does not re-run when a task dependency changes while loading", async () => {
+            let resolve1, resolve2;
+            const s1 = c.signal(1);
+            let taskRuns = 0;
+            const c1 = c.task((c) => {
+                taskRuns++;
+                const v = c.val(s1);
+                if (v === 1) {
+                    return c.suspend(new Promise(r => { resolve1 = r; }));
+                }
+                return c.suspend(new Promise(r => { resolve2 = r; }));
+            }, 0);
+            let effectRuns = 0;
+
+            c.effect(c => {
+                c.val(c1);
+                effectRuns++;
+            });
+
+            expect(effectRuns).toBe(1);
+            expect(c1.loading()).toBe(true);
+            expect(taskRuns).toBe(1);
+
+            /**
+             * Update s1 while the task is still loading. The task
+             * re-executes (fires a new promise), but the downstream
+             * effect must NOT be notified because the task is still
+             * loading — its value hasn't settled yet.
+             */
+            s1.set(2);
+            await settle();
+
+            expect(taskRuns).toBe(2);
+            expect(effectRuns).toBe(1);
+
+            resolve2(42);
+            await settle();
+
+            /** Now the task has settled — the effect should run. */
+            expect(effectRuns).toBe(2);
+        });
+
+        test("chained computes: intermediate task loading blocks downstream effect", async () => {
+            let resolve;
+            const s1 = c.signal(1);
+            const c1 = c.task((c) => {
+                const v = c.val(s1);
+                return c.suspend(new Promise(r => { resolve = r; }));
+            }, 0);
+            const c2 = c.compute(c => c.val(c1) * 10);
+            let runs = 0;
+            let observed = void 0;
+
+            c.effect(c => {
+                observed = c.val(c2);
+                runs++;
+            });
+
+            expect(runs).toBe(1);
+            expect(observed).toBe(0);
+
+            /** Changing s1 while task is loading should not propagate. */
+            s1.set(2);
+            await settle();
+
+            expect(runs).toBe(1);
+
+            resolve(5);
+            await settle();
+
+            expect(runs).toBe(2);
+            expect(observed).toBe(50);
+        });
+
+        test("multiple dep changes while loading do not cause multiple effect runs", async () => {
+            let resolve;
+            const s1 = c.signal(1);
+            const s2 = c.signal(10);
+            const c1 = c.task((c) => {
+                const a = c.val(s1);
+                const b = c.val(s2);
+                return c.suspend(new Promise(r => { resolve = r; }));
+            }, 0);
+            let runs = 0;
+
+            c.effect(c => {
+                c.val(c1);
+                runs++;
+            });
+
+            expect(runs).toBe(1);
+
+            /**
+             * Two dependency updates while loading — neither should
+             * cause an extra effect run.
+             */
+            s1.set(2);
+            await settle();
+            s2.set(20);
+            await settle();
+
+            expect(runs).toBe(1);
+
+            resolve(99);
+            await settle();
+
+            expect(runs).toBe(2);
+        });
+    });
     describe("suspend", () => {
         test("resolves value when node is still alive", async () => {
             const c1 = c.task(async (c) => {

@@ -1,6 +1,6 @@
 import { bench, run } from 'mitata';
 import { EXPECTED } from './expected.js';
-import { c } from '../../dist/index.mjs';
+import { c } from '../../dist/index.js';
 import { saveRun } from './save-run.js';
 
 let sink = 0;
