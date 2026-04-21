@@ -208,7 +208,7 @@ function Signal(value) {
   /** @type {T} */
   this._value = value;
   /** @type {number} */
-  this._version = 0;
+  this._version = -1;
   /** @type {Receiver} */
   this._sub1 = null;
   /** @type {number} */
@@ -233,7 +233,7 @@ function Compute(opts, fn, dep1, seed, args) {
   /** @type {T} */
   this._value = seed;
   /** @type {number} */
-  this._version = 0;
+  this._version = -1;
   /** @type {Receiver} */
   this._sub1 = null;
   /** @type {number} */
@@ -307,7 +307,7 @@ function Gate(value) {
   /** @type {T} */
   this._value = value;
   /** @type {number} */
-  this._version = 0;
+  this._version = -1;
   /** @type {Receiver} */
   this._sub1 = null;
   /** @type {number} */
@@ -1109,8 +1109,15 @@ function gate(value) {
       if (fiber._controller !== null) {
         fiber._controller.abort();
       }
-      if (fiber._channel !== null && fiber._channel._res1 !== null) {
-        clearChannel(fiber._channel);
+      if (fiber._channel !== null) {
+        /** Panic any nodes awaiting this task. */
+        if (fiber._channel._waiters !== null) {
+          resolveWaiters(this, fiber._channel, new Error("Awaited task was disposed"), true, true);
+        }
+        /** Remove ourselves from any responders we were awaiting. */
+        if (fiber._channel._res1 !== null) {
+          clearChannel(fiber._channel);
+        }
       }
     }
     this._fn = this._value = this._args = null;
@@ -1902,27 +1909,59 @@ function clearOwned(owner) {
  * @param {*} error
  * @returns {boolean} true if error was handled
  */
-function tryRecover(node, error) {
-  let owner = node._owner;
-  while (owner !== null) {
-    let recover = owner._recover;
-    if (recover !== null) {
-      if (typeof recover === "function") {
-        if (recover(error) === true) {
+/**
+ * Checks a single owner's _recover handlers.
+ * @param {Root | Effect} owner
+ * @param {*} error
+ * @returns {boolean}
+ */
+function _checkRecover(owner, error) {
+  let recover = owner._recover;
+  if (recover !== null) {
+    if (typeof recover === "function") {
+      if (recover(error) === true) {
+        return true;
+      }
+    } else {
+      let count = recover.length;
+      for (let i = 0; i < count; i++) {
+        if (recover[i](error) === true) {
           return true;
-        }
-      } else {
-        let count = recover.length;
-        for (let i = 0; i < count; i++) {
-          if (recover[i](error) === true) {
-            return true;
-          }
         }
       }
     }
-    owner = owner._owner;
   }
   return false;
+}
+
+/** @const */ var RECOVER_NONE = 0;
+/** @const */ var RECOVER_SELF = 1;
+/** @const */ var RECOVER_OWNER = 2;
+
+/**
+ * Attempts to recover from an error.
+ * - RECOVER_SELF: the node's own _recover handled it — node survives.
+ * - RECOVER_OWNER: an ancestor handled it — node still disposes, error swallowed.
+ * - RECOVER_NONE: unhandled — node disposes, error propagates.
+ *
+ * @param {Effect} node
+ * @param {*} error
+ * @returns {number}
+ */
+function tryRecover(node, error) {
+  /** Self-recovery: node stays alive. */
+  if (node._recover !== null && _checkRecover(node, error)) {
+    return RECOVER_SELF;
+  }
+  /** Bubble up the owner chain. Node will be disposed by caller. */
+  let owner = node._owner;
+  while (owner !== null) {
+    if (_checkRecover(owner, error)) {
+      return RECOVER_OWNER;
+    }
+    owner = owner._owner;
+  }
+  return RECOVER_NONE;
 }
 
 // ─── patchDeps ─────────────────────────────────────────────────────────────
@@ -2540,7 +2579,7 @@ function settle(node, value) {
     if (node._flag & FLAG_FIBER) {
       let ch = node._args._fiber._channel;
       if (ch !== null && ch._waiters !== null) {
-        resolveWaiters(node, ch, value, !!(node._flag & FLAG_ERROR));
+        resolveWaiters(node, ch, value, !!(node._flag & FLAG_ERROR), false);
       }
     }
 
@@ -2583,57 +2622,43 @@ function settleDeps(node) {
     dep1._version = stamp;
   }
 
-  /** Dedup scan of _deps. */
+  /** Dedup scan of _deps — remove duplicates via swap-with-last. */
+  let hasDefers = deferLen > 0;
   if (deps !== null) {
     let i = deps.length - 2;
-    if (deferLen > 0) {
-      /** Write-pointer compaction when defers need appending. */
-      let write = deps.length;
-      while (i >= 0) {
-        let dep = /** @type {!Sender} */ (deps[i]);
-        if (dep._version === stamp) {
-          clearReceiver(dep, /** @type {number} */ (deps[i + 1]));
-          write -= 2;
-          if (i !== write) {
-            deps[i] = deps[write];
-            deps[i + 1] = deps[write + 1];
-            let movedSlot = /** @type {number} */ (deps[i + 1]);
-            if (movedSlot === -1) {
-              /** @type {Sender} */ (deps[i])._sub1slot = i;
-            } else {
-              /** @type {Sender} */ (deps[i])._subs[movedSlot + 1] = i;
-            }
+    let write = deps.length;
+    while (i >= 0) {
+      let dep = /** @type {!Sender} */ (deps[i]);
+      if (dep._version === stamp) {
+        clearReceiver(dep, /** @type {number} */ (deps[i + 1]));
+        write -= 2;
+        if (i !== write) {
+          let lastDep, lastSlot;
+          if (hasDefers) {
+            lastDep = deps[write];
+            lastSlot = deps[write + 1];
+          } else {
+            lastSlot = /** @type {number} */ (deps.pop());
+            lastDep = /** @type {!Sender} */ (deps.pop());
           }
-        } else {
-          dep._version = stamp;
-        }
-        i -= 2;
-      }
-      if (write < deps.length) {
-        deps.length = write;
-      }
-    } else {
-      /** No defers — pop-based compaction. */
-      while (i >= 0) {
-        let dep = /** @type {!Sender} */ (deps[i]);
-        if (dep._version === stamp) {
-          clearReceiver(dep, /** @type {number} */ (deps[i + 1]));
-          let lastSlot = /** @type {number} */ (deps.pop());
-          let lastDep = /** @type {!Sender} */ (deps.pop());
-          if (i !== deps.length) {
-            deps[i] = lastDep;
-            deps[i + 1] = lastSlot;
-            if (lastSlot === -1) {
-              lastDep._sub1slot = i;
-            } else {
-              lastDep._subs[lastSlot + 1] = i;
-            }
+          deps[i] = lastDep;
+          deps[i + 1] = lastSlot;
+          if (lastSlot === -1) {
+            /** @type {Sender} */ (lastDep)._sub1slot = i;
+          } else {
+            /** @type {Sender} */ (lastDep)._subs[lastSlot + 1] = i;
           }
-        } else {
-          dep._version = stamp;
+        } else if (!hasDefers) {
+          deps.pop();
+          deps.pop();
         }
-        i -= 2;
+      } else {
+        dep._version = stamp;
       }
+      i -= 2;
+    }
+    if (hasDefers && write < deps.length) {
+      deps.length = write;
     }
   }
 
@@ -2658,7 +2683,6 @@ function settleDeps(node) {
       changed = true;
     }
   }
-
   return changed;
 }
 
@@ -2766,7 +2790,19 @@ function clearChannel(channel) {
  * @param {boolean} isError
  * @returns {void}
  */
-function resolveWaiters(responder, responderCh, value, isError) {
+/**
+ * Resolves (or rejects) all waiters of a responder and clears their
+ * channel references. When panic is false, subscribes each awaiter as
+ * a dep of the responder. When panic is true (responder is disposing),
+ * skips subscription since the responder is dead.
+ * @param {!Compute} responder
+ * @param {!Channel} responderCh
+ * @param {*} value
+ * @param {boolean} isError
+ * @param {boolean} panic
+ * @returns {void}
+ */
+function resolveWaiters(responder, responderCh, value, isError, panic) {
   let waiters = responderCh._waiters;
   let count = waiters.length;
   for (let i = 0; i < count; i += 4) {
@@ -2777,8 +2813,9 @@ function resolveWaiters(responder, responderCh, value, isError) {
     } else {
       waiters[i + 2](value);
     }
-    /** Subscribe responder as a dep of the awaiter. */
-    subscribe(awaiter, responder);
+    if (!panic) {
+      subscribe(awaiter, responder);
+    }
     /** Clear the awaiter's back-reference to this responder. */
     let awaiterCh = awaiter._args._fiber._channel;
     if (resSlot === -1) {
@@ -2818,8 +2855,8 @@ function resolveEffectPromise(ref, promise) {
       let node = ref.deref();
       if (node !== void 0 && !(node._flag & FLAG_DISPOSED)) {
         node._flag &= ~FLAG_LOADING;
-        let recovered = tryRecover(node, err);
-        if (!recovered) {
+        let result = tryRecover(node, err);
+        if (result !== RECOVER_SELF) {
           node._dispose();
         }
       }
@@ -2867,8 +2904,8 @@ function resolveEffectIterator(ref, iterable) {
     let node = ref.deref();
     if (node !== void 0 && !(node._flag & FLAG_DISPOSED)) {
       node._flag &= ~FLAG_LOADING;
-      let recovered = tryRecover(node, err);
-      if (!recovered) {
+      let result = tryRecover(node, err);
+      if (result !== RECOVER_SELF) {
         node._dispose();
       }
     }
@@ -2928,9 +2965,11 @@ function startEffect(node) {
         start();
       }
     } catch (err) {
-      let recovered = tryRecover(node, err);
-      node._dispose();
-      if (!recovered) {
+      let result = tryRecover(node, err);
+      if (result !== RECOVER_SELF) {
+        node._dispose();
+      }
+      if (result === RECOVER_NONE) {
         throw err;
       }
     } finally {
@@ -2940,9 +2979,11 @@ function startEffect(node) {
     try {
       node._update(TIME);
     } catch (err) {
-      let recovered = tryRecover(node, err);
-      node._dispose();
-      if (!recovered) {
+      let result = tryRecover(node, err);
+      if (result !== RECOVER_SELF) {
+        node._dispose();
+      }
+      if (result === RECOVER_NONE) {
         throw err;
       }
     }
@@ -3012,13 +3053,14 @@ function start() {
                 TRANSACTION = SEED;
                 node._update(time);
               } catch (err) {
-                if (!thrown) {
-                  if (!tryRecover(node, err)) {
-                    error = err;
-                    thrown = true;
-                  }
+                let result = tryRecover(node, err);
+                if (result !== RECOVER_SELF) {
+                  node._dispose();
                 }
-                node._dispose();
+                if (!thrown && result === RECOVER_NONE) {
+                  error = err;
+                  thrown = true;
+                }
               }
             } else {
               node._flag &= ~(FLAG_STALE | FLAG_PENDING);
@@ -3042,13 +3084,14 @@ function start() {
             try {
               node._update(time);
             } catch (err) {
-              if (!thrown) {
-                if (!tryRecover(node, err)) {
-                  error = err;
-                  thrown = true;
-                }
+              let result = tryRecover(node, err);
+              if (result !== RECOVER_SELF) {
+                node._dispose();
               }
-              node._dispose();
+              if (!thrown && result === RECOVER_NONE) {
+                error = err;
+                thrown = true;
+              }
             }
           } else {
             node._flag &= ~(FLAG_STALE | FLAG_PENDING);
@@ -3074,15 +3117,26 @@ function start() {
 // ─── Public API ────────────────────────────────────────────────────────────
 
 /** Unowned compute. */
-function compute(a, b, c, d, e) {
+/**
+ * Creates a sync compute node.
+ * Unbound: compute(fn, seed?, opts?, args?)
+ * Bound:   compute(dep, fn, seed?, opts?, args?)
+ * @param {Sender | Function} depOrFn
+ * @param {Function | *} fnOrSeed
+ * @param {number | *} optsOrSeed
+ * @param {number | *} argsOrOpts
+ * @param {*} [args]
+ * @returns {!Compute}
+ */
+function compute(depOrFn, fnOrSeed, optsOrSeed, argsOrOpts, args) {
   let flag, node;
-  if (typeof a === "function") {
-    flag = FLAG_SETUP | ((0 | c) & OPTIONS);
-    node = new Compute(flag, a, null, b, d);
+  if (typeof depOrFn === "function") {
+    flag = FLAG_SETUP | ((0 | optsOrSeed) & OPTIONS);
+    node = new Compute(flag, depOrFn, null, fnOrSeed, argsOrOpts);
   } else {
-    flag = FLAG_STABLE | FLAG_BOUND | FLAG_SINGLE | ((0 | d) & OPTIONS);
-    node = new Compute(flag, b, a, c, e);
-    node._dep1slot = connect(a, node, -1);
+    flag = FLAG_STABLE | FLAG_BOUND | FLAG_SINGLE | ((0 | argsOrOpts) & OPTIONS);
+    node = new Compute(flag, fnOrSeed, depOrFn, optsOrSeed, args);
+    node._dep1slot = connect(depOrFn, node, -1);
   }
   if (!(flag & FLAG_DEFER)) {
     startCompute(node);
@@ -3090,17 +3144,27 @@ function compute(a, b, c, d, e) {
   return node;
 }
 
-/** Unowned async compute. */
-function task(a, b, c, d, e) {
+/**
+ * Creates an async compute node (task).
+ * Unbound: task(fn, seed?, opts?, args?)
+ * Bound:   task(dep, fn, seed?, opts?, args?)
+ * @param {Sender | Function} depOrFn
+ * @param {Function | *} fnOrSeed
+ * @param {number | *} optsOrSeed
+ * @param {number | *} argsOrOpts
+ * @param {*} [args]
+ * @returns {!Compute}
+ */
+function task(depOrFn, fnOrSeed, optsOrSeed, argsOrOpts, args) {
   let flag, node;
-  if (typeof a === "function") {
-    flag = FLAG_ASYNC | FLAG_SETUP | ((0 | c) & OPTIONS);
-    node = new Compute(flag, a, null, b, d);
+  if (typeof depOrFn === "function") {
+    flag = FLAG_ASYNC | FLAG_SETUP | ((0 | optsOrSeed) & OPTIONS);
+    node = new Compute(flag, depOrFn, null, fnOrSeed, argsOrOpts);
   } else {
     flag =
-      FLAG_ASYNC | FLAG_STABLE | FLAG_BOUND | FLAG_SINGLE | ((0 | d) & OPTIONS);
-    node = new Compute(flag, b, a, c, e);
-    node._dep1slot = connect(a, node, -1);
+      FLAG_ASYNC | FLAG_STABLE | FLAG_BOUND | FLAG_SINGLE | ((0 | argsOrOpts) & OPTIONS);
+    node = new Compute(flag, fnOrSeed, depOrFn, optsOrSeed, args);
+    node._dep1slot = connect(depOrFn, node, -1);
   }
   if (!(flag & FLAG_DEFER)) {
     startCompute(node);
@@ -3108,32 +3172,50 @@ function task(a, b, c, d, e) {
   return node;
 }
 
-/** Unowned effect. */
-function effect(a, b, c, d) {
+/**
+ * Creates a sync effect node.
+ * Unbound: effect(fn, opts?, args?)
+ * Bound:   effect(dep, fn, opts?, args?)
+ * @param {Sender | Function} depOrFn
+ * @param {Function | number} fnOrOpts
+ * @param {number | *} optsOrArgs
+ * @param {*} [args]
+ * @returns {!Effect}
+ */
+function effect(depOrFn, fnOrOpts, optsOrArgs, args) {
   let flag, node;
-  if (typeof a === "function") {
-    flag = FLAG_SETUP | ((0 | b) & OPTIONS);
-    node = new Effect(flag, a, null, null, c);
+  if (typeof depOrFn === "function") {
+    flag = FLAG_SETUP | ((0 | fnOrOpts) & OPTIONS);
+    node = new Effect(flag, depOrFn, null, null, optsOrArgs);
   } else {
-    flag = FLAG_STABLE | FLAG_BOUND | FLAG_SINGLE | ((0 | c) & OPTIONS);
-    node = new Effect(flag, b, a, null, d);
-    node._dep1slot = connect(a, node, -1);
+    flag = FLAG_STABLE | FLAG_BOUND | FLAG_SINGLE | ((0 | optsOrArgs) & OPTIONS);
+    node = new Effect(flag, fnOrOpts, depOrFn, null, args);
+    node._dep1slot = connect(depOrFn, node, -1);
   }
   startEffect(node);
   return node;
 }
 
-/** Unowned async effect. */
-function spawn(a, b, c, d) {
+/**
+ * Creates an async effect node (spawn).
+ * Unbound: spawn(fn, opts?, args?)
+ * Bound:   spawn(dep, fn, opts?, args?)
+ * @param {Sender | Function} depOrFn
+ * @param {Function | number} fnOrOpts
+ * @param {number | *} optsOrArgs
+ * @param {*} [args]
+ * @returns {!Effect}
+ */
+function spawn(depOrFn, fnOrOpts, optsOrArgs, args) {
   let flag, node;
-  if (typeof a === "function") {
-    flag = FLAG_ASYNC | FLAG_SETUP | ((0 | b) & OPTIONS);
-    node = new Effect(flag, a, null, null, c);
+  if (typeof depOrFn === "function") {
+    flag = FLAG_ASYNC | FLAG_SETUP | ((0 | fnOrOpts) & OPTIONS);
+    node = new Effect(flag, depOrFn, null, null, optsOrArgs);
   } else {
     flag =
-      FLAG_ASYNC | FLAG_STABLE | FLAG_BOUND | FLAG_SINGLE | ((0 | c) & OPTIONS);
-    node = new Effect(flag, b, a, null, d);
-    node._dep1slot = connect(a, node, -1);
+      FLAG_ASYNC | FLAG_STABLE | FLAG_BOUND | FLAG_SINGLE | ((0 | optsOrArgs) & OPTIONS);
+    node = new Effect(flag, fnOrOpts, depOrFn, null, args);
+    node._dep1slot = connect(depOrFn, node, -1);
   }
   startEffect(node);
   return node;
@@ -3166,21 +3248,21 @@ function batch(fn) {
 function Clock() {}
 Clock.prototype.signal = signal;
 Clock.prototype.gate = gate;
-Clock.prototype.compute = function (a, b, c, d, e) {
+Clock.prototype.compute = function (depOrFn, fnOrSeed, optsOrSeed, argsOrOpts, args) {
   if (!IDLE) { throw new Error(ASSERT_IDLE); }
-  return compute(a, b, c, d, e);
+  return compute(depOrFn, fnOrSeed, optsOrSeed, argsOrOpts, args);
 };
-Clock.prototype.task = function (a, b, c, d, e) {
+Clock.prototype.task = function (depOrFn, fnOrSeed, optsOrSeed, argsOrOpts, args) {
   if (!IDLE) { throw new Error(ASSERT_IDLE); }
-  return task(a, b, c, d, e);
+  return task(depOrFn, fnOrSeed, optsOrSeed, argsOrOpts, args);
 };
-Clock.prototype.effect = function (a, b, c, d) {
+Clock.prototype.effect = function (depOrFn, fnOrOpts, optsOrArgs, args) {
   if (!IDLE) { throw new Error(ASSERT_IDLE); }
-  return effect(a, b, c, d);
+  return effect(depOrFn, fnOrOpts, optsOrArgs, args);
 };
-Clock.prototype.spawn = function (a, b, c, d) {
+Clock.prototype.spawn = function (depOrFn, fnOrOpts, optsOrArgs, args) {
   if (!IDLE) { throw new Error(ASSERT_IDLE); }
-  return spawn(a, b, c, d);
+  return spawn(depOrFn, fnOrOpts, optsOrArgs, args);
 };
 Clock.prototype.root = root;
 Clock.prototype.batch = batch;
