@@ -1,4 +1,3 @@
-// 1. Destructure the RUNTIME variables from the fake globals
 import {
     Signal, Compute, Effect, OPT_SETUP, OPT_STABLE
 } from '@fyren/core';
@@ -6,9 +5,7 @@ import {
 import {
     IDLE,
     FLAG_STALE, FLAG_INIT, FLAG_BOUND,
-    register, notify, scheduleSignal, subscribe, startEffect,
-    Reader, Subscriber,
-    isPrimitive, isFunction, isSignal
+    connect, subscribe, schedule, assignSignal, notify, start, startEffect
 } from '@fyren/core/internal';
 
 /**
@@ -31,23 +28,15 @@ import {
 var SignalProto = Signal.prototype;
 /** @const */
 var ComputeProto = Compute.prototype;
-/** @const */
-var ReaderProto = Reader.prototype;
-/** @const */
-var SubscriberProto = Subscriber.prototype;
 
 /**
- * Returns the bound source value (dep1.val()).
+ * Returns the bound source value (dep1's value).
  * Used by array methods to access the underlying array.
- * On Reader/Subscriber: delegates through _node.
- * On Compute: the node IS the context, accesses _dep1 directly.
+ * @this {!Compute}
  * @returns {*}
  */
-ReaderProto._source = SubscriberProto._source = function () {
-    return this._node._dep1.val();
-};
 ComputeProto._source = function () {
-    return this._dep1.val();
+    return this._dep1._value;
 };
 
 /** @const */
@@ -69,14 +58,9 @@ EffectProto._source = function () {
  * On Compute: the node IS the context, accesses _dep1 directly.
  * @returns {number}
  */
-ReaderProto._getMod = SubscriberProto._getMod = function () {
-    return this._node._dep1._mod;
-};
+/** Stub — mod tracking disabled for now. */
 ComputeProto._getMod = function () {
-    return this._dep1._mod;
-};
-EffectProto._getMod = function () {
-    return this._dep1._mod;
+    return 0;
 };
 
 
@@ -105,64 +89,100 @@ function encodeMod(op, pos, len) {
  * @param {number} mod
  * @returns {void}
  */
-function setMod(node, mod) {
-    if (node._flag & FLAG_STALE) {
-        node._mod = mod;
-    } else {
-        node._mod = 0;
-    }
+/** @returns {number} Stub — mod tracking disabled for now. */
+function getMod() {
+    return 0;
 }
 
-/** @const {number} */ var OP_COPY_WITHIN = register(function (node, args) {
-    node._value.copyWithin(args[0], args[1], args[2]);
-    node._mod = 0;
-});
-/** @const {number} */ var OP_FILL = register(function (node, value) {
-    node._value.fill(value);
-    node._mod = 0;
-});
-/** @const {number} */ var OP_FILL_RANGE = register(function (node, args) {
-    node._value.fill(args[0], args[1], args[2]);
-    node._mod = 0;
-});
-/** @const {number} */ var OP_POP = register(function (node) {
+/**
+ * Batched array mutation handlers. Each mutates the array in-place
+ * and notifies subscribers if FLAG_SCHEDULED is set.
+ * @param {!Signal} node
+ */
+function push(node, value) {
+    node._value.push(value);
+    if (node._flag & FLAG_SCHEDULED) {
+        node._flag &= ~FLAG_SCHEDULED;
+        notify(node, FLAG_STALE);
+    }
+}
+function pushArray(node, items) {
+    node._value.push(...items);
+    if (node._flag & FLAG_SCHEDULED) {
+        node._flag &= ~FLAG_SCHEDULED;
+        notify(node, FLAG_STALE);
+    }
+}
+function pop(node) {
     node._value.pop();
-    setMod(node, encodeMod(MUT_DEL, node._value.length, 1));
-});
-/** @const {number} */ var OP_PUSH = register(function (node, value) {
-    let arr = node._value;
-    let pos = arr.length;
-    arr.push(value);
-    setMod(node, encodeMod(MUT_ADD, pos, 1));
-});
-/** @const {number} */ var OP_PUSH_ARRAY = register(function (node, items) {
-    let arr = node._value;
-    let pos = arr.length;
-    arr.push(...items);
-    setMod(node, encodeMod(MUT_ADD, pos, items.length));
-});
-/** @const {number} */ var OP_REVERSE = register(function (node) {
-    node._value.reverse();
-    setMod(node, encodeMod(MUT_SORT, 0, 0));
-});
-/** @const {number} */ var OP_SHIFT = register(function (node) {
+    if (node._flag & FLAG_SCHEDULED) {
+        node._flag &= ~FLAG_SCHEDULED;
+        notify(node, FLAG_STALE);
+    }
+}
+function shift(node) {
     node._value.shift();
-    setMod(node, encodeMod(MUT_DEL, 0, 1));
-});
-/** @const {number} */ var OP_SORT = register(function (node, compareFn) {
+    if (node._flag & FLAG_SCHEDULED) {
+        node._flag &= ~FLAG_SCHEDULED;
+        notify(node, FLAG_STALE);
+    }
+}
+function unshift(node, value) {
+    node._value.unshift(value);
+    if (node._flag & FLAG_SCHEDULED) {
+        node._flag &= ~FLAG_SCHEDULED;
+        notify(node, FLAG_STALE);
+    }
+}
+function unshiftArray(node, items) {
+    node._value.unshift(...items);
+    if (node._flag & FLAG_SCHEDULED) {
+        node._flag &= ~FLAG_SCHEDULED;
+        notify(node, FLAG_STALE);
+    }
+}
+function reverse(node) {
+    node._value.reverse();
+    if (node._flag & FLAG_SCHEDULED) {
+        node._flag &= ~FLAG_SCHEDULED;
+        notify(node, FLAG_STALE);
+    }
+}
+function sort(node, compareFn) {
     node._value.sort(compareFn);
-    setMod(node, encodeMod(MUT_SORT, 0, 0));
-});
-/** @const {number} */ var OP_SPLICE = register(function (node, args) {
+    if (node._flag & FLAG_SCHEDULED) {
+        node._flag &= ~FLAG_SCHEDULED;
+        notify(node, FLAG_STALE);
+    }
+}
+function fill(node, value) {
+    node._value.fill(value);
+    if (node._flag & FLAG_SCHEDULED) {
+        node._flag &= ~FLAG_SCHEDULED;
+        notify(node, FLAG_STALE);
+    }
+}
+function fillRange(node, args) {
+    node._value.fill(args[0], args[1], args[2]);
+    if (node._flag & FLAG_SCHEDULED) {
+        node._flag &= ~FLAG_SCHEDULED;
+        notify(node, FLAG_STALE);
+    }
+}
+function copyWithin(node, args) {
+    node._value.copyWithin(args[0], args[1], args[2]);
+    if (node._flag & FLAG_SCHEDULED) {
+        node._flag &= ~FLAG_SCHEDULED;
+        notify(node, FLAG_STALE);
+    }
+}
+function splice(node, args) {
     let arr = node._value;
     let start = args[0];
     let delCount = args[1];
     let items = args[2];
-    /** Normalize negative start */
-    let pos = start < 0 ? Math.max(0, arr.length + start) : Math.min(start, arr.length);
     if (items.length === 0) {
         if (delCount === void 0) {
-            delCount = arr.length - pos;
             arr.splice(start);
         } else {
             arr.splice(start, delCount);
@@ -170,40 +190,45 @@ function setMod(node, mod) {
     } else {
         arr.splice(start, delCount, ...items);
     }
-    let addLen = items.length;
-    let op = (delCount > 0 ? MUT_DEL : 0) | (addLen > 0 ? MUT_ADD : 0);
-    let len = Math.max(delCount, addLen);
-    setMod(node, op > 0 ? encodeMod(op, pos, len) : 0);
-});
-/** @const {number} */ var OP_UNSHIFT = register(function (node, value) {
-    node._value.unshift(value);
-    setMod(node, encodeMod(MUT_ADD, 0, 1));
-});
-/** @const {number} */ var OP_UNSHIFT_ARRAY = register(function (node, items) {
-    node._value.unshift(...items);
-    setMod(node, encodeMod(MUT_ADD, 0, items.length));
-});
+    if (node._flag & FLAG_SCHEDULED) {
+        node._flag &= ~FLAG_SCHEDULED;
+        notify(node, FLAG_STALE);
+    }
+}
 
 /**
  * @template T
  * @param {*} arg
  * @returns {T}
  */
+/** @param {*} v @returns {boolean} */
+function isSignal(v) {
+    return v !== null && typeof v === "object" && v._flag !== undefined;
+}
+
 function getVal(arg) {
-    return isPrimitive(arg) ? arg :
-        isSignal(arg) ? /** @type {ReadonlySignal<T>} */(arg).val() :
-            isFunction(arg) ? /** @type {function(): T} */(arg)() : arg;
+    if (typeof arg === "function") {
+        return arg();
+    }
+    if (arg !== null && typeof arg === "object" && arg._flag !== undefined) {
+        return arg._value;
+    }
+    return arg;
 }
 
 /**
  * @template T
- * @param {ReadonlySignal<T> | (function(): T)} source
+ * @param {*} source
  * @returns {T}
  */
 function read(source) {
-    return isFunction(source) ?
-        /** @type {function(): T} */(source)() :
-        isSignal(source) ? /** @type {ReadonlySignal<T>} */(source).val() : source;
+    if (typeof source === "function") {
+        return source();
+    }
+    if (source !== null && typeof source === "object" && source._flag !== undefined) {
+        return source._value;
+    }
+    return source;
 }
 
 /**
@@ -1308,11 +1333,11 @@ SignalProto.values = ComputeProto.values = function () {
 SignalProto.copyWithin = function (target, start, end) {
     if (IDLE) {
         this._value.copyWithin(target, start, end);
-        this._mod = 0;
-        notify(this);
+        
+        notify(this, FLAG_STALE); start();
     } else {
         this._flag |= FLAG_STALE;
-        scheduleSignal(this, OP_COPY_WITHIN, [target, start, end]);
+        schedule(this, [target, start, end], copyWithin);
     }
 };
 
@@ -1327,14 +1352,14 @@ SignalProto.copyWithin = function (target, start, end) {
 SignalProto.fill = function (value, start, end) {
     if (IDLE) {
         this._value.fill(value, start, end);
-        this._mod = 0;
-        notify(this);
+        
+        notify(this, FLAG_STALE); start();
     } else {
         this._flag |= FLAG_STALE;
         if (arguments.length === 1) {
-            scheduleSignal(this, OP_FILL, value);
+            schedule(this, value, fill);
         } else {
-            scheduleSignal(this, OP_FILL_RANGE, [value, start, end]);
+            schedule(this, [value, start, end], fillRange);
         }
     }
 };
@@ -1347,11 +1372,11 @@ SignalProto.fill = function (value, start, end) {
 SignalProto.pop = function () {
     if (IDLE) {
         this._value.pop();
-        this._mod = encodeMod(MUT_DEL, this._value.length, 1);
-        notify(this);
+        
+        notify(this, FLAG_STALE); start();
     } else {
         this._flag |= FLAG_STALE;
-        scheduleSignal(this, OP_POP, null);
+        schedule(this, null, pop);
     }
 };
 
@@ -1372,14 +1397,14 @@ SignalProto.push = function (...items) {
             } else {
                 arr.push(...items);
             }
-            this._mod = encodeMod(MUT_ADD, pos, len);
-            notify(this);
+            
+            notify(this, FLAG_STALE); start();
         } else {
             this._flag |= FLAG_STALE;
             if (len === 1) {
-                scheduleSignal(this, OP_PUSH, items[0]);
+                schedule(this, items[0], push);
             } else {
-                scheduleSignal(this, OP_PUSH_ARRAY, items);
+                schedule(this, items, pushArray);
             }
         }
     }
@@ -1393,11 +1418,11 @@ SignalProto.push = function (...items) {
 SignalProto.reverse = function () {
     if (IDLE) {
         this._value.reverse();
-        this._mod = encodeMod(MUT_SORT, 0, 0);
-        notify(this);
+        
+        notify(this, FLAG_STALE); start();
     } else {
         this._flag |= FLAG_STALE;
-        scheduleSignal(this, OP_REVERSE, null);
+        schedule(this, null, reverse);
     }
 };
 
@@ -1409,11 +1434,11 @@ SignalProto.reverse = function () {
 SignalProto.shift = function () {
     if (IDLE) {
         this._value.shift();
-        this._mod = encodeMod(MUT_DEL, 0, 1);
-        notify(this);
+        
+        notify(this, FLAG_STALE); start();
     } else {
         this._flag |= FLAG_STALE;
-        scheduleSignal(this, OP_SHIFT, null);
+        schedule(this, null, shift);
     }
 };
 
@@ -1426,11 +1451,11 @@ SignalProto.shift = function () {
 SignalProto.sort = function (compareFn) {
     if (IDLE) {
         this._value.sort(compareFn);
-        this._mod = encodeMod(MUT_SORT, 0, 0);
-        notify(this);
+        
+        notify(this, FLAG_STALE); start();
     } else {
         this._flag |= FLAG_STALE;
-        scheduleSignal(this, OP_SORT, compareFn);
+        schedule(this, compareFn, sort);
     }
 };
 
@@ -1458,11 +1483,11 @@ SignalProto.splice = function (start, deleteCount, ...items) {
         }
         let addLen = items.length;
         let op = (deleteCount > 0 ? MUT_DEL : 0) | (addLen > 0 ? MUT_ADD : 0);
-        this._mod = op > 0 ? encodeMod(op, pos, Math.max(deleteCount, addLen)) : 0;
-        notify(this);
+        
+        notify(this, FLAG_STALE); start();
     } else {
         this._flag |= FLAG_STALE;
-        scheduleSignal(this, OP_SPLICE, [start, deleteCount, items]);
+        schedule(this, [start, deleteCount, items], splice);
     }
 };
 
@@ -1481,14 +1506,14 @@ SignalProto.unshift = function (...items) {
             } else {
                 this._value.unshift(...items);
             }
-            this._mod = encodeMod(MUT_ADD, 0, len);
-            notify(this);
+            
+            notify(this, FLAG_STALE); start();
         } else {
             this._flag |= FLAG_STALE;
             if (len === 1) {
-                scheduleSignal(this, OP_UNSHIFT, items[0]);
+                schedule(this, items[0], unshift);
             } else {
-                scheduleSignal(this, OP_UNSHIFT_ARRAY, items);
+                schedule(this, items, unshiftArray);
             }
         }
     }

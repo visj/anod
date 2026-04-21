@@ -161,6 +161,8 @@ var SENDERS = [];
  * @type {Array}
  */
 var PAYLOADS = [];
+/** @const @type {Array<Function>} */
+var UPDATES = [];
 var SENDER_COUNT = 0;
 
 /** @const @type {Array<Compute>} */
@@ -441,12 +443,53 @@ function set(value) {
       notify(this, FLAG_STALE);
       start();
     } else {
-      this._flag |= FLAG_SCHEDULED;
-      let index = SENDER_COUNT++;
-      SENDERS[index] = this;
-      PAYLOADS[index] = value;
+      schedule(this, value, assignCompute);
     }
   }
+}
+
+/**
+ * Batch-drain handler for signals. Sets value and notifies.
+ * @param {!Signal} node
+ * @param {*} value
+ */
+function assignSignal(node, value) {
+  node._value = value;
+  if (node._flag & FLAG_SCHEDULED) {
+    node._flag &= ~FLAG_SCHEDULED;
+    notify(node, FLAG_STALE);
+  }
+}
+
+/**
+ * Batch-drain handler for writable computes. Sets value, clears
+ * FLAG_INIT, stamps _ctime, and notifies.
+ * @param {!Compute} node
+ * @param {*} value
+ */
+function assignCompute(node, value) {
+  node._value = value;
+  if (node._flag & FLAG_SCHEDULED) {
+    node._flag &= ~(FLAG_SCHEDULED | FLAG_INIT);
+    node._ctime = TIME;
+    notify(node, FLAG_STALE);
+  }
+}
+
+/**
+ * Enqueues a deferred update to run during the next drain cycle.
+ * Used by extension packages (e.g. @fyren/list) to schedule custom
+ * mutations like push, pop, splice without branching in the drain loop.
+ * @param {!Sender} node
+ * @param {*} payload
+ * @param {function(!Sender, *)} fn
+ */
+function schedule(node, payload, fn) {
+  node._flag |= FLAG_SCHEDULED;
+  let index = SENDER_COUNT++;
+  SENDERS[index] = node;
+  PAYLOADS[index] = payload;
+  UPDATES[index] = fn;
 }
 
 /**
@@ -1109,27 +1152,11 @@ function root(fn) {
         notify(this, FLAG_STALE);
         start();
       } else {
-        this._flag |= FLAG_SCHEDULED;
-        let index = SENDER_COUNT++;
-        SENDERS[index] = this;
-        PAYLOADS[index] = value;
+        schedule(this, value, assignSignal);
       }
     }
   };
 
-  /**
-   * Batch-drain counterpart of `set`.
-   * @this {!Signal<T>}
-   * @param {T} value
-   * @returns {void}
-   */
-  SignalProto._assign = function (value) {
-    this._value = value;
-    if (this._flag & FLAG_SCHEDULED) {
-      this._flag &= ~FLAG_SCHEDULED;
-      notify(this, FLAG_STALE);
-    }
-  };
 
   /**
    * @this {!Signal<T>}
@@ -1213,22 +1240,6 @@ function root(fn) {
    */
   ComputeProto.set = set;
 
-  /**
-   * Batch-drain counterpart of `set`. Runs inside `start()` after TIME
-   * has been bumped, so `TIME` here is already the new cycle's time —
-   * no `+1` needed.
-   * @this {!Compute<T,U,V,W>}
-   * @param {T} value
-   * @returns {void}
-   */
-  ComputeProto._assign = function (value) {
-    this._value = value;
-    if (this._flag & FLAG_SCHEDULED) {
-      this._flag &= ~(FLAG_SCHEDULED | FLAG_INIT);
-      this._ctime = TIME;
-      notify(this, FLAG_STALE);
-    }
-  };
 
   /**
    * @this {Compute}
@@ -3096,8 +3107,8 @@ function start() {
       if (SENDER_COUNT > 0) {
         let count = SENDER_COUNT;
         for (let i = 0; i < count; i++) {
-          SENDERS[i]._assign(PAYLOADS[i]);
-          SENDERS[i] = PAYLOADS[i] = null;
+          UPDATES[i](SENDERS[i], PAYLOADS[i]);
+          SENDERS[i] = PAYLOADS[i] = UPDATES[i] = null;
         }
         SENDER_COUNT = 0;
       }
@@ -3370,6 +3381,10 @@ export {
   IDLE,
   connect,
   subscribe,
+  schedule,
+  assignSignal,
+  notify,
+  start,
   startEffect
 };
 

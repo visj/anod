@@ -11,6 +11,7 @@ export {
   FLAG_EQUAL,
   FLAG_WEAK,
   FLAG_INIT,
+  FLAG_BOUND,
   OPT_DEFER,
   OPT_STABLE,
   OPT_SETUP,
@@ -19,5 +20,9 @@ export {
   IDLE,
   connect,
   subscribe,
+  schedule,
+  assignSignal,
+  notify,
+  start,
   startEffect
 } from "./core/signal.js";
