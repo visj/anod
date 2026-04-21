@@ -1,25 +1,21 @@
 {
-  "name": "anod",
+  "name": "fyren",
   "workspace": [
-    "packages/anod",
-    "packages/anod-list"
+    "packages/core",
+    "packages/list"
   ],
-  "version": "1.0.0",
+  "version": "0.6.0",
   "description": "",
-  "main": "index.js",
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
-  },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/visj/anod.git"
+    "url": "git+https://github.com/visj/fyren.git"
   },
   "keywords": [],
   "author": "",
-  "license": "ISC",
-  "type": "commonjs",
+  "license": "MIT",
+  "type": "module",
   "bugs": {
-    "url": "https://github.com/visj/anod/issues"
+    "url": "https://github.com/visj/fyren/issues"
   },
-  "homepage": "https://github.com/visj/anod#readme"
+  "homepage": "https://github.com/visj/fyren#readme"
 }
