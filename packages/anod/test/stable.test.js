@@ -34,7 +34,7 @@ describe("stable compute", () => {
 		});
 
 		// Run setup
-		expect(stable.peek()).toBe(-1);
+		expect(stable.get()).toBe(-1);
 
 		// Now make victim stale
 		trigger.set(2);
@@ -46,7 +46,7 @@ describe("stable compute", () => {
 		// stable re-runs in stable mode, reads victim for the first time.
 		// victim._version is 0, VERSION is 0 → collision!
 		// Should return 20 (trigger=2, 2*10), but might return undefined/0 (initial _value)
-		expect(stable.peek()).toBe(20);
+		expect(stable.get()).toBe(20);
 	});
 
 	test("val() returns stale value: victim was pulled once then went stale (setup stamps persist)", () => {
@@ -78,7 +78,7 @@ describe("stable compute", () => {
 			return base;
 		});
 
-		expect(outer.peek()).toBe(100);
+		expect(outer.get()).toBe(100);
 
 		// Make victim stale
 		s1.set(5);
@@ -88,6 +88,6 @@ describe("stable compute", () => {
 		s2.set(200);
 
 		// Should be 200 + (5+1) = 206
-		expect(outer.peek()).toBe(206);
+		expect(outer.get()).toBe(206);
 	});
 });

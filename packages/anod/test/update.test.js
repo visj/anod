@@ -39,12 +39,12 @@ describe("update", () => {
 
             order = "";
             s1.set(2);
-            c2.peek();
+            c2.get();
             expect(order).toBe("c1"); // "c1 runs, but c2 should be skipped as value is same"
 
             order = "";
             s1.set(-1);
-            c2.peek();
+            c2.get();
             expect(order).toBe("c1c2"); // "c2 runs because value changed"
         });
 

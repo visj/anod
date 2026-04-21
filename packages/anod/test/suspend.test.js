@@ -149,11 +149,11 @@ describe("pull-flow: c.pending() with tasks", () => {
 			return "value:" + cx.val(taskA);
 		});
 
-		expect(status.peek()).toBe("loading");
+		expect(status.get()).toBe("loading");
 
 		resolve(42);
 		await settle();
-		expect(status.peek()).toBe("value:42");
+		expect(status.get()).toBe("value:42");
 	});
 
 	test("loading suppresses downstream: effect not notified while task restarts", async () => {
@@ -283,12 +283,12 @@ describe("suspend(promise): memory safety", () => {
 		await settle();
 
 		expect(taskA.loading).toBe(false);
-		expect(taskA.peek()).toBe(222);
+		expect(taskA.get()).toBe(222);
 
 		// Resolving the first (stale) promise should be a no-op
 		resolvers[0].resolve(111);
 		await settle();
-		expect(taskA.peek()).toBe(222); // unchanged
+		expect(taskA.get()).toBe(222); // unchanged
 	});
 
 	test("disposed spawn: pending promise resolution is a no-op", async () => {
@@ -369,7 +369,7 @@ describe("suspend(task): two-way binding lifecycle", () => {
 		// Resolve after disposal — should be a no-op
 		resolve(42);
 		await settle();
-		expect(taskA.peek()).toBe(42);
+		expect(taskA.get()).toBe(42);
 	});
 
 	test("responder disposed while awaiter waiting: awaiter freed", async () => {
@@ -500,7 +500,7 @@ describe("suspend(task): two-way binding lifecycle", () => {
 		// Resolve the task — stale awaiters should be gone
 		resolve(42);
 		await settle();
-		expect(taskA.peek()).toBe(42);
+		expect(taskA.get()).toBe(42);
 
 		r.dispose();
 	});
@@ -509,7 +509,7 @@ describe("suspend(task): two-way binding lifecycle", () => {
 		const s1 = c.signal(1);
 		const taskA = c.task((cx) => cx.suspend(Promise.resolve(cx.val(s1) * 100)));
 		await settle();
-		expect(taskA.peek()).toBe(100);
+		expect(taskA.get()).toBe(100);
 
 		let observed = null;
 		let runs = 0;

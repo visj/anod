@@ -19,11 +19,11 @@ describe("dispose", () => {
                     return c.val(s1);
                 });
 
-                expect(c1.peek()).toBe(0);
+                expect(c1.get()).toBe(0);
                 expect(count).toBe(1);
 
                 s1.set(1);
-                expect(c1.peek()).toBe(1);
+                expect(c1.get()).toBe(1);
                 expect(count).toBe(2);
             });
 
@@ -31,7 +31,7 @@ describe("dispose", () => {
             s1.set(2);
 
             expect(count).toBe(2); // "Compute should not execute after disposal"
-            expect(c1.peek()).toBeNull(); // "Disposed compute value should be null"
+            expect(c1.get()).toBeNull(); // "Disposed compute value should be null"
         });
     });
 
@@ -53,8 +53,8 @@ describe("dispose", () => {
                     });
                 });
 
-                s1.set(s1.peek() + 1);
-                s1.set(s1.peek() + 1);
+                s1.set(s1.get() + 1);
+                s1.set(s1.get() + 1);
                 /** e3 runs once before c1 is disposed (adds 1), then
                  *  subsequent cycles skip c1 reads since its dep was cleared
                  *  on dispose. Assertion proves dispose-during-cycle didn't

@@ -34,11 +34,11 @@ describe("root", () => {
             const s1 = c.signal(1);
             const c1 = c.compute(c => c.val(s1));
 
-            expect(c1.peek()).toBe(1);
+            expect(c1.get()).toBe(1);
             s1.set(2);
-            expect(c1.peek()).toBe(2);
+            expect(c1.get()).toBe(2);
             s1.set(3);
-            expect(c1.peek()).toBe(3);
+            expect(c1.get()).toBe(3);
         });
     });
 });

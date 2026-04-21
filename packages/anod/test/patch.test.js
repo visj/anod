@@ -112,7 +112,7 @@ function harness(kind, pattern, n = 10) {
         node = kind === 'compute' ? c.compute(fn) : r.effect(fn);
     });
     if (kind === 'compute') {
-        node.peek();
+        node.get();
     }
     return {
         signals,
@@ -129,7 +129,7 @@ function harness(kind, pattern, n = 10) {
             }
             trigger.set(trigger._value + 1);
             if (kind === 'compute') {
-                node.peek();
+                node.get();
             }
         },
     };

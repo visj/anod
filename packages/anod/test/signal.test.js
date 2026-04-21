@@ -4,13 +4,13 @@ import { c } from "#anod";
 describe("signal", () => {
     test("takes and returns an initial value", () => {
         const s1 = c.signal(1);
-        expect(s1.peek()).toBe(1); // "Initial value should match"
+        expect(s1.get()).toBe(1); // "Initial value should match"
     });
 
     test("can be set by passing in a new value", () => {
         const s1 = c.signal(1);
         s1.set(2);
-        expect(s1.peek()).toBe(2); // "Value should update"
+        expect(s1.get()).toBe(2); // "Value should update"
     });
 
     test("does not propagate if set to equal value", () => {
@@ -22,9 +22,9 @@ describe("signal", () => {
             return ++count;
         });
 
-        expect(c1.peek()).toBe(1);
+        expect(c1.get()).toBe(1);
         s1.set(1);
-        expect(c1.peek()).toBe(1); // "Compute count should remain 1"
+        expect(c1.get()).toBe(1); // "Compute count should remain 1"
     });
 
     test("propagates if set to unequal value", () => {
@@ -36,15 +36,15 @@ describe("signal", () => {
             return ++count;
         });
 
-        expect(c1.peek()).toBe(1);
+        expect(c1.get()).toBe(1);
         s1.set(2);
-        expect(c1.peek()).toBe(2); // "Compute count should increment"
+        expect(c1.get()).toBe(2); // "Compute count should increment"
     });
 
     describe("val", () => {
         test("returns the value of a signal", () => {
             const s1 = c.signal(1);
-            expect(s1.peek()).toBe(1); // "val should return current value"
+            expect(s1.get()).toBe(1); // "val should return current value"
         });
 
         test("tracks all val() calls as dependencies", () => {
@@ -63,15 +63,15 @@ describe("signal", () => {
             expect(count).toBe(1, "initial"); // "Initial execution"
 
             s1.set(5);
-            c1.peek();
+            c1.get();
             expect(count).toBe(2, "s1"); // "Propagates on s1 change"
 
             s2.set(4);
-            c1.peek();
+            c1.get();
             expect(count).toBe(3, "s2"); // "Propagates on s2 change"
 
             s3.set(6);
-            c1.peek();
+            c1.get();
             expect(count).toBe(4, "s3"); // "Propagates on s3 change"
         });
     });

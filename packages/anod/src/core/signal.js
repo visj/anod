@@ -252,6 +252,8 @@ function Compute(opts, fn, dep1, seed, args) {
   this._time = 0;
   /** @type {number} */
   this._ctime = 0;
+  /** @type {Function | Array<Function> | null} */
+  this._cleanup = null;
   /** @type {W | undefined} */
   this._args = args;
 }
@@ -408,6 +410,24 @@ function val(sender) {
     REUSED++;
   } else {
     this._read(sender, stamp);
+  }
+  if (sender._flag & FLAG_ERROR) {
+    throw sender._value;
+  }
+  return sender._value;
+}
+
+/**
+ * Reads a sender's current value without subscribing. Refreshes
+ * stale/pending senders so the value is always current, but does
+ * not create a dependency link.
+ * @this {!Compute | !Effect}
+ * @param {!Sender} sender
+ * @returns {*}
+ */
+function peek(sender) {
+  if (sender._flag & (FLAG_STALE | FLAG_PENDING)) {
+    sender._refresh();
   }
   if (sender._flag & FLAG_ERROR) {
     throw sender._value;
@@ -585,6 +605,7 @@ function gate(value) {
   ComputeProto._read = EffectProto._read = _read;
 
   ComputeProto._readAsync = EffectProto._readAsync = _readAsync;
+  ComputeProto.peek = EffectProto.peek = peek;
 
   // IAwaitable — Compute + Effect (getters)
   let _errorLoading = {
@@ -603,7 +624,7 @@ function gate(value) {
    * @param {function(): void} fn
    * @returns {void}
    */
-  function _addCleanup(fn) {
+  function cleanup(fn) {
     let cleanup = this._cleanup;
     if (cleanup === null) {
       this._cleanup = fn;
@@ -620,7 +641,7 @@ function gate(value) {
    * @param {function(*): boolean} fn
    * @returns {void}
    */
-  function _addRecover(fn) {
+  function recover(fn) {
     let recover = this._recover;
     if (recover === null) {
       this._recover = fn;
@@ -638,7 +659,7 @@ function gate(value) {
    * @param {boolean=} eq
    * @returns {void}
    */
-  function _equal(eq) {
+  function equal(eq) {
     if (eq === false) {
       this._flag = (this._flag | FLAG_NOTEQUAL) & ~FLAG_EQUAL;
     } else {
@@ -656,7 +677,7 @@ function gate(value) {
    * @this {!Compute | !Effect}
    * @returns {void}
    */
-  function _stable() {
+  function stable() {
     if (this._flag & FLAG_ASYNC) {
       this._flag = (this._flag | FLAG_STABLE) & ~FLAG_SETUP;
     } else {
@@ -664,13 +685,11 @@ function gate(value) {
     }
   }
 
-  RootProto._addCleanup = EffectProto._addCleanup = _addCleanup;
-  RootProto._addRecover = EffectProto._addRecover = _addRecover;
   /** IOwner: cleanup/recover exposed on Root + Effect prototypes */
-  RootProto.cleanup = EffectProto.cleanup = _addCleanup;
-  RootProto.recover = EffectProto.recover = _addRecover;
-  ComputeProto.equal = EffectProto.equal = _equal;
-  ComputeProto.stable = EffectProto.stable = _stable;
+  RootProto.cleanup = EffectProto.cleanup = ComputeProto.cleanup = cleanup;
+  RootProto.recover = EffectProto.recover = recover;
+  ComputeProto.equal = EffectProto.equal = equal;
+  ComputeProto.stable = EffectProto.stable = stable;
 
   /**
    * Marks this compute as eager (push-based). Once set, the node
@@ -810,7 +829,7 @@ function gate(value) {
    * @this {!Compute | !Effect}
    * @returns {!Fiber}
    */
-  function _ensureFiber() {
+  function _fiber() {
     if (this._flag & FLAG_FIBER) {
       return this._args._fiber;
     }
@@ -820,14 +839,14 @@ function gate(value) {
     return fiber;
   }
 
-  ComputeProto._fiber = EffectProto._fiber = _ensureFiber;
+  ComputeProto._fiber = EffectProto._fiber = _fiber;
 
   /**
    * Lazily allocates the Fiber and its Channel. Returns the channel.
    * @this {!Compute | !Effect}
    * @returns {!Channel}
    */
-  function _ensureChannel() {
+  function _channel() {
     let fiber = this._fiber();
     if (fiber._channel === null) {
       fiber._channel = new Channel();
@@ -835,7 +854,7 @@ function gate(value) {
     return fiber._channel;
   }
 
-  ComputeProto._channel = EffectProto._channel = _ensureChannel;
+  ComputeProto._channel = EffectProto._channel = _channel;
 
   /**
    * Creates a fresh AbortController for this async activation.
@@ -843,14 +862,14 @@ function gate(value) {
    * @this {!Compute | !Effect}
    * @returns {!AbortController}
    */
-  function _controller() {
+  function controller() {
     let fiber = this._fiber();
     let controller = new AbortController();
     fiber._controller = controller;
     return controller;
   }
 
-  ComputeProto.controller = EffectProto.controller = _controller;
+  ComputeProto.controller = EffectProto.controller = controller;
 
   /**
    * Reads a sender's current value without subscribing immediately.
@@ -860,7 +879,7 @@ function gate(value) {
    * @param {!Sender} sender
    * @returns {*}
    */
-  function _defer(sender) {
+  function defer(sender) {
     if (!(this._flag & FLAG_ASYNC)) {
       return val.call(this, sender);
     }
@@ -881,7 +900,7 @@ function gate(value) {
     return value;
   }
 
-  ComputeProto.defer = EffectProto.defer = _defer;
+  ComputeProto.defer = EffectProto.defer = defer;
 
   /**
    * Checks if one or more tasks are currently loading. Subscribes to
@@ -894,7 +913,7 @@ function gate(value) {
    * @param {!Compute | !Array<!Compute>} tasks
    * @returns {boolean} true if any task has FLAG_LOADING set
    */
-  function _pending(tasks) {
+  function pending(tasks) {
     let loading = false;
     if (tasks._flag !== undefined) {
       /** Single task. */
@@ -916,7 +935,7 @@ function gate(value) {
     return loading;
   }
 
-  ComputeProto.pending = EffectProto.pending = _pending;
+  ComputeProto.pending = EffectProto.pending = pending;
 
   // ─── Root — single-use methods ─────────────────────────────────────────
 
@@ -943,7 +962,7 @@ function gate(value) {
    * @this {!Signal<T>}
    * @returns {T}
    */
-  SignalProto.peek = function () {
+  SignalProto.get = function () {
     return this._value;
   };
 
@@ -1010,7 +1029,7 @@ function gate(value) {
    * @this {!Compute<T,U,V,W>}
    * @returns {T}
    */
-  ComputeProto.peek = function () {
+  ComputeProto.get = function () {
     let flag = this._flag;
     if (flag & (FLAG_STALE | FLAG_PENDING)) {
       if (IDLE) {
@@ -1120,6 +1139,9 @@ function gate(value) {
         }
       }
     }
+    if (this._cleanup !== null) {
+      clearCleanup(this);
+    }
     this._fn = this._value = this._args = null;
   };
 
@@ -1140,6 +1162,10 @@ function gate(value) {
     this._time = time;
     this._flag =
       flag & ~(FLAG_STALE | FLAG_LOADING | FLAG_EQUAL | FLAG_NOTEQUAL);
+
+    if (!(flag & FLAG_INIT) && this._cleanup !== null) {
+      clearCleanup(this);
+    }
 
     /** Async prep: reset fiber state. */
     if (flag & FLAG_ASYNC) {

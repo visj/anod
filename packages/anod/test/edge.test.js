@@ -18,11 +18,11 @@ describe("edge cases", () => {
                 return val * 10;
             });
 
-            expect(c1.peek()).toBe(10);
+            expect(c1.get()).toBe(10);
             s1.set(2);
-            expect(c1.peek()).toBe(20);
+            expect(c1.get()).toBe(20);
             s1.set(3);
-            expect(c1.peek()).toBe(30);
+            expect(c1.get()).toBe(30);
         });
 
         test("effect throwing during creation does not corrupt outer effect deps (with try/catch)", () => {
@@ -94,11 +94,11 @@ describe("edge cases", () => {
                 return val + 100;
             });
 
-            expect(c1.peek()).toBe(101);
+            expect(c1.get()).toBe(101);
             s1.set(2);
-            expect(c1.peek()).toBe(102);
+            expect(c1.get()).toBe(102);
             s1.set(3);
-            expect(c1.peek()).toBe(103);
+            expect(c1.get()).toBe(103);
         });
 
         test("nested scope throwing does not corrupt parent scope", () => {
@@ -193,15 +193,15 @@ describe("edge cases", () => {
                 return c.val(s1) + c.val(s2);
             });
 
-            expect(d.peek()).toBe(11);
+            expect(d.get()).toBe(11);
             expect(runs).toBe(1);
 
             s1.set(2);
-            expect(d.peek()).toBe(12);
+            expect(d.get()).toBe(12);
             expect(runs).toBe(2);
 
             s2.set(20);
-            expect(d.peek()).toBe(22);
+            expect(d.get()).toBe(22);
             expect(runs).toBe(3);
         });
 
@@ -216,12 +216,12 @@ describe("edge cases", () => {
                 return 42;
             });
 
-            expect(d.peek()).toBe(42);
+            expect(d.get()).toBe(42);
             expect(runs).toBe(1);
 
             s1.set(2);
             /** compute runs because s1 changed, but value is still 42 */
-            expect(d.peek()).toBe(42);
+            expect(d.get()).toBe(42);
             expect(runs).toBe(2);
         });
     });
@@ -271,13 +271,13 @@ describe("edge cases", () => {
         test("settles to resolved value", async () => {
             const t = c.task((c) => c.suspend(Promise.resolve(42)), 0);
 
-            expect(t.peek()).toBe(0);
+            expect(t.get()).toBe(0);
             expect(t.loading).toBe(true);
 
             await tick();
             await tick();
 
-            expect(t.peek()).toBe(42);
+            expect(t.get()).toBe(42);
             expect(t.loading).toBe(false);
         });
 
@@ -300,7 +300,7 @@ describe("edge cases", () => {
             await tick();
 
             expect(t.error).not.toBeNull();
-            expect(() => t.peek()).toThrow("fail");
+            expect(() => t.get()).toThrow("fail");
         });
 
         test("re-evaluates when dep changes", async () => {
@@ -309,13 +309,13 @@ describe("edge cases", () => {
 
             await tick();
             await tick();
-            expect(t.peek()).toBe(10);
+            expect(t.get()).toBe(10);
 
             s1.set(2);
-            t.peek();
+            t.get();
             await tick();
             await tick();
-            expect(t.peek()).toBe(20);
+            expect(t.get()).toBe(20);
         });
 
         test("async allows changing deps", async () => {
@@ -331,30 +331,30 @@ describe("edge cases", () => {
 
             await tick();
             await tick();
-            expect(t.peek()).toBe("a");
+            expect(t.get()).toBe("a");
             expect(runs).toBe(1);
 
             s1.set(false);
-            t.peek();
+            t.get();
             await tick();
             await tick();
-            expect(t.peek()).toBe("b");
+            expect(t.get()).toBe("b");
             expect(runs).toBe(2);
 
             /** s2 should no longer be tracked */
             s2.set("x");
-            t.peek();
+            t.get();
             await tick();
             await tick();
-            expect(t.peek()).toBe("b");
+            expect(t.get()).toBe("b");
             expect(runs).toBe(2);
 
             /** s3 should be tracked */
             s3.set("y");
-            t.peek();
+            t.get();
             await tick();
             await tick();
-            expect(t.peek()).toBe("y");
+            expect(t.get()).toBe("y");
             expect(runs).toBe(3);
         });
     });
@@ -504,11 +504,11 @@ describe("edge cases", () => {
             const right = c.compute(s1, val => val * 3);
             const sum = c.compute(c => { c.stable(); return c.val(left) + c.val(right); });
 
-            expect(sum.peek()).toBe(5);
+            expect(sum.get()).toBe(5);
             s1.set(2);
-            expect(sum.peek()).toBe(10);
+            expect(sum.get()).toBe(10);
             s1.set(3);
-            expect(sum.peek()).toBe(15);
+            expect(sum.get()).toBe(15);
         });
 
         test("deep diamond with pending/stale split", () => {
@@ -526,7 +526,7 @@ describe("edge cases", () => {
             expect(runs).toBe(1);
             s1.set(1);
             expect(runs).toBe(2);
-            expect(c1.peek()).toBe(5);
+            expect(c1.get()).toBe(5);
         });
     });
 
@@ -610,12 +610,12 @@ describe("edge cases", () => {
 
             c.batch(() => {
                 s1.set(1);
-                mid = s1.peek();
+                mid = s1.get();
             });
 
             /** Inside batch, set is deferred, so val sees old value */
             expect(mid).toBe(0);
-            expect(s1.peek()).toBe(1);
+            expect(s1.get()).toBe(1);
         });
     });
 
@@ -624,7 +624,7 @@ describe("edge cases", () => {
             const s1 = c.signal(1);
             const c1 = c.compute(s1, val => val * 2);
 
-            expect(c1.peek()).toBe(2);
+            expect(c1.get()).toBe(2);
             c1.dispose();
             s1.set(2);
             /** Disposed compute retains nothing usable */
@@ -679,11 +679,11 @@ describe("edge cases", () => {
             c.effect(c => { c.val(c1); });
 
             expect(runs).toBe(1);
-            expect(c1.peek()).toBe("a");
+            expect(c1.get()).toBe("a");
 
             /** Switch branch */
             s1.set(false);
-            expect(c1.peek()).toBe("b");
+            expect(c1.get()).toBe("b");
             expect(runs).toBe(2);
 
             /** s2 should no longer trigger */
@@ -692,7 +692,7 @@ describe("edge cases", () => {
 
             /** s3 should trigger */
             s3.set("y");
-            expect(c1.peek()).toBe("y");
+            expect(c1.get()).toBe("y");
             expect(runs).toBe(3);
         });
     });
@@ -771,7 +771,7 @@ describe("edge cases", () => {
                 return prev + 1;
             }, 10);
 
-            expect(c1.peek()).toBe(11);
+            expect(c1.get()).toBe(11);
             expect(received).toBe(10);
         });
 
@@ -783,7 +783,7 @@ describe("edge cases", () => {
                 return 42;
             }, 99);
 
-            expect(d.peek()).toBe(42);
+            expect(d.get()).toBe(42);
             expect(received).toBe(99);
         });
     });
@@ -835,9 +835,9 @@ describe("edge cases", () => {
             expect(c1.error).not.toBeNull();
         });
 
-        test("compute.peek() rethrows stored error", () => {
+        test("compute.get() rethrows stored error", () => {
             const c1 = c.compute(() => { throw new Error("rethrow me"); });
-            expect(() => c1.peek()).toThrow("rethrow me");
+            expect(() => c1.get()).toThrow("rethrow me");
         });
     });
 
@@ -850,9 +850,9 @@ describe("edge cases", () => {
                 current = c.compute(prev, val => val + 1);
             }
 
-            expect(current.peek()).toBe(50);
+            expect(current.get()).toBe(50);
             head.set(1);
-            expect(current.peek()).toBe(51);
+            expect(current.get()).toBe(51);
         });
     });
 
@@ -881,9 +881,9 @@ describe("edge cases", () => {
             const c2 = c.compute(c1, val => val * 2);
             const c3 = c.compute(c => { c.stable(); return c.val(c1) + c.val(c2); });
 
-            expect(c3.peek()).toBe(9);
+            expect(c3.get()).toBe(9);
             s1.set(3);
-            expect(c3.peek()).toBe(15);
+            expect(c3.get()).toBe(15);
         });
     });
 });

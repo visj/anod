@@ -7,7 +7,7 @@ describe("garbage collection", () => {
         const ref = new WeakRef(c.compute(c => c.val(s1)));
 
         // Bind dependencies to ensure bidirectional link exists.
-        ref.deref()?.peek();
+        ref.deref()?.get();
 
         await new Promise((resolve) => {
             collect(() => {
@@ -21,7 +21,7 @@ describe("garbage collection", () => {
         const s1 = c.signal(1);
         const c1 = new WeakRef(c.compute(c => c.val(s1)));
 
-        c1.deref()?.peek();
+        c1.deref()?.get();
 
         // Severing the hard link back to c1.
         s1.dispose();

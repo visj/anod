@@ -4,16 +4,16 @@ import { c } from "#anod";
 describe("compute", () => {
     test("returns initial value of wrapped function", () => {
         const c1 = c.compute(() => 1);
-        expect(c1.peek()).toBe(1); // "Should compute initial value"
+        expect(c1.get()).toBe(1); // "Should compute initial value"
     });
 
     test("does not re-occur when read multiple times", () => {
         let count = 0;
         const c1 = c.compute(() => { count++; });
 
-        c1.peek();
-        c1.peek();
-        c1.peek();
+        c1.get();
+        c1.get();
+        c1.get();
         expect(count).toBe(1);
     });
 
@@ -27,7 +27,7 @@ describe("compute", () => {
             });
 
             s1.set(2);
-            expect(c1.peek()).toBe(2);
+            expect(c1.get()).toBe(2);
             expect(count).toBe(2);
         });
 
@@ -39,7 +39,7 @@ describe("compute", () => {
                 return c.val(s1);
             });
 
-            s1.peek();
+            s1.get();
             expect(count).toBe(1);
         });
     });
@@ -55,12 +55,12 @@ describe("compute", () => {
             return c.val(s1) ? c.val(s2) : c.val(s3);
         });
 
-        c1.peek();
+        c1.get();
         count = 0;
 
         test("updates on active dependencies", () => {
             s2.set(5);
-            expect(c1.peek()).toBe(5);
+            expect(c1.get()).toBe(5);
             expect(count).toBe(1);
             count = 0;
         });
@@ -68,7 +68,7 @@ describe("compute", () => {
         test("does not update on inactive dependencies", () => {
             s3.set(5);
             expect(count).toBe(0);
-            expect(c1.peek()).toBe(5);
+            expect(c1.get()).toBe(5);
         });
 
         test("deactivates obsolete dependencies", () => {
@@ -80,7 +80,7 @@ describe("compute", () => {
 
         test("activates new dependencies", () => {
             s3.set(7);
-            expect(c1.peek()).toBe(7);
+            expect(c1.get()).toBe(7);
             expect(count).toBe(1);
         });
     });
@@ -94,17 +94,17 @@ describe("compute", () => {
             s1 = c.signal(1);
         });
 
-        c1.peek();
+        c1.get();
         count = 0;
         s1.set(2);
 
-        c1.peek();
+        c1.get();
         expect(count).toBe(0);
     });
 
     test("returns undefined from void function", () => {
         const c1 = c.compute(() => {});
-        expect(c1.peek()).toBeUndefined();
+        expect(c1.get()).toBeUndefined();
     });
 
     describe("with a dependency on a computation", () => {
@@ -123,13 +123,13 @@ describe("compute", () => {
         });
 
         test("does not cause re-evaluation prematurely", () => {
-            c2.peek();
+            c2.get();
             expect(countOne).toBe(1);
         });
 
         test("occurs when computation updates", () => {
             s1.set(2);
-            expect(c2.peek()).toBe(2);
+            expect(c2.get()).toBe(2);
             expect(countOne).toBe(2);
             expect(countTwo).toBe(2);
         });
@@ -146,7 +146,7 @@ describe("compute", () => {
 
             order = "";
             s1.set(1);
-            c3.peek();
+            c3.get();
             expect(order).toBe("c1c2c3"); // "Should execute strictly left-to-right topological order"
         });
 
@@ -166,7 +166,7 @@ describe("compute", () => {
 
             count = 0;
             s1.set(1);
-            c6.peek();
+            c6.get();
             expect(count).toBe(1); // "Converging nodes should only trigger the sink once"
         });
     });
@@ -175,10 +175,10 @@ describe("compute", () => {
         test("set overrides the derived value and val() returns it", () => {
             const s1 = c.signal(5);
             const c1 = c.compute(c => c.val(s1) * 2);
-            expect(c1.peek()).toBe(10);
+            expect(c1.get()).toBe(10);
 
             c1.set(99);
-            expect(c1.peek()).toBe(99);
+            expect(c1.get()).toBe(99);
         });
 
         test("set does not re-run the compute's fn", () => {
@@ -188,11 +188,11 @@ describe("compute", () => {
                 runs++;
                 return c.val(s1);
             });
-            expect(c1.peek()).toBe(1);
+            expect(c1.get()).toBe(1);
             expect(runs).toBe(1);
 
             c1.set(42);
-            expect(c1.peek()).toBe(42);
+            expect(c1.get()).toBe(42);
             expect(runs).toBe(1);
         });
 
@@ -204,11 +204,11 @@ describe("compute", () => {
                 downstream++;
                 return c.val(c1);
             });
-            expect(c2.peek()).toBe(3);
+            expect(c2.get()).toBe(3);
             expect(downstream).toBe(1);
 
             c1.set(3);
-            c2.peek();
+            c2.get();
             expect(downstream).toBe(1);
         });
 
@@ -216,10 +216,10 @@ describe("compute", () => {
             const s1 = c.signal(1);
             const c1 = c.compute(c => c.val(s1));
             const c2 = c.compute(c => c.val(c1) + 10);
-            expect(c2.peek()).toBe(11);
+            expect(c2.get()).toBe(11);
 
             c1.set(100);
-            expect(c2.peek()).toBe(110);
+            expect(c2.get()).toBe(110);
         });
 
         test("set propagates to downstream effects", () => {
@@ -240,13 +240,13 @@ describe("compute", () => {
         test("upstream change after set re-runs the fn and clobbers the override", () => {
             const s1 = c.signal(1);
             const c1 = c.compute(c => c.val(s1) * 10);
-            expect(c1.peek()).toBe(10);
+            expect(c1.get()).toBe(10);
 
             c1.set(999);
-            expect(c1.peek()).toBe(999);
+            expect(c1.get()).toBe(999);
 
             s1.set(3);
-            expect(c1.peek()).toBe(30);
+            expect(c1.get()).toBe(30);
         });
 
         test("batched sets coalesce and fire subs once", () => {
@@ -257,7 +257,7 @@ describe("compute", () => {
                 runs++;
                 return c.val(c1);
             });
-            expect(c2.peek()).toBe(1);
+            expect(c2.get()).toBe(1);
             expect(runs).toBe(1);
 
             c.batch(() => {
@@ -265,7 +265,7 @@ describe("compute", () => {
                 c1.set(3);
                 c1.set(4);
             });
-            expect(c2.peek()).toBe(4);
+            expect(c2.get()).toBe(4);
             expect(runs).toBe(2);
         });
 
@@ -274,23 +274,23 @@ describe("compute", () => {
                 const serverValue = c.signal("alice");
                 /** Derived initial value for the input; user can overwrite. */
                 const draft = c.compute(c => c.val(serverValue));
-                expect(draft.peek()).toBe("alice");
+                expect(draft.get()).toBe("alice");
 
                 /** User types — overwrite the derived value. */
                 draft.set("alice the great");
-                expect(draft.peek()).toBe("alice the great");
+                expect(draft.get()).toBe("alice the great");
 
                 /** Another field change from the server arrives for an
                  *  unrelated key — shouldn't trample the user's edit
                  *  because `serverValue` didn't change. */
                 const unrelated = c.signal(0);
                 unrelated.set(1);
-                expect(draft.peek()).toBe("alice the great");
+                expect(draft.get()).toBe("alice the great");
 
                 /** The server sends an authoritative overwrite. The
                  *  derived value recomputes, replacing the user's draft. */
                 serverValue.set("bob");
-                expect(draft.peek()).toBe("bob");
+                expect(draft.get()).toBe("bob");
             });
         });
 
@@ -322,13 +322,13 @@ describe("compute", () => {
         test("set on a compute that was STALE still propagates the new value", () => {
             const s1 = c.signal(1);
             const c1 = c.compute(c => c.val(s1));
-            expect(c1.peek()).toBe(1);
+            expect(c1.get()).toBe(1);
 
             /** Mark STALE by setting upstream, but don't read c1 yet. */
             s1.set(2);
             /** Overwrite before the lazy re-run would have seen s1=2. */
             c1.set(50);
-            expect(c1.peek()).toBe(50);
+            expect(c1.get()).toBe(50);
         });
 
         test("set on an initialized compute triggers stale notifications synchronously", () => {

@@ -148,15 +148,15 @@ describe("ptime guard: correct usage patterns", () => {
                 r.val(join);
             });
             expect(effectRuns).toBe(1);
-            expect(join.peek()).toBe(1);
+            expect(join.get()).toBe(1);
 
             s.set(1);
             expect(effectRuns).toBe(2);
-            expect(join.peek()).toBe(12);
+            expect(join.get()).toBe(12);
 
             s.set(2);
             expect(effectRuns).toBe(3);
-            expect(join.peek()).toBe(23);
+            expect(join.get()).toBe(23);
         });
 
         test("deep diamond with pending/stale split", () => {
@@ -171,15 +171,15 @@ describe("ptime guard: correct usage patterns", () => {
                 r.val(d);
             });
             expect(effectRuns).toBe(1);
-            expect(d.peek()).toBe(3);
+            expect(d.get()).toBe(3);
 
             s.set(1);
             expect(effectRuns).toBe(2);
-            expect(d.peek()).toBe(5);
+            expect(d.get()).toBe(5);
 
             s.set(2);
             expect(effectRuns).toBe(3);
-            expect(d.peek()).toBe(7);
+            expect(d.get()).toBe(7);
         });
     });
 
@@ -202,7 +202,7 @@ describe("ptime guard: correct usage patterns", () => {
             c.effect(r => {
                 effectRuns++;
                 lastVal = r.val(comp);
-                if (lastVal === 1 && s2.peek() === 0) {
+                if (lastVal === 1 && s2.get() === 0) {
                     s2.set(10);
                 }
             });
@@ -285,25 +285,25 @@ describe("ptime guard: correct usage patterns", () => {
         test("compute with no subscribers: val() always returns correct value", () => {
             const s = c.signal(0);
             const comp = c.compute(r => r.val(s) + 1);
-            expect(comp.peek()).toBe(1);
+            expect(comp.get()).toBe(1);
 
             s.set(1);
             s.set(2);
             s.set(3);
             /** val() pulls regardless of flag state */
-            expect(comp.peek()).toBe(4);
+            expect(comp.get()).toBe(4);
         });
 
         test("compute gains subscriber after being stale -- subscriber sees current value", () => {
             const s = c.signal(0);
             const comp = c.compute(r => r.val(s) + 1);
-            expect(comp.peek()).toBe(1);
+            expect(comp.get()).toBe(1);
 
             /** comp gets STALE, no subscriber to pull it */
             s.set(1);
             s.set(2);
 
-            /** Now subscribe -- effect creation reads comp.peek() -> clears flags */
+            /** Now subscribe -- effect creation reads comp.get() -> clears flags */
             let lastVal = 0;
             c.effect(r => {
                 lastVal = r.val(comp);
@@ -336,7 +336,7 @@ describe("ptime guard: correct usage patterns", () => {
             });
             /** Single run despite two signal changes */
             expect(effectRuns).toBe(1);
-            expect(comp.peek()).toBe(2);
+            expect(comp.get()).toBe(2);
         });
 
         test("batch: same signal set twice, compute runs once", () => {
@@ -355,7 +355,7 @@ describe("ptime guard: correct usage patterns", () => {
                 s.set(2);
             });
             expect(effectRuns).toBe(1);
-            expect(comp.peek()).toBe(3);
+            expect(comp.get()).toBe(3);
         });
     });
 
@@ -378,11 +378,11 @@ describe("ptime guard: correct usage patterns", () => {
 
             head.set(1);
             expect(effectRuns).toBe(1);
-            expect(current.peek()).toBe(21);
+            expect(current.get()).toBe(21);
 
             head.set(2);
             expect(effectRuns).toBe(2);
-            expect(current.peek()).toBe(22);
+            expect(current.get()).toBe(22);
         });
 
         test("deep absorb chain: only first node runs", () => {

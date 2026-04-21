@@ -13,11 +13,11 @@ describe("OPT_WEAK", () => {
         });
 
         /** While subscribed, value is retained */
-        expect(c1.peek()).toEqual({ data: "large" });
+        expect(c1.get()).toEqual({ data: "large" });
 
         /** After disposing the only subscriber, value is released */
         e1.dispose();
-        expect(c1.peek()).toEqual({ data: "large" });
+        expect(c1.get()).toEqual({ data: "large" });
     });
 
     test("recomputes fresh after value is released", () => {
@@ -32,14 +32,14 @@ describe("OPT_WEAK", () => {
             c.val(c1);
         });
 
-        expect(c1.peek()).toBe(1);
+        expect(c1.get()).toBe(1);
         runs = 0;
 
         /** Dispose subscriber -- value released, node marked STALE */
         e1.dispose();
 
         /** Reading again triggers a fresh recompute */
-        expect(c1.peek()).toBe(1);
+        expect(c1.get()).toBe(1);
         expect(runs).toBe(1);
     });
 
@@ -65,7 +65,7 @@ describe("OPT_WEAK", () => {
         expect(runs).toBe(0);
 
         /** Reading should NOT recompute -- still subscribed */
-        expect(c1.peek()).toBe(1);
+        expect(c1.get()).toBe(1);
         expect(runs).toBe(0);
     });
 
@@ -89,7 +89,7 @@ describe("OPT_WEAK", () => {
         e2.dispose();
 
         /** Now fully unsubscribed -- reading should recompute */
-        expect(c1.peek()).toBe(1);
+        expect(c1.get()).toBe(1);
         expect(runs).toBe(1);
     });
 
@@ -105,13 +105,13 @@ describe("OPT_WEAK", () => {
             c.val(c1);
         });
 
-        expect(c1.peek()).toBe(2);
+        expect(c1.get()).toBe(2);
         runs = 0;
 
         e1.dispose();
 
         /** Reading after release triggers recompute */
-        expect(c1.peek()).toBe(2);
+        expect(c1.get()).toBe(2);
         expect(runs).toBe(1);
     });
 
@@ -151,7 +151,7 @@ describe("OPT_WEAK", () => {
         e2.dispose();
 
         /** Should recompute on read again */
-        expect(c1.peek()).toBe(2);
+        expect(c1.get()).toBe(2);
         expect(runs).toBe(1);
     });
 
@@ -175,15 +175,15 @@ describe("OPT_WEAK", () => {
             return 0;
         });
 
-        expect(c2.peek()).toBe(1);
+        expect(c2.get()).toBe(1);
         runs = 0;
 
         /** Flip condition -- c2 stops reading weak1 */
         s2.set(false);
-        expect(c2.peek()).toBe(0);
+        expect(c2.get()).toBe(0);
 
         /** weak1 should have released its value and recompute on read */
-        expect(weak1.peek()).toBe(1);
+        expect(weak1.get()).toBe(1);
         expect(runs).toBe(1);
     });
 
@@ -206,7 +206,7 @@ describe("OPT_WEAK", () => {
         s1.set(42);
 
         /** Reading should recompute and pick up the new value */
-        expect(c1.peek()).toBe(42);
+        expect(c1.get()).toBe(42);
         expect(runs).toBe(1);
     });
 
@@ -226,7 +226,7 @@ describe("OPT_WEAK", () => {
         e1.dispose();
 
         /** Non-weak: should NOT recompute on read */
-        expect(c1.peek()).toBe(1);
+        expect(c1.get()).toBe(1);
         expect(runs).toBe(0);
     });
 
@@ -245,7 +245,7 @@ describe("OPT_WEAK", () => {
             c.val(c2);
         });
 
-        expect(c2.peek()).toBe(2);
+        expect(c2.get()).toBe(2);
         runs1 = 0;
 
         /**
@@ -253,7 +253,7 @@ describe("OPT_WEAK", () => {
          * but c2 still subscribes to c1.  c1 should NOT release.
          */
         e1.dispose();
-        expect(c1.peek()).toBe(1);
+        expect(c1.get()).toBe(1);
         expect(runs1).toBe(0);
     });
 
@@ -272,7 +272,7 @@ describe("OPT_WEAK", () => {
             c.val(c2);
         });
 
-        expect(c2.peek()).toBe(2);
+        expect(c2.get()).toBe(2);
         runs1 = 0;
 
         /**
@@ -280,7 +280,7 @@ describe("OPT_WEAK", () => {
          * subscribers and should release its value.
          */
         c2.dispose();
-        expect(c1.peek()).toBe(1);
+        expect(c1.get()).toBe(1);
         expect(runs1).toBe(1);
     });
 
@@ -312,7 +312,7 @@ describe("OPT_WEAK", () => {
         c.batch(() => {
             s1.set(10);
         });
-        expect(c1.peek()).toBe(10);
+        expect(c1.get()).toBe(10);
         expect(runs).toBe(1);
     });
 });

@@ -7,7 +7,7 @@ describe("OPT_DEFER", () => {
             let runs = 0;
             const c1 = c.compute(() => { runs++; return 1; }, undefined, OPT_DEFER);
             expect(runs).toBe(0);
-            expect(c1.peek()).toBe(1);
+            expect(c1.get()).toBe(1);
             expect(runs).toBe(1);
         });
     });
@@ -18,7 +18,7 @@ describe("OPT_DEFER", () => {
             let runs = 0;
             const c1 = c.compute(c => { c.stable(); runs++; return c.val(s1) * 2; }, undefined, OPT_DEFER);
             expect(runs).toBe(0);
-            expect(c1.peek()).toBe(2);
+            expect(c1.get()).toBe(2);
             expect(runs).toBe(1);
         });
     });
@@ -49,7 +49,7 @@ describe("OPT_DEFER", () => {
                 let runs = 0;
                 const c1 = r.compute(c => { c.stable(); runs++; return c.val(s1) * 2; }, undefined, OPT_DEFER);
                 expect(runs).toBe(0);
-                expect(c1.peek()).toBe(20);
+                expect(c1.get()).toBe(20);
                 expect(runs).toBe(1);
             });
         });

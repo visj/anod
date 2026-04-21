@@ -6,13 +6,13 @@ describe("gate", () => {
     describe("basic signal behavior", () => {
         test("peek returns initial value", () => {
             const s = c.gate(5);
-            expect(s.peek()).toBe(5);
+            expect(s.get()).toBe(5);
         });
 
         test("set updates value", () => {
             const s = c.gate(5);
             s.set(10);
-            expect(s.peek()).toBe(10);
+            expect(s.get()).toBe(10);
         });
 
         test("set with same value is a no-op", () => {
@@ -39,7 +39,7 @@ describe("gate", () => {
             function isNumber(v) { return typeof v === 'number'; }
             const s = c.gate(1).guard(isNumber);
             s.set(2);
-            expect(s.peek()).toBe(2);
+            expect(s.get()).toBe(2);
         });
 
         test("throws on invalid value with guard name", () => {
@@ -54,7 +54,7 @@ describe("gate", () => {
             const s = c.gate(1).guard(isNumber).guard(isPositive);
 
             s.set(5);
-            expect(s.peek()).toBe(5);
+            expect(s.get()).toBe(5);
 
             expect(() => s.set("x")).toThrow("isNumber");
             expect(() => s.set(-1)).toThrow("isPositive");
@@ -70,7 +70,7 @@ describe("gate", () => {
             function isPositive(v) { return v > 0; }
             const s = c.gate(5).guard(isPositive);
             try { s.set(-1); } catch (_) { }
-            expect(s.peek()).toBe(5);
+            expect(s.get()).toBe(5);
         });
     });
 
@@ -123,19 +123,19 @@ describe("gate", () => {
         test("bound compute reads gate value", () => {
             const s = c.gate(3);
             const doubled = c.compute(s, val => val * 2);
-            expect(doubled.peek()).toBe(6);
+            expect(doubled.get()).toBe(6);
 
             s.set(5);
-            expect(doubled.peek()).toBe(10);
+            expect(doubled.get()).toBe(10);
         });
 
         test("dynamic compute reads gate via val()", () => {
             const s = c.gate(3);
             const doubled = c.compute(cx => cx.val(s) * 2);
-            expect(doubled.peek()).toBe(6);
+            expect(doubled.get()).toBe(6);
 
             s.set(5);
-            expect(doubled.peek()).toBe(10);
+            expect(doubled.get()).toBe(10);
         });
 
         test("bound effect fires on gate update", () => {
@@ -167,13 +167,13 @@ describe("gate", () => {
             const doubled = c.compute(s, val => val * 2);
             const quadrupled = c.compute(doubled, val => val * 2);
 
-            expect(quadrupled.peek()).toBe(4);
+            expect(quadrupled.get()).toBe(4);
 
             s.set(3);
-            expect(quadrupled.peek()).toBe(12);
+            expect(quadrupled.get()).toBe(12);
 
             expect(() => s.set("x")).toThrow("isNumber");
-            expect(quadrupled.peek()).toBe(12);
+            expect(quadrupled.get()).toBe(12);
         });
 
         test("checked gate skips downstream when equal", () => {

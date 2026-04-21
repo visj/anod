@@ -36,13 +36,13 @@ describe("async", () => {
         );
       }, 0);
 
-      expect(c1.peek()).toBe(0);
+      expect(c1.get()).toBe(0);
       expect(c1.loading).toBe(true);
 
       resolve(99);
       await settle();
 
-      expect(c1.peek()).toBe(99);
+      expect(c1.get()).toBe(99);
       expect(c1.loading).toBe(false);
     });
 
@@ -54,7 +54,7 @@ describe("async", () => {
       expect(c1.loading).toBe(true);
       await settle();
 
-      expect(c1.peek()).toBe(42);
+      expect(c1.get()).toBe(42);
       expect(c1.loading).toBe(false);
       expect(c1.error).toBeNull();
     });
@@ -77,7 +77,7 @@ describe("async", () => {
 
       await settle();
 
-      expect(() => c1.peek()).toThrow("async error");
+      expect(() => c1.get()).toThrow("async error");
     });
 
     test("clears error on subsequent successful resolution", async () => {
@@ -92,11 +92,11 @@ describe("async", () => {
       expect(c1.error).not.toBeNull();
 
       s1.set(false);
-      c1.peek(); // Pull to trigger re-evaluation
+      c1.get(); // Pull to trigger re-evaluation
       await settle();
 
       expect(c1.error).toBeNull();
-      expect(c1.peek()).toBe(42);
+      expect(c1.get()).toBe(42);
     });
 
     test("notifies downstream effect when promise settles", async () => {
@@ -130,7 +130,7 @@ describe("async", () => {
 
       // Trigger a second promise by updating the signal
       s1.set(1);
-      c1.peek(); // Pull to trigger re-evaluation with new signal value
+      c1.get(); // Pull to trigger re-evaluation with new signal value
 
       // Resolve the stale (first) promise — should be ignored
       resolvers[0](100);
@@ -142,7 +142,7 @@ describe("async", () => {
       resolvers[1](200);
       await settle();
 
-      expect(c1.peek()).toBe(200);
+      expect(c1.get()).toBe(200);
       expect(c1.loading).toBe(false);
     });
   });
@@ -166,7 +166,7 @@ describe("async", () => {
       });
 
       expect(c1.loading).toBe(true);
-      expect(c1.peek()).toBeUndefined();
+      expect(c1.get()).toBeUndefined();
 
       // prevent unhandled-rejection noise from a never-resolved promise
       resolver({ done: true });
@@ -237,7 +237,7 @@ describe("async", () => {
       await tick();
 
       expect(c1.loading).toBe(false);
-      expect(c1.peek()).toBe(42);
+      expect(c1.get()).toBe(42);
     });
 
     test("sets error flag when the iterator rejects", async () => {
@@ -252,7 +252,7 @@ describe("async", () => {
       await tick();
 
       expect(c1.error).not.toBeNull();
-      expect(() => c1.peek()).toThrow("iterator error");
+      expect(() => c1.get()).toThrow("iterator error");
     });
 
     test("calls return() on the stale iterator when it next yields", async () => {
@@ -285,17 +285,17 @@ describe("async", () => {
       });
 
       s1.set(false);
-      c1.peek();
+      c1.get();
       await tick();
       await tick();
 
-      expect(c1.peek()).toBe(99);
+      expect(c1.get()).toBe(99);
 
       resolveStale({ value: 42, done: false });
       await tick();
 
       expect(returnCalled).toBe(true);
-      expect(c1.peek()).toBe(99);
+      expect(c1.get()).toBe(99);
     });
   });
 
@@ -310,7 +310,7 @@ describe("async", () => {
         return a + b;
       });
       await settle();
-      expect(c1.peek()).toBe(11);
+      expect(c1.get()).toBe(11);
     });
 
     test("re-runs when a dep added post-await changes", async () => {
@@ -324,13 +324,13 @@ describe("async", () => {
         return c.val(s2);
       });
       await settle();
-      expect(c1.peek()).toBe(10);
+      expect(c1.get()).toBe(10);
       expect(runs).toBe(1);
 
       s2.set(20);
-      c1.peek();
+      c1.get();
       await settle();
-      expect(c1.peek()).toBe(20);
+      expect(c1.get()).toBe(20);
       expect(runs).toBe(2);
     });
 
@@ -346,7 +346,7 @@ describe("async", () => {
         return sel ? c.val(sA) : c.val(sB);
       });
       await settle();
-      expect(c1.peek()).toBe("a");
+      expect(c1.get()).toBe("a");
 
       // sB is not a current dep — changing it must NOT trigger a re-run.
       sB.set("B");
@@ -355,9 +355,9 @@ describe("async", () => {
 
       // Flip: now sB becomes the dep, sA is torn down.
       s1.set(false);
-      c1.peek();
+      c1.get();
       await settle();
-      expect(c1.peek()).toBe("B");
+      expect(c1.get()).toBe("B");
       expect(runs).toBe(2);
 
       // sA no longer a dep.
@@ -379,27 +379,27 @@ describe("async", () => {
         return sum;
       });
       await settle();
-      expect(c1.peek()).toBe(50);
+      expect(c1.get()).toBe(50);
       expect(runs).toBe(1);
 
       s1.set(6);
-      c1.peek();
+      c1.get();
       await settle();
-      expect(c1.peek()).toBe(60);
+      expect(c1.get()).toBe(60);
       expect(runs).toBe(2);
 
       c1.dispose();
       const c2 = c.compute((c) => c.val(s1) + 1);
-      expect(c2.peek()).toBe(7);
+      expect(c2.get()).toBe(7);
       s1.set(7);
-      expect(c2.peek()).toBe(8);
+      expect(c2.get()).toBe(8);
     });
 
     test("cross-compute pollution: same signal read twice across await is deduped", async () => {
       const s1 = c.signal(1);
       const s2 = c.signal(10);
       const c0 = c.compute((c) => c.val(s2) * 100);
-      expect(c0.peek()).toBe(1000);
+      expect(c0.get()).toBe(1000);
 
       let runs = 0;
       const c1 = c.task(async (c) => {
@@ -410,20 +410,20 @@ describe("async", () => {
         return c.val(s2);
       });
       await settle();
-      expect(c1.peek()).toBe(10);
+      expect(c1.get()).toBe(10);
       expect(runs).toBe(1);
 
       s2.set(20);
-      c1.peek();
+      c1.get();
       await settle();
-      expect(c1.peek()).toBe(20);
+      expect(c1.get()).toBe(20);
       expect(runs).toBe(2);
 
       c1.dispose();
       const c2 = c.compute((c) => c.val(s2));
-      expect(c2.peek()).toBe(20);
+      expect(c2.get()).toBe(20);
       s2.set(21);
-      expect(c2.peek()).toBe(21);
+      expect(c2.get()).toBe(21);
     });
 
     test("captured context is the node itself", async () => {
@@ -437,7 +437,7 @@ describe("async", () => {
         return c.val(s1);
       });
       await settle();
-      expect(c1.peek()).toBe(1);
+      expect(c1.get()).toBe(1);
       /** Without Reader, captured context IS the node object. */
       expect(captured).toBe(c1);
     });
@@ -448,12 +448,12 @@ describe("async", () => {
         return await c.suspend(Promise.resolve(val * 2));
       });
       await settle();
-      expect(c1.peek()).toBe(10);
+      expect(c1.get()).toBe(10);
 
       s1.set(6);
-      c1.peek();
+      c1.get();
       await settle();
-      expect(c1.peek()).toBe(12);
+      expect(c1.get()).toBe(12);
     });
 
     test("spawn with bound signal dependency", async () => {
@@ -503,7 +503,7 @@ describe("async", () => {
         return v1 + v2;
       });
       await settle();
-      expect(c1.peek()).toBe(11);
+      expect(c1.get()).toBe(11);
       expect(runs).toBe(1);
 
       s2.set(99);
@@ -524,12 +524,12 @@ describe("async", () => {
         return v1 + v2;
       });
       await settle();
-      expect(c1.peek()).toBe(11);
+      expect(c1.get()).toBe(11);
 
       s1.set(2);
-      c1.peek();
+      c1.get();
       await settle();
-      expect(c1.peek()).toBe(12);
+      expect(c1.get()).toBe(12);
       expect(runs).toBe(2);
     });
 
@@ -542,7 +542,7 @@ describe("async", () => {
         return v;
       });
       await settle();
-      expect(c1.peek()).toBe(0);
+      expect(c1.get()).toBe(0);
     });
 
     test("c.stable() on spawn()", async () => {
@@ -583,13 +583,13 @@ describe("async", () => {
         return v;
       });
       await settle();
-      expect(c1.peek()).toBe(1);
+      expect(c1.get()).toBe(1);
       expect(runs).toBe(1);
 
       s1.set(2);
       await tick();
       expect(runs).toBe(1);
-      expect(c1.peek()).toBe(1);
+      expect(c1.get()).toBe(1);
     });
   });
 
@@ -600,7 +600,7 @@ describe("async", () => {
         return val;
       });
       await settle();
-      expect(c1.peek()).toBe(42);
+      expect(c1.get()).toBe(42);
     });
 
     test("never resumes when node is disposed", async () => {
@@ -648,17 +648,17 @@ describe("async", () => {
       expect(runs).toBe(1);
 
       s1.set(2);
-      c1.peek();
+      c1.get();
       await settle();
 
       expect(runs).toBe(2);
-      expect(c1.peek()).toBe(20);
+      expect(c1.get()).toBe(20);
 
       firstResolve(999);
       await settle();
 
       expect(firstContinued).toBe(false);
-      expect(c1.peek()).toBe(20);
+      expect(c1.get()).toBe(20);
     });
 
     test("throws ASSERT_SUSPEND when async fn returns promise without suspend", () => {
@@ -676,7 +676,7 @@ describe("async", () => {
       await settle();
 
       expect(c1.error).not.toBeNull();
-      expect(() => c1.peek()).toThrow("boom");
+      expect(() => c1.get()).toThrow("boom");
     });
 
     test("suspend works with bound task", async () => {
@@ -686,12 +686,12 @@ describe("async", () => {
         return result;
       });
       await settle();
-      expect(c1.peek()).toBe(6);
+      expect(c1.get()).toBe(6);
 
       s1.set(10);
-      c1.peek();
+      c1.get();
       await settle();
-      expect(c1.peek()).toBe(11);
+      expect(c1.get()).toBe(11);
     });
 
     test("suspend works with spawn", async () => {
@@ -713,7 +713,7 @@ describe("async", () => {
         return await c.suspend(Promise.resolve(42));
       });
       await settle();
-      expect(c1.peek()).toBe(42);
+      expect(c1.get()).toBe(42);
     });
 
     test("controller is aborted on re-run", async () => {
@@ -729,16 +729,16 @@ describe("async", () => {
         return await c.suspend(Promise.resolve(v));
       });
       await settle();
-      expect(c1.peek()).toBe(1);
+      expect(c1.get()).toBe(1);
       expect(captured.signal.aborted).toBe(false);
 
       s1.set(2);
-      c1.peek();
+      c1.get();
       /** The old controller should be aborted on re-run. */
       expect(captured.signal.aborted).toBe(true);
 
       await settle();
-      expect(c1.peek()).toBe(2);
+      expect(c1.get()).toBe(2);
     });
 
     test("controller is aborted on dispose", async () => {
@@ -788,7 +788,7 @@ describe("async", () => {
       await settle();
 
       s1.set(2);
-      c1.peek();
+      c1.get();
       await settle();
 
       expect(controllers.length).toBe(2);
@@ -821,7 +821,7 @@ describe("async", () => {
 
       resolve(11);
       await settle();
-      expect(c1.peek()).toBe(11);
+      expect(c1.get()).toBe(11);
     });
 
     test("re-runs after settle if deferred dep changed", async () => {
@@ -866,10 +866,10 @@ describe("async", () => {
       expect(runs).toBe(1);
 
       s1.set(2);
-      c1.peek();
+      c1.get();
       await settle();
       expect(runs).toBe(2);
-      expect(c1.peek()).toBe(12);
+      expect(c1.get()).toBe(12);
     });
 
     test("deferred deps are subscribed after settle", async () => {
@@ -887,10 +887,10 @@ describe("async", () => {
       expect(runs).toBe(1);
 
       s2.set(20);
-      c1.peek();
+      c1.get();
       await settle();
       expect(runs).toBe(2);
-      expect(c1.peek()).toBe(21);
+      expect(c1.get()).toBe(21);
     });
 
     test("defer works with spawn", async () => {
@@ -921,7 +921,7 @@ describe("async", () => {
     test("fast-path: spawn awaits a settled task", async () => {
       const taskA = c.task((c) => c.suspend(Promise.resolve(42)));
       await settle();
-      expect(taskA.peek()).toBe(42);
+      expect(taskA.get()).toBe(42);
 
       let observed = null;
       c.spawn(async (c) => {
@@ -993,7 +993,7 @@ describe("async", () => {
         return c.suspend(Promise.resolve(c.val(s1) * 10));
       });
       await settle();
-      expect(taskA.peek()).toBe(10);
+      expect(taskA.get()).toBe(10);
 
       let observed = null;
       let runs = 0;
@@ -1007,7 +1007,7 @@ describe("async", () => {
 
       s1.set(2);
       await settle();
-      expect(taskA.peek()).toBe(20);
+      expect(taskA.get()).toBe(20);
       await settle();
       expect(runs).toBe(2);
       expect(observed).toBe(20);
@@ -1059,9 +1059,9 @@ describe("async", () => {
 
       resolve(5);
       await settle();
-      expect(taskA.peek()).toBe(5);
+      expect(taskA.get()).toBe(5);
       await settle();
-      expect(taskB.peek()).toBe(10);
+      expect(taskB.get()).toBe(10);
     });
 
     test("error propagation: task rejects, awaiter receives error", async () => {
@@ -1108,7 +1108,7 @@ describe("async", () => {
       resolve(42);
       await settle();
       expect(observed).toBe(null);
-      expect(taskA.peek()).toBe(42);
+      expect(taskA.get()).toBe(42);
     });
   });
 
@@ -1337,7 +1337,7 @@ describe("async", () => {
       });
       await settle();
       expect(taskRuns).toBe(1);
-      expect(taskA.peek()).toBe(10);
+      expect(taskA.get()).toBe(10);
 
       /** Change dep but don't read taskA — should NOT re-run (pull). */
       s1.set(2);
@@ -1345,10 +1345,10 @@ describe("async", () => {
       expect(taskRuns).toBe(1);
 
       /** Reading it pulls the update. */
-      taskA.peek();
+      taskA.get();
       await settle();
       expect(taskRuns).toBe(2);
-      expect(taskA.peek()).toBe(20);
+      expect(taskA.get()).toBe(20);
     });
   });
 });

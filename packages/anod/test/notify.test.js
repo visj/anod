@@ -27,7 +27,7 @@ describe("equal()", () => {
 
         runs = 0;
         s1.set(2);
-        expect(c1.peek()).toBe(2);
+        expect(c1.get()).toBe(2);
         /** c2 should not have re-run because c1 declared itself equal */
         expect(runs).toBe(0);
     });
@@ -45,11 +45,11 @@ describe("equal()", () => {
             return c.val(c1);
         });
 
-        expect(c1.peek()).toBe(42);
+        expect(c1.get()).toBe(42);
         runs = 0;
         /** Value stays 42, but equal(false) forces notification */
         s1.set(2);
-        c2.peek();
+        c2.get();
         expect(runs).toBe(1);
     });
 
@@ -85,7 +85,7 @@ describe("equal()", () => {
 
         runs = 0;
         s1.set(2);
-        c2.peek();
+        c2.get();
         /** c1 returns 42 both times, so c2 should not re-run */
         expect(runs).toBe(0);
     });
@@ -103,9 +103,9 @@ describe("equal()", () => {
 
         runs = 0;
         s1.set(2);
-        c2.peek();
+        c2.get();
         expect(runs).toBe(1);
-        expect(c2.peek()).toBe(4);
+        expect(c2.get()).toBe(4);
 		});
 
  //    test("dynamic re-run sweepDeps doesn't retain old deps via VSTACK", async () => {
@@ -130,11 +130,11 @@ describe("equal()", () => {
 	// 					c.val(sOther);
 	// 				}
 	// 			});
-	// 			r.compute((c2) => c2.val(sShared)).peek();
+	// 			r.compute((c2) => c2.val(sShared)).get();
 
-	// 			outer.peek();
+	// 			outer.get();
 	// 			sGate.set(false); // outer re-runs dynamically; sShared dropped
-	// 			outer.peek();
+	// 			outer.get();
 	// 		});
 	// 		r.dispose();
 	// 		return [outer, sGate, sShared, sOther];
@@ -161,7 +161,7 @@ describe("equal()", () => {
 
         runs = 0;
         s1.set(2);
-        c2.peek();
+        c2.get();
         /** Last call was equal(false), so c2 should re-run */
         expect(runs).toBe(1);
     });
@@ -181,7 +181,7 @@ describe("equal()", () => {
 
         runs = 0;
         s1.set(2);
-        c2.peek();
+        c2.get();
         /** Last call was equal(true), so c2 should not re-run */
         expect(runs).toBe(0);
     });
@@ -205,21 +205,21 @@ describe("equal()", () => {
         runs = 0;
         /** First run: no equal(false), value stays 42 → no notification */
         s1.set(2);
-        c2.peek();
+        c2.get();
         expect(runs).toBe(0);
 
         /** Second run: equal(false) → force notification */
         forceNotify = true;
         runs = 0;
         s1.set(3);
-        c2.peek();
+        c2.get();
         expect(runs).toBe(1);
 
         /** Third run: no equal(false) again → no notification */
         forceNotify = false;
         runs = 0;
         s1.set(4);
-        c2.peek();
+        c2.get();
         expect(runs).toBe(0);
     });
 });

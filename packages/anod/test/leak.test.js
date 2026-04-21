@@ -32,7 +32,7 @@ describe("stack retention after disposal", () => {
 				(c) => c.val(s1) + c.val(s2) + c.val(s3) + c.val(s4) + c.val(s5)
 			);
 			// Trigger setup.
-			cx.peek();
+			cx.get();
 			cx.dispose();
 			s1.dispose();
 			s2.dispose();
@@ -77,7 +77,7 @@ describe("stack retention after disposal", () => {
 					// and `stamp > TRANSACTION`, so each pushes onto
 					// VSTACK. Created via root owner so it is properly
 					// disposed when the root is disposed.
-					r2.compute((c2) => c2.val(s1) + c2.val(s2) + c2.val(s3)).peek();
+					r2.compute((c2) => c2.val(s1) + c2.val(s2) + c2.val(s3)).get();
 				});
 
 				holders.push(r);
@@ -161,11 +161,11 @@ describe("stack retention after disposal", () => {
 						c.val(sOther);
 					}
 				});
-				r.compute((c2) => c2.val(sShared)).peek();
+				r.compute((c2) => c2.val(sShared)).get();
 
-				outer.peek();
+				outer.get();
 				sGate.set(false); // outer re-runs dynamically; sShared dropped
-				outer.peek();
+				outer.get();
 			});
 			r.dispose();
 			return [outer, sGate, sShared, sOther];

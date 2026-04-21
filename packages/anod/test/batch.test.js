@@ -6,9 +6,9 @@ describe("batch", () => {
         const s1 = c.signal(1);
         c.batch(() => {
             s1.set(2);
-            expect(s1.peek()).toBe(1);
+            expect(s1.get()).toBe(1);
         });
-        expect(s1.peek()).toBe(2);
+        expect(s1.get()).toBe(2);
     });
 
     test("stops propagation within batch scope", () => {
@@ -17,8 +17,8 @@ describe("batch", () => {
 
         c.batch(() => {
             s1.set(2);
-            expect(c1.peek()).toBe(1);
+            expect(c1.get()).toBe(1);
         });
-        expect(c1.peek()).toBe(2);
+        expect(c1.get()).toBe(2);
     });
 });

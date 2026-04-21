@@ -49,6 +49,7 @@ interface IBaseContext {
   equal(equal?: boolean): void;
   stable(): void;
   cleanup(fn: () => void): void;
+  peek<R>(signal: Sender<R>): R;
   suspend<T>(promise: Promise<T>): Promise<T>;
   suspend<T>(task: ICompute<T>): T | Promise<T>;
   controller(): AbortController;
@@ -86,7 +87,7 @@ export interface IRootContext extends IFactory {
 // ─── Node interfaces ──────────────────────────────────────────────────
 
 export interface ISignal<T> {
-  peek(): T;
+  get(): T;
   set(value: T): void;
   dispose(): void;
 }
@@ -95,6 +96,7 @@ export interface ICompute<T> extends ISignal<T> {
   readonly error: Error | null;
   readonly loading: boolean;
   eager(): void;
+  cleanup(fn: () => void): void;
 }
 
 export interface IGate<T> extends ISignal<T> {
@@ -238,7 +240,7 @@ export declare class Root implements IRoot, IFactory {
 
 export declare class Signal<T> implements ISignal<T> {
   constructor(value: T);
-  peek(): T;
+  get(): T;
   set(value: T): void;
   dispose(): void;
 }
@@ -253,6 +255,7 @@ export declare class Compute<T = any> extends Signal<T> implements ICompute<T> {
   constructor(opts: number, fn: Function, dep1: any, seed?: T, args?: any);
   readonly error: Error | null;
   readonly loading: boolean;
+  cleanup(fn: () => void): void;
   eager(): void;
 }
 
