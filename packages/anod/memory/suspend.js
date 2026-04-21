@@ -337,6 +337,54 @@ async function main() {
     }
   });
 
+  // ── 11. Promise.all inside suspend: does it leak? ─────────────────────────
+  await runTest("Promise.all inside suspend: retains promises (LEAK expected)", async () => {
+    const s1 = c.signal(0);
+    const r = c.root((r) => {
+      r.spawn(async (cx) => {
+        cx.val(s1);
+        await cx.suspend(Promise.all([
+          neverResolve(),
+          neverResolve(),
+          neverResolve(),
+        ]));
+      });
+    });
+
+    for (let i = 1; i <= ITERATIONS; i++) {
+      s1.set(i);
+      if (i % 1000 === 0) {
+        updateLoader(Math.floor((i / ITERATIONS) * 100));
+        await nextTick();
+      }
+    }
+    r.dispose();
+  });
+
+  // ── 12. Promise.race inside suspend: same leak pattern ───────────────────
+  await runTest("Promise.race inside suspend: retains promises (LEAK expected)", async () => {
+    const s1 = c.signal(0);
+    const r = c.root((r) => {
+      r.spawn(async (cx) => {
+        cx.val(s1);
+        await cx.suspend(Promise.race([
+          neverResolve(),
+          neverResolve(),
+          neverResolve(),
+        ]));
+      });
+    });
+
+    for (let i = 1; i <= ITERATIONS; i++) {
+      s1.set(i);
+      if (i % 1000 === 0) {
+        updateLoader(Math.floor((i / ITERATIONS) * 100));
+        await nextTick();
+      }
+    }
+    r.dispose();
+  });
+
   // ── Summary ──────────────────────────────────────────────────────────────
   console.log();
   console.log("─── Summary ───");

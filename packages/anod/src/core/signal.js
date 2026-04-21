@@ -69,6 +69,7 @@ const REGRET = { then: function () {} };
  */
 const ASSERT_SUSPEND = "Async node must call c.suspend() on all awaited promises";
 const ASSERT_IDLE = "Cannot create nodes from the top-level clock inside a running transaction. Use a root or owner context instead.";
+const ASSERT_DISPOSED = "Cannot access a disposed node";
 
 // ─── Global state ──────────────────────────────────────────────────────────
 
@@ -387,6 +388,9 @@ function dispose() {
  */
 function val(sender) {
   let flag = this._flag;
+  if ((sender._flag & FLAG_DISPOSED) || (flag & FLAG_DISPOSED)) {
+    throw new Error(ASSERT_DISPOSED);
+  }
 
   if (flag & FLAG_LOADING) {
     return this._readAsync(sender);
@@ -427,6 +431,9 @@ function val(sender) {
  * @returns {*}
  */
 function peek(sender) {
+  if (sender._flag & FLAG_DISPOSED) {
+    throw new Error(ASSERT_DISPOSED);
+  }
   if (sender._flag & (FLAG_STALE | FLAG_PENDING)) {
     sender._refresh();
   }
@@ -507,14 +514,10 @@ function _read(sender, stamp) {
  * @returns {void}
  */
 function _readAsync(sender) {
-  let flag = this._flag;
-  if (flag & FLAG_DISPOSED) {
-    throw new Error("Disposed");
-  }
   if (sender._flag & (FLAG_STALE | FLAG_PENDING)) {
     sender._refresh();
   }
-  if ((flag & (FLAG_STABLE | FLAG_SETUP)) === FLAG_STABLE) {
+  if ((this._flag & (FLAG_STABLE | FLAG_SETUP)) === FLAG_STABLE) {
     if (sender._flag & FLAG_ERROR) {
       throw sender._value;
     }
@@ -615,6 +618,12 @@ function gate(value) {
   };
   Object.defineProperties(ComputeProto, states);
   Object.defineProperties(EffectProto, states);
+
+  let _disposed = { disposed: { get() { return (this._flag & FLAG_DISPOSED) !== 0; } } };
+	Object.defineProperties(SignalProto, _disposed);
+  Object.defineProperties(ComputeProto, _disposed);
+  Object.defineProperties(EffectProto, _disposed);
+  Object.defineProperties(RootProto, _disposed);
 
   // ─── Shared owner methods — Root + Effect ──────────────────────────────
 
@@ -723,7 +732,7 @@ function gate(value) {
    * @param {!Promise | !Compute} promiseOrTask
    * @returns {*}
    */
-  function _suspend(promiseOrTask, onResolve, onReject) {
+  function suspend(promiseOrTask, onResolve, onReject) {
     /** Branch: array of tasks → concurrent await with single cursor.
      *  If onResolve/onReject are provided, uses pure callbacks (zero
      *  Promise allocation). Otherwise returns a Promise. */
@@ -732,7 +741,7 @@ function gate(value) {
     }
     /** Branch: Compute node with FLAG_ASYNC → task-await path. */
     if (promiseOrTask._flag !== undefined && promiseOrTask._flag & FLAG_ASYNC) {
-      return _suspendTask.call(this, promiseOrTask);
+      return _suspendTask.call(this, promiseOrTask, onResolve, onReject);
     }
     /** Existing promise path. */
     let ref = new WeakRef(this);
@@ -779,50 +788,42 @@ function gate(value) {
    * @param {!Compute} taskNode
    * @returns {*}
    */
-  function _suspendTask(taskNode) {
+  function _suspendTask(taskNode, onResolve, onReject) {
     this._flag |= FLAG_SUSPEND;
+
+    if (taskNode._flag & FLAG_DISPOSED) {
+      throw new Error(ASSERT_DISPOSED);
+    }
 
     /** Fast-path: task is settled — subscribe and return value. */
     if (!(taskNode._flag & FLAG_LOADING)) {
       subscribe(this, taskNode);
       if (taskNode._flag & FLAG_ERROR) {
+        if (onReject) {
+          onReject(taskNode._value);
+          return;
+        }
         throw taskNode._value;
+      }
+      if (onResolve) {
+        onResolve(taskNode._value);
+        return;
       }
       return taskNode._value;
     }
 
     /** Slow-path: task is loading — create two-way awaiter binding. */
     taskNode._flag |= FLAG_EAGER;
-    let awaiterCh = this._channel();
-    let responderCh = taskNode._channel();
 
-    let awaiterResSlot;
-    if (awaiterCh._res1 === null) {
-      awaiterResSlot = -1;
-    } else if (awaiterCh._responds === null) {
-      awaiterResSlot = 0;
-    } else {
-      awaiterResSlot = awaiterCh._responds.length;
+    if (onResolve) {
+      send(this, taskNode, onResolve, onReject);
+      return;
     }
 
+    /** Promise mode. */
     let self = this;
     let promise = new Promise(function (resolve, reject) {
-      let waiterSlot = addWaiter(
-        responderCh,
-        self,
-        awaiterResSlot,
-        resolve,
-        reject
-      );
-
-      if (awaiterResSlot === -1) {
-        awaiterCh._res1 = taskNode;
-        awaiterCh._res1slot = waiterSlot;
-      } else if (awaiterCh._responds === null) {
-        awaiterCh._responds = [taskNode, waiterSlot];
-      } else {
-        awaiterCh._responds.push(taskNode, waiterSlot);
-      }
+      send(self, taskNode, resolve, reject);
     });
 
     return promise;
@@ -966,20 +967,7 @@ function gate(value) {
     /** Bind waiter to the blocked task. */
     let task = tasks[blocked];
     task._flag |= FLAG_EAGER;
-    let awaiterCh = node._channel();
-    let responderCh = task._channel();
-
-    let awaiterResSlot;
-    if (awaiterCh._res1 === null) {
-      awaiterResSlot = -1;
-    } else if (awaiterCh._responds === null) {
-      awaiterResSlot = 0;
-    } else {
-      awaiterResSlot = awaiterCh._responds.length;
-    }
-
-    let waiterSlot = addWaiter(
-      responderCh, node, awaiterResSlot,
+    send(node, task,
       function (value) {
         if (task._flag & FLAG_ERROR) {
           reject(task._value);
@@ -991,18 +979,9 @@ function gate(value) {
       },
       reject
     );
-
-    if (awaiterResSlot === -1) {
-      awaiterCh._res1 = task;
-      awaiterCh._res1slot = waiterSlot;
-    } else if (awaiterCh._responds === null) {
-      awaiterCh._responds = [task, waiterSlot];
-    } else {
-      awaiterCh._responds.push(task, waiterSlot);
-    }
   }
 
-  ComputeProto.suspend = EffectProto.suspend = _suspend;
+  ComputeProto.suspend = EffectProto.suspend = suspend;
 
   /**
    * Lazily allocates the Fiber for this node. If no fiber exists yet,
@@ -1153,6 +1132,9 @@ function gate(value) {
    * @returns {void}
    */
   SignalProto.set = function (value) {
+    if (this._flag & FLAG_DISPOSED) {
+      throw new Error(ASSERT_DISPOSED);
+    }
     if (this._value !== value) {
       if (IDLE) {
         this._value = value;
@@ -2934,6 +2916,41 @@ function addWaiter(responderCh, awaiter, awaiterResSlot, resolve, reject) {
     waiters.push(awaiter, awaiterResSlot, resolve, reject);
   }
   return slot;
+}
+
+/**
+ * Creates a two-way channel binding between an awaiter and a task.
+ * Calculates the awaiter's respond slot, calls addWaiter, and stores
+ * the back-reference from the awaiter's channel to the task.
+ * @param {!Compute | !Effect} awaiter
+ * @param {!Compute} task
+ * @param {function(*)} resolve
+ * @param {function(*)} reject
+ * @returns {void}
+ */
+function send(awaiter, task, resolve, reject) {
+  let awaiterCh = awaiter._channel();
+  let responderCh = task._channel();
+
+  let resSlot;
+  if (awaiterCh._res1 === null) {
+    resSlot = -1;
+  } else if (awaiterCh._responds === null) {
+    resSlot = 0;
+  } else {
+    resSlot = awaiterCh._responds.length;
+  }
+
+  let waiterSlot = addWaiter(responderCh, awaiter, resSlot, resolve, reject);
+
+  if (resSlot === -1) {
+    awaiterCh._res1 = task;
+    awaiterCh._res1slot = waiterSlot;
+  } else if (awaiterCh._responds === null) {
+    awaiterCh._responds = [task, waiterSlot];
+  } else {
+    awaiterCh._responds.push(task, waiterSlot);
+  }
 }
 
 /**

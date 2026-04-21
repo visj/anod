@@ -52,6 +52,11 @@ interface IBaseContext {
   peek<R>(signal: Sender<R>): R;
   suspend<T>(promise: Promise<T>): Promise<T>;
   suspend<T>(task: ICompute<T>): T | Promise<T>;
+  suspend<T>(
+    task: ICompute<T>,
+    onResolve: (value: T) => void,
+    onReject: (error: any) => void
+  ): void;
   suspend<T extends readonly ICompute<any>[]>(
     tasks: [...T]
   ): Promise<{ [K in keyof T]: T[K] extends ICompute<infer U> ? U : never }>;
@@ -98,6 +103,7 @@ export interface ISignal<T> {
   get(): T;
   set(value: T): void;
   dispose(): void;
+  readonly disposed: boolean;
 }
 
 export interface ICompute<T> extends ISignal<T> {
@@ -114,12 +120,14 @@ export interface IGate<T> extends ISignal<T> {
 
 export interface IEffect {
   dispose(): void;
+  readonly disposed: boolean;
   readonly error: Error | null;
   readonly loading: boolean;
 }
 
 export interface IRoot {
   dispose(): void;
+  readonly disposed: boolean;
   recover(fn: (error: any) => boolean): void;
   cleanup(fn: () => void): void;
 }
@@ -235,6 +243,7 @@ export declare class Clock implements IFactory {
 export declare class Root implements IRoot, IFactory {
   constructor();
   dispose(): void;
+  readonly disposed: boolean;
   signal: IFactory["signal"];
   gate: IFactory["gate"];
   compute: IFactory["compute"];
@@ -251,6 +260,7 @@ export declare class Signal<T> implements ISignal<T> {
   get(): T;
   set(value: T): void;
   dispose(): void;
+  readonly disposed: boolean;
 }
 
 export declare class Gate<T> extends Signal<T> implements IGate<T> {
@@ -270,6 +280,7 @@ export declare class Compute<T = any> extends Signal<T> implements ICompute<T> {
 export declare class Effect implements IEffect {
   constructor(opts: number, fn: Function, dep1: any, owner: any, args?: any);
   dispose(): void;
+  readonly disposed: boolean;
   readonly error: Error | null;
   readonly loading: boolean;
 }

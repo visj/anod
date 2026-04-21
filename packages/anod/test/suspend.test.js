@@ -987,4 +987,46 @@ describe("suspend(tasks[]): concurrent task await", () => {
 		expect(errorVal).not.toBeNull();
 		r.dispose();
 	});
+
+	test("callback variant: single task settled", async () => {
+		const taskA = c.task((cx) => cx.suspend(Promise.resolve(42)));
+		await settle();
+
+		let result = null;
+		const r = c.root((r) => {
+			r.spawn(async (cx) => {
+				cx.suspend(taskA,
+					(val) => { result = val; },
+					() => {}
+				);
+				await cx.suspend(tick());
+			});
+		});
+		await settle();
+		expect(result).toBe(42);
+		r.dispose();
+	});
+
+	test("callback variant: single task loading", async () => {
+		let resolve;
+		const taskA = c.task((cx) => cx.suspend(new Promise((r) => { resolve = r; })));
+
+		let result = null;
+		const r = c.root((r) => {
+			r.spawn(async (cx) => {
+				cx.suspend(taskA,
+					(val) => { result = val; },
+					() => {}
+				);
+				await cx.suspend(tick());
+			});
+		});
+		await settle();
+		expect(result).toBe(null);
+
+		resolve(99);
+		await settle();
+		expect(result).toBe(99);
+		r.dispose();
+	});
 });
