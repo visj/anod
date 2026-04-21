@@ -17,7 +17,7 @@ import { c } from "#fyren-src";
  *      formula `(depCount-1)*2` mis-accounts on the following re-run.
  */
 
-const FLAG_SINGLE = 1 << 28;
+const FLAG_SINGLE = 1 << 11;
 
 function collectDeps(node) {
     const deps = [];
