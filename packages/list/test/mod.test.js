@@ -1,6 +1,6 @@
-import { describe, test, expect } from "bun:test";
-import { signal, compute, effect, batch } from "anod";
-import { list } from "../";
+import { describe, test, expect } from "#test-runner";
+import { c } from "@fyren/core";
+import { list } from "../src/list.js";
 
 describe.skip("_mod encoding", () => {
     /** Helper: read _mod via .mod() on a derived compute */
@@ -10,7 +10,7 @@ describe.skip("_mod encoding", () => {
             mod = c.mod();
             return source;
         });
-        return () => { c.val(); return mod; };
+        return () => { c.get(); return mod; };
     }
 
     test("push sets MUT_ADD with correct position and length", () => {
@@ -154,7 +154,7 @@ describe.skip("_mod encoding", () => {
         const readMod = getMod(l);
         readMod();
 
-        batch(() => {
+        c.batch(() => {
             l.push(4);
             l.push(5);
         });
@@ -167,7 +167,7 @@ describe.skip("_mod encoding", () => {
         const readMod = getMod(l);
         readMod();
 
-        batch(() => {
+        c.batch(() => {
             l.push(4);
         });
         let mod = readMod();
@@ -185,11 +185,11 @@ describe.skip("every optimization", () => {
             return v > 0;
         });
 
-        expect(c.val()).toBe(true);
+        expect(c.get()).toBe(true);
         runs = 0;
 
         l.pop();
-        expect(c.val()).toBe(true);
+        expect(c.get()).toBe(true);
         /** Should have short-circuited — zero callback invocations */
         expect(runs).toBe(0);
     });
@@ -202,11 +202,11 @@ describe.skip("every optimization", () => {
             return v > 0;
         });
 
-        expect(c.val()).toBe(true);
+        expect(c.get()).toBe(true);
         runs = 0;
 
         l.shift();
-        expect(c.val()).toBe(true);
+        expect(c.get()).toBe(true);
         expect(runs).toBe(0);
     });
 
@@ -218,11 +218,11 @@ describe.skip("every optimization", () => {
             return v > 0;
         });
 
-        expect(c.val()).toBe(true);
+        expect(c.get()).toBe(true);
         runs = 0;
 
         l.push(4);
-        c.val();
+        c.get();
         /** Must do full recompute because items were added */
         expect(runs).toBeGreaterThan(0);
     });
@@ -235,11 +235,11 @@ describe.skip("every optimization", () => {
             return v > 0;
         });
 
-        expect(c.val()).toBe(false);
+        expect(c.get()).toBe(false);
         runs = 0;
 
         l.pop();
-        c.val();
+        c.get();
         /** Previous was false, must recheck */
         expect(runs).toBeGreaterThan(0);
     });
@@ -252,11 +252,11 @@ describe.skip("every optimization", () => {
             return v > 0;
         });
 
-        expect(c.val()).toBe(true);
+        expect(c.get()).toBe(true);
         runs = 0;
 
         l.sort();
-        c.val();
+        c.get();
         expect(runs).toBeGreaterThan(0);
     });
 });
@@ -270,11 +270,11 @@ describe.skip("some optimization", () => {
             return v > 10;
         });
 
-        expect(c.val()).toBe(false);
+        expect(c.get()).toBe(false);
         runs = 0;
 
         l.pop();
-        expect(c.val()).toBe(false);
+        expect(c.get()).toBe(false);
         expect(runs).toBe(0);
     });
 
@@ -286,11 +286,11 @@ describe.skip("some optimization", () => {
             return v > 10;
         });
 
-        expect(c.val()).toBe(false);
+        expect(c.get()).toBe(false);
         runs = 0;
 
         l.push(4);
-        c.val();
+        c.get();
         expect(runs).toBeGreaterThan(0);
     });
 
@@ -302,11 +302,11 @@ describe.skip("some optimization", () => {
             return v > 10;
         });
 
-        expect(c.val()).toBe(true);
+        expect(c.get()).toBe(true);
         runs = 0;
 
         l.pop();
-        c.val();
+        c.get();
         expect(runs).toBeGreaterThan(0);
     });
 });
@@ -317,42 +317,42 @@ describe.skip("indexOf mutation optimization", () => {
         const l = list([10, 20, 30]);
         const c = l.indexOf(20, true);
 
-        expect(c.val()).toBe(1);
+        expect(c.get()).toBe(1);
 
         /** Push at end (pos=3) > found index (1) → skip scan */
         l.push(40);
-        expect(c.val()).toBe(1);
+        expect(c.get()).toBe(1);
     });
 
     test("recomputes when push is before found index", () => {
         const l = list([10, 20, 30]);
         const c = l.indexOf(20, true);
 
-        expect(c.val()).toBe(1);
+        expect(c.get()).toBe(1);
 
         /** Unshift at pos=0 <= found index (1) → must recompute */
         l.unshift(5);
-        expect(c.val()).toBe(2);
+        expect(c.get()).toBe(2);
     });
 
     test("not found stays not found on delete", () => {
         const l = list([10, 20, 30]);
         const c = l.indexOf(99, true);
 
-        expect(c.val()).toBe(-1);
+        expect(c.get()).toBe(-1);
 
         l.pop();
-        expect(c.val()).toBe(-1);
+        expect(c.get()).toBe(-1);
     });
 
     test("recomputes on sort", () => {
         const l = list([30, 10, 20]);
         const c = l.indexOf(10, true);
 
-        expect(c.val()).toBe(1);
+        expect(c.get()).toBe(1);
 
         l.sort();
-        expect(c.val()).toBe(0);
+        expect(c.get()).toBe(0);
     });
 });
 
@@ -361,20 +361,20 @@ describe.skip("findIndex mutation optimization", () => {
         const l = list([10, 20, 30]);
         const c = l.findIndex((v) => v === 20, undefined, true);
 
-        expect(c.val()).toBe(1);
+        expect(c.get()).toBe(1);
 
         l.push(40);
-        expect(c.val()).toBe(1);
+        expect(c.get()).toBe(1);
     });
 
     test("not found stays not found on delete", () => {
         const l = list([10, 20, 30]);
         const c = l.findIndex((v) => v === 99, undefined, true);
 
-        expect(c.val()).toBe(-1);
+        expect(c.get()).toBe(-1);
 
         l.pop();
-        expect(c.val()).toBe(-1);
+        expect(c.get()).toBe(-1);
     });
 });
 
@@ -383,42 +383,42 @@ describe.skip("includes mutation optimization", () => {
         const l = list([10, 20, 30]);
         const c = l.includes(20, true);
 
-        expect(c.val()).toBe(true);
+        expect(c.get()).toBe(true);
 
         l.push(40);
-        expect(c.val()).toBe(true);
+        expect(c.get()).toBe(true);
     });
 
     test("not included stays not included on delete", () => {
         const l = list([10, 20, 30]);
         const c = l.includes(99, true);
 
-        expect(c.val()).toBe(false);
+        expect(c.get()).toBe(false);
 
         l.pop();
-        expect(c.val()).toBe(false);
+        expect(c.get()).toBe(false);
     });
 
     test("recomputes correctly when mutation is before found position", () => {
         const l = list([10, 20, 30]);
         const c = l.includes(20, true);
 
-        expect(c.val()).toBe(true);
+        expect(c.get()).toBe(true);
 
         /** Shift at pos=0 is before found index → must recompute */
         l.shift();
-        expect(c.val()).toBe(true);
+        expect(c.get()).toBe(true);
     });
 
     test("detects when item is removed", () => {
         const l = list([10, 20, 30]);
         const c = l.includes(30, true);
 
-        expect(c.val()).toBe(true);
+        expect(c.get()).toBe(true);
 
         /** Remove the item we were tracking */
         l.splice(2, 1);
-        expect(c.val()).toBe(false);
+        expect(c.get()).toBe(false);
     });
 });
 
@@ -427,20 +427,20 @@ describe.skip("find mutation optimization", () => {
         const l = list([10, 20, 30]);
         const c = l.find((v) => v === 20, undefined, true);
 
-        expect(c.val()).toBe(20);
+        expect(c.get()).toBe(20);
 
         l.push(40);
-        expect(c.val()).toBe(20);
+        expect(c.get()).toBe(20);
     });
 
     test("not found stays not found on delete", () => {
         const l = list([10, 20, 30]);
         const c = l.find((v) => v === 99, undefined, true);
 
-        expect(c.val()).toBe(undefined);
+        expect(c.get()).toBe(undefined);
 
         l.pop();
-        expect(c.val()).toBe(undefined);
+        expect(c.get()).toBe(undefined);
     });
 });
 
@@ -449,10 +449,10 @@ describe.skip("findLastIndex mutation optimization", () => {
         const l = list([10, 20, 30]);
         const c = l.findLastIndex((v) => v === 20, undefined, true);
 
-        expect(c.val()).toBe(1);
+        expect(c.get()).toBe(1);
 
         l.push(40);
-        expect(c.val()).toBe(1);
+        expect(c.get()).toBe(1);
     });
 });
 
@@ -467,11 +467,11 @@ describe.skip("every inverse optimization", () => {
             return v > 0;
         });
 
-        expect(c.val()).toBe(false);
+        expect(c.get()).toBe(false);
         runs = 0;
 
         l.push(4);
-        expect(c.val()).toBe(false);
+        expect(c.get()).toBe(false);
         /** Callback does not use index → short-circuit */
         expect(runs).toBe(0);
     });
@@ -484,11 +484,11 @@ describe.skip("every inverse optimization", () => {
             return v > 0;
         });
 
-        expect(c.val()).toBe(true);
+        expect(c.get()).toBe(true);
         runs = 0;
 
         l.push(4, 5);
-        expect(c.val()).toBe(true);
+        expect(c.get()).toBe(true);
         /** Only the 2 new items should be checked */
         expect(runs).toBe(2);
     });
@@ -497,10 +497,10 @@ describe.skip("every inverse optimization", () => {
         const l = list([1, 2, 3]);
         const c = l.every((v) => v > 0);
 
-        expect(c.val()).toBe(true);
+        expect(c.get()).toBe(true);
 
         l.push(-1);
-        expect(c.val()).toBe(false);
+        expect(c.get()).toBe(false);
     });
 
     test("prev=true + unshift → partial check with cb.length<=1", () => {
@@ -511,11 +511,11 @@ describe.skip("every inverse optimization", () => {
             return v > 0;
         });
 
-        expect(c.val()).toBe(true);
+        expect(c.get()).toBe(true);
         runs = 0;
 
         l.unshift(10);
-        expect(c.val()).toBe(true);
+        expect(c.get()).toBe(true);
         /** Only the 1 new item should be checked */
         expect(runs).toBe(1);
     });
@@ -528,11 +528,11 @@ describe.skip("every inverse optimization", () => {
             return v > 0;
         });
 
-        expect(c.val()).toBe(false);
+        expect(c.get()).toBe(false);
         runs = 0;
 
         l.push(4);
-        c.val();
+        c.get();
         /** cb.length > 1, so must do full recompute */
         expect(runs).toBeGreaterThan(0);
     });
@@ -547,11 +547,11 @@ describe.skip("some inverse optimization", () => {
             return v > 50;
         });
 
-        expect(c.val()).toBe(true);
+        expect(c.get()).toBe(true);
         runs = 0;
 
         l.push(4);
-        expect(c.val()).toBe(true);
+        expect(c.get()).toBe(true);
         expect(runs).toBe(0);
     });
 
@@ -559,10 +559,10 @@ describe.skip("some inverse optimization", () => {
         const l = list([1, 2, 3]);
         const c = l.some((v) => v > 50);
 
-        expect(c.val()).toBe(false);
+        expect(c.get()).toBe(false);
 
         l.push(100);
-        expect(c.val()).toBe(true);
+        expect(c.get()).toBe(true);
     });
 
     test("prev=false + ADD → partial check no match", () => {
@@ -573,11 +573,11 @@ describe.skip("some inverse optimization", () => {
             return v > 50;
         });
 
-        expect(c.val()).toBe(false);
+        expect(c.get()).toBe(false);
         runs = 0;
 
         l.push(4, 5);
-        expect(c.val()).toBe(false);
+        expect(c.get()).toBe(false);
         /** Only 2 new items checked */
         expect(runs).toBe(2);
     });
@@ -588,32 +588,32 @@ describe.skip("indexOf DEL-shift optimization", () => {
         const l = list([10, 20, 30, 40, 50]);
         const c = l.indexOf(40, true);
 
-        expect(c.val()).toBe(3);
+        expect(c.get()).toBe(3);
 
         /** Delete at pos=0, len=1 → found shifts from 3 to 2 */
         l.shift();
-        expect(c.val()).toBe(2);
+        expect(c.get()).toBe(2);
     });
 
     test("splice delete before found shifts left", () => {
         const l = list([10, 20, 30, 40, 50]);
         const c = l.indexOf(50, true);
 
-        expect(c.val()).toBe(4);
+        expect(c.get()).toBe(4);
 
         l.splice(0, 2);
-        expect(c.val()).toBe(2);
+        expect(c.get()).toBe(2);
     });
 
     test("delete overlapping found position recomputes", () => {
         const l = list([10, 20, 30, 40, 50]);
         const c = l.indexOf(30, true);
 
-        expect(c.val()).toBe(2);
+        expect(c.get()).toBe(2);
 
         /** Delete at pos=1, len=2 overlaps found index 2 */
         l.splice(1, 2);
-        expect(c.val()).toBe(-1);
+        expect(c.get()).toBe(-1);
     });
 });
 
@@ -622,41 +622,41 @@ describe.skip("indexOf ADD-region optimization", () => {
         const l = list([10, 20, 30]);
         const c = l.indexOf(20, true);
 
-        expect(c.val()).toBe(1);
+        expect(c.get()).toBe(1);
 
         /** Unshift 20 at pos=0 → new region contains target */
         l.unshift(20);
-        expect(c.val()).toBe(0);
+        expect(c.get()).toBe(0);
     });
 
     test("unshift without target in new region shifts right", () => {
         const l = list([10, 20, 30]);
         const c = l.indexOf(20, true);
 
-        expect(c.val()).toBe(1);
+        expect(c.get()).toBe(1);
 
         l.unshift(5);
-        expect(c.val()).toBe(2);
+        expect(c.get()).toBe(2);
     });
 
     test("not found + push adds target → found in new region", () => {
         const l = list([10, 20, 30]);
         const c = l.indexOf(99, true);
 
-        expect(c.val()).toBe(-1);
+        expect(c.get()).toBe(-1);
 
         l.push(99);
-        expect(c.val()).toBe(3);
+        expect(c.get()).toBe(3);
     });
 
     test("not found + push without target → still not found", () => {
         const l = list([10, 20, 30]);
         const c = l.indexOf(99, true);
 
-        expect(c.val()).toBe(-1);
+        expect(c.get()).toBe(-1);
 
         l.push(88);
-        expect(c.val()).toBe(-1);
+        expect(c.get()).toBe(-1);
     });
 });
 
@@ -665,20 +665,20 @@ describe.skip("includes DEL-shift optimization", () => {
         const l = list([10, 20, 30, 40]);
         const c = l.includes(30, true);
 
-        expect(c.val()).toBe(true);
+        expect(c.get()).toBe(true);
 
         l.shift();
-        expect(c.val()).toBe(true);
+        expect(c.get()).toBe(true);
     });
 
     test("not found + push with target → found", () => {
         const l = list([10, 20, 30]);
         const c = l.includes(99, true);
 
-        expect(c.val()).toBe(false);
+        expect(c.get()).toBe(false);
 
         l.push(99);
-        expect(c.val()).toBe(true);
+        expect(c.get()).toBe(true);
     });
 });
 
@@ -695,7 +695,7 @@ describe.skip("FLAG_INIT prevents optimization on first run", () => {
         });
 
         /** Must do full computation on first run */
-        expect(c.val()).toBe(true);
+        expect(c.get()).toBe(true);
         expect(runs).toBe(2); // [1, 2] after pop
     });
 
@@ -704,6 +704,6 @@ describe.skip("FLAG_INIT prevents optimization on first run", () => {
         l.push(40); // sets _mod
 
         const c = l.indexOf(20, true);
-        expect(c.val()).toBe(1);
+        expect(c.get()).toBe(1);
     });
 });

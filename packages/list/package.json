@@ -31,5 +31,12 @@
     "rolldown": "^1.0.0-rc.9",
     "terser": "^5.0.0",
     "alien-signals": "^3.1.2"
+  },
+  "imports": {
+    "#test-runner": {
+      "bun": "./test/env/bun.js",
+      "node": "./test/env/node.js",
+      "default": "./test/env/node.js"
+    }
   }
 }

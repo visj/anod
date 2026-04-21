@@ -441,7 +441,7 @@ function set(value) {
        *  will re-mark STALE via notify and fn runs again. */
       this._flag &= ~(FLAG_STALE | FLAG_PENDING | FLAG_INIT);
       notify(this, FLAG_STALE);
-      start();
+      flush();
     } else {
       schedule(this, value, assignCompute);
     }
@@ -1150,7 +1150,7 @@ function root(fn) {
       if (IDLE) {
         this._value = value;
         notify(this, FLAG_STALE);
-        start();
+        flush();
       } else {
         schedule(this, value, assignSignal);
       }
@@ -1198,7 +1198,7 @@ function root(fn) {
             this._update(TIME);
           }
           if (SENDER_COUNT > 0 || DISPOSER_COUNT > 0) {
-            start();
+            flush();
           }
         } finally {
           IDLE = true;
@@ -1230,7 +1230,7 @@ function root(fn) {
    * until a tracked dep changes and fires the compute's fn again.
    *
    * `_ctime = TIME + 1` anticipates the `++TIME` at the top of the next
-   * `start()` cycle, so downstream `_ctime > lastRun` sees this change
+   * `flush()` cycle, so downstream `_ctime > lastRun` sees this change
    * on the very next read — matches what `settle()` does on async
    * resolution.
    * @public
@@ -1359,7 +1359,19 @@ function root(fn) {
       }
 
       try {
-        value = this._fn(this, this._value, args);
+        if (flag & FLAG_BOUND) {
+          /** Bound + setup/dynamic: refresh dep1, stamp its version
+           *  so val() treats it as already-tracked, then pass its
+           *  value as the first argument. */
+          let dep = this._dep1;
+          if (dep._flag & (FLAG_STALE | FLAG_PENDING)) {
+            dep._refresh();
+          }
+          dep._version = version;
+          value = this._fn(dep._value, this, this._value, args);
+        } else {
+          value = this._fn(this, this._value, args);
+        }
         this._flag &= ~FLAG_ERROR;
       } catch (err) {
         value = normalize(err);
@@ -1425,19 +1437,18 @@ function root(fn) {
       }
     }
 
-    this._flag &= ~FLAG_INIT;
-
+		this._flag &= ~FLAG_INIT;
     /** Value comparison (shared by sync and async SYNC_SYNC). */
-    let f = this._flag;
-    if (f & FLAG_ERROR) {
+    flag = this._flag;
+    if (flag & FLAG_ERROR) {
       this._value = value;
       this._ctime = time;
     } else if (value !== this._value) {
       this._value = value;
-      if (!(f & FLAG_EQUAL)) {
+      if (!(flag & FLAG_EQUAL)) {
         this._ctime = time;
       }
-    } else if (f & FLAG_NOTEQUAL) {
+    } else if (flag & FLAG_NOTEQUAL) {
       this._ctime = time;
     }
   };
@@ -2636,7 +2647,7 @@ function settle(node, value) {
     }
 
     notify(node, FLAG_STALE);
-    start();
+    flush();
 
     if (stale) {
       node._update(TIME);
@@ -2934,7 +2945,7 @@ function resolveEffectPromise(ref, promise) {
           let stale = settleDeps(node);
           if (stale) {
             notify(node, FLAG_STALE);
-            start();
+            flush();
             node._flag |= FLAG_STALE;
             node._update(TIME);
           }
@@ -2980,7 +2991,7 @@ function resolveEffectIterator(ref, iterable) {
         let stale = settleDeps(node);
         if (stale) {
           notify(node, FLAG_STALE);
-          start();
+          flush();
           node._flag |= FLAG_STALE;
           node._update(TIME);
         }
@@ -3031,7 +3042,7 @@ function startCompute(node) {
       TRANSACTION = SEED;
       node._update(TIME);
       if (SENDER_COUNT > 0 || DISPOSER_COUNT > 0) {
-        start();
+        flush();
       }
     } finally {
       IDLE = true;
@@ -3052,7 +3063,7 @@ function startEffect(node) {
       TRANSACTION = SEED;
       node._update(TIME);
       if (SENDER_COUNT > 0 || DISPOSER_COUNT > 0) {
-        start();
+        flush();
       }
     } catch (err) {
       let result = tryRecover(node, err);
@@ -3083,7 +3094,7 @@ function startEffect(node) {
 /**
  * @returns {void}
  */
-function start() {
+function flush() {
   /** @type {number} */
   let time = 0;
   /** @type {number} */
@@ -3320,7 +3331,7 @@ function batch(fn) {
     IDLE = false;
     try {
       fn();
-      start();
+      flush();
     } finally {
       IDLE = true;
     }
@@ -3359,20 +3370,27 @@ Clock.prototype.batch = batch;
 const c = new Clock();
 
 export {
-  FLAG_DEFER,
-  FLAG_STABLE,
-  FLAG_SETUP,
   FLAG_STALE,
   FLAG_PENDING,
+  FLAG_SCHEDULED,
   FLAG_DISPOSED,
+  FLAG_INIT,
+  FLAG_SETUP,
   FLAG_LOADING,
   FLAG_ERROR,
+  FLAG_DEFER,
+  FLAG_STABLE,
+  FLAG_SINGLE,
   FLAG_DERIVED,
-  FLAG_EQUAL,
-  FLAG_BOUND,
   FLAG_WEAK,
-  FLAG_INIT,
+  FLAG_EQUAL,
+  FLAG_NOTEQUAL,
   FLAG_ASYNC,
+  FLAG_BOUND,
+  FLAG_SUSPEND,
+  FLAG_FIBER,
+  FLAG_EAGER,
+  FLAG_BLOCKED,
   OPT_DEFER,
   OPT_STABLE,
   OPT_SETUP,
@@ -3384,7 +3402,7 @@ export {
   schedule,
   assignSignal,
   notify,
-  start,
+  flush,
   startEffect
 };
 

@@ -1,6 +1,6 @@
-import { describe, test, expect } from "bun:test";
-import { list } from "..";
-import { signal, compute, effect, batch, root } from "anod";
+import { describe, test, expect } from "#test-runner";
+import { list } from "../src/list.js";
+import { c } from "@fyren/core";
 
 describe("forEach", () => {
     test("iterates over all elements", () => {

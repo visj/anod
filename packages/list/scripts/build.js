@@ -4,8 +4,8 @@ import { rolldown } from 'rolldown';
 import { minify } from 'terser';
 
 const outputDir = './dist';
-/** Load signal's stable property map so underscore-prefixed properties mangle identically */
-const signalManglePath = path.resolve('../fyren/dist/mangle.json');
+/** Load core's stable property map so underscore-prefixed properties mangle identically */
+const signalManglePath = path.resolve('../core/dist/mangle.json');
 const nameCachePath = path.resolve(outputDir, 'mangle.json');
 
 async function build() {
@@ -16,8 +16,8 @@ async function build() {
             index: './src/list.js',
         },
         external: [
-            'fyren',
-            'fyren/internal',
+            '@fyren/core',
+            '@fyren/core/internal',
         ],
     });
 
