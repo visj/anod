@@ -1,5 +1,5 @@
-import { describe, test, expect } from "bun:test";
-import { c } from "../src";
+import { describe, test, expect } from "#test-runner";
+import { c } from "#anod-src";
 
 /**
  * Tests for dynamic dep reconciliation (patchDeps) in compute() and

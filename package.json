@@ -1,8 +1,8 @@
 {
   "name": "anod",
   "workspace": [
-    "packages/signal",
-    "packages/list"
+    "packages/anod",
+    "packages/anod-list"
   ],
   "version": "1.0.0",
   "description": "",

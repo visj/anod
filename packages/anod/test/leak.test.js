@@ -1,21 +1,5 @@
-import { describe, test, expect } from "bun:test";
-import { c } from "../";
-
-/**
- * Collects garbage after an event-loop turn. Mirrors the helper in
- * garbage.test.js -- the setTimeout lets the microtask queue drain before
- * we force a full stop-the-world GC.
- */
-function collect(callback) {
-    setTimeout(() => {
-        Bun.gc(true);
-        callback();
-    }, 10);
-}
-
-function collectAsync() {
-    return new Promise((resolve) => collect(() => resolve()));
-}
+import { describe, test, expect, collectAsync } from "#test-runner";
+import { c } from "#anod";
 
 /**
  * Runs `fn` in a child scope and returns WeakRefs to everything `fn`

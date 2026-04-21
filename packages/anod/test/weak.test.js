@@ -1,5 +1,5 @@
-import { describe, test, expect } from "bun:test";
-import { c, OPT_WEAK } from "../";
+import { describe, test, expect } from "#test-runner";
+import { c, OPT_WEAK } from "#anod";
 
 describe("OPT_WEAK", () => {
     test("releases value when last subscriber disposes", () => {

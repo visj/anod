@@ -1,5 +1,5 @@
-import { describe, test, expect } from "bun:test";
-import { c } from "../";
+import { describe, test, expect } from "#test-runner";
+import { c } from "#anod";
 
 const tick = () => Promise.resolve();
 /** suspend() adds one extra microtask layer; settle needs 2 ticks for

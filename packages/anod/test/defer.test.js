@@ -1,5 +1,5 @@
-import { describe, test, expect } from "bun:test";
-import { c, OPT_DEFER } from "../";
+import { describe, test, expect } from "#test-runner";
+import { c, OPT_DEFER } from "#anod";
 
 describe("OPT_DEFER", () => {
     describe("compute", () => {

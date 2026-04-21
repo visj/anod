@@ -1,5 +1,5 @@
-import { describe, test, expect } from "bun:test";
-import { c } from "../";
+import { describe, test, expect } from "#test-runner";
+import { c } from "#anod";
 
 describe("root", () => {
     test("allows subcomputations to escape their parents via nested scope", () => {

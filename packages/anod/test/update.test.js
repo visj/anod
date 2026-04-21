@@ -1,5 +1,5 @@
-import { describe, test, expect } from "bun:test";
-import { c } from "../";
+import { describe, test, expect } from "#test-runner";
+import { c } from "#anod";
 
 describe("update", () => {
     test("does not register a dependency on the subcomputation", () => {

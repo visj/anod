@@ -1,14 +1,5 @@
-import { describe, test, expect } from "bun:test";
-import { c } from "../";
-
-function collect(callback) {
-    // We use a small timeout to allow the event loop to turn
-    // and clear any temporary microtask references.
-    setTimeout(() => {
-        Bun.gc(true); // Call Bun's native GC
-        callback();
-    }, 10);
-}
+import { describe, test, expect, collect } from "#test-runner";
+import { c } from "#anod";
 
 describe("garbage collection", () => {
     test("should not be collected when referenced", async () => {
