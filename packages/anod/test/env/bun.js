@@ -16,7 +16,12 @@ export function collect(callback) {
     }, 10);
 }
 
-/** Promise-based version of collect(). */
-export function collectAsync() {
-    return new Promise((resolve) => collect(() => resolve()));
+/**
+ * Promise-based version of collect(). Two passes with setTimeout
+ * between them to ensure all stack frames are unwound and WeakRef
+ * targets are finalized before asserting.
+ */
+export async function collectAsync() {
+    await new Promise((resolve) => collect(() => resolve()));
+    await new Promise((resolve) => collect(() => resolve()));
 }

@@ -77,7 +77,7 @@ export interface IEffectReader extends IBaseContext {
 }
 
 /** Root callback context — factories + ownership. */
-export interface IRootContext extends IClock {
+export interface IRootContext extends IFactory {
   dispose(): void;
   cleanup(fn: () => void): void;
   recover(fn: (error: any) => boolean): void;
@@ -114,9 +114,9 @@ export interface IRoot {
   cleanup(fn: () => void): void;
 }
 
-// ─── Clock interface (factory methods) ───────────────────────────────
+// ─── Factory interface (factory methods) ───────────────────────────────
 
-export interface IClock {
+export interface IFactory {
   signal<T>(value: T): ISignal<T>;
 
   gate<T>(value: T): IGate<T>;
@@ -206,35 +206,34 @@ export interface IClock {
   ): IEffect;
 
   root(fn: (r: IRootContext) => void): IRoot;
-
-  batch(fn: () => void): void;
 }
 
 // ─── Concrete classes ─────────────────────────────────────────────────
 
-export declare class Clock implements IClock {
-  signal<T>(value: T): ISignal<T>;
-  gate<T>(value: T): IGate<T>;
-  compute: IClock["compute"];
-  task: IClock["task"];
-  effect: IClock["effect"];
-  spawn: IClock["spawn"];
-  root: IClock["root"];
+export declare class Clock implements IFactory {
+  private constructor();
+  signal: IFactory["signal"];
+  gate: IFactory["gate"];
+  compute: IFactory["compute"];
+  task: IFactory["task"];
+  effect: IFactory["effect"];
+  spawn: IFactory["spawn"];
+  root: IFactory["root"];
   batch(fn: () => void): void;
 }
 
-export declare class Root implements IRoot, IClock {
+export declare class Root implements IRoot, IFactory {
+  constructor();
   dispose(): void;
+  signal: IFactory["signal"];
+  gate: IFactory["gate"];
+  compute: IFactory["compute"];
+  task: IFactory["task"];
+  effect: IFactory["effect"];
+  spawn: IFactory["spawn"];
+  root: IFactory["root"];
   recover(fn: (error: any) => boolean): void;
   cleanup(fn: () => void): void;
-  signal<T>(value: T): ISignal<T>;
-  gate<T>(value: T): IGate<T>;
-  compute: IClock["compute"];
-  task: IClock["task"];
-  effect: IClock["effect"];
-  spawn: IClock["spawn"];
-  root: IClock["root"];
-  batch(fn: () => void): void;
 }
 
 export declare class Signal<T> implements ISignal<T> {

@@ -66,9 +66,8 @@ const REGRET = { then: function () {} };
  * let code continue executing after the node is disposed.
  * @const
  */
-const ASSERT_SUSPEND = {
-  message: "Async node must call c.suspend() on all awaited promises"
-};
+const ASSERT_SUSPEND = "Async node must call c.suspend() on all awaited promises";
+const ASSERT_IDLE = "Cannot create nodes from the top-level clock inside a running transaction. Use a root or owner context instead.";
 
 // ─── Global state ──────────────────────────────────────────────────────────
 
@@ -1231,7 +1230,7 @@ function gate(value) {
       let kind = asyncKind(value);
       if (kind !== ASYNC_SYNC) {
         if (kind === ASYNC_PROMISE && !(this._flag & FLAG_SUSPEND)) {
-          throw ASSERT_SUSPEND;
+          throw new Error(ASSERT_SUSPEND);
         }
         this._flag |= FLAG_LOADING;
         if (kind === ASYNC_PROMISE) {
@@ -1418,7 +1417,7 @@ function gate(value) {
       let kind = asyncKind(value);
       if (kind !== ASYNC_SYNC) {
         if (kind === ASYNC_PROMISE && !(this._flag & FLAG_SUSPEND)) {
-          throw ASSERT_SUSPEND;
+          throw new Error(ASSERT_SUSPEND);
         }
         this._flag |= FLAG_LOADING;
         if (kind === ASYNC_PROMISE) {
@@ -1924,16 +1923,6 @@ function tryRecover(node, error) {
     owner = owner._owner;
   }
   return false;
-}
-
-/**
- * @param {Receiver} node
- * @returns {boolean}
- */
-function unbound(node) {
-  return (
-    node._dep1 === null && (node._deps === null || node._deps.length === 0)
-  );
 }
 
 // ─── patchDeps ─────────────────────────────────────────────────────────────
@@ -2545,8 +2534,6 @@ function settle(node, value) {
       if (node._deps !== null || hasDefers) {
         stale = settleDeps(node);
       }
-    } else if (unbound(node)) {
-      node._fn = node._args = null;
     }
 
     /** Resolve any awaiters waiting on this task. */
@@ -2900,10 +2887,7 @@ function startRoot(root, fn) {
   let idle = IDLE;
   IDLE = true;
   try {
-    let ret = fn(root);
-    if (typeof ret === "function") {
-      root._addCleanup(ret);
-    }
+    fn(root);
   } finally {
     IDLE = idle;
   }
@@ -3182,10 +3166,22 @@ function batch(fn) {
 function Clock() {}
 Clock.prototype.signal = signal;
 Clock.prototype.gate = gate;
-Clock.prototype.compute = compute;
-Clock.prototype.task = task;
-Clock.prototype.effect = effect;
-Clock.prototype.spawn = spawn;
+Clock.prototype.compute = function (a, b, c, d, e) {
+  if (!IDLE) { throw new Error(ASSERT_IDLE); }
+  return compute(a, b, c, d, e);
+};
+Clock.prototype.task = function (a, b, c, d, e) {
+  if (!IDLE) { throw new Error(ASSERT_IDLE); }
+  return task(a, b, c, d, e);
+};
+Clock.prototype.effect = function (a, b, c, d) {
+  if (!IDLE) { throw new Error(ASSERT_IDLE); }
+  return effect(a, b, c, d);
+};
+Clock.prototype.spawn = function (a, b, c, d) {
+  if (!IDLE) { throw new Error(ASSERT_IDLE); }
+  return spawn(a, b, c, d);
+};
 Clock.prototype.root = root;
 Clock.prototype.batch = batch;
 
@@ -3217,4 +3213,47 @@ export {
   startEffect
 };
 
-export { c, Clock, Root, Signal, Gate, Compute, Effect };
+/**
+ * DEBUG: Returns all internal global arrays/stacks that could retain references.
+ * Each entry is [name, array]. Only for leak testing.
+ */
+function _internals() {
+  return [
+    ["VSTACK", VSTACK],
+    ["CSTACK", CSTACK],
+    ["CINDEX", CINDEX],
+    ["DSTACK", DSTACK],
+    ["DISPOSES", DISPOSES],
+    ["SENDERS", SENDERS],
+    ["PAYLOADS", PAYLOADS],
+    ["COMPUTES", COMPUTES],
+    ["RECEIVERS", RECEIVERS],
+    ["SCOPES[0]", SCOPES[0]],
+    ["SCOPES[1]", SCOPES[1]],
+    ["SCOPES[2]", SCOPES[2]],
+    ["SCOPES[3]", SCOPES[3]],
+  ];
+}
+
+/**
+ * DEBUG: Scans all internal arrays and returns a list of retained non-primitive
+ * values (objects/functions) with their location.
+ * @returns {Array<{name: string, index: number, value: *}>}
+ */
+function _checkLeaks() {
+  let leaks = [];
+  let stacks = _internals();
+  for (let s = 0; s < stacks.length; s++) {
+    let name = stacks[s][0];
+    let arr = stacks[s][1];
+    for (let i = 0; i < arr.length; i++) {
+      let v = arr[i];
+      if (v !== null && v !== undefined && typeof v === "object" || typeof v === "function") {
+        leaks.push({ name, index: i, value: v });
+      }
+    }
+  }
+  return leaks;
+}
+
+export { c, Clock, Root, Signal, Gate, Compute, Effect, _checkLeaks };

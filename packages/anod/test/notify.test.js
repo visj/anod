@@ -1,5 +1,16 @@
-import { describe, test, expect } from "#test-runner";
+import { describe, test, expect, collectAsync } from "#test-runner";
 import { c } from "#anod";
+
+/**
+ * Runs `fn` in a child scope and returns WeakRefs to everything `fn`
+ * returns. After this helper returns the only strong references should
+ * be whatever the library itself still holds -- the caller can GC and
+ * inspect what leaked.
+ */
+function capture(fn) {
+	const nodes = fn();
+	return nodes.map((n) => new WeakRef(n));
+}
 
 describe("equal()", () => {
     test("equal(true) suppresses notification when value changes", () => {
@@ -95,7 +106,44 @@ describe("equal()", () => {
         c2.peek();
         expect(runs).toBe(1);
         expect(c2.peek()).toBe(4);
-    });
+		});
+
+ //    test("dynamic re-run sweepDeps doesn't retain old deps via VSTACK", async () => {
+	// 	/**
+	// 	 * sweepDeps pushes (dep, depver) onto VSTACK for every pre-existing
+	// 	 * dep whose `_version > TRANSACTION` (i.e. tagged by a sibling
+	// 	 * running in the same transaction). With a nested dynamic compute
+	// 	 * and a shared signal we can force this path, then re-run the
+	// 	 * outer so the shared signal is dropped from its dep set.
+	// 	 */
+	// 	const refs = capture(() => {
+	// 		let outer, sGate, sShared, sOther;
+	// 		const r = c.root((r) => {
+	// 			sGate = c.signal(true);
+	// 			sShared = c.signal("shared");
+	// 			sOther = c.signal("other");
+
+	// 			outer = r.compute((c) => {
+	// 				if (c.val(sGate)) {
+	// 					c.val(sShared);
+	// 				} else {
+	// 					c.val(sOther);
+	// 				}
+	// 			});
+	// 			r.compute((c2) => c2.val(sShared)).peek();
+
+	// 			outer.peek();
+	// 			sGate.set(false); // outer re-runs dynamically; sShared dropped
+	// 			outer.peek();
+	// 		});
+	// 		r.dispose();
+	// 		return [outer, sGate, sShared, sOther];
+	// 	});
+	// 	await collectAsync();
+	// 	for (const r of refs) {
+	// 		expect(r.deref()).toBeUndefined();
+	// 	}
+	// });
 
     test("equal(true) then equal(false) uses last call", () => {
         const s1 = c.signal(1);
