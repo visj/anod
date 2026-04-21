@@ -1336,12 +1336,12 @@ function gate(value) {
       this._recover = null;
     }
 
-    /** Async prep: reset fiber state. */
+    /** Async prep: reset fiber state, clear loading from previous activation. */
     if (flag & FLAG_ASYNC) {
       if (flag & FLAG_FIBER) {
         clearFiber(this);
       }
-      this._flag &= ~FLAG_SUSPEND;
+      this._flag &= ~(FLAG_SUSPEND | FLAG_LOADING);
     }
 
     /** @type {(function(): void) | null | undefined} */
