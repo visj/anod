@@ -11,31 +11,37 @@ import {
 // ─── Flags ─────────────────────────────────────────────────────────────────
 
 /* Sender flags */
+/* Sender flags (bits 0-5) — readable on any Sender (Signal or Compute).
+ * Bits 6+ on a plain Signal are free for extension (e.g. mod encoding
+ * in @fyren/list). FLAG_RECEIVER distinguishes Compute/Effect from Signal. */
 const FLAG_STALE = 1 << 0;
 const FLAG_PENDING = 1 << 1;
 const FLAG_SCHEDULED = 1 << 2;
 const FLAG_DISPOSED = 1 << 3;
+const FLAG_ERROR = 1 << 4;
+const FLAG_RECEIVER = 1 << 5;
 
-/* Receiver flags */
-const FLAG_INIT = 1 << 4;
-const FLAG_SETUP = 1 << 5;
+/* Receiver flags (bits 6+) — only valid when FLAG_RECEIVER is set. */
+const FLAG_INIT = 1 << 6;
+const FLAG_SETUP = 1 << 7;
+const FLAG_LOADING = 1 << 8;
+const FLAG_DEFER = 1 << 9;
+const FLAG_STABLE = 1 << 10;
+const FLAG_EQUAL = 1 << 11;
+const FLAG_NOTEQUAL = 1 << 12;
+const FLAG_ASYNC = 1 << 13;
+const FLAG_BOUND = 1 << 14;
+const FLAG_SUSPEND = 1 << 15;
+const FLAG_FIBER = 1 << 16;
+const FLAG_BLOCKED = 1 << 17;
 
-const FLAG_LOADING = 1 << 6;
-const FLAG_ERROR = 1 << 7;
-const FLAG_DEFER = 1 << 8;
-const FLAG_STABLE = 1 << 9;
-
-const FLAG_SINGLE = 1 << 11;
-const FLAG_DERIVED = 1 << 12;
-const FLAG_WEAK = 1 << 13;
-const FLAG_EQUAL = 1 << 14;
-const FLAG_NOTEQUAL = 1 << 15;
-const FLAG_ASYNC = 1 << 16;
-const FLAG_BOUND = 1 << 17;
-const FLAG_SUSPEND = 1 << 18;
-const FLAG_FIBER = 1 << 19;
-const FLAG_EAGER = 1 << 20;
-const FLAG_BLOCKED = 1 << 21;
+/* Shared Sender | Receiver flags — these are read on generic Sender-typed
+ * variables (deps in checkRun, senders in clearReceiver). Code that reads
+ * them MUST also check FLAG_RECEIVER to avoid false positives from Signal
+ * mod bits occupying the same bit positions. */
+const FLAG_SINGLE = 1 << 28;
+const FLAG_WEAK = 1 << 29;
+const FLAG_EAGER = 1 << 30;
 
 /* Option flags */
 const OPT_DEFER = FLAG_DEFER;
@@ -68,7 +74,6 @@ const REGRET = { then: function () {} };
  * @const
  */
 const ASSERT_SUSPEND = "Async node must call c.suspend() on all awaited promises";
-const ASSERT_IDLE = "Cannot create nodes from the top-level clock inside a running transaction. Use a root or owner context instead.";
 const ASSERT_DISPOSED = "Cannot access a disposed node";
 
 // ─── Global state ──────────────────────────────────────────────────────────
@@ -233,7 +238,7 @@ function Signal(value) {
  */
 function Compute(opts, fn, dep1, seed, args) {
   /** @type {number} */
-  this._flag = FLAG_INIT | FLAG_STALE | opts;
+  this._flag = FLAG_RECEIVER | FLAG_INIT | FLAG_STALE | opts;
   /** @type {T} */
   this._value = seed;
   /** @type {number} */
@@ -274,7 +279,7 @@ function Compute(opts, fn, dep1, seed, args) {
  */
 function Effect(opts, fn, dep1, owner, args) {
   /** @type {number} */
-  this._flag = FLAG_INIT | (0 | opts);
+  this._flag = FLAG_RECEIVER | FLAG_INIT | (0 | opts);
   /** @type {(function(W): (function(): void | void)) | (function(U,W): (function(): void | void)) | (function(U,V,W): (function(): void | void)) | null} */
   this._fn = fn;
   /** @type {Sender<U> | null} */
@@ -1308,8 +1313,6 @@ function root(fn) {
     if (!(flag & FLAG_INIT) && this._cleanup !== null) {
       clearCleanup(this);
     }
-
-    /** Async prep: reset fiber state. */
     if (flag & FLAG_ASYNC) {
       if (flag & FLAG_FIBER) {
         clearFiber(this);
@@ -1319,35 +1322,16 @@ function root(fn) {
 
     let value;
     let args = flag & FLAG_FIBER ? this._args._args : this._args;
+    let stable = (flag & (FLAG_STABLE | FLAG_SETUP)) === FLAG_STABLE;
+    let prevRVer, version, saveStart, depsLen, depCount, prevDBase, prevReused;
 
-    if ((flag & (FLAG_STABLE | FLAG_SETUP)) === FLAG_STABLE) {
-      try {
-        if (flag & FLAG_BOUND) {
-          let dep = this._dep1;
-          if (dep._flag & (FLAG_STALE | FLAG_PENDING)) {
-            dep._refresh();
-          }
-          value = this._fn(dep._value, this, this._value, args);
-        } else {
-          value = this._fn(this, this._value, args);
-        }
-      } catch (err) {
-        this._value = normalize(err);
-        this._flag =
-          (this._flag & ~(FLAG_STALE | FLAG_PENDING | FLAG_INIT)) | FLAG_ERROR;
-        this._ctime = time;
-        return;
-      }
-    } else {
-      /** Setup or dynamic: bump VERSION for dep tracking */
-      let prevRVer = VERSION;
-      let version = (SEED += 2);
+    if (!stable) {
+      prevRVer = VERSION;
+      version = (SEED += 2);
       VERSION = version;
-      let saveStart = VCOUNT;
-      let depsLen = 0;
-      let depCount = 0;
-      let prevDBase;
-      let prevReused;
+      saveStart = VCOUNT;
+      depsLen = 0;
+      depCount = 0;
       if (flag & FLAG_SETUP) {
         prevDBase = DBASE;
         DBASE = DCOUNT;
@@ -1357,27 +1341,34 @@ function root(fn) {
         depCount = sweepDeps(version - 1, this._dep1, this._deps);
         depsLen = this._deps !== null ? this._deps.length : 0;
       }
+    }
 
-      try {
-        if (flag & FLAG_BOUND) {
-          /** Bound + setup/dynamic: refresh dep1, stamp its version
-           *  so val() treats it as already-tracked, then pass its
-           *  value as the first argument. */
-          let dep = this._dep1;
-          if (dep._flag & (FLAG_STALE | FLAG_PENDING)) {
-            dep._refresh();
-          }
-          dep._version = version;
-          value = this._fn(dep._value, this, this._value, args);
-        } else {
-          value = this._fn(this, this._value, args);
+    try {
+      if (flag & FLAG_BOUND) {
+        let dep = this._dep1;
+        if (dep._flag & FLAG_DISPOSED) {
+          throw new Error(ASSERT_DISPOSED);
         }
-        this._flag &= ~FLAG_ERROR;
-      } catch (err) {
-        value = normalize(err);
-        this._flag |= FLAG_ERROR;
+        if (dep._flag & (FLAG_STALE | FLAG_PENDING)) {
+          dep._refresh();
+        }
+        if (dep._flag & FLAG_ERROR) {
+          throw dep._value;
+        }
+        if (!stable) {
+          dep._version = version;
+        }
+        value = this._fn(dep._value, this, this._value, args);
+      } else {
+        value = this._fn(this, this._value, args);
       }
+      this._flag &= ~FLAG_ERROR;
+    } catch (err) {
+      value = normalize(err);
+      this._flag |= FLAG_ERROR;
+    }
 
+    if (!stable) {
       if (flag & FLAG_SETUP) {
         if (DCOUNT > DBASE) {
           let stack = DSTACK;
@@ -1397,7 +1388,6 @@ function root(fn) {
         }
         REUSED = prevReused;
       }
-
       if (VCOUNT > saveStart) {
         let count = VCOUNT;
         let stack = VSTACK;
@@ -1410,35 +1400,11 @@ function root(fn) {
       VERSION = prevRVer;
     }
 
-    this._flag &= ~(FLAG_STALE | FLAG_PENDING | FLAG_SETUP);
-
-    /** Async: if fn returned a promise/iterator, dispatch and return. */
-    if (flag & FLAG_ASYNC) {
-      let kind = asyncKind(value);
-      if (kind !== ASYNC_SYNC) {
-        if (kind === ASYNC_PROMISE && !(this._flag & FLAG_SUSPEND)) {
-          throw new Error(ASSERT_SUSPEND);
-        }
-        this._flag |= FLAG_LOADING;
-        if (kind === ASYNC_PROMISE) {
-          resolvePromise(
-            new WeakRef(this),
-            /** @type {IThenable} */ (value),
-            time
-          );
-        } else {
-          resolveIterator(
-            new WeakRef(this),
-            /** @type {AsyncIterator | AsyncIterable} */ (value),
-            time
-          );
-        }
-        return;
-      }
+    if (flag & FLAG_ASYNC && waitFor(this, value, time)) {
+      return;
     }
 
-		this._flag &= ~FLAG_INIT;
-    /** Value comparison (shared by sync and async SYNC_SYNC). */
+    this._flag &= ~(FLAG_STALE | FLAG_PENDING | FLAG_SETUP | FLAG_INIT);
     flag = this._flag;
     if (flag & FLAG_ERROR) {
       this._value = value;
@@ -1453,10 +1419,6 @@ function root(fn) {
     }
   };
 
-  /**
-   * @this {Compute}
-   * @returns {void}
-   */
   /**
    * Compute notification handler. Three cases:
    * 1. Default: propagate PENDING downstream (pure pull).
@@ -1531,8 +1493,14 @@ function root(fn) {
       try {
         if (flag & FLAG_BOUND) {
           let dep = this._dep1;
+          if (dep._flag & FLAG_DISPOSED) {
+            throw new Error(ASSERT_DISPOSED);
+          }
           if (dep._flag & (FLAG_STALE | FLAG_PENDING)) {
             dep._refresh();
+          }
+          if (dep._flag & FLAG_ERROR) {
+            throw dep._value;
           }
           value = this._fn(dep._value, this, args);
         } else {
@@ -1663,7 +1631,18 @@ function root(fn) {
   // ─── Owned factory methods (Root + Effect prototypes) ───────────────
 
   /** @this {!Root | !Effect} */
+  function _signal(value) {
+    if (this._flag & FLAG_DISPOSED) { throw new Error(ASSERT_DISPOSED); }
+    return signal(value);
+  }
+
+  function _root(fn) {
+    if (this._flag & FLAG_DISPOSED) { throw new Error(ASSERT_DISPOSED); }
+    return root(fn);
+  }
+
   function _compute(a, b, c, d, e) {
+    if (this._flag & FLAG_DISPOSED) { throw new Error(ASSERT_DISPOSED); }
     let flag, node;
     if (typeof a === "function") {
       flag = FLAG_SETUP | ((0 | c) & OPTIONS);
@@ -1682,6 +1661,7 @@ function root(fn) {
 
   /** @this {!Root | !Effect} */
   function _task(a, b, c, d, e) {
+    if (this._flag & FLAG_DISPOSED) { throw new Error(ASSERT_DISPOSED); }
     let flag, node;
     if (typeof a === "function") {
       flag = FLAG_ASYNC | FLAG_SETUP | ((0 | c) & OPTIONS);
@@ -1705,6 +1685,7 @@ function root(fn) {
 
   /** @this {!Root | !Effect} */
   function _effect(a, b, c, d) {
+    if (this._flag & FLAG_DISPOSED) { throw new Error(ASSERT_DISPOSED); }
     let flag, node;
     if (typeof a === "function") {
       flag = FLAG_SETUP | ((0 | b) & OPTIONS);
@@ -1727,6 +1708,7 @@ function root(fn) {
 
   /** @this {!Root | !Effect} */
   function _spawn(a, b, c, d) {
+    if (this._flag & FLAG_DISPOSED) { throw new Error(ASSERT_DISPOSED); }
     let flag, node;
     if (typeof a === "function") {
       flag = FLAG_ASYNC | FLAG_SETUP | ((0 | b) & OPTIONS);
@@ -1753,12 +1735,12 @@ function root(fn) {
   }
 
   /** Install factory methods on Root and Effect prototypes */
-  RootProto.signal = EffectProto.signal = signal;
+  RootProto.signal = EffectProto.signal = _signal;
   RootProto.compute = EffectProto.compute = _compute;
   RootProto.task = EffectProto.task = _task;
   RootProto.effect = EffectProto.effect = _effect;
   RootProto.spawn = EffectProto.spawn = _spawn;
-  RootProto.root = EffectProto.root = root;
+  RootProto.root = EffectProto.root = _root;
 }
 
 // ─── Global helpers (non-prototype) ────────────────────────────────────────
@@ -1836,6 +1818,7 @@ function clearReceiver(send, slot) {
    *   .val() recomputes fresh.
    */
   if (
+    send._flag & FLAG_RECEIVER &&
     send._flag & (FLAG_WEAK | FLAG_EAGER) &&
     send._sub1 === null &&
     (send._subs === null || send._subs.length === 0)
@@ -2516,6 +2499,32 @@ function checkRun(node, time) {
  * @param {*} value
  * @returns {number}
  */
+/**
+ * Dispatches an async value (promise or iterator) for resolution.
+ * Returns true if the value was async (caller should return early),
+ * false if it was a sync value.
+ * @param {!Compute} node
+ * @param {*} value
+ * @param {number} time
+ * @returns {boolean}
+ */
+function waitFor(node, value, time) {
+  let kind = asyncKind(value);
+  if (kind === ASYNC_SYNC) {
+    return false;
+  }
+  if (kind === ASYNC_PROMISE && !(node._flag & FLAG_SUSPEND)) {
+    throw new Error(ASSERT_SUSPEND);
+  }
+  node._flag = (node._flag & ~(FLAG_STALE | FLAG_PENDING | FLAG_SETUP)) | FLAG_LOADING;
+  if (kind === ASYNC_PROMISE) {
+    resolvePromise(new WeakRef(node), /** @type {IThenable} */ (value), time);
+  } else {
+    resolveIterator(new WeakRef(node), /** @type {AsyncIterator | AsyncIterable} */ (value), time);
+  }
+  return true;
+}
+
 function asyncKind(value) {
   if (value === null || typeof value !== "object") {
     return ASYNC_SYNC;
@@ -3348,22 +3357,10 @@ function batch(fn) {
  */
 function Clock() {}
 Clock.prototype.signal = signal;
-Clock.prototype.compute = function (depOrFn, fnOrSeed, optsOrSeed, argsOrOpts, args) {
-  if (!IDLE) { throw new Error(ASSERT_IDLE); }
-  return compute(depOrFn, fnOrSeed, optsOrSeed, argsOrOpts, args);
-};
-Clock.prototype.task = function (depOrFn, fnOrSeed, optsOrSeed, argsOrOpts, args) {
-  if (!IDLE) { throw new Error(ASSERT_IDLE); }
-  return task(depOrFn, fnOrSeed, optsOrSeed, argsOrOpts, args);
-};
-Clock.prototype.effect = function (depOrFn, fnOrOpts, optsOrArgs, args) {
-  if (!IDLE) { throw new Error(ASSERT_IDLE); }
-  return effect(depOrFn, fnOrOpts, optsOrArgs, args);
-};
-Clock.prototype.spawn = function (depOrFn, fnOrOpts, optsOrArgs, args) {
-  if (!IDLE) { throw new Error(ASSERT_IDLE); }
-  return spawn(depOrFn, fnOrOpts, optsOrArgs, args);
-};
+Clock.prototype.compute = compute;
+Clock.prototype.task = task;
+Clock.prototype.effect = effect;
+Clock.prototype.spawn = spawn;
 Clock.prototype.root = root;
 Clock.prototype.batch = batch;
 
@@ -3378,10 +3375,10 @@ export {
   FLAG_SETUP,
   FLAG_LOADING,
   FLAG_ERROR,
+  FLAG_RECEIVER,
   FLAG_DEFER,
   FLAG_STABLE,
   FLAG_SINGLE,
-  FLAG_DERIVED,
   FLAG_WEAK,
   FLAG_EQUAL,
   FLAG_NOTEQUAL,

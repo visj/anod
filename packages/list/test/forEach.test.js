@@ -1,24 +1,24 @@
 import { describe, test, expect } from "#test-runner";
-import { list } from "../src/list.js";
+import "../src/list.js";
 import { c } from "@fyren/core";
 
 describe("forEach", () => {
     test("iterates over all elements", () => {
-        const l = list([1, 2, 3]);
+        const l = c.list([1, 2, 3]);
         const result = [];
         const e = l.forEach((x) => { result.push(x); });
         expect(result).toEqual([1, 2, 3]);
     });
 
     test("callback receives index", () => {
-        const l = list(["a", "b"]);
+        const l = c.list(["a", "b"]);
         const indices = [];
         const e = l.forEach((_, i) => { indices.push(i); });
         expect(indices).toEqual([0, 1]);
     });
 
     test("re-runs when source changes", () => {
-        const l = list([1, 2]);
+        const l = c.list([1, 2]);
         const result = [];
         const e = l.forEach((x) => { result.push(x); });
         expect(result).toEqual([1, 2]);
@@ -27,14 +27,14 @@ describe("forEach", () => {
     });
 
     test("creates an effect (not a compute)", () => {
-        const l = list([1]);
+        const l = c.list([1]);
         const e = l.forEach(() => {});
         // Effects have dispose but no val()
         expect(typeof e.dispose).toBe("function");
     });
 
     test("stops running after dispose", () => {
-        const l = list([1]);
+        const l = c.list([1]);
         const result = [];
         const e = l.forEach((x) => { result.push(x); });
         expect(result).toEqual([1]);
@@ -44,7 +44,7 @@ describe("forEach", () => {
     });
 
     test("re-runs on mutation methods", () => {
-        const l = list([1]);
+        const l = c.list([1]);
         const result = [];
         const e = l.forEach((x) => { result.push(x); });
         expect(result).toEqual([1]);

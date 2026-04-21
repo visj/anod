@@ -66,6 +66,87 @@ describe("dispose", () => {
         });
     });
 
+    describe("bound dep1 error/dispose guards", () => {
+        test("bound compute throws when dep1 has FLAG_ERROR", () => {
+            const s1 = c.signal(1);
+            const bad = c.compute((cx) => {
+                if (cx.val(s1) > 1) {
+                    throw new Error("boom");
+                }
+                return cx.val(s1);
+            });
+            const bound = c.compute(bad, (val) => val * 2);
+            expect(bound.get()).toBe(2);
+
+            // Make bad error
+            s1.set(2);
+            // Pulling bound should propagate the error from bad
+            let threw = false;
+            try {
+                bound.get();
+            } catch (e) {
+                threw = true;
+            }
+            expect(threw).toBe(true);
+            expect(bound.error).not.toBeNull();
+        });
+
+        test("bound compute throws when dep1 is disposed", () => {
+            const s1 = c.signal(1);
+            const dep = c.compute((cx) => cx.val(s1));
+            const bound = c.compute(dep, (val) => val * 2);
+            expect(bound.get()).toBe(2);
+
+            dep.dispose();
+            // Reading bound should throw because dep1 is disposed
+            let threw = false;
+            try {
+                bound.get();
+            } catch (e) {
+                threw = true;
+            }
+            expect(threw).toBe(true);
+        });
+    });
+
+    describe("disposed owner guards", () => {
+        test("disposed root cannot create compute", () => {
+            const r = c.root(() => {});
+            r.dispose();
+            expect(() => r.compute((cx) => 1)).toThrow();
+        });
+
+        test("disposed root cannot create effect", () => {
+            const r = c.root(() => {});
+            r.dispose();
+            expect(() => r.effect(() => {})).toThrow();
+        });
+
+        test("disposed root cannot create signal", () => {
+            const r = c.root(() => {});
+            r.dispose();
+            expect(() => r.signal(1)).toThrow();
+        });
+
+        test("disposed root cannot create task", () => {
+            const r = c.root(() => {});
+            r.dispose();
+            expect(() => r.task((cx) => cx.suspend(Promise.resolve(1)))).toThrow();
+        });
+
+        test("disposed root cannot create spawn", () => {
+            const r = c.root(() => {});
+            r.dispose();
+            expect(() => r.spawn(async (cx) => { await cx.suspend(Promise.resolve()); })).toThrow();
+        });
+
+        test("disposed root cannot create nested root", () => {
+            const r = c.root(() => {});
+            r.dispose();
+            expect(() => r.root(() => {})).toThrow();
+        });
+    });
+
     describe("async disposal: task disposes while awaited", () => {
         test("task dispose panics awaiting task (sets FLAG_ERROR)", async () => {
             /**

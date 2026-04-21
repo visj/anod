@@ -1,10 +1,10 @@
 import { describe, test, expect } from "#test-runner";
-import { list } from "../src/list.js";
+import "../src/list.js";
 import { c } from "@fyren/core";
 
 describe("reactive chaining", () => {
     test("chaining map and filter", () => {
-        const l = list([1, 2, 3, 4, 5]);
+        const l = c.list([1, 2, 3, 4, 5]);
         const derived = l.filter((x) => x > 2).map((x) => x * 10);
         expect(derived.get()).toEqual([30, 40, 50]);
         l.set([1, 3, 5]);
@@ -12,7 +12,7 @@ describe("reactive chaining", () => {
     });
 
     test("chaining filter and reduce", () => {
-        const l = list([1, 2, 3, 4]);
+        const l = c.list([1, 2, 3, 4]);
         const derived = l.filter((x) => x % 2 === 0).reduce((a, b) => a + b, 0);
         expect(derived.get()).toBe(6);
         l.set([2, 4, 6]);
@@ -20,13 +20,13 @@ describe("reactive chaining", () => {
     });
 
     test("chaining map and join", () => {
-        const l = list([1, 2, 3]);
+        const l = c.list([1, 2, 3]);
         const derived = l.map((x) => x * 2).join(", ");
         expect(derived.get()).toBe("2, 4, 6");
     });
 
     test("chaining slice and map", () => {
-        const l = list([1, 2, 3, 4, 5]);
+        const l = c.list([1, 2, 3, 4, 5]);
         const derived = l.slice(1, 4).map((x) => x * 10);
         expect(derived.get()).toEqual([20, 30, 40]);
         l.set([10, 20, 30, 40, 50]);
@@ -34,7 +34,7 @@ describe("reactive chaining", () => {
     });
 
     test("multiple downstream computes from same list", () => {
-        const l = list([1, 2, 3]);
+        const l = c.list([1, 2, 3]);
         const sum = l.reduce((a, b) => a + b, 0);
         const count = l.map((x) => x);
         const hasEven = l.some((x) => x % 2 === 0);
@@ -52,7 +52,7 @@ describe("reactive chaining", () => {
 
 describe("compute on list", () => {
     test("derived compute reading a list", () => {
-        const l = list([1, 2, 3]);
+        const l = c.list([1, 2, 3]);
         const comp = c.compute((cx) => {
             const arr = cx.val(l);
             return arr.length;
@@ -63,7 +63,7 @@ describe("compute on list", () => {
     });
 
     test("effect reacts to list changes", () => {
-        const l = list([1, 2, 3]);
+        const l = c.list([1, 2, 3]);
         let lastLen = 0;
         c.root((r) => {
             r.effect((cx) => {
@@ -78,7 +78,7 @@ describe("compute on list", () => {
 
 describe("batch interactions", () => {
     test("multiple mutations in batch coalesce", () => {
-        const l = list([1, 2, 3]);
+        const l = c.list([1, 2, 3]);
         let mapCount = 0;
         const mapped = l.map((x) => { mapCount++; return x; });
         mapped.get();
@@ -94,7 +94,7 @@ describe("batch interactions", () => {
     });
 
     test("set inside batch", () => {
-        const l = list([1, 2]);
+        const l = c.list([1, 2]);
         const joined = l.join(",");
         expect(joined.get()).toBe("1,2");
         c.batch(() => {
@@ -104,7 +104,7 @@ describe("batch interactions", () => {
     });
 
     test("mixed set and mutation in batch", () => {
-        const l = list([1]);
+        const l = c.list([1]);
         c.batch(() => {
             l.push(2);
             l.push(3);
@@ -115,7 +115,7 @@ describe("batch interactions", () => {
 
 describe("disposal", () => {
     test("disposed compute stops reacting", () => {
-        const l = list([1, 2, 3]);
+        const l = c.list([1, 2, 3]);
         const mapped = l.map((x) => x * 2);
         expect(mapped.get()).toEqual([2, 4, 6]);
         mapped.dispose();
@@ -123,7 +123,7 @@ describe("disposal", () => {
     });
 
     test("disposed list stops notifying", () => {
-        const l = list([1, 2, 3]);
+        const l = c.list([1, 2, 3]);
         const mapped = l.map((x) => x);
         expect(mapped.get()).toEqual([1, 2, 3]);
         l.dispose();

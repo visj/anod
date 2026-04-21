@@ -1,5 +1,5 @@
 import {
-    Signal, Compute, Effect, OPT_SETUP, OPT_STABLE
+    Signal, Compute, Effect, Clock, Root, OPT_SETUP, OPT_STABLE
 } from '@fyren/core';
 
 import {
@@ -9,20 +9,25 @@ import {
 } from '@fyren/core/internal';
 
 /**
- * Mutation tracking bit layout (32-bit unsigned via >>> 0):
+ * Mutation tracking — encoded in the Signal's _flag, bits 6-31.
+ * Bits 0-5 are reserved for sender flags (core).
  *
- *   Bits  0– 2 : op type   (MUT_ADD=1, MUT_DEL=2, MUT_SORT=4)
- *   Bits  3–14 : length    (12 bits, max 4095 — affected region extent)
- *   Bits 15–31 : position  (17 bits, max 131071 — mutation start index)
+ *   Bits  6– 8 : op type   (MUT_ADD=1, MUT_DEL=2, MUT_SORT=4)
+ *   Bits  9–14 : length    (6 bits, max 63)
+ *   Bits 15–31 : position  (17 bits, max 131071)
+ *
+ * The op/len/mask constants are relative to the encoded value
+ * AFTER shifting right by 6 (stripping sender flags).
  */
-/** @const {number} */ const MUT_ADD = 1;
-/** @const {number} */ const MUT_DEL = 2;
-/** @const {number} */ const MUT_SORT = 4;
-/** @const {number} */ const MUT_OP_MASK = 7;
-/** @const {number} */ const MUT_LEN_SHIFT = 3;
-/** @const {number} */ const MUT_LEN_MASK = 0xFFF;
-/** @const {number} */ const MUT_POS_SHIFT = 15;
-/** @const {number} */ const MUT_POS_MASK = 0x1FFFF;
+const MOD_SHIFT = 6;
+const MUT_ADD = 1;
+const MUT_DEL = 2;
+const MUT_SORT = 4;
+const MUT_OP_MASK = 7;
+const MUT_LEN_SHIFT = 3;
+const MUT_LEN_MASK = 0x3F;
+const MUT_POS_SHIFT = 9;
+const MUT_POS_MASK = 0x1FFFF;
 
 /** @const */
 var SignalProto = Signal.prototype;
@@ -30,41 +35,24 @@ var SignalProto = Signal.prototype;
 var ComputeProto = Compute.prototype;
 
 /**
- * Returns the bound source value (dep1's value).
- * Used by array methods to access the underlying array.
+ * Reads the mutation descriptor from dep1's _flag (bits 6+).
+ * Returns 0 if no mutation encoded (full recompute).
  * @this {!Compute}
- * @returns {*}
- */
-/** @const */
-var EffectProto = Effect.prototype;
-
-/**
- * Returns the mutation descriptor from the first dependency.
- * Used by array methods to optimize incremental updates.
- * On Reader/Subscriber: delegates through _node.
- * On Compute: the node IS the context, accesses _dep1 directly.
  * @returns {number}
  */
-/** Stub — mod tracking disabled for now. */
 ComputeProto._getMod = function () {
-    return 0;
+    return this._dep1._flag >>> MOD_SHIFT;
 };
 
-
 /**
- * Registered mutation callbacks. Each receives the signal node and a payload,
- * applies the in-place array mutation, then lets the transaction loop handle
- * the stale notification.
- */
-/**
- * Encodes a mutation descriptor into _mod (32-bit unsigned).
+ * Encodes a mutation descriptor into the upper bits of _flag.
  * @param {number} op
  * @param {number} pos
  * @param {number} len
  * @returns {number}
  */
-function encodeMod(op, pos, len) {
-    return (op | (len << MUT_LEN_SHIFT) | (pos << MUT_POS_SHIFT)) >>> 0;
+function encode(op, pos, len) {
+    return ((op | (len << MUT_LEN_SHIFT) | (pos << MUT_POS_SHIFT)) << MOD_SHIFT) >>> 0;
 }
 
 /**
@@ -76,100 +64,92 @@ function encodeMod(op, pos, len) {
  * @param {number} mod
  * @returns {void}
  */
-/** @returns {number} Stub — mod tracking disabled for now. */
-function getMod() {
-    return 0;
+/** Sender flag mask — preserve bits 0-5, clear mod bits 6+. */
+const FLAG_SENDER_MASK = 0x3F;
+
+/**
+ * Sets mod on the signal, notifies, and flushes. The mod bits
+ * persist until the next mutation overwrites them.
+ * @param {!Signal} node
+ * @param {number} mod - pre-encoded mod (already shifted)
+ */
+function modify(node, mod) {
+    node._flag = (node._flag & FLAG_SENDER_MASK) | mod;
+    notify(node, FLAG_STALE);
+    flush();
 }
 
 /**
- * Batched array mutation handlers. Each mutates the array in-place
- * and notifies subscribers if FLAG_SCHEDULED is set.
+ * Sets mod bits on the signal and notifies if FLAG_SCHEDULED.
  * @param {!Signal} node
+ * @param {number} mod - pre-encoded mod (already shifted by MOD_SHIFT)
  */
-function push(node, value) {
-    node._value.push(value);
+function setMod(node, mod) {
     if (node._flag & FLAG_SCHEDULED) {
-        node._flag &= ~FLAG_SCHEDULED;
+        node._flag = (node._flag & FLAG_SENDER_MASK & ~FLAG_SCHEDULED) | mod;
         notify(node, FLAG_STALE);
     }
 }
+
+/**
+ * Batched array mutation handlers. Each mutates the array in-place,
+ * encodes the mod into _flag bits 6+, and notifies subscribers.
+ */
+function push(node, value) {
+    let pos = node._value.length;
+    node._value.push(value);
+    setMod(node, encode(MUT_ADD, pos, 1));
+}
 function pushArray(node, items) {
+    let pos = node._value.length;
     node._value.push(...items);
-    if (node._flag & FLAG_SCHEDULED) {
-        node._flag &= ~FLAG_SCHEDULED;
-        notify(node, FLAG_STALE);
-    }
+    setMod(node, encode(MUT_ADD, pos, items.length));
 }
 function pop(node) {
     node._value.pop();
-    if (node._flag & FLAG_SCHEDULED) {
-        node._flag &= ~FLAG_SCHEDULED;
-        notify(node, FLAG_STALE);
-    }
+    setMod(node, encode(MUT_DEL, node._value.length, 1));
 }
 function shift(node) {
     node._value.shift();
-    if (node._flag & FLAG_SCHEDULED) {
-        node._flag &= ~FLAG_SCHEDULED;
-        notify(node, FLAG_STALE);
-    }
+    setMod(node, encode(MUT_DEL, 0, 1));
 }
 function unshift(node, value) {
     node._value.unshift(value);
-    if (node._flag & FLAG_SCHEDULED) {
-        node._flag &= ~FLAG_SCHEDULED;
-        notify(node, FLAG_STALE);
-    }
+    setMod(node, encode(MUT_ADD, 0, 1));
 }
 function unshiftArray(node, items) {
     node._value.unshift(...items);
-    if (node._flag & FLAG_SCHEDULED) {
-        node._flag &= ~FLAG_SCHEDULED;
-        notify(node, FLAG_STALE);
-    }
+    setMod(node, encode(MUT_ADD, 0, items.length));
 }
 function reverse(node) {
     node._value.reverse();
-    if (node._flag & FLAG_SCHEDULED) {
-        node._flag &= ~FLAG_SCHEDULED;
-        notify(node, FLAG_STALE);
-    }
+    setMod(node, encode(MUT_SORT, 0, 0));
 }
 function sort(node, compareFn) {
     node._value.sort(compareFn);
-    if (node._flag & FLAG_SCHEDULED) {
-        node._flag &= ~FLAG_SCHEDULED;
-        notify(node, FLAG_STALE);
-    }
+    setMod(node, encode(MUT_SORT, 0, 0));
 }
 function fill(node, value) {
     node._value.fill(value);
-    if (node._flag & FLAG_SCHEDULED) {
-        node._flag &= ~FLAG_SCHEDULED;
-        notify(node, FLAG_STALE);
-    }
+    setMod(node, 0);
 }
 function fillRange(node, args) {
     node._value.fill(args[0], args[1], args[2]);
-    if (node._flag & FLAG_SCHEDULED) {
-        node._flag &= ~FLAG_SCHEDULED;
-        notify(node, FLAG_STALE);
-    }
+    setMod(node, 0);
 }
 function copyWithin(node, args) {
     node._value.copyWithin(args[0], args[1], args[2]);
-    if (node._flag & FLAG_SCHEDULED) {
-        node._flag &= ~FLAG_SCHEDULED;
-        notify(node, FLAG_STALE);
-    }
+    setMod(node, 0);
 }
 function splice(node, args) {
     let arr = node._value;
     let start = args[0];
     let delCount = args[1];
     let items = args[2];
+    let pos = start < 0 ? Math.max(0, arr.length + start) : Math.min(start, arr.length);
     if (items.length === 0) {
         if (delCount === void 0) {
+            delCount = arr.length - pos;
             arr.splice(start);
         } else {
             arr.splice(start, delCount);
@@ -177,10 +157,9 @@ function splice(node, args) {
     } else {
         arr.splice(start, delCount, ...items);
     }
-    if (node._flag & FLAG_SCHEDULED) {
-        node._flag &= ~FLAG_SCHEDULED;
-        notify(node, FLAG_STALE);
-    }
+    let addLen = items.length;
+    let op = (delCount > 0 ? MUT_DEL : 0) | (addLen > 0 ? MUT_ADD : 0);
+    setMod(node, op > 0 ? encode(op, pos, Math.max(delCount, addLen)) : 0);
 }
 
 /**
@@ -1295,8 +1274,7 @@ SignalProto.values = ComputeProto.values = function () {
 SignalProto.copyWithin = function (target, start, end) {
     if (IDLE) {
         this._value.copyWithin(target, start, end);
-
-        notify(this, FLAG_STALE); flush();
+        modify(this, 0);
     } else {
         schedule(this, [target, start, end], copyWithin);
     }
@@ -1313,8 +1291,7 @@ SignalProto.copyWithin = function (target, start, end) {
 SignalProto.fill = function (value, start, end) {
     if (IDLE) {
         this._value.fill(value, start, end);
-
-        notify(this, FLAG_STALE); flush();
+        modify(this, 0);
     } else {
         if (arguments.length === 1) {
             schedule(this, value, fill);
@@ -1332,8 +1309,7 @@ SignalProto.fill = function (value, start, end) {
 SignalProto.pop = function () {
     if (IDLE) {
         this._value.pop();
-
-        notify(this, FLAG_STALE); flush();
+        modify(this, encode(MUT_DEL, this._value.length, 1));
     } else {
         schedule(this, null, pop);
     }
@@ -1356,8 +1332,7 @@ SignalProto.push = function (...items) {
             } else {
                 arr.push(...items);
             }
-
-            notify(this, FLAG_STALE); flush();
+            modify(this, encode(MUT_ADD, pos, len));
         } else {
             if (len === 1) {
                 schedule(this, items[0], push);
@@ -1376,8 +1351,7 @@ SignalProto.push = function (...items) {
 SignalProto.reverse = function () {
     if (IDLE) {
         this._value.reverse();
-
-        notify(this, FLAG_STALE); flush();
+        modify(this, encode(MUT_SORT, 0, 0));
     } else {
         schedule(this, null, reverse);
     }
@@ -1391,8 +1365,7 @@ SignalProto.reverse = function () {
 SignalProto.shift = function () {
     if (IDLE) {
         this._value.shift();
-
-        notify(this, FLAG_STALE); flush();
+        modify(this, encode(MUT_DEL, 0, 1));
     } else {
         schedule(this, null, shift);
     }
@@ -1407,8 +1380,7 @@ SignalProto.shift = function () {
 SignalProto.sort = function (compareFn) {
     if (IDLE) {
         this._value.sort(compareFn);
-
-        notify(this, FLAG_STALE); flush();
+        modify(this, encode(MUT_SORT, 0, 0));
     } else {
         schedule(this, compareFn, sort);
     }
@@ -1438,8 +1410,7 @@ SignalProto.splice = function (start, deleteCount, ...items) {
         }
         let addLen = items.length;
         let op = (deleteCount > 0 ? MUT_DEL : 0) | (addLen > 0 ? MUT_ADD : 0);
-
-        notify(this, FLAG_STALE); flush();
+        modify(this, op > 0 ? encode(op, pos, Math.max(deleteCount, addLen)) : 0);
     } else {
         schedule(this, [start, deleteCount, items], splice);
     }
@@ -1460,8 +1431,7 @@ SignalProto.unshift = function (...items) {
             } else {
                 this._value.unshift(...items);
             }
-
-            notify(this, FLAG_STALE); flush();
+            modify(this, encode(MUT_ADD, 0, len));
         } else {
             if (len === 1) {
                 schedule(this, items[0], unshift);
@@ -1487,4 +1457,4 @@ function list(value) {
     return new Signal(value);
 }
 
-export { list };
+Clock.prototype.list = Root.prototype.list = Effect.prototype.list = list;
