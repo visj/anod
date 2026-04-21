@@ -7,5 +7,6 @@ export {
     Signal,
     Compute,
     Effect,
+    Clock,
     c,
 } from "./core/signal.js";

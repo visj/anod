@@ -265,20 +265,20 @@ describe("edge cases", () => {
             }, 0);
 
             expect(runs).toBe(1);
-            expect(t.loading()).toBe(true);
+            expect(t.loading).toBe(true);
         });
 
         test("settles to resolved value", async () => {
             const t = c.task((c) => c.suspend(Promise.resolve(42)), 0);
 
             expect(t.peek()).toBe(0);
-            expect(t.loading()).toBe(true);
+            expect(t.loading).toBe(true);
 
             await tick();
             await tick();
 
             expect(t.peek()).toBe(42);
-            expect(t.loading()).toBe(false);
+            expect(t.loading).toBe(false);
         });
 
         test("notifies downstream on settle", async () => {
@@ -299,7 +299,7 @@ describe("edge cases", () => {
             await tick();
             await tick();
 
-            expect(t.error()).toBe(true);
+            expect(t.error).not.toBeNull();
             expect(() => t.peek()).toThrow("fail");
         });
 
@@ -748,7 +748,7 @@ describe("edge cases", () => {
 
             c.effect(c => {
                 const v = c.val(c1);
-                if (!c1.loading()) {
+                if (!c1.loading) {
                     values.push(v);
                 }
             });
@@ -832,7 +832,7 @@ describe("edge cases", () => {
 
         test("compute.error() returns true after throw", () => {
             const c1 = c.compute(() => { throw new Error("fail"); });
-            expect(c1.error()).toBe(true);
+            expect(c1.error).not.toBeNull();
         });
 
         test("compute.peek() rethrows stored error", () => {

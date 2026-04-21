@@ -34,7 +34,7 @@ const FLAG_ASYNC = 1 << 16;
 const FLAG_BOUND = 1 << 17;
 const FLAG_SUSPEND = 1 << 18;
 const FLAG_FIBER = 1 << 19;
-const FLAG_PROMISE = 1 << 20;
+const FLAG_EAGER = 1 << 20;
 
 /* Option flags */
 const OPT_DEFER = FLAG_DEFER;
@@ -163,9 +163,9 @@ var PAYLOADS = [];
 var SENDER_COUNT = 0;
 
 /** @const @type {Array<Compute>} */
-var TASKS = [];
+var COMPUTES = [];
 
-var TASK_COUNT = 0;
+var COMPUTE_COUNT = 0;
 
 /** @const @type {Array<number>} */
 var LEVELS = [0, 0, 0, 0];
@@ -326,7 +326,7 @@ Gate.prototype = Object.create(Signal.prototype);
 /**
  * Async execution context for task/spawn nodes. Created lazily on first
  * call to a context utility (e.g. controller(), defer()). Stored in the
- * _args wrapper as { _args, _context: Fiber }.
+ * _args wrapper as { _args, _fiber: Fiber }.
  * @constructor
  */
 function Fiber() {
@@ -374,22 +374,6 @@ function dispose() {
       DISPOSES[DISPOSER_COUNT++] = this;
     }
   }
-}
-
-/**
- * @this {!Receiver}
- * @returns {boolean}
- */
-function error() {
-  return (this._flag & FLAG_ERROR) !== 0;
-}
-
-/**
- * @this {!Receiver}
- * @returns {boolean}
- */
-function loading() {
-  return (this._flag & FLAG_LOADING) !== 0;
 }
 
 /**
@@ -480,12 +464,12 @@ function _read(sender, stamp) {
   if (this._flag & FLAG_SETUP) {
     /** Setup path: first run, push deps to DSTACK. */
     if (this._dep1 === null) {
-      let subslot = subscribe(sender, this, -1);
+      let subslot = connect(sender, this, -1);
       this._dep1 = sender;
       this._dep1slot = subslot;
     } else {
       let depslot = DCOUNT - DBASE;
-      let subslot = subscribe(sender, this, depslot);
+      let subslot = connect(sender, this, depslot);
       DSTACK[DCOUNT++] = sender;
       DSTACK[DCOUNT++] = subslot;
     }
@@ -516,19 +500,7 @@ function _readAsync(sender) {
     }
     return sender._value;
   }
-  if (this._dep1 === null) {
-    this._dep1 = sender;
-    this._dep1slot = subscribe(sender, this, -1);
-  } else {
-    let deps = this._deps;
-    let depslot = deps === null ? 0 : deps.length;
-    let slot = subscribe(sender, this, depslot);
-    if (deps === null) {
-      this._deps = [sender, slot];
-    } else {
-      deps.push(sender, slot);
-    }
-  }
+  subscribe(this, sender);
   if (sender._flag & FLAG_ERROR) {
     throw sender._value;
   }
@@ -615,9 +587,13 @@ function gate(value) {
 
   ComputeProto._readAsync = EffectProto._readAsync = _readAsync;
 
-  // IAwaitable — Compute + Effect
-  ComputeProto.error = EffectProto.error = error;
-  ComputeProto.loading = EffectProto.loading = loading;
+  // IAwaitable — Compute + Effect (getters)
+  let _errorLoading = {
+    error: { get() { return (this._flag & FLAG_ERROR) ? this._value : null; } },
+    loading: { get() { return (this._flag & FLAG_LOADING) !== 0; } }
+  };
+  Object.defineProperties(ComputeProto, _errorLoading);
+  Object.defineProperties(EffectProto, _errorLoading);
 
   // ─── Shared owner methods — Root + Effect ──────────────────────────────
 
@@ -673,11 +649,6 @@ function gate(value) {
 
   /**
    * Marks the node stable — no dynamic dep tracking on subsequent runs.
-   * @this {!Compute | !Effect}
-   * @returns {void}
-   */
-  /**
-   * Marks the node stable — no dynamic dep tracking on subsequent runs.
    * For async nodes, also clears FLAG_SETUP so the stable short-circuit
    * in val() fires immediately (SETUP persists across awaits). For sync
    * nodes, SETUP is left in place — the natural cleanup at the end of
@@ -703,6 +674,15 @@ function gate(value) {
   ComputeProto.stable = EffectProto.stable = _stable;
 
   /**
+   * Marks this compute as eager (push-based). Once set, the node
+   * eagerly re-runs on notification instead of waiting for a pull.
+   * @this {!Compute}
+   */
+  ComputeProto.eager = function () {
+    this._flag |= FLAG_EAGER;
+  };
+
+  /**
    * Intercepts a promise so the async continuation is silently dropped
    * when the owning node has been disposed or re-run since this call.
    * Uses a WeakRef + activation timestamp to detect staleness.
@@ -726,10 +706,7 @@ function gate(value) {
    */
   function _suspend(promiseOrTask) {
     /** Branch: Compute node with FLAG_ASYNC → task-await path. */
-    if (
-      promiseOrTask._flag !== undefined &&
-      promiseOrTask._flag & FLAG_ASYNC
-    ) {
+    if (promiseOrTask._flag !== undefined && promiseOrTask._flag & FLAG_ASYNC) {
       return _suspendTask.call(this, promiseOrTask);
     }
     /** Existing promise path. */
@@ -782,19 +759,7 @@ function gate(value) {
 
     /** Fast-path: task is settled — subscribe and return value. */
     if (!(taskNode._flag & FLAG_LOADING)) {
-      if (this._dep1 === null) {
-        this._dep1 = taskNode;
-        this._dep1slot = subscribe(taskNode, this, -1);
-      } else {
-        let deps = this._deps;
-        let depslot = deps === null ? 0 : deps.length;
-        let slot = subscribe(taskNode, this, depslot);
-        if (deps === null) {
-          this._deps = [taskNode, slot];
-        } else {
-          deps.push(taskNode, slot);
-        }
-      }
+      subscribe(this, taskNode);
       if (taskNode._flag & FLAG_ERROR) {
         throw taskNode._value;
       }
@@ -802,9 +767,9 @@ function gate(value) {
     }
 
     /** Slow-path: task is loading — create two-way awaiter binding. */
-    taskNode._flag |= FLAG_PROMISE;
-    let awaiterCh = this._ensureChannel();
-    let responderCh = taskNode._ensureChannel();
+    taskNode._flag |= FLAG_EAGER;
+    let awaiterCh = this._channel();
+    let responderCh = taskNode._channel();
 
     let awaiterResSlot;
     if (awaiterCh._res1 === null) {
@@ -841,46 +806,48 @@ function gate(value) {
   ComputeProto.suspend = EffectProto.suspend = _suspend;
 
   /**
-   * Lazily allocates a Fiber + Channel. Returns the channel.
+   * Lazily allocates the Fiber for this node. If no fiber exists yet,
+   * creates one and lifts _args into { _args, _fiber }.
+   * @this {!Compute | !Effect}
+   * @returns {!Fiber}
+   */
+  function _ensureFiber() {
+    if (this._flag & FLAG_FIBER) {
+      return this._args._fiber;
+    }
+    let fiber = new Fiber();
+    this._args = { _args: this._args, _fiber: fiber };
+    this._flag |= FLAG_FIBER;
+    return fiber;
+  }
+
+  ComputeProto._fiber = EffectProto._fiber = _ensureFiber;
+
+  /**
+   * Lazily allocates the Fiber and its Channel. Returns the channel.
    * @this {!Compute | !Effect}
    * @returns {!Channel}
    */
   function _ensureChannel() {
-    if (!(this._flag & FLAG_FIBER)) {
-      let fiber = new Fiber();
-      fiber._channel = new Channel();
-      this._args = { _args: this._args, _context: fiber };
-      this._flag |= FLAG_FIBER;
-      return fiber._channel;
-    }
-    let fiber = this._args._context;
+    let fiber = this._fiber();
     if (fiber._channel === null) {
       fiber._channel = new Channel();
     }
     return fiber._channel;
   }
 
-  ComputeProto._ensureChannel = EffectProto._ensureChannel = _ensureChannel;
+  ComputeProto._channel = EffectProto._channel = _ensureChannel;
 
   /**
-   * Creates a fresh AbortController for this async activation. If this
-   * is the first call, lazily allocates the Fiber context and lifts
-   * _args into { _args, _context }.
+   * Creates a fresh AbortController for this async activation.
    * The controller is automatically aborted on re-run or dispose.
    * @this {!Compute | !Effect}
    * @returns {!AbortController}
    */
   function _controller() {
-    let context;
-    if (this._flag & FLAG_FIBER) {
-      context = this._args._context;
-    } else {
-      context = new Fiber();
-      this._args = { _args: this._args, _context: context };
-      this._flag |= FLAG_FIBER;
-    }
+    let fiber = this._fiber();
     let controller = new AbortController();
-    context._controller = controller;
+    fiber._controller = controller;
     return controller;
   }
 
@@ -902,17 +869,10 @@ function gate(value) {
       sender._refresh();
     }
     let value = sender._value;
-    let context;
-    if (this._flag & FLAG_FIBER) {
-      context = this._args._context;
-    } else {
-      context = new Fiber();
-      this._args = { _args: this._args, _context: context };
-      this._flag |= FLAG_FIBER;
-    }
-    let defers = context._defers;
+    let fiber = this._fiber();
+    let defers = fiber._defers;
     if (defers === null) {
-      context._defers = [sender, value];
+      fiber._defers = [sender, value];
     } else {
       defers.push(sender, value);
     }
@@ -1146,12 +1106,12 @@ function gate(value) {
     clearSubs(this);
     clearDeps(this);
     if (flag & FLAG_FIBER) {
-      let ctx = this._args._context;
-      if (ctx._controller !== null) {
-        ctx._controller.abort();
+      let fiber = this._args._fiber;
+      if (fiber._controller !== null) {
+        fiber._controller.abort();
       }
-      if (ctx._channel !== null && ctx._channel._res1 !== null) {
-        clearChannel(ctx._channel);
+      if (fiber._channel !== null && fiber._channel._res1 !== null) {
+        clearChannel(fiber._channel);
       }
     }
     this._fn = this._value = this._args = null;
@@ -1173,19 +1133,18 @@ function gate(value) {
     let flag = this._flag;
     this._time = time;
     this._flag =
-      flag &
-      ~(FLAG_STALE | FLAG_LOADING | FLAG_EQUAL | FLAG_NOTEQUAL);
+      flag & ~(FLAG_STALE | FLAG_LOADING | FLAG_EQUAL | FLAG_NOTEQUAL);
 
     /** Async prep: reset fiber state. */
     if (flag & FLAG_ASYNC) {
       if (flag & FLAG_FIBER) {
-        resetFiber(this);
+        clearFiber(this);
       }
       this._flag &= ~FLAG_SUSPEND;
     }
 
     let value;
-    let args = (flag & FLAG_FIBER) ? this._args._args : this._args;
+    let args = flag & FLAG_FIBER ? this._args._args : this._args;
 
     if ((flag & (FLAG_STABLE | FLAG_SETUP)) === FLAG_STABLE) {
       try {
@@ -1265,7 +1224,7 @@ function gate(value) {
       VERSION = prevRVer;
     }
 
-    this._flag &= ~(FLAG_STALE | FLAG_PENDING | FLAG_INIT | FLAG_SETUP);
+    this._flag &= ~(FLAG_STALE | FLAG_PENDING | FLAG_SETUP);
 
     /** Async: if fn returned a promise/iterator, dispatch and return. */
     if (flag & FLAG_ASYNC) {
@@ -1292,6 +1251,8 @@ function gate(value) {
       }
     }
 
+    this._flag &= ~FLAG_INIT;
+
     /** Value comparison (shared by sync and async SYNC_SYNC). */
     let f = this._flag;
     if (f & FLAG_ERROR) {
@@ -1313,20 +1274,21 @@ function gate(value) {
    */
   /**
    * Compute notification handler. Three cases:
-   * 1. Sync compute: just propagate PENDING downstream (pure pull).
-   * 2. Async + FLAG_PROMISE (someone awaiting us): eagerly enqueue to
-   *    TASKS so we re-run and can settle the waiting promise. Do NOT
-   *    notify — downstream will be notified at settle time.
-   * 3. Async + no promise waiters: propagate PENDING. Stay pull-based.
-   *    If nobody reads us, we don't waste work.
+   * 1. Default: propagate PENDING downstream (pure pull).
+   * 2. FLAG_EAGER + FLAG_ASYNC: enqueue to COMPUTES for eager re-run.
+   *    Downstream is notified at settle time.
+   * 3. FLAG_EAGER + sync: notify FLAG_STALE directly — pure push node
+   *    that eagerly updates and forces downstream to re-evaluate.
    * @this {Compute}
    * @returns {void}
    */
   ComputeProto._receive = function () {
-    if (!(this._flag & FLAG_PROMISE)) {
+    if (!(this._flag & FLAG_EAGER)) {
       notify(this, FLAG_PENDING);
+    } else if (this._flag & FLAG_ASYNC) {
+      COMPUTES[COMPUTE_COUNT++] = this;
     } else {
-      TASKS[TASK_COUNT++] = this;
+      notify(this, FLAG_STALE);
     }
   };
 
@@ -1371,14 +1333,14 @@ function gate(value) {
     /** Async prep: reset fiber state. */
     if (flag & FLAG_ASYNC) {
       if (flag & FLAG_FIBER) {
-        resetFiber(this);
+        clearFiber(this);
       }
       this._flag &= ~FLAG_SUSPEND;
     }
 
     /** @type {(function(): void) | null | undefined} */
     let value;
-    let args = (flag & FLAG_FIBER) ? this._args._args : this._args;
+    let args = flag & FLAG_FIBER ? this._args._args : this._args;
 
     if ((flag & (FLAG_STABLE | FLAG_SETUP)) === FLAG_STABLE) {
       try {
@@ -1392,7 +1354,7 @@ function gate(value) {
           value = this._fn(this, args);
         }
       } finally {
-        this._flag &= ~(FLAG_INIT | FLAG_STALE | FLAG_PENDING);
+        this._flag &= ~(FLAG_STALE | FLAG_PENDING);
       }
     } else {
       /** Setup or dynamic: bump VERSION for dep tracking */
@@ -1447,18 +1409,14 @@ function gate(value) {
           VCOUNT = saveStart;
         }
         VERSION = current;
-        this._flag &= ~(FLAG_INIT | FLAG_SETUP | FLAG_STALE | FLAG_PENDING);
+        this._flag &= ~(FLAG_SETUP | FLAG_STALE | FLAG_PENDING);
       }
     }
 
     if (flag & FLAG_ASYNC) {
       /** Async result handling. */
       let kind = asyncKind(value);
-      if (kind === ASYNC_SYNC) {
-        if (typeof value === "function") {
-          this._addCleanup(value);
-        }
-      } else {
+      if (kind !== ASYNC_SYNC) {
         if (kind === ASYNC_PROMISE && !(this._flag & FLAG_SUSPEND)) {
           throw ASSERT_SUSPEND;
         }
@@ -1468,13 +1426,11 @@ function gate(value) {
         } else {
           resolveEffectIterator(new WeakRef(this), value);
         }
-      }
-    } else {
-      /** Sync result handling. */
-      if (typeof value === "function") {
-        this._addCleanup(value);
+        return;
       }
     }
+
+    this._flag &= ~FLAG_INIT;
   };
 
   /**
@@ -1492,12 +1448,12 @@ function gate(value) {
       clearOwned(this);
     }
     if (flag & FLAG_FIBER) {
-      let ctx = this._args._context;
-      if (ctx._controller !== null) {
-        ctx._controller.abort();
+      let fiber = this._args._fiber;
+      if (fiber._controller !== null) {
+        fiber._controller.abort();
       }
-      if (ctx._channel !== null && ctx._channel._res1 !== null) {
-        clearChannel(ctx._channel);
+      if (fiber._channel !== null && fiber._channel._res1 !== null) {
+        clearChannel(fiber._channel);
       }
     }
     this._fn = this._args = this._owned = this._owner = this._recover = null;
@@ -1645,7 +1601,7 @@ function gate(value) {
     } else {
       flag = FLAG_STABLE | FLAG_BOUND | FLAG_SINGLE | ((0 | d) & OPTIONS);
       node = new Compute(flag, b, a, c, e);
-      node._dep1slot = subscribe(a, node, -1);
+      node._dep1slot = connect(a, node, -1);
     }
     addOwned(this, node);
     if (!(flag & FLAG_DEFER)) {
@@ -1668,7 +1624,7 @@ function gate(value) {
         FLAG_SINGLE |
         ((0 | d) & OPTIONS);
       node = new Compute(flag, b, a, c, e);
-      node._dep1slot = subscribe(a, node, -1);
+      node._dep1slot = connect(a, node, -1);
     }
     addOwned(this, node);
     if (!(flag & FLAG_DEFER)) {
@@ -1686,7 +1642,7 @@ function gate(value) {
     } else {
       flag = FLAG_STABLE | FLAG_BOUND | FLAG_SINGLE | ((0 | c) & OPTIONS);
       node = new Effect(flag, b, a, this, d);
-      node._dep1slot = subscribe(a, node, -1);
+      node._dep1slot = connect(a, node, -1);
     }
     let level = this._level + 1;
     if (this._level > 2 && level >= LEVELS.length) {
@@ -1713,7 +1669,7 @@ function gate(value) {
         FLAG_SINGLE |
         ((0 | c) & OPTIONS);
       node = new Effect(flag, b, a, this, d);
-      node._dep1slot = subscribe(a, node, -1);
+      node._dep1slot = connect(a, node, -1);
     }
     let level = this._level + 1;
     if (this._level > 2 && level >= LEVELS.length) {
@@ -1739,24 +1695,45 @@ function gate(value) {
 // ─── Global helpers (non-prototype) ────────────────────────────────────────
 
 /**
+ *
+ * @param {Receiver} receiver
+ * @param {Sender} sender
+ */
+function subscribe(receiver, sender) {
+  if (receiver._dep1 === null) {
+    receiver._dep1 = sender;
+    receiver._dep1slot = connect(sender, receiver, -1);
+  } else {
+    let deps = receiver._deps;
+    let depslot = deps === null ? 0 : deps.length;
+    let slot = connect(sender, receiver, depslot);
+    if (deps === null) {
+      receiver._deps = [sender, slot];
+    } else {
+      deps.push(sender, slot);
+    }
+  }
+}
+
+/**
  * @param {Sender} send
- * @param {Receiver} receive
+ * @param {Receiver} receiver
  * @param {number} depslot
  * @returns {number}
  */
-function subscribe(send, receive, depslot) {
+function connect(send, receiver, depslot) {
   /** @type {number} */
   let subslot = -1;
   if (send._sub1 === null) {
-    send._sub1 = receive;
+    send._sub1 = receiver;
     send._sub1slot = depslot;
     /* subslot = -1 */
   } else if (send._subs === null) {
     subslot = 0;
-    send._subs = [receive, depslot];
+    send._subs = [receiver, depslot];
   } else {
     subslot = send._subs.length;
-    send._subs.push(receive, depslot);
+    send._subs.push(receiver, depslot);
   }
   return subslot;
 }
@@ -1784,18 +1761,21 @@ function clearReceiver(send, slot) {
     }
   }
   /**
-   * FLAG_WEAK computes release their cached value when the last
-   * subscriber is removed.  The node stays alive (deps intact)
-   * but marks itself STALE so the next .val() recomputes fresh.
-   * This keeps idle weak computes from retaining large objects.
+   * When the last subscriber is removed:
+   * - FLAG_EAGER: task reverts to pull-based (no eager re-run).
+   * - FLAG_WEAK: release cached value and mark STALE so next
+   *   .val() recomputes fresh.
    */
   if (
-    send._flag & FLAG_WEAK &&
+    send._flag & (FLAG_WEAK | FLAG_EAGER) &&
     send._sub1 === null &&
     (send._subs === null || send._subs.length === 0)
   ) {
-    send._flag |= FLAG_STALE;
-    /** @type {Compute} */ (send)._value = null;
+    send._flag &= ~FLAG_EAGER;
+    if (send._flag & FLAG_WEAK) {
+      send._flag |= FLAG_STALE;
+      /** @type {Compute} */ (send)._value = null;
+    }
   }
 }
 
@@ -1991,7 +1971,7 @@ function patchDeps(node, version, depCount, newLen) {
         /** Fill dep1 with a new dep */
         let newDep = /** @type {Sender} */ (deps[newidx]);
         node._dep1 = newDep;
-        node._dep1slot = subscribe(newDep, node, -1);
+        node._dep1slot = connect(newDep, node, -1);
         newidx += 2;
       } else {
         node._dep1 = null;
@@ -2033,7 +2013,7 @@ function patchDeps(node, version, depCount, newLen) {
     if (newidx < newLen) {
       /** Fill hole with next new dep */
       let newDep = /** @type {Sender} */ (deps[newidx]);
-      let subslot = subscribe(newDep, node, i);
+      let subslot = connect(newDep, node, i);
       deps[i] = newDep;
       deps[i + 1] = subslot;
       newidx += 2;
@@ -2076,7 +2056,7 @@ function patchDeps(node, version, depCount, newLen) {
     if (node._dep1 === null) {
       /** Fill hole with next new dep */
       let newDep = /** @type {Sender} */ (deps[newidx]);
-      let subslot = subscribe(newDep, node, i);
+      let subslot = connect(newDep, node, i);
       deps[i] = newDep;
       deps[i + 1] = subslot;
       newidx += 2;
@@ -2084,7 +2064,7 @@ function patchDeps(node, version, depCount, newLen) {
     /** Remaining new deps — subscribe at the end of the live region */
     while (newidx < newLen) {
       let dep = /** @type {Sender} */ (deps[newidx]);
-      let subslot = subscribe(dep, node, tail);
+      let subslot = connect(dep, node, tail);
       deps[tail] = dep;
       deps[tail + 1] = subslot;
       tail += 2;
@@ -2550,17 +2530,18 @@ function resolveIterator(ref, iterable, time) {
  * @returns {void}
  */
 function settle(node, value) {
-  let flag = node._flag &= ~FLAG_LOADING;
+  let flag = node._flag;
+  node._flag &= ~(FLAG_LOADING | FLAG_INIT);
 
-  if (value !== node._value || node._ctime === 0 || (flag & FLAG_ERROR)) {
+  if (value !== node._value || flag & (FLAG_INIT | FLAG_ERROR)) {
     node._value = value;
     let time = TIME + 1;
     node._ctime = time;
 
     let stale = false;
     if (node._flag & FLAG_ASYNC) {
-      let hasDefers = (node._flag & FLAG_FIBER) &&
-        node._args._context._defers !== null;
+      let hasDefers =
+        node._flag & FLAG_FIBER && node._args._fiber._defers !== null;
       if (node._deps !== null || hasDefers) {
         stale = settleDeps(node);
       }
@@ -2570,7 +2551,7 @@ function settle(node, value) {
 
     /** Resolve any awaiters waiting on this task. */
     if (node._flag & FLAG_FIBER) {
-      let ch = node._args._context._channel;
+      let ch = node._args._fiber._channel;
       if (ch !== null && ch._waiters !== null) {
         resolveWaiters(node, ch, value, !!(node._flag & FLAG_ERROR));
       }
@@ -2580,7 +2561,6 @@ function settle(node, value) {
     start();
 
     if (stale) {
-      node._flag |= FLAG_STALE;
       node._update(TIME);
     }
   }
@@ -2603,11 +2583,11 @@ function settleDeps(node) {
   let defers = null;
   let deferLen = 0;
   if (node._flag & FLAG_FIBER) {
-    let ctx = node._args._context;
-    defers = ctx._defers;
+    let fiber = node._args._fiber;
+    defers = fiber._defers;
     if (defers !== null) {
       deferLen = defers.length;
-      ctx._defers = null;
+      fiber._defers = null;
     }
   }
 
@@ -2686,19 +2666,7 @@ function settleDeps(node) {
       continue;
     }
     sender._version = stamp;
-    if (node._dep1 === null) {
-      node._dep1 = sender;
-      node._dep1slot = subscribe(sender, node, -1);
-    } else {
-      let d = node._deps;
-      let depslot = d === null ? 0 : d.length;
-      let slot = subscribe(sender, node, depslot);
-      if (d === null) {
-        node._deps = [sender, slot];
-      } else {
-        d.push(sender, slot);
-      }
-    }
+    subscribe(node, sender);
     if (sender._changed(snapshot)) {
       changed = true;
     }
@@ -2714,15 +2682,15 @@ function settleDeps(node) {
  * @param {!Receiver} node
  * @returns {void}
  */
-function resetFiber(node) {
-  let ctx = node._args._context;
-  if (ctx._controller !== null) {
-    ctx._controller.abort();
-    ctx._controller = null;
+function clearFiber(node) {
+  let fiber = node._args._fiber;
+  if (fiber._controller !== null) {
+    fiber._controller.abort();
+    fiber._controller = null;
   }
-  ctx._defers = null;
-  if (ctx._channel !== null && ctx._channel._res1 !== null) {
-    clearChannel(ctx._channel);
+  fiber._defers = null;
+  if (fiber._channel !== null && fiber._channel._res1 !== null) {
+    clearChannel(fiber._channel);
   }
 }
 
@@ -2757,7 +2725,7 @@ function addWaiter(responderCh, awaiter, awaiterResSlot, resolve, reject) {
  * @param {number} slot
  * @returns {void}
  */
-function removeWaiter(responderCh, responderNode, slot) {
+function removeWaiter(responderCh, slot) {
   let waiters = responderCh._waiters;
   let lastReject = waiters.pop();
   let lastResolve = waiters.pop();
@@ -2768,7 +2736,7 @@ function removeWaiter(responderCh, responderNode, slot) {
     waiters[slot + 1] = lastResSlot;
     waiters[slot + 2] = lastResolve;
     waiters[slot + 3] = lastReject;
-    let ch = lastAwaiter._args._context._channel;
+    let ch = lastAwaiter._args._fiber._channel;
     if (lastResSlot === -1) {
       ch._res1slot = slot;
     } else {
@@ -2777,7 +2745,6 @@ function removeWaiter(responderCh, responderNode, slot) {
   }
   if (waiters.length === 0) {
     responderCh._waiters = null;
-    responderNode._flag &= ~FLAG_PROMISE;
   }
 }
 
@@ -2789,7 +2756,7 @@ function removeWaiter(responderCh, responderNode, slot) {
 function clearChannel(channel) {
   let res = channel._res1;
   if (res !== null) {
-    removeWaiter(res._args._context._channel, res, channel._res1slot);
+    removeWaiter(res._args._fiber._channel, channel._res1slot);
     channel._res1 = null;
   }
   let responds = channel._responds;
@@ -2797,7 +2764,7 @@ function clearChannel(channel) {
     for (let i = 0; i < responds.length; i += 2) {
       let responder = responds[i];
       let slot = responds[i + 1];
-      removeWaiter(responder._args._context._channel, responder, slot);
+      removeWaiter(responder._args._fiber._channel, slot);
     }
     channel._responds = null;
   }
@@ -2824,21 +2791,9 @@ function resolveWaiters(responder, responderCh, value, isError) {
       waiters[i + 2](value);
     }
     /** Subscribe responder as a dep of the awaiter. */
-    if (awaiter._dep1 === null) {
-      awaiter._dep1 = responder;
-      awaiter._dep1slot = subscribe(responder, awaiter, -1);
-    } else {
-      let deps = awaiter._deps;
-      let depslot = deps === null ? 0 : deps.length;
-      let slot = subscribe(responder, awaiter, depslot);
-      if (deps === null) {
-        awaiter._deps = [responder, slot];
-      } else {
-        deps.push(responder, slot);
-      }
-    }
+    subscribe(awaiter, responder);
     /** Clear the awaiter's back-reference to this responder. */
-    let awaiterCh = awaiter._args._context._channel;
+    let awaiterCh = awaiter._args._fiber._channel;
     if (resSlot === -1) {
       awaiterCh._res1 = null;
     } else {
@@ -2846,7 +2801,6 @@ function resolveWaiters(responder, responderCh, value, isError) {
     }
   }
   responderCh._waiters = null;
-  responder._flag &= ~FLAG_PROMISE;
 }
 
 /**
@@ -2858,14 +2812,11 @@ function resolveWaiters(responder, responderCh, value, isError) {
  */
 function resolveEffectPromise(ref, promise) {
   promise.then(
-    (val) => {
+    () => {
       let node = ref.deref();
       if (node !== void 0 && !(node._flag & FLAG_DISPOSED)) {
         node._flag &= ~FLAG_LOADING;
-        if (typeof val === "function") {
-          node._addCleanup(val);
-        }
-        if (node._flag & FLAG_FIBER && node._args._context._defers !== null) {
+        if (node._flag & FLAG_FIBER && node._args._fiber._defers !== null) {
           let stale = settleDeps(node);
           if (stale) {
             notify(node, FLAG_STALE);
@@ -2911,7 +2862,7 @@ function resolveEffectIterator(ref, iterable) {
     }
     if (result.done) {
       node._flag &= ~FLAG_LOADING;
-      if (node._flag & FLAG_FIBER && node._args._context._defers !== null) {
+      if (node._flag & FLAG_FIBER && node._args._fiber._defers !== null) {
         let stale = settleDeps(node);
         if (stale) {
           notify(node, FLAG_STALE);
@@ -2924,9 +2875,6 @@ function resolveEffectIterator(ref, iterable) {
     }
     iterator.next().then(onNext, onError);
     node._flag &= ~FLAG_LOADING;
-    if (typeof result.value === "function") {
-      node._addCleanup(result.value);
-    }
   };
   let onError = (err) => {
     let node = ref.deref();
@@ -3049,18 +2997,21 @@ function start() {
         }
         SENDER_COUNT = 0;
       }
-      if (TASK_COUNT > 0) {
-          let count = TASK_COUNT;
-          for (let i = 0; i < count; i++) {
-              let node = TASKS[i];
-              TASKS[i] = null;
-              if ((node._flag & FLAG_STALE) || ((node._flag & FLAG_PENDING) && needsUpdate(node, time))) {
-                  node._update(time);
-              } else {
-                  node._flag &= ~(FLAG_STALE | FLAG_PENDING);
-              }
+      if (COMPUTE_COUNT > 0) {
+        let count = COMPUTE_COUNT;
+        for (let i = 0; i < count; i++) {
+          let node = COMPUTES[i];
+          COMPUTES[i] = null;
+          if (
+            node._flag & FLAG_STALE ||
+            (node._flag & FLAG_PENDING && needsUpdate(node, time))
+          ) {
+            node._update(time);
+          } else {
+            node._flag &= ~(FLAG_STALE | FLAG_PENDING);
           }
-          TASK_COUNT = 0;
+        }
+        COMPUTE_COUNT = 0;
       }
       if (SCOPE_COUNT > 0) {
         let levels = LEVELS.length;
@@ -3147,7 +3098,7 @@ function compute(a, b, c, d, e) {
   } else {
     flag = FLAG_STABLE | FLAG_BOUND | FLAG_SINGLE | ((0 | d) & OPTIONS);
     node = new Compute(flag, b, a, c, e);
-    node._dep1slot = subscribe(a, node, -1);
+    node._dep1slot = connect(a, node, -1);
   }
   if (!(flag & FLAG_DEFER)) {
     startCompute(node);
@@ -3165,7 +3116,7 @@ function task(a, b, c, d, e) {
     flag =
       FLAG_ASYNC | FLAG_STABLE | FLAG_BOUND | FLAG_SINGLE | ((0 | d) & OPTIONS);
     node = new Compute(flag, b, a, c, e);
-    node._dep1slot = subscribe(a, node, -1);
+    node._dep1slot = connect(a, node, -1);
   }
   if (!(flag & FLAG_DEFER)) {
     startCompute(node);
@@ -3182,7 +3133,7 @@ function effect(a, b, c, d) {
   } else {
     flag = FLAG_STABLE | FLAG_BOUND | FLAG_SINGLE | ((0 | c) & OPTIONS);
     node = new Effect(flag, b, a, null, d);
-    node._dep1slot = subscribe(a, node, -1);
+    node._dep1slot = connect(a, node, -1);
   }
   startEffect(node);
   return node;
@@ -3198,7 +3149,7 @@ function spawn(a, b, c, d) {
     flag =
       FLAG_ASYNC | FLAG_STABLE | FLAG_BOUND | FLAG_SINGLE | ((0 | c) & OPTIONS);
     node = new Effect(flag, b, a, null, d);
-    node._dep1slot = subscribe(a, node, -1);
+    node._dep1slot = connect(a, node, -1);
   }
   startEffect(node);
   return node;
@@ -3228,16 +3179,17 @@ function batch(fn) {
  * Top-level clock object. The entry point to the library.
  * @const
  */
-const c = {
-  signal,
-  gate,
-  compute,
-  task,
-  effect,
-  spawn,
-  root,
-  batch
-};
+function Clock() {}
+Clock.prototype.signal = signal;
+Clock.prototype.gate = gate;
+Clock.prototype.compute = compute;
+Clock.prototype.task = task;
+Clock.prototype.effect = effect;
+Clock.prototype.spawn = spawn;
+Clock.prototype.root = root;
+Clock.prototype.batch = batch;
+
+const c = new Clock();
 
 export {
   FLAG_DEFER,
@@ -3260,8 +3212,9 @@ export {
   OPT_WEAK,
   OPTIONS,
   IDLE,
+  connect,
   subscribe,
   startEffect
 };
 
-export { Root, Signal, Compute, Effect, Gate, c, batch };
+export { c, Clock, Root, Signal, Gate, Compute, Effect };

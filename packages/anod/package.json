@@ -6,7 +6,8 @@
   "types": "./dist/index.d.ts",
   "scripts": {
     "make": "bun scripts/build.js",
-    "closure": "bun scripts/closure.js"
+    "closure": "bun scripts/closure.js",
+    "test": "node --expose-gc --test test/*.test.js"
   },
   "keywords": [],
   "author": "Vilhelm Sjölund",
