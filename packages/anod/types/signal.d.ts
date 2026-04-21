@@ -52,6 +52,9 @@ interface IBaseContext {
   peek<R>(signal: Sender<R>): R;
   suspend<T>(promise: Promise<T>): Promise<T>;
   suspend<T>(task: ICompute<T>): T | Promise<T>;
+  suspend<T extends readonly ICompute<any>[]>(
+    tasks: [...T]
+  ): Promise<{ [K in keyof T]: T[K] extends ICompute<infer U> ? U : never }>;
   controller(): AbortController;
   pending(tasks: ICompute<any> | ICompute<any>[]): boolean;
 }

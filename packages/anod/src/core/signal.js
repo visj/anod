@@ -35,6 +35,7 @@ const FLAG_BOUND = 1 << 17;
 const FLAG_SUSPEND = 1 << 18;
 const FLAG_FIBER = 1 << 19;
 const FLAG_EAGER = 1 << 20;
+const FLAG_BLOCKED = 1 << 21;
 
 /* Option flags */
 const OPT_DEFER = FLAG_DEFER;
@@ -608,12 +609,12 @@ function gate(value) {
   ComputeProto.peek = EffectProto.peek = peek;
 
   // IAwaitable — Compute + Effect (getters)
-  let _errorLoading = {
+  let states = {
     error: { get() { return (this._flag & FLAG_ERROR) ? this._value : null; } },
     loading: { get() { return (this._flag & FLAG_LOADING) !== 0; } }
   };
-  Object.defineProperties(ComputeProto, _errorLoading);
-  Object.defineProperties(EffectProto, _errorLoading);
+  Object.defineProperties(ComputeProto, states);
+  Object.defineProperties(EffectProto, states);
 
   // ─── Shared owner methods — Root + Effect ──────────────────────────────
 
@@ -723,6 +724,10 @@ function gate(value) {
    * @returns {*}
    */
   function _suspend(promiseOrTask) {
+    /** Branch: array of tasks → concurrent await with single cursor. */
+    if (Array.isArray(promiseOrTask)) {
+      return _suspendArray.call(this, promiseOrTask);
+    }
     /** Branch: Compute node with FLAG_ASYNC → task-await path. */
     if (promiseOrTask._flag !== undefined && promiseOrTask._flag & FLAG_ASYNC) {
       return _suspendTask.call(this, promiseOrTask);
@@ -819,6 +824,117 @@ function gate(value) {
     });
 
     return promise;
+  }
+
+  /**
+   * Awaits an array of task nodes concurrently using a single-cursor
+   * walk. Only one task is awaited at a time — no N-promise overhead.
+   *
+   * Walk: for each task in the array:
+   * - Settled → store value, move on.
+   * - Loading → create channel binding, await it. Peek all remaining
+   *   tasks (refresh but don't subscribe). After resume, clear binding,
+   *   continue walk from current index.
+   * - Wrap around until all slots are filled.
+   *
+   * FLAG_BLOCKED prevents resolveWaiters from subscribing us to tasks
+   * mid-walk. After the entire array settles, we subscribe to all tasks
+   * in one pass.
+   *
+   * @this {!Compute | !Effect}
+   * @param {!Array<!Compute>} tasks
+   * @returns {!Array | !Promise<!Array>}
+   */
+  async function _suspendArray(tasks) {
+    this._flag |= FLAG_SUSPEND | FLAG_BLOCKED;
+    let count = tasks.length;
+    let results = new Array(count);
+    /** Bitmask tracking which slots have been filled. */
+    let done = new Array(count);
+    let filled = 0;
+    let cursor = 0;
+
+    while (filled < count) {
+      let task = tasks[cursor];
+
+      if (!done[cursor]) {
+        if (task._flag & (FLAG_STALE | FLAG_PENDING)) {
+          task._refresh();
+        }
+
+        if (task._flag & FLAG_LOADING) {
+          /** Peek remaining unfilled tasks so they're current. */
+          for (let j = 1; j < count; j++) {
+            let k = (cursor + j) % count;
+            if (!done[k]) {
+              let t = tasks[k];
+              if (t._flag & (FLAG_STALE | FLAG_PENDING)) {
+                t._refresh();
+              }
+            }
+          }
+
+          /** Await this single task via channel binding. */
+          task._flag |= FLAG_EAGER;
+          let awaiterCh = this._channel();
+          let responderCh = task._channel();
+
+          let awaiterResSlot;
+          if (awaiterCh._res1 === null) {
+            awaiterResSlot = -1;
+          } else if (awaiterCh._responds === null) {
+            awaiterResSlot = 0;
+          } else {
+            awaiterResSlot = awaiterCh._responds.length;
+          }
+
+          let self = this;
+          let value = await new Promise(function (resolve, reject) {
+            let waiterSlot = addWaiter(
+              responderCh,
+              self,
+              awaiterResSlot,
+              resolve,
+              reject
+            );
+
+            if (awaiterResSlot === -1) {
+              awaiterCh._res1 = task;
+              awaiterCh._res1slot = waiterSlot;
+            } else if (awaiterCh._responds === null) {
+              awaiterCh._responds = [task, waiterSlot];
+            } else {
+              awaiterCh._responds.push(task, waiterSlot);
+            }
+          });
+
+          if (task._flag & FLAG_ERROR) {
+            throw task._value;
+          }
+          results[cursor] = value;
+          done[cursor] = 1;
+          filled++;
+        } else {
+          /** Settled — store value. */
+          if (task._flag & FLAG_ERROR) {
+            throw task._value;
+          }
+          results[cursor] = task._value;
+          done[cursor] = 1;
+          filled++;
+        }
+      }
+
+      cursor = (cursor + 1) % count;
+    }
+
+    /** All settled — subscribe to every task for future reactive updates. */
+    this._flag &= ~FLAG_BLOCKED;
+    for (let i = 0; i < count; i++) {
+      subscribe(this, tasks[i]);
+    }
+
+    return results;
   }
 
   ComputeProto.suspend = EffectProto.suspend = _suspend;
@@ -2839,7 +2955,7 @@ function resolveWaiters(responder, responderCh, value, isError, panic) {
     } else {
       waiters[i + 2](value);
     }
-    if (!panic) {
+    if (!panic && !(awaiter._flag & FLAG_BLOCKED)) {
       subscribe(awaiter, responder);
     }
     /** Clear the awaiter's back-reference to this responder. */

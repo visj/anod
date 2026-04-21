@@ -713,3 +713,202 @@ describe("ownership: async nodes and disposal", () => {
 		}
 	});
 });
+
+// ─── 5. c.suspend([...tasks]) — array of tasks ──────────────────────────────
+
+describe("suspend(tasks[]): concurrent task await", () => {
+	test("all tasks already settled: returns array", async () => {
+		const taskA = c.task((cx) => cx.suspend(Promise.resolve(10)));
+		const taskB = c.task((cx) => cx.suspend(Promise.resolve(20)));
+		const taskC = c.task((cx) => cx.suspend(Promise.resolve(30)));
+		await settle();
+
+		let result = null;
+		const r = c.root((r) => {
+			r.spawn(async (cx) => {
+				result = await cx.suspend([taskA, taskB, taskC]);
+			});
+		});
+		await settle();
+		expect(result).toEqual([10, 20, 30]);
+		r.dispose();
+	});
+
+	test("all tasks loading: resolves when all settle", async () => {
+		let resolveA, resolveB, resolveC;
+		const taskA = c.task((cx) => cx.suspend(new Promise((r) => { resolveA = r; })));
+		const taskB = c.task((cx) => cx.suspend(new Promise((r) => { resolveB = r; })));
+		const taskC = c.task((cx) => cx.suspend(new Promise((r) => { resolveC = r; })));
+
+		let result = null;
+		const r = c.root((r) => {
+			r.spawn(async (cx) => {
+				result = await cx.suspend([taskA, taskB, taskC]);
+			});
+		});
+		await settle();
+		expect(result).toBe(null);
+
+		resolveA(10); await settle();
+		expect(result).toBe(null);
+
+		resolveB(20); await settle();
+		expect(result).toBe(null);
+
+		resolveC(30); await settle();
+		expect(result).toEqual([10, 20, 30]);
+		r.dispose();
+	});
+
+	test("mixed settled and loading", async () => {
+		const taskA = c.task((cx) => cx.suspend(Promise.resolve(10)));
+		await settle();
+
+		let resolveB;
+		const taskB = c.task((cx) => cx.suspend(new Promise((r) => { resolveB = r; })));
+		const taskC = c.task((cx) => cx.suspend(Promise.resolve(30)));
+		await settle();
+
+		let result = null;
+		const r = c.root((r) => {
+			r.spawn(async (cx) => {
+				result = await cx.suspend([taskA, taskB, taskC]);
+			});
+		});
+		await settle();
+		expect(result).toBe(null);
+
+		resolveB(20); await settle();
+		expect(result).toEqual([10, 20, 30]);
+		r.dispose();
+	});
+
+	test("one task errors: rejects immediately", async () => {
+		const taskA = c.task((cx) => cx.suspend(Promise.resolve(10)));
+		const taskB = c.task((cx) => cx.suspend(Promise.reject(new Error("boom"))));
+		const taskC = c.task((cx) => cx.suspend(Promise.resolve(30)));
+		await settle();
+
+		let caught = null;
+		const r = c.root((r) => {
+			r.spawn(async (cx) => {
+				cx.recover((err) => { caught = err; return true; });
+				await cx.suspend([taskA, taskB, taskC]);
+			});
+		});
+		await settle();
+		expect(caught).not.toBeNull();
+		r.dispose();
+	});
+
+	test("tasks settle in reverse order", async () => {
+		let resolveA, resolveB, resolveC;
+		const taskA = c.task((cx) => cx.suspend(new Promise((r) => { resolveA = r; })));
+		const taskB = c.task((cx) => cx.suspend(new Promise((r) => { resolveB = r; })));
+		const taskC = c.task((cx) => cx.suspend(new Promise((r) => { resolveC = r; })));
+
+		let result = null;
+		const r = c.root((r) => {
+			r.spawn(async (cx) => {
+				result = await cx.suspend([taskA, taskB, taskC]);
+			});
+		});
+		await settle();
+
+		resolveC(30); await settle();
+		expect(result).toBe(null);
+		resolveB(20); await settle();
+		expect(result).toBe(null);
+		resolveA(10); await settle();
+		expect(result).toEqual([10, 20, 30]);
+		r.dispose();
+	});
+
+	test("subscribes to all tasks after array completes", async () => {
+		const s1 = c.signal(1);
+		const taskA = c.task((cx) => cx.suspend(Promise.resolve(cx.val(s1) * 10)));
+		const taskB = c.task((cx) => cx.suspend(Promise.resolve(cx.val(s1) * 100)));
+		await settle();
+
+		let result = null;
+		let runs = 0;
+		const r = c.root((r) => {
+			r.spawn(async (cx) => {
+				runs++;
+				result = await cx.suspend([taskA, taskB]);
+			});
+		});
+		await settle();
+		expect(result).toEqual([10, 100]);
+		expect(runs).toBe(1);
+
+		s1.set(2);
+		await settle();
+		expect(result).toEqual([20, 200]);
+		expect(runs).toBe(2);
+		r.dispose();
+	});
+
+	test("does not subscribe during walk (FLAG_BLOCKED)", async () => {
+		let resolveA, resolveB;
+		const s1 = c.signal(1);
+		const taskA = c.task((cx) => {
+			cx.val(s1);
+			return cx.suspend(new Promise((r) => { resolveA = r; }));
+		});
+		const taskB = c.task((cx) => cx.suspend(new Promise((r) => { resolveB = r; })));
+
+		let result = null;
+		let runs = 0;
+		const r = c.root((r) => {
+			r.spawn(async (cx) => {
+				runs++;
+				result = await cx.suspend([taskA, taskB]);
+			});
+		});
+		await settle();
+		expect(runs).toBe(1);
+
+		// Settle A — should NOT subscribe yet (blocked)
+		resolveA(10); await settle();
+
+		// Change s1 — if subscribed to taskA, this causes a re-run
+		s1.set(2); await settle();
+		expect(runs).toBe(1); // no premature re-run
+
+		// Settle B — array completes, subscribe to both
+		resolveB(20); await settle();
+		expect(result).toEqual([10, 20]);
+		r.dispose();
+	});
+
+	test("dispose while awaiting array: cleanup runs", async () => {
+		const taskA = c.task((cx) => cx.suspend(new Promise(() => {})));
+		const taskB = c.task((cx) => cx.suspend(new Promise(() => {})));
+
+		let cleanupRan = false;
+		const r = c.root((r) => {
+			r.spawn(async (cx) => {
+				cx.cleanup(() => { cleanupRan = true; });
+				await cx.suspend([taskA, taskB]);
+			});
+		});
+		await settle();
+		expect(cleanupRan).toBe(false);
+
+		r.dispose();
+		expect(cleanupRan).toBe(true);
+	});
+
+	test("empty array: returns empty array immediately", async () => {
+		let result = null;
+		const r = c.root((r) => {
+			r.spawn(async (cx) => {
+				result = await cx.suspend([]);
+			});
+		});
+		await settle();
+		expect(result).toEqual([]);
+		r.dispose();
+	});
+});
