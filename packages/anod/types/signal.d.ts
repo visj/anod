@@ -55,6 +55,11 @@ interface IBaseContext {
   suspend<T extends readonly ICompute<any>[]>(
     tasks: [...T]
   ): Promise<{ [K in keyof T]: T[K] extends ICompute<infer U> ? U : never }>;
+  suspend<T extends readonly ICompute<any>[]>(
+    tasks: [...T],
+    onResolve: (values: { [K in keyof T]: T[K] extends ICompute<infer U> ? U : never }) => void,
+    onReject: (error: any) => void
+  ): void;
   controller(): AbortController;
   pending(tasks: ICompute<any> | ICompute<any>[]): boolean;
 }

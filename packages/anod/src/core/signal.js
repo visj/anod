@@ -723,10 +723,12 @@ function gate(value) {
    * @param {!Promise | !Compute} promiseOrTask
    * @returns {*}
    */
-  function _suspend(promiseOrTask) {
-    /** Branch: array of tasks → concurrent await with single cursor. */
+  function _suspend(promiseOrTask, onResolve, onReject) {
+    /** Branch: array of tasks → concurrent await with single cursor.
+     *  If onResolve/onReject are provided, uses pure callbacks (zero
+     *  Promise allocation). Otherwise returns a Promise. */
     if (Array.isArray(promiseOrTask)) {
-      return _suspendArray.call(this, promiseOrTask);
+      return _suspendArray.call(this, promiseOrTask, onResolve, onReject);
     }
     /** Branch: Compute node with FLAG_ASYNC → task-await path. */
     if (promiseOrTask._flag !== undefined && promiseOrTask._flag & FLAG_ASYNC) {
@@ -827,114 +829,177 @@ function gate(value) {
   }
 
   /**
-   * Awaits an array of task nodes concurrently using a single-cursor
-   * walk. Only one task is awaited at a time — no N-promise overhead.
+   * Awaits an array of task nodes using a single-cursor walk.
+   * Allocates exactly ONE Promise. The walk is callback-driven
+   * via the global `_stepArray` helper: settled tasks are collected
+   * synchronously; when a loading task is hit, addWaiter binds a
+   * callback that re-enters `_stepArray` from the next index.
    *
-   * Walk: for each task in the array:
-   * - Settled → store value, move on.
-   * - Loading → create channel binding, await it. Peek all remaining
-   *   tasks (refresh but don't subscribe). After resume, clear binding,
-   *   continue walk from current index.
-   * - Wrap around until all slots are filled.
-   *
-   * FLAG_BLOCKED prevents resolveWaiters from subscribing us to tasks
-   * mid-walk. After the entire array settles, we subscribe to all tasks
-   * in one pass.
+   * FLAG_BLOCKED prevents resolveWaiters from subscribing the
+   * awaiter during the walk. After all slots are filled, we
+   * subscribe to every task in one pass and resolve the Promise.
    *
    * @this {!Compute | !Effect}
    * @param {!Array<!Compute>} tasks
    * @returns {!Array | !Promise<!Array>}
    */
-  async function _suspendArray(tasks) {
+  function _suspendArray(tasks, onResolve, onReject) {
     this._flag |= FLAG_SUSPEND | FLAG_BLOCKED;
     let count = tasks.length;
+    if (count === 0) {
+      this._flag &= ~FLAG_BLOCKED;
+      if (onResolve) {
+        onResolve([]);
+        return;
+      }
+      return [];
+    }
     let results = new Array(count);
-    /** Bitmask tracking which slots have been filled. */
-    let done = new Array(count);
+    let visited = new Array(count);
+
+    /** Fast-path: try to collect everything synchronously. */
     let filled = 0;
-    let cursor = 0;
+    for (let i = 0; i < count; i++) {
+      let task = tasks[i];
+      if (task._flag & (FLAG_STALE | FLAG_PENDING)) {
+        task._refresh();
+      }
+      if (task._flag & FLAG_LOADING) {
+        break;
+      }
+      if (task._flag & FLAG_ERROR) {
+        if (onReject) {
+          onReject(task._value);
+          return;
+        }
+        throw task._value;
+      }
+      results[i] = task._value;
+      visited[i] = 1;
+      filled++;
+    }
 
-    while (filled < count) {
-      let task = tasks[cursor];
+    if (filled === count) {
+      this._flag &= ~FLAG_BLOCKED;
+      for (let i = 0; i < count; i++) {
+        subscribe(this, tasks[i]);
+      }
+      if (onResolve) {
+        onResolve(results);
+        return;
+      }
+      return results;
+    }
 
-      if (!done[cursor]) {
+    /** At least one is loading — start the callback-driven walk. */
+    if (onResolve) {
+      _stepArray(this, tasks, results, visited, filled, onResolve, onReject);
+      return;
+    }
+
+    /** No callbacks — allocate one Promise. */
+    let self = this;
+    return new Promise(function (resolve, reject) {
+      _stepArray(self, tasks, results, visited, filled, resolve, reject);
+    });
+  }
+
+  /**
+   * Walk the task array from `start`, wrapping around. Collects
+   * settled values into `results`. On the first loading task,
+   * peeks all remaining, binds one waiter that resumes the walk.
+   * When all slots are filled, subscribes and resolves.
+   * @param {!Compute | !Effect} node
+   * @param {!Array<!Compute>} tasks
+   * @param {!Array} results
+   * @param {!Array} visited
+   * @param {number} start
+   * @param {function(!Array)} resolve
+   * @param {function(*)} reject
+   */
+  function _stepArray(node, tasks, results, visited, start, resolve, reject) {
+    let count = tasks.length;
+    let blocked = -1;
+    let steps = 0;
+    while (steps < count) {
+      let idx = (start + steps) % count;
+      if (!visited[idx]) {
+        let task = tasks[idx];
         if (task._flag & (FLAG_STALE | FLAG_PENDING)) {
           task._refresh();
         }
-
         if (task._flag & FLAG_LOADING) {
-          /** Peek remaining unfilled tasks so they're current. */
-          for (let j = 1; j < count; j++) {
-            let k = (cursor + j) % count;
-            if (!done[k]) {
-              let t = tasks[k];
-              if (t._flag & (FLAG_STALE | FLAG_PENDING)) {
-                t._refresh();
-              }
-            }
-          }
+          blocked = idx;
+          break;
+        }
+        if (task._flag & FLAG_ERROR) {
+          reject(task._value);
+          return;
+        }
+        results[idx] = task._value;
+        visited[idx] = 1;
+      }
+      steps++;
+    }
 
-          /** Await this single task via channel binding. */
-          task._flag |= FLAG_EAGER;
-          let awaiterCh = this._channel();
-          let responderCh = task._channel();
+    /** All filled — subscribe and resolve. */
+    if (blocked === -1) {
+      node._flag &= ~FLAG_BLOCKED;
+      for (let i = 0; i < count; i++) {
+        subscribe(node, tasks[i]);
+      }
+      resolve(results);
+      return;
+    }
 
-          let awaiterResSlot;
-          if (awaiterCh._res1 === null) {
-            awaiterResSlot = -1;
-          } else if (awaiterCh._responds === null) {
-            awaiterResSlot = 0;
-          } else {
-            awaiterResSlot = awaiterCh._responds.length;
-          }
-
-          let self = this;
-          let value = await new Promise(function (resolve, reject) {
-            let waiterSlot = addWaiter(
-              responderCh,
-              self,
-              awaiterResSlot,
-              resolve,
-              reject
-            );
-
-            if (awaiterResSlot === -1) {
-              awaiterCh._res1 = task;
-              awaiterCh._res1slot = waiterSlot;
-            } else if (awaiterCh._responds === null) {
-              awaiterCh._responds = [task, waiterSlot];
-            } else {
-              awaiterCh._responds.push(task, waiterSlot);
-            }
-          });
-
-          if (task._flag & FLAG_ERROR) {
-            throw task._value;
-          }
-          results[cursor] = value;
-          done[cursor] = 1;
-          filled++;
-        } else {
-          /** Settled — store value. */
-          if (task._flag & FLAG_ERROR) {
-            throw task._value;
-          }
-          results[cursor] = task._value;
-          done[cursor] = 1;
-          filled++;
+    /** Peek remaining unfilled tasks so they're current. */
+    for (let j = 1; j < count; j++) {
+      let k = (blocked + j) % count;
+      if (!visited[k]) {
+        let t = tasks[k];
+        if (t._flag & (FLAG_STALE | FLAG_PENDING)) {
+          t._refresh();
         }
       }
-
-      cursor = (cursor + 1) % count;
     }
 
-    /** All settled — subscribe to every task for future reactive updates. */
-    this._flag &= ~FLAG_BLOCKED;
-    for (let i = 0; i < count; i++) {
-      subscribe(this, tasks[i]);
+    /** Bind waiter to the blocked task. */
+    let task = tasks[blocked];
+    task._flag |= FLAG_EAGER;
+    let awaiterCh = node._channel();
+    let responderCh = task._channel();
+
+    let awaiterResSlot;
+    if (awaiterCh._res1 === null) {
+      awaiterResSlot = -1;
+    } else if (awaiterCh._responds === null) {
+      awaiterResSlot = 0;
+    } else {
+      awaiterResSlot = awaiterCh._responds.length;
     }
 
-    return results;
+    let waiterSlot = addWaiter(
+      responderCh, node, awaiterResSlot,
+      function (value) {
+        if (task._flag & FLAG_ERROR) {
+          reject(task._value);
+          return;
+        }
+        results[blocked] = value;
+        visited[blocked] = 1;
+        _stepArray(node, tasks, results, visited, (blocked + 1) % count, resolve, reject);
+      },
+      reject
+    );
+
+    if (awaiterResSlot === -1) {
+      awaiterCh._res1 = task;
+      awaiterCh._res1slot = waiterSlot;
+    } else if (awaiterCh._responds === null) {
+      awaiterCh._responds = [task, waiterSlot];
+    } else {
+      awaiterCh._responds.push(task, waiterSlot);
+    }
   }
 
   ComputeProto.suspend = EffectProto.suspend = _suspend;
@@ -2916,6 +2981,9 @@ function clearChannel(channel) {
   if (responds !== null) {
     for (let i = 0; i < responds.length; i += 2) {
       let responder = responds[i];
+      if (responder === null) {
+        continue;
+      }
       let slot = responds[i + 1];
       removeWaiter(responder._args._fiber._channel, slot);
     }
