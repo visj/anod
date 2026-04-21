@@ -11,7 +11,8 @@
     }
   },
   "references": [
-    { "path": "./packages/anod" },
-    { "path": "./packages/anod-list" }
+    { "path": "./packages/core" },
+    { "path": "./packages/list" },
+    { "path": "./packages/tools" }
   ]
 }

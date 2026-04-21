@@ -113,11 +113,6 @@ export interface ICompute<T> extends ISignal<T> {
   cleanup(fn: () => void): void;
 }
 
-export interface IGate<T> extends ISignal<T> {
-  check(fn: (newVal: T, oldVal: T) => boolean): IGate<T>;
-  guard(fn: (value: T) => boolean): IGate<T>;
-}
-
 export interface IEffect {
   dispose(): void;
   readonly disposed: boolean;
@@ -136,8 +131,6 @@ export interface IRoot {
 
 export interface IFactory {
   signal<T>(value: T): ISignal<T>;
-
-  gate<T>(value: T): IGate<T>;
 
   // Unbound compute
   compute<U>(fn: (c: IComputeReader) => U): ICompute<Resolve<U>>;
@@ -231,7 +224,6 @@ export interface IFactory {
 export declare class Clock implements IFactory {
   private constructor();
   signal: IFactory["signal"];
-  gate: IFactory["gate"];
   compute: IFactory["compute"];
   task: IFactory["task"];
   effect: IFactory["effect"];
@@ -245,7 +237,6 @@ export declare class Root implements IRoot, IFactory {
   dispose(): void;
   readonly disposed: boolean;
   signal: IFactory["signal"];
-  gate: IFactory["gate"];
   compute: IFactory["compute"];
   task: IFactory["task"];
   effect: IFactory["effect"];
@@ -263,11 +254,7 @@ export declare class Signal<T> implements ISignal<T> {
   readonly disposed: boolean;
 }
 
-export declare class Gate<T> extends Signal<T> implements IGate<T> {
-  constructor(value: T);
-  check(fn: (newVal: T, oldVal: T) => boolean): this;
-  guard(fn: (value: T) => boolean): this;
-}
+
 
 export declare class Compute<T = any> extends Signal<T> implements ICompute<T> {
   constructor(opts: number, fn: Function, dep1: any, seed?: T, args?: any);

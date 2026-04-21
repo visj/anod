@@ -1,8 +1,9 @@
 {
   "name": "fyren",
-  "workspace": [
+  "workspaces": [
     "packages/core",
-    "packages/list"
+    "packages/list",
+    "packages/tools"
   ],
   "version": "0.6.0",
   "description": "",

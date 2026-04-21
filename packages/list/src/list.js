@@ -186,7 +186,7 @@ function setMod(node, mod) {
 
 /**
  * @template T
- * @param {*} arg 
+ * @param {*} arg
  * @returns {T}
  */
 function getVal(arg) {
@@ -198,12 +198,12 @@ function getVal(arg) {
 /**
  * @template T
  * @param {ReadonlySignal<T> | (function(): T)} source
- * @returns {T} 
+ * @returns {T}
  */
 function read(source) {
-    return isFunction(source) ? 
-        /** @type {function(): T} */(source)() : 
-        isSignal(source) ? /** @type {ReadonlySignal<T>} */(source).val() : source; 
+    return isFunction(source) ?
+        /** @type {function(): T} */(source)() :
+        isSignal(source) ? /** @type {ReadonlySignal<T>} */(source).val() : source;
 }
 
 /**
@@ -238,7 +238,7 @@ function at(_node, seed, args) {
 
 /**
  * @this {Compute<Array<T>> | Signal<Array<T>>}
- * @param {number | ReadonlySignal<number> | (function(): number)} index 
+ * @param {number | ReadonlySignal<number> | (function(): number)} index
  * @returns {Compute<T|undefined,Array<T>,null,number | ReadonlySignal<number> | (function(): number)>}
  */
 SignalProto.at = ComputeProto.at = function (index) {
@@ -247,8 +247,8 @@ SignalProto.at = ComputeProto.at = function (index) {
 
 /**
  * @template T
- * @param {Array<T>} source 
- * @param {Array<T>} seed 
+ * @param {Array<T>} source
+ * @param {Array<T>} seed
  * @param {*} args
  * @returns {Array<T>}
  */
@@ -270,7 +270,7 @@ function concatN(_node, seed, args) {
 /**
  * @template T
  * @this {Compute<Array<T>> | Signal<Array<T>>}
- * @param {...*} items 
+ * @param {...*} items
  * @returns {Compute<Array<T>,Array<T>,null,*>}
  */
 SignalProto.concat = ComputeProto.concat = function (...items) {
@@ -345,7 +345,7 @@ function every(_node, prev, cb) {
 
 /**
  * @this {Compute<Array<T>> | Signal<Array<T>>}
- * @param {function(T, number): boolean} cb 
+ * @param {function(T, number): boolean} cb
  * @param {number=} opts
  * @returns {Compute<boolean,Array<T>,null,(function(T, number): boolean)>}
  */
@@ -367,7 +367,7 @@ function filter(_node, seed, cb) {
 
 /**
  * @this {Compute<Array<T>> | Signal<Array<T>>}
- * @param {function(T, number, Array<T>): boolean} cb 
+ * @param {function(T, number, Array<T>): boolean} cb
  * @param {number=} opts
  * @returns {Compute<Array<T>,Array<T>,null,(function(T, number, Array<T>): boolean)>}
  */
@@ -712,7 +712,7 @@ function flat(_node, seed, depth) {
 
 /**
  * @this {Compute<Array<T>> | Signal<Array<T>>}
- * @param {number | ReadonlySignal<number> | (function(): number)=} depth 
+ * @param {number | ReadonlySignal<number> | (function(): number)=} depth
  * @returns {Compute<Array<T>,Array<T>,null,number|ReadonlySignal<number>|(function(): number)|undefined>}
  */
 SignalProto.flat = ComputeProto.flat = function (depth) {
@@ -754,7 +754,7 @@ function forEach(_node, cb) {
 
 /**
  * @this {Compute<Array<T>> | Signal<Array<T>>}
- * @param {(function(T, number): ((function(): void) | void))} cb 
+ * @param {(function(T, number): ((function(): void) | void))} cb
  * @param {number=} opts
  * @returns {Effect<Array<T>,null, ((function(T, number): ((function(): void) | void)))>}
  */
@@ -864,7 +864,7 @@ function includes2(_node, seed, args) {
 
 /**
  * @this {Compute<Array<T>> | Signal<Array<T>>}
- * @param {*} searchElement 
+ * @param {*} searchElement
  * @param {number | ReadonlySignal<number> | (function(): number)=} fromIndex
  * @returns {Compute<boolean,Array<T>,null,*>}
  */
@@ -974,7 +974,7 @@ function indexOf2(_node, seed, args) {
 
 /**
  * @this {Compute<Array<T>> | Signal<Array<T>>}
- * @param {*} searchElement 
+ * @param {*} searchElement
  * @param {number | ReadonlySignal<number> | (function(): number)=} fromIndex
  * @returns {Compute<number, Array<T>, null, *>}
  */
@@ -1006,7 +1006,7 @@ function join(_node, seed, separator) {
 
 /**
  * @this {Compute<Array<T>> | Signal<Array<T>>}
- * @param {string | ReadonlySignal<string> | (function(): string)=} separator 
+ * @param {string | ReadonlySignal<string> | (function(): string)=} separator
  * @returns {Compute<string, Array<T>, null, string | ReadonlySignal<string> | (function(): string) | undefined>}
  */
 SignalProto.join = ComputeProto.join = function (separator) {
@@ -1054,7 +1054,7 @@ function map(_node, seed, cb) {
 /**
  * @template U
  * @this {Compute<Array<T>> | Signal<Array<T>>}
- * @param {function(T, number, Array<T>): U} cb 
+ * @param {function(T, number, Array<T>): U} cb
  * @param {number=} opts
  * @returns {Compute<Array<U>,Array<T>,null, function(T, number, Array<T>): U>}
  */
@@ -1097,7 +1097,7 @@ function reduce2(_node, seed, args) {
 /**
  * @template T,U
  * @this {Compute<Array<T>> | Signal<Array<T>>}
- * @param {function(U, T, number, Array<T>): U} cb 
+ * @param {function(U, T, number, Array<T>): U} cb
  * @param {U | ReadonlySignal<U>=} initialValue
  * @param {number=} opts
  * @returns {Compute<U, Array<T>, null, *>}
@@ -1147,7 +1147,7 @@ function reduceRight2(_node, seed, args) {
 /**
  * @template T,U
  * @this {Compute<Array<T>> | Signal<Array<T>>}
- * @param {function(U, T, number, Array<T>): U} cb 
+ * @param {function(U, T, number, Array<T>): U} cb
  * @param {U | ReadonlySignal<U>=} initialValue
  * @param {number=} opts
  * @returns {Compute<U, Array<T>, null, *>}
@@ -1204,8 +1204,8 @@ function slice2(_node, seed, args) {
 
 /**
  * @this {Compute<Array<T>> | Signal<Array<T>>}
- * @param {number | ReadonlySignal<number> | (function(): number)=} start 
- * @param {number | ReadonlySignal<number> | (function(): number)=} end 
+ * @param {number | ReadonlySignal<number> | (function(): number)=} start
+ * @param {number | ReadonlySignal<number> | (function(): number)=} end
  * @returns {Compute<Array<T>, Array<T>, null, *>}
  */
 SignalProto.slice = ComputeProto.slice = function (start, end) {
@@ -1267,7 +1267,7 @@ function some(_node, prev, cb) {
 
 /**
  * @this {Compute<Array<T>> | Signal<Array<T>>}
- * @param {function(T, number, Array<T>): boolean} cb 
+ * @param {function(T, number, Array<T>): boolean} cb
  * @param {number=} opts
  * @returns {Compute<boolean, Array<T>, null, function(T, number, Array<T>): boolean>}
  */

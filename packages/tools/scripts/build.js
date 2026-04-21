@@ -4,8 +4,8 @@ import { rolldown } from 'rolldown';
 import { minify } from 'terser';
 
 const outputDir = './dist';
-/** Load signal's stable property map so underscore-prefixed properties mangle identically */
-const signalManglePath = path.resolve('../fyren/dist/mangle.json');
+/** Load core's stable property map so underscore-prefixed properties mangle identically */
+const coreManglePath = path.resolve('../core/dist/mangle.json');
 const nameCachePath = path.resolve(outputDir, 'mangle.json');
 
 async function build() {
@@ -13,31 +13,33 @@ async function build() {
 
     const bundle = await rolldown({
         input: {
-            index: './src/list.js',
+            index: './src/index.js',
         },
         external: [
-            'fyren',
-            'fyren/internal',
+            '@fyren/core',
         ],
+        resolve: {
+            extensions: ['.js'],
+        },
     });
 
     const { output } = await bundle.generate({
         dir: outputDir,
         format: 'esm',
         sourcemap: true,
-        entryFileNames: '[name].mjs',
+        entryFileNames: '[name].js',
     });
 
     console.log('2. Minifying and mangling properties with Terser...');
 
     /**
-     * Load signal's mangle.json as the starting nameCache.
-     * This ensures all _-prefixed properties (e.g. _value, _flag, _state)
-     * get the exact same mangled names as the signal package.
+     * Load core's mangle.json as the starting nameCache.
+     * This ensures all _-prefixed properties (e.g. _value, _flag, _check)
+     * get the exact same mangled names as the core package.
      */
     let nameCache = {};
-    if (fs.existsSync(signalManglePath)) {
-        nameCache = JSON.parse(fs.readFileSync(signalManglePath, 'utf8'));
+    if (fs.existsSync(coreManglePath)) {
+        nameCache = JSON.parse(fs.readFileSync(coreManglePath, 'utf8'));
     }
 
     if (!fs.existsSync(outputDir)) {
@@ -70,7 +72,7 @@ async function build() {
         }
     }
 
-    /** Save the combined property map (signal's entries + any new list-specific ones) */
+    /** Save the combined property map */
     fs.writeFileSync(nameCachePath, JSON.stringify(nameCache, null, 2));
 
     console.log('Success! Output written to dist/');
