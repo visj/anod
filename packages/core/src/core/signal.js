@@ -10,32 +10,36 @@ import {
 
 // ─── Flags ─────────────────────────────────────────────────────────────────
 
-/* Sender flags */
+/* Sender flags (bits 0-5) — readable on any Sender (Signal or Compute).
+ * Bits 6+ on a plain Signal are free for extension (e.g. mod encoding
+ * in @fyren/list). FLAG_RECEIVER distinguishes Compute/Effect from Signal. */
 const FLAG_STALE = 1 << 0;
 const FLAG_PENDING = 1 << 1;
 const FLAG_SCHEDULED = 1 << 2;
 const FLAG_DISPOSED = 1 << 3;
+const FLAG_ERROR = 1 << 4;
+const FLAG_RECEIVER = 1 << 5;
 
-/* Receiver flags */
-const FLAG_INIT = 1 << 4;
-const FLAG_SETUP = 1 << 5;
+/* Receiver flags (bits 6+) — only valid when FLAG_RECEIVER is set. */
+const FLAG_INIT = 1 << 6;
+const FLAG_SETUP = 1 << 7;
+const FLAG_LOADING = 1 << 8;
+const FLAG_DEFER = 1 << 9;
+const FLAG_STABLE = 1 << 10;
+const FLAG_EQUAL = 1 << 11;
+const FLAG_NOTEQUAL = 1 << 12;
+const FLAG_ASYNC = 1 << 13;
+const FLAG_BOUND = 1 << 14;
+const FLAG_SUSPEND = 1 << 15;
+const FLAG_FIBER = 1 << 16;
+const FLAG_BLOCKED = 1 << 17;
 
-const FLAG_LOADING = 1 << 6;
-const FLAG_ERROR = 1 << 7;
-const FLAG_DEFER = 1 << 8;
-const FLAG_STABLE = 1 << 9;
-
-const FLAG_SINGLE = 1 << 11;
-const FLAG_DERIVED = 1 << 12;
-const FLAG_WEAK = 1 << 13;
-const FLAG_EQUAL = 1 << 14;
-const FLAG_NOTEQUAL = 1 << 15;
-const FLAG_ASYNC = 1 << 16;
-const FLAG_BOUND = 1 << 17;
-const FLAG_SUSPEND = 1 << 18;
-const FLAG_FIBER = 1 << 19;
-const FLAG_EAGER = 1 << 20;
-const FLAG_BLOCKED = 1 << 21;
+/* Shared Sender | Receiver flags — read on generic Sender-typed variables.
+ * Code that reads them MUST also check FLAG_RECEIVER to avoid false positives
+ * from Signal mod bits occupying the same bit positions. */
+const FLAG_SINGLE = 1 << 28;
+const FLAG_WEAK = 1 << 29;
+const FLAG_EAGER = 1 << 30;
 
 /* Option flags */
 const OPT_DEFER = FLAG_DEFER;
@@ -45,7 +49,6 @@ const OPT_WEAK = FLAG_WEAK;
 
 const OPTIONS = OPT_DEFER | OPT_STABLE | OPT_SETUP | OPT_WEAK;
 
-export const FLAG_RECEIVER = 0;
 
 /* Async dispatch kinds — asyncKind() returns one of these so callers can
  * branch without re-sniffing the value. */
@@ -70,7 +73,6 @@ const REGRET = { then: function () {} };
  * @const
  */
 const ASSERT_SUSPEND = "Async node must call c.suspend() on all awaited promises";
-const ASSERT_IDLE = "Cannot create nodes from the top-level clock inside a running transaction. Use a root or owner context instead.";
 const ASSERT_DISPOSED = "Cannot access a disposed node";
 
 // ─── Global state ──────────────────────────────────────────────────────────
@@ -235,7 +237,7 @@ function Signal(value) {
  */
 function Compute(opts, fn, dep1, seed, args) {
   /** @type {number} */
-  this._flag = FLAG_INIT | FLAG_STALE | opts;
+  this._flag = FLAG_RECEIVER | FLAG_INIT | FLAG_STALE | opts;
   /** @type {T} */
   this._value = seed;
   /** @type {number} */
@@ -276,7 +278,7 @@ function Compute(opts, fn, dep1, seed, args) {
  */
 function Effect(opts, fn, dep1, owner, args) {
   /** @type {number} */
-  this._flag = FLAG_INIT | (0 | opts);
+  this._flag = FLAG_RECEIVER | FLAG_INIT | (0 | opts);
   /** @type {(function(W): (function(): void | void)) | (function(U,W): (function(): void | void)) | (function(U,V,W): (function(): void | void)) | null} */
   this._fn = fn;
   /** @type {Sender<U> | null} */
@@ -1248,14 +1250,14 @@ function root(fn) {
    * @returns {void}
    */
   ComputeProto._refresh = function () {
-    let flag = this._flag;
+		let flag = this._flag;
     if (flag & FLAG_STALE) {
       this._update(TIME);
     } else if (flag & FLAG_SINGLE) {
       checkSingle(this, TIME);
     } else {
       checkRun(this, TIME);
-    }
+		}
   };
 
   /**
@@ -1325,9 +1327,18 @@ function root(fn) {
     if ((flag & (FLAG_STABLE | FLAG_SETUP)) === FLAG_STABLE) {
       try {
         if (flag & FLAG_BOUND) {
-          let dep = this._dep1;
-          if (dep._flag & (FLAG_STALE | FLAG_PENDING)) {
-            dep._refresh();
+					let dep = this._dep1;
+					if (dep._flag & FLAG_RECEIVER) {
+						if (dep._flag & (FLAG_STALE | FLAG_PENDING)) {
+            	dep._refresh();
+						}
+          if (dep._flag & FLAG_ERROR) {
+        		this._value = normalize(dep._value);
+	          this._flag =
+	            (this._flag & ~(FLAG_STALE | FLAG_PENDING | FLAG_INIT)) | FLAG_ERROR;
+	          this._ctime = time;
+	          return;
+          	}
           }
           value = this._fn(dep._value, this, this._value, args);
         } else {
@@ -1365,11 +1376,21 @@ function root(fn) {
           /** Bound + setup/dynamic: refresh dep1, stamp its version
            *  so val() treats it as already-tracked, then pass its
            *  value as the first argument. */
-          let dep = this._dep1;
-          if (dep._flag & (FLAG_STALE | FLAG_PENDING)) {
-            dep._refresh();
+					let dep = this._dep1;
+					if (dep._flag & FLAG_RECEIVER) {
+						if (dep._flag & (FLAG_STALE | FLAG_PENDING)) {
+            	dep._refresh();
+						}
+						if (dep._flag & FLAG_ERROR) {
+        		this._value = normalize(dep._value);
+       this._flag =
+         (this._flag & ~(FLAG_STALE | FLAG_PENDING | FLAG_INIT)) | FLAG_ERROR;
+       this._ctime = time;
+       return;
+          	}
           }
-          dep._version = version;
+
+					dep._version = version;
           value = this._fn(dep._value, this, this._value, args);
         } else {
           value = this._fn(this, this._value, args);
@@ -1533,9 +1554,14 @@ function root(fn) {
       try {
         if (flag & FLAG_BOUND) {
           let dep = this._dep1;
-          if (dep._flag & (FLAG_STALE | FLAG_PENDING)) {
-            dep._refresh();
-          }
+          if (dep._flag & FLAG_RECEIVER) {
+						if (dep._flag & (FLAG_STALE | FLAG_PENDING)) {
+                 	dep._refresh();
+						}
+            if (dep._flag & FLAG_ERROR) {
+           	throw dep._value;
+           	}
+            }
           value = this._fn(dep._value, this, args);
         } else {
           value = this._fn(this, args);
@@ -1565,7 +1591,20 @@ function root(fn) {
       }
 
       try {
+      if (flag & FLAG_BOUND) {
+        let dep = this._dep1;
+        if (dep._flag & FLAG_RECEIVER) {
+						if (dep._flag & (FLAG_STALE | FLAG_PENDING)) {
+               	dep._refresh();
+						}
+          if (dep._flag & FLAG_ERROR) {
+         	throw dep._value;
+         	}
+          }
+        value = this._fn(dep._value, this, args);
+      } else {
         value = this._fn(this, args);
+      }
       } finally {
         if (flag & FLAG_SETUP) {
           if (DCOUNT > DBASE) {
@@ -1837,8 +1876,10 @@ function clearReceiver(send, slot) {
    * - FLAG_WEAK: release cached value and mark STALE so next
    *   .val() recomputes fresh.
    */
+	let flag = send._flag;
   if (
-    send._flag & (FLAG_WEAK | FLAG_EAGER) &&
+    flag & FLAG_RECEIVER &&
+    flag & (FLAG_WEAK | FLAG_EAGER) &&
     send._sub1 === null &&
     (send._subs === null || send._subs.length === 0)
   ) {
@@ -3350,22 +3391,10 @@ function batch(fn) {
  */
 function Clock() {}
 Clock.prototype.signal = signal;
-Clock.prototype.compute = function (depOrFn, fnOrSeed, optsOrSeed, argsOrOpts, args) {
-  if (!IDLE) { throw new Error(ASSERT_IDLE); }
-  return compute(depOrFn, fnOrSeed, optsOrSeed, argsOrOpts, args);
-};
-Clock.prototype.task = function (depOrFn, fnOrSeed, optsOrSeed, argsOrOpts, args) {
-  if (!IDLE) { throw new Error(ASSERT_IDLE); }
-  return task(depOrFn, fnOrSeed, optsOrSeed, argsOrOpts, args);
-};
-Clock.prototype.effect = function (depOrFn, fnOrOpts, optsOrArgs, args) {
-  if (!IDLE) { throw new Error(ASSERT_IDLE); }
-  return effect(depOrFn, fnOrOpts, optsOrArgs, args);
-};
-Clock.prototype.spawn = function (depOrFn, fnOrOpts, optsOrArgs, args) {
-  if (!IDLE) { throw new Error(ASSERT_IDLE); }
-  return spawn(depOrFn, fnOrOpts, optsOrArgs, args);
-};
+Clock.prototype.compute = compute;
+Clock.prototype.task = task;
+Clock.prototype.effect = effect;
+Clock.prototype.spawn = spawn;
 Clock.prototype.root = root;
 Clock.prototype.batch = batch;
 
@@ -3380,10 +3409,10 @@ export {
   FLAG_SETUP,
   FLAG_LOADING,
   FLAG_ERROR,
+  FLAG_RECEIVER,
   FLAG_DEFER,
   FLAG_STABLE,
-  FLAG_SINGLE,
-  FLAG_DERIVED,
+	FLAG_SINGLE,
   FLAG_WEAK,
   FLAG_EQUAL,
   FLAG_NOTEQUAL,
