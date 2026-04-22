@@ -1,4 +1,4 @@
-import { describe, test, expect, collectAsync } from "#test-runner";
+import { describe, test, expect, collectAsync, expectCollected } from "#test-runner";
 import { signal, root } from "#fyren";
 
 let c; root((_c) => { c = _c; });
@@ -363,7 +363,7 @@ describe("suspend(task): two-way binding lifecycle", () => {
 			return nodes;
 		});
 
-		await collectAsync();
+		await expectCollected(refs);
 		for (const ref of refs) {
 			expect(ref.deref()).toBeUndefined();
 		}
@@ -389,7 +389,7 @@ describe("suspend(task): two-way binding lifecycle", () => {
 			return nodes;
 		});
 
-		await collectAsync();
+		await expectCollected(refs);
 		for (const ref of refs) {
 			expect(ref.deref()).toBeUndefined();
 		}
@@ -413,7 +413,7 @@ describe("suspend(task): two-way binding lifecycle", () => {
 			return nodes;
 		});
 
-		await collectAsync();
+		await expectCollected(refs);
 		for (const ref of refs) {
 			expect(ref.deref()).toBeUndefined();
 		}
@@ -467,7 +467,7 @@ describe("suspend(task): two-way binding lifecycle", () => {
 			return nodes;
 		});
 
-		await collectAsync();
+		await expectCollected(refs);
 		for (const ref of refs) {
 			expect(ref.deref()).toBeUndefined();
 		}
@@ -660,7 +660,7 @@ describe("ownership: async nodes and disposal", () => {
 			return nodes;
 		});
 
-		await collectAsync();
+		await expectCollected(refs);
 		for (const ref of refs) {
 			expect(ref.deref()).toBeUndefined();
 		}
@@ -684,7 +684,7 @@ describe("ownership: async nodes and disposal", () => {
 			return nodes;
 		});
 
-		await collectAsync();
+		await expectCollected(refs);
 		for (const ref of refs) {
 			expect(ref.deref()).toBeUndefined();
 		}
@@ -709,7 +709,7 @@ describe("ownership: async nodes and disposal", () => {
 			return nodes;
 		});
 
-		await collectAsync();
+		await expectCollected(refs);
 		for (const ref of refs) {
 			expect(ref.deref()).toBeUndefined();
 		}

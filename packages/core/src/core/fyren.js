@@ -1577,12 +1577,10 @@ function root(fn) {
     } else if (flag & FLAG_LOCK) {
       return;
     } else {
-      /** Abort in-flight async work. Bump _time so old resolve/reject
-       *  callbacks see a stale activation and silently ignore. */
+      /** Abort in-flight async work. The stale/pending flag check
+       *  in resolvePromise ensures old callbacks are rejected. */
       if (flag & FLAG_LOADING && flag & FLAG_FIBER) {
-        this._time++;
         clearFiber(this);
-        this._flag &= ~FLAG_LOADING;
       }
       if (!(flag & (FLAG_EAGER | FLAG_WAITER))) {
         notify(this, FLAG_PENDING);
@@ -2752,22 +2750,32 @@ function resolvePromise(ref, promise, time) {
     (val) => {
       let node = ref.deref();
       if (
-        node !== void 0 &&
-        !(node._flag & FLAG_DISPOSED) &&
-        node._time === time
+        node === void 0 ||
+        node._flag & FLAG_DISPOSED ||
+        node._time !== time ||
+        (!(node._flag & FLAG_LOCK) && (
+          node._flag & FLAG_STALE ||
+          (node._flag & FLAG_PENDING && needsUpdate(node, time))
+        ))
       ) {
-        node._settle(val);
+        return;
       }
+      node._settle(val);
     },
     (err) => {
       let node = ref.deref();
       if (
-        node !== void 0 &&
-        !(node._flag & FLAG_DISPOSED) &&
-        node._time === time
+        node === void 0 ||
+        node._flag & FLAG_DISPOSED ||
+        node._time !== time ||
+        (!(node._flag & FLAG_LOCK) && (
+          node._flag & FLAG_STALE ||
+          (node._flag & FLAG_PENDING && needsUpdate(node, time))
+        ))
       ) {
-        node._error(err);
+        return;
       }
+      node._error(err);
     }
   );
 }
@@ -2789,8 +2797,15 @@ function resolveIterator(ref, iterable, time) {
   /** @param {IteratorResult<T>} result */
   let onNext = (result) => {
     let node = ref.deref();
-
-    if (node === void 0 || node._flag & FLAG_DISPOSED || node._time !== time) {
+    if (
+      node === void 0 ||
+      node._flag & FLAG_DISPOSED ||
+      node._time !== time ||
+      (!(node._flag & FLAG_LOCK) && (
+        node._flag & FLAG_STALE ||
+        (node._flag & FLAG_PENDING && needsUpdate(node, time))
+      ))
+    ) {
       if (typeof iterator.return === "function") {
         iterator.return();
       }
@@ -2810,12 +2825,17 @@ function resolveIterator(ref, iterable, time) {
   let onError = (err) => {
     let node = ref.deref();
     if (
-      node !== void 0 &&
-      !(node._flag & FLAG_DISPOSED) &&
-      node._time === time
+      node === void 0 ||
+      node._flag & FLAG_DISPOSED ||
+      node._time !== time ||
+      (!(node._flag & FLAG_LOCK) && (
+        node._flag & FLAG_STALE ||
+        (node._flag & FLAG_PENDING && needsUpdate(node, time))
+      ))
     ) {
-      node._error(err);
+      return;
     }
+    node._error(err);
   };
 
   iterator.next().then(onNext, onError);

@@ -1,4 +1,4 @@
-import { describe, test, expect, collectAsync } from "#test-runner";
+import { describe, test, expect, collectAsync, expectCollected } from "#test-runner";
 import { signal, root } from "#fyren";
 import { inspect } from "node:util";
 

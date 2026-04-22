@@ -1,4 +1,4 @@
-import { describe, test, expect, collectAsync } from "#test-runner";
+import { describe, test, expect, expectCollected } from "#test-runner";
 import { signal, root } from "#fyren";
 
 let c; root((_c) => { c = _c; });
@@ -272,7 +272,7 @@ describe("dispose", () => {
                 return nodes.map((n) => new WeakRef(n));
             })();
 
-            await collectAsync();
+            await expectCollected(refs);
             for (const ref of refs) {
                 expect(ref.deref()).toBeUndefined();
             }
