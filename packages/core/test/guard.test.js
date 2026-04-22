@@ -1,7 +1,7 @@
 import { describe, test, expect } from "#test-runner";
 import { c } from "#fyren";
 
-describe("signal guard", () => {
+describe.skip("signal guard", () => {
     describe("custom equality", () => {
         test("skips set when guard returns true (equal)", () => {
             const s = c.signal(

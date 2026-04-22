@@ -210,7 +210,7 @@ function Root() {
  * @implements {ISignal<T>}
  * @param {T} value
  */
-function Signal(value, guard) {
+function Signal(value) {
   /** @type {number} */
   this._flag = 0;
   /** @type {T} */
@@ -223,8 +223,6 @@ function Signal(value, guard) {
   this._sub1slot = 0;
   /** @type {Array<Receiver | number> | null} */
   this._subs = null;
-  /** @type {(function(T,T): boolean) | null} */
-  this._guard = guard || null;
 }
 
 /**
@@ -614,8 +612,8 @@ function refreshDep1(dep) {
  *   To validate/assert, throw inside the guard when the value is invalid.
  * @returns {!Signal<T>}
  */
-function signal(value, guard) {
-  return new Signal(value, guard || null);
+function signal(value) {
+  return new Signal(value);
 }
 
 /**
@@ -1215,8 +1213,7 @@ function root(fn) {
     if (this._flag & FLAG_DISPOSED) {
       throw new Error(ASSERT_DISPOSED);
     }
-    let changed = this._guard === null ? (this._value !== value) : !this._guard(this._value, value);
-    if (changed) {
+    if (this._value !== value) {
       if (IDLE) {
         this._value = value;
         notify(this, FLAG_STALE);
@@ -1523,9 +1520,7 @@ function root(fn) {
       }
     }
 
-    this._flag &= ~FLAG_INIT;
-    /** Value comparison (shared by sync and async SYNC_SYNC). */
-    flag = this._flag;
+    flag = this._flag &= ~FLAG_INIT;
     if (flag & FLAG_ERROR) {
       this._value = value;
       this._ctime = time;
