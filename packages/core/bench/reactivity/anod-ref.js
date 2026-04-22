@@ -278,10 +278,10 @@ function setupCellx(layers) {
             start.prop3.set(toggle ? 2 : 3);
             start.prop4.set(toggle ? 1 : 4);
         });
-        end.prop1.peek();
-        end.prop2.peek();
-        end.prop3.peek();
-        end.prop4.peek();
+        end.prop1.get();
+        end.prop2.get();
+        end.prop3.get();
+        end.prop4.get();
     };
 }
 
@@ -481,7 +481,7 @@ function setupDynBuild(width, totalLayers, staticFraction, nSources) {
         const { layers } = makeDynGraph(width, totalLayers, staticFraction, nSources);
         const leaves = layers[layers.length - 1];
         for (let r = 0; r < leaves.length; r++) {
-            sink += leaves[r].peek();
+            sink += leaves[r].get();
         }
         return layers;
     };
@@ -497,7 +497,7 @@ function setupDynUpdate(width, totalLayers, staticFraction, nSources, readFracti
     const leaves = layers[layers.length - 1];
     /** Force-read ALL leaves so lazy frameworks fully materialize the graph. */
     for (let r = 0; r < leaves.length; r++) {
-        sink += leaves[r].peek();
+        sink += leaves[r].get();
     }
     const rand = pseudoRandom('seed');
     const skipCount = Math.round(leaves.length * (1 - readFraction));
@@ -511,7 +511,7 @@ function setupDynUpdate(width, totalLayers, staticFraction, nSources, readFracti
         const sourceDex = iter % srcLen;
         sources[sourceDex].set(iter + sourceDex);
         for (let r = 0; r < readLen; r++) {
-            sink += readLeaves[r].peek();
+            sink += readLeaves[r].get();
         }
     };
 }

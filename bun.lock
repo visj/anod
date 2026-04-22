@@ -263,6 +263,10 @@
 
     "vinyl-sourcemaps-apply": ["vinyl-sourcemaps-apply@0.2.1", "", { "dependencies": { "source-map": "^0.5.1" } }, "sha512-+oDh3KYZBoZC8hfocrbrxbLUeaYtQK7J5WU5Br9VqWqmCll3tFJqKp97GC9GmMsVIL0qnx2DgEDVxdo5EZ5sSw=="],
 
+    "@fyren/list/@fyren/core": ["@fyren/core@file:packages/core", { "devDependencies": { "@ampproject/remapping": "^2.3.0", "@mitata/counters": "^0.0.8", "@preact/signals": "^2.8.1", "@preact/signals-core": "^1.13.0", "@reactively/core": "^0.0.8", "@rollup/plugin-terser": "^1.0.0", "@solidjs/signals": "^0.12.0", "@zeix/cause-effect": "^1.0.0", "alien-signals": "^3.1.2", "google-closure-compiler": "^20260225.0.0", "magic-string": "^0.30.21", "mitata": "^1.0.34", "rolldown": "^1.0.0-rc.9", "rollup": "^4.59.0", "s-js": "^0.4.9", "terser": "^5.46.0", "usignal": "^0.10.0" } }],
+
+    "@fyren/tools/@fyren/core": ["@fyren/core@file:packages/core", { "devDependencies": { "@ampproject/remapping": "^2.3.0", "@mitata/counters": "^0.0.8", "@preact/signals": "^2.8.1", "@preact/signals-core": "^1.13.0", "@reactively/core": "^0.0.8", "@rollup/plugin-terser": "^1.0.0", "@solidjs/signals": "^0.12.0", "@zeix/cause-effect": "^1.0.0", "alien-signals": "^3.1.2", "google-closure-compiler": "^20260225.0.0", "magic-string": "^0.30.21", "mitata": "^1.0.34", "rolldown": "^1.0.0-rc.9", "rollup": "^4.59.0", "s-js": "^0.4.9", "terser": "^5.46.0", "usignal": "^0.10.0" } }],
+
     "source-map-support/source-map": ["source-map@0.6.1", "", {}, "sha512-UjgapumWlbMhkBgzT7Ykc5YXUT46F0iKu8SGXq0bcwP5dz/h0Plj6enJqjz1Zbq2l5WaqYnrVbwWOWMyF3F47g=="],
   }
 }

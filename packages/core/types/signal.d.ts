@@ -16,7 +16,6 @@ export const enum Flag {
   NOTEQUAL = 32768,
   ASYNC = 65536,
   BOUND = 131072,
-  SUSPEND = 262144,
   FIBER = 524288,
   EAGER = 1048576
 }
@@ -129,8 +128,10 @@ export interface IRoot {
 
 // ─── Factory interface (factory methods) ───────────────────────────────
 
+export type EqualityFn<T> = (prev: T, next: T) => boolean;
+
 export interface IFactory {
-  signal<T>(value: T): ISignal<T>;
+  signal<T>(value: T, guard?: EqualityFn<T>): ISignal<T>;
 
   // Unbound compute
   compute<U>(fn: (c: IComputeReader) => U): ICompute<Resolve<U>>;
@@ -247,7 +248,7 @@ export declare class Root implements IRoot, IFactory {
 }
 
 export declare class Signal<T> implements ISignal<T> {
-  constructor(value: T);
+  constructor(value: T, guard?: EqualityFn<T>);
   get(): T;
   set(value: T): void;
   dispose(): void;

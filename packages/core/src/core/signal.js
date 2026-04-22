@@ -30,7 +30,7 @@ const FLAG_EQUAL = 1 << 11;
 const FLAG_NOTEQUAL = 1 << 12;
 const FLAG_ASYNC = 1 << 13;
 const FLAG_BOUND = 1 << 14;
-const FLAG_SUSPEND = 1 << 15;
+const FLAG_WAITER = 1 << 15;
 const FLAG_FIBER = 1 << 16;
 const FLAG_BLOCKED = 1 << 17;
 
@@ -63,7 +63,7 @@ const ASYNC_SYNC = 3;
  * nothing, so the continuation never resumes and the closure is GC'd.
  * @const
  */
-const REGRET = { then: function () {} };
+const REGRET = { then: function () { } };
 
 /**
  * Thrown (synchronously) when an async node's fn returns a non-sync
@@ -72,7 +72,6 @@ const REGRET = { then: function () {} };
  * let code continue executing after the node is disposed.
  * @const
  */
-const ASSERT_SUSPEND = "Async node must call c.suspend() on all awaited promises";
 const ASSERT_DISPOSED = "Cannot access a disposed node";
 
 // ─── Global state ──────────────────────────────────────────────────────────
@@ -210,7 +209,7 @@ function Root() {
  * @implements {ISignal<T>}
  * @param {T} value
  */
-function Signal(value) {
+function Signal(value, guard) {
   /** @type {number} */
   this._flag = 0;
   /** @type {T} */
@@ -223,6 +222,8 @@ function Signal(value) {
   this._sub1slot = 0;
   /** @type {Array<Receiver | number> | null} */
   this._subs = null;
+  /** @type {(function(T,T): boolean) | null} */
+  this._guard = guard || null;
 }
 
 /**
@@ -373,9 +374,6 @@ function dispose() {
  */
 function val(sender) {
   let flag = this._flag;
-  if ((sender._flag & FLAG_DISPOSED) || (flag & FLAG_DISPOSED)) {
-    throw new Error(ASSERT_DISPOSED);
-  }
 
   if (flag & FLAG_LOADING) {
     return this._readAsync(sender);
@@ -577,8 +575,15 @@ function normalize(err) {
  * @param {*} value
  * @returns {!Signal}
  */
-function signal(value) {
-  return new Signal(value);
+/**
+ * @template T
+ * @param {T} value
+ * @param {(function(T,T): boolean)=} guard - Equality function: (prev, next) => true if equal (skip update).
+ *   To validate/assert, throw inside the guard when the value is invalid.
+ * @returns {!Signal<T>}
+ */
+function signal(value, guard) {
+  return new Signal(value, guard);
 }
 
 /**
@@ -618,7 +623,7 @@ function root(fn) {
     SignalProto.dispose =
     ComputeProto.dispose =
     EffectProto.dispose =
-      dispose;
+    dispose;
 
   // Receiver#_read — internal dep tracking, called from val() when listening
   ComputeProto._read = EffectProto._read = _read;
@@ -635,7 +640,7 @@ function root(fn) {
   Object.defineProperties(EffectProto, states);
 
   let _disposed = { disposed: { get() { return (this._flag & FLAG_DISPOSED) !== 0; } } };
-	Object.defineProperties(SignalProto, _disposed);
+  Object.defineProperties(SignalProto, _disposed);
   Object.defineProperties(ComputeProto, _disposed);
   Object.defineProperties(EffectProto, _disposed);
   Object.defineProperties(RootProto, _disposed);
@@ -735,8 +740,6 @@ function root(fn) {
    * `.then()` is a no-op, so `await` never resumes and the closure
    * becomes eligible for GC.
    *
-   * Also sets FLAG_SUSPEND on the node so _updateAsync can assert
-   * that the user actually called suspend().
    * @template T
    * @this {!Compute | !Effect}
    * @param {!Promise<T>} promise
@@ -761,7 +764,6 @@ function root(fn) {
     /** Existing promise path. */
     let ref = new WeakRef(this);
     let time = this._time;
-    this._flag |= FLAG_SUSPEND;
     return promiseOrTask.then(
       function (val) {
         let node = ref.deref();
@@ -804,10 +806,11 @@ function root(fn) {
    * @returns {*}
    */
   function _suspendTask(taskNode, onResolve, onReject) {
-    this._flag |= FLAG_SUSPEND;
-
     if (taskNode._flag & FLAG_DISPOSED) {
       throw new Error(ASSERT_DISPOSED);
+    }
+    if (taskNode._flag & (FLAG_STALE | FLAG_PENDING)) {
+      taskNode._refresh();
     }
 
     /** Fast-path: task is settled — subscribe and return value. */
@@ -826,9 +829,6 @@ function root(fn) {
       }
       return taskNode._value;
     }
-
-    /** Slow-path: task is loading — create two-way awaiter binding. */
-    taskNode._flag |= FLAG_EAGER;
 
     if (onResolve) {
       send(this, taskNode, onResolve, onReject);
@@ -860,7 +860,7 @@ function root(fn) {
    * @returns {!Array | !Promise<!Array>}
    */
   function _suspendArray(tasks, onResolve, onReject) {
-    this._flag |= FLAG_SUSPEND | FLAG_BLOCKED;
+    this._flag |= FLAG_BLOCKED;
     let count = tasks.length;
     if (count === 0) {
       this._flag &= ~FLAG_BLOCKED;
@@ -981,7 +981,6 @@ function root(fn) {
 
     /** Bind waiter to the blocked task. */
     let task = tasks[blocked];
-    task._flag |= FLAG_EAGER;
     send(node, task,
       function (value) {
         if (task._flag & FLAG_ERROR) {
@@ -1150,7 +1149,8 @@ function root(fn) {
     if (this._flag & FLAG_DISPOSED) {
       throw new Error(ASSERT_DISPOSED);
     }
-    if (this._value !== value) {
+    let changed = this._guard === null ? (this._value !== value) : !this._guard(this._value, value);
+    if (changed) {
       if (IDLE) {
         this._value = value;
         notify(this, FLAG_STALE);
@@ -1211,6 +1211,10 @@ function root(fn) {
         this._refresh();
       }
     }
+    if (this._flag & FLAG_BOUND && this._dep1 === null) {
+      this._flag |= FLAG_ERROR;
+      this._value = { message: ASSERT_DISPOSED };
+    }
     if (this._flag & FLAG_ERROR) {
       throw this._value;
     }
@@ -1250,14 +1254,14 @@ function root(fn) {
    * @returns {void}
    */
   ComputeProto._refresh = function () {
-		let flag = this._flag;
+    let flag = this._flag;
     if (flag & FLAG_STALE) {
       this._update(TIME);
     } else if (flag & FLAG_SINGLE) {
       checkSingle(this, TIME);
     } else {
       checkRun(this, TIME);
-		}
+    }
   };
 
   /**
@@ -1318,7 +1322,6 @@ function root(fn) {
       if (flag & FLAG_FIBER) {
         clearFiber(this);
       }
-      this._flag &= ~FLAG_SUSPEND;
     }
 
     let value;
@@ -1327,18 +1330,18 @@ function root(fn) {
     if ((flag & (FLAG_STABLE | FLAG_SETUP)) === FLAG_STABLE) {
       try {
         if (flag & FLAG_BOUND) {
-					let dep = this._dep1;
-					if (dep._flag & FLAG_RECEIVER) {
-						if (dep._flag & (FLAG_STALE | FLAG_PENDING)) {
-            	dep._refresh();
-						}
-          if (dep._flag & FLAG_ERROR) {
-        		this._value = normalize(dep._value);
-	          this._flag =
-	            (this._flag & ~(FLAG_STALE | FLAG_PENDING | FLAG_INIT)) | FLAG_ERROR;
-	          this._ctime = time;
-	          return;
-          	}
+          let dep = this._dep1;
+          let dflag = dep !== null ? dep._flag : FLAG_DISPOSED;
+          if (dflag & (FLAG_STALE | FLAG_PENDING)) {
+            dep._refresh();
+            dflag = dep._flag;
+          }
+          if (dflag & (FLAG_ERROR | FLAG_DISPOSED)) {
+            this._value = (dflag & FLAG_DISPOSED) ? { message: ASSERT_DISPOSED } : normalize(dep._value);
+            this._flag =
+              (this._flag & ~(FLAG_STALE | FLAG_PENDING | FLAG_INIT)) | FLAG_ERROR;
+            this._ctime = time;
+            return;
           }
           value = this._fn(dep._value, this, this._value, args);
         } else {
@@ -1371,26 +1374,23 @@ function root(fn) {
         depsLen = this._deps !== null ? this._deps.length : 0;
       }
 
-      try {
+      call: try {
         if (flag & FLAG_BOUND) {
           /** Bound + setup/dynamic: refresh dep1, stamp its version
            *  so val() treats it as already-tracked, then pass its
            *  value as the first argument. */
-					let dep = this._dep1;
-					if (dep._flag & FLAG_RECEIVER) {
-						if (dep._flag & (FLAG_STALE | FLAG_PENDING)) {
-            	dep._refresh();
-						}
-						if (dep._flag & FLAG_ERROR) {
-        		this._value = normalize(dep._value);
-       this._flag =
-         (this._flag & ~(FLAG_STALE | FLAG_PENDING | FLAG_INIT)) | FLAG_ERROR;
-       this._ctime = time;
-       return;
-          	}
+          let dep = this._dep1;
+          let dflag = dep !== null ? dep._flag : FLAG_DISPOSED;
+          if (dflag & (FLAG_STALE | FLAG_PENDING)) {
+            dep._refresh();
+            dflag = dep._flag;
           }
-
-					dep._version = version;
+          if (dflag & (FLAG_ERROR | FLAG_DISPOSED)) {
+            value = (dflag & FLAG_DISPOSED) ? { message: ASSERT_DISPOSED } : normalize(dep._value);
+            this._flag |= FLAG_ERROR;
+            break call;
+          }
+          dep._version = version;
           value = this._fn(dep._value, this, this._value, args);
         } else {
           value = this._fn(this, this._value, args);
@@ -1432,37 +1432,18 @@ function root(fn) {
       }
       VERSION = prevRVer;
     }
-
-    this._flag &= ~(FLAG_STALE | FLAG_PENDING | FLAG_SETUP);
-
-    /** Async: if fn returned a promise/iterator, dispatch and return. */
-    if (flag & FLAG_ASYNC) {
-      let kind = asyncKind(value);
-      if (kind !== ASYNC_SYNC) {
-        if (kind === ASYNC_PROMISE && !(this._flag & FLAG_SUSPEND)) {
-          throw new Error(ASSERT_SUSPEND);
-        }
-        this._flag |= FLAG_LOADING;
-        if (kind === ASYNC_PROMISE) {
-          resolvePromise(
-            new WeakRef(this),
-            /** @type {IThenable} */ (value),
-            time
-          );
-        } else {
-          resolveIterator(
-            new WeakRef(this),
-            /** @type {AsyncIterator | AsyncIterable} */ (value),
-            time
-          );
-        }
-        return;
-      }
-    }
-
-		this._flag &= ~FLAG_INIT;
-    /** Value comparison (shared by sync and async SYNC_SYNC). */
     flag = this._flag;
+
+    
+    /** Async: if fn returned a promise/iterator, dispatch and return. */
+    if (
+      (flag & (FLAG_ASYNC | FLAG_ERROR)) === FLAG_ASYNC &&
+      waitFor(this, value, time)
+    ) {
+      return;
+    }
+    this._flag &= ~(FLAG_INIT | FLAG_SETUP | FLAG_STALE | FLAG_PENDING);
+    
     if (flag & FLAG_ERROR) {
       this._value = value;
       this._ctime = time;
@@ -1477,26 +1458,18 @@ function root(fn) {
   };
 
   /**
-   * @this {Compute}
-   * @returns {void}
-   */
-  /**
    * Compute notification handler. Three cases:
-   * 1. Default: propagate PENDING downstream (pure pull).
-   * 2. FLAG_EAGER + FLAG_ASYNC: enqueue to COMPUTES for eager re-run.
-   *    Downstream is notified at settle time.
-   * 3. FLAG_EAGER + sync: notify FLAG_STALE directly — pure push node
-   *    that eagerly updates and forces downstream to re-evaluate.
+   * 1. Default: notify PENDING downstream (pure pull).
+   * 2. Eager notify STALE downstream (pure push).
    * @this {Compute}
    * @returns {void}
    */
   ComputeProto._receive = function () {
-    if (!(this._flag & FLAG_EAGER)) {
-      notify(this, FLAG_PENDING);
-    } else if (this._flag & FLAG_ASYNC) {
+    if (this._flag & (FLAG_EAGER | FLAG_WAITER)) {
       COMPUTES[COMPUTE_COUNT++] = this;
+      notify(this, this._flag & FLAG_EAGER ? FLAG_STALE : FLAG_PENDING);
     } else {
-      notify(this, FLAG_STALE);
+      notify(this, FLAG_PENDING);
     }
   };
 
@@ -1543,7 +1516,7 @@ function root(fn) {
       if (flag & FLAG_FIBER) {
         clearFiber(this);
       }
-      this._flag &= ~(FLAG_SUSPEND | FLAG_LOADING);
+      this._flag &= ~FLAG_LOADING;
     }
 
     /** @type {(function(): void) | null | undefined} */
@@ -1555,13 +1528,13 @@ function root(fn) {
         if (flag & FLAG_BOUND) {
           let dep = this._dep1;
           if (dep._flag & FLAG_RECEIVER) {
-						if (dep._flag & (FLAG_STALE | FLAG_PENDING)) {
-                 	dep._refresh();
-						}
-            if (dep._flag & FLAG_ERROR) {
-           	throw dep._value;
-           	}
+            if (dep._flag & (FLAG_STALE | FLAG_PENDING)) {
+              dep._refresh();
             }
+            if (dep._flag & FLAG_ERROR) {
+              throw dep._value;
+            }
+          }
           value = this._fn(dep._value, this, args);
         } else {
           value = this._fn(this, args);
@@ -1591,20 +1564,20 @@ function root(fn) {
       }
 
       try {
-      if (flag & FLAG_BOUND) {
-        let dep = this._dep1;
-        if (dep._flag & FLAG_RECEIVER) {
-						if (dep._flag & (FLAG_STALE | FLAG_PENDING)) {
-               	dep._refresh();
-						}
-          if (dep._flag & FLAG_ERROR) {
-         	throw dep._value;
-         	}
+        if (flag & FLAG_BOUND) {
+          let dep = this._dep1;
+          if (dep._flag & FLAG_RECEIVER) {
+            if (dep._flag & (FLAG_STALE | FLAG_PENDING)) {
+              dep._refresh();
+            }
+            if (dep._flag & FLAG_ERROR) {
+              throw dep._value;
+            }
           }
-        value = this._fn(dep._value, this, args);
-      } else {
-        value = this._fn(this, args);
-      }
+          value = this._fn(dep._value, this, args);
+        } else {
+          value = this._fn(this, args);
+        }
       } finally {
         if (flag & FLAG_SETUP) {
           if (DCOUNT > DBASE) {
@@ -1643,9 +1616,6 @@ function root(fn) {
       /** Async result handling. */
       let kind = asyncKind(value);
       if (kind !== ASYNC_SYNC) {
-        if (kind === ASYNC_PROMISE && !(this._flag & FLAG_SUSPEND)) {
-          throw new Error(ASSERT_SUSPEND);
-        }
         this._flag |= FLAG_LOADING;
         if (kind === ASYNC_PROMISE) {
           resolveEffectPromise(new WeakRef(this), value);
@@ -1705,6 +1675,9 @@ function root(fn) {
 
   /** @this {!Root | !Effect} */
   function _compute(a, b, c, d, e) {
+    if (this._flag & FLAG_DISPOSED) {
+      throw new Error(ASSERT_DISPOSED);
+    }
     let flag, node;
     if (typeof a === "function") {
       flag = FLAG_SETUP | ((0 | c) & OPTIONS);
@@ -1723,6 +1696,9 @@ function root(fn) {
 
   /** @this {!Root | !Effect} */
   function _task(a, b, c, d, e) {
+    if (this._flag & FLAG_DISPOSED) {
+      throw new Error(ASSERT_DISPOSED);
+    }
     let flag, node;
     if (typeof a === "function") {
       flag = FLAG_ASYNC | FLAG_SETUP | ((0 | c) & OPTIONS);
@@ -1746,6 +1722,9 @@ function root(fn) {
 
   /** @this {!Root | !Effect} */
   function _effect(a, b, c, d) {
+    if (this._flag & FLAG_DISPOSED) {
+      throw new Error(ASSERT_DISPOSED);
+    }
     let flag, node;
     if (typeof a === "function") {
       flag = FLAG_SETUP | ((0 | b) & OPTIONS);
@@ -1768,6 +1747,9 @@ function root(fn) {
 
   /** @this {!Root | !Effect} */
   function _spawn(a, b, c, d) {
+    if (this._flag & FLAG_DISPOSED) {
+      throw new Error(ASSERT_DISPOSED);
+    }
     let flag, node;
     if (typeof a === "function") {
       flag = FLAG_ASYNC | FLAG_SETUP | ((0 | b) & OPTIONS);
@@ -1876,7 +1858,7 @@ function clearReceiver(send, slot) {
    * - FLAG_WEAK: release cached value and mark STALE so next
    *   .val() recomputes fresh.
    */
-	let flag = send._flag;
+  let flag = send._flag;
   if (
     flag & FLAG_RECEIVER &&
     flag & (FLAG_WEAK | FLAG_EAGER) &&
@@ -1932,8 +1914,8 @@ function clearDeps(receive) {
     let count = deps.length;
     for (let i = 0; i < count; i += 2) {
       clearReceiver(
-        /** @type {Sender} */ (deps[i]),
-        /** @type {number} */ (deps[i + 1])
+        /** @type {Sender} */(deps[i]),
+        /** @type {number} */(deps[i + 1])
       );
     }
     receive._deps = null;
@@ -1954,8 +1936,8 @@ function clearSubs(send) {
     let count = subs.length;
     for (let i = 0; i < count; i += 2) {
       clearSender(
-        /** @type {Receiver} */ (subs[i]),
-        /** @type {number} */ (subs[i + 1])
+        /** @type {Receiver} */(subs[i]),
+        /** @type {number} */(subs[i + 1])
       );
     }
     send._subs = null;
@@ -2040,9 +2022,9 @@ function _checkRecover(owner, error) {
   return false;
 }
 
-/** @const */ var RECOVER_NONE = 0;
-/** @const */ var RECOVER_SELF = 1;
-/** @const */ var RECOVER_OWNER = 2;
+const RECOVER_NONE = 0;
+const RECOVER_SELF = 1;
+const RECOVER_OWNER = 2;
 
 /**
  * Attempts to recover from an error.
@@ -2143,7 +2125,7 @@ function patchDeps(node, version, depCount, newLen) {
       continue;
     }
     /** Dropped — unbind (read slot only on the drop path) */
-    clearReceiver(dep, /** @type {number} */ (deps[i + 1]));
+    clearReceiver(dep, /** @type {number} */(deps[i + 1]));
     if (newidx < newLen) {
       /** Fill hole with next new dep */
       let newDep = /** @type {Sender} */ (deps[newidx]);
@@ -2175,7 +2157,7 @@ function patchDeps(node, version, depCount, newLen) {
           break;
         } else {
           /** Also dropped — unbind */
-          clearReceiver(tDep, /** @type {number} */ (deps[tail + 1]));
+          clearReceiver(tDep, /** @type {number} */(deps[tail + 1]));
         }
       }
       if (found) {
@@ -2334,9 +2316,9 @@ function needsUpdate(node, time) {
     } else if (flag & FLAG_PENDING) {
       TRANSACTION = SEED;
       if (flag & FLAG_SINGLE) {
-        checkSingle(/** @type {Compute} */ (dep), time);
+        checkSingle(/** @type {Compute} */(dep), time);
       } else {
-        checkRun(/** @type {Compute} */ (dep), time);
+        checkRun(/** @type {Compute} */(dep), time);
       }
     }
     if (dep._ctime > lastRun) {
@@ -2355,9 +2337,9 @@ function needsUpdate(node, time) {
       } else if (flag & FLAG_PENDING) {
         TRANSACTION = SEED;
         if (flag & FLAG_SINGLE) {
-          checkSingle(/** @type {Compute} */ (dep), time);
+          checkSingle(/** @type {Compute} */(dep), time);
         } else {
-          checkRun(/** @type {Compute} */ (dep), time);
+          checkRun(/** @type {Compute} */(dep), time);
         }
       }
       if (dep._ctime > lastRun) {
@@ -2380,9 +2362,9 @@ function checkSingle(node, time) {
     dep._update(time);
   } else if (flag & FLAG_PENDING) {
     if (flag & FLAG_SINGLE) {
-      checkSingle(/** @type {Compute} */ (dep), time);
+      checkSingle(/** @type {Compute} */(dep), time);
     } else {
-      checkRun(/** @type {Compute} */ (dep), time);
+      checkRun(/** @type {Compute} */(dep), time);
     }
   }
   if (dep._ctime > node._time) {
@@ -2423,7 +2405,7 @@ function checkRun(node, time) {
   /** -2 = fresh entry (scan from dep1), -1 = resume after dep1, >= 0 = resume after _deps[n] */
   let resumeFrom = -2;
 
-  outer: for (;;) {
+  outer: for (; ;) {
     let lastRun = node._time;
     let i;
 
@@ -2549,6 +2531,36 @@ function checkRun(node, time) {
     }
     return;
   }
+}
+
+/**
+ * @template T
+ * @param {Compute<T>} node 
+ * @param {T} value 
+ * @param {number} time 
+ * @returns {boolean}
+ */
+function waitFor(node, value, time) {
+  let kind = asyncKind(value);
+  if (kind !== ASYNC_SYNC) {
+    let flag = node._flag;
+    node._flag = (flag & ~(FLAG_STALE | FLAG_PENDING | FLAG_SETUP)) | FLAG_LOADING;
+    if (kind === ASYNC_PROMISE) {
+      resolvePromise(
+        new WeakRef(node),
+            /** @type {IThenable} */(value),
+        time
+      );
+    } else {
+      resolveIterator(
+        new WeakRef(node),
+            /** @type {AsyncIterator | AsyncIterable} */(value),
+        time
+      );
+    }
+    return true;
+  }
+  return false;
 }
 
 /**
@@ -2736,7 +2748,7 @@ function settleDeps(node) {
     while (i >= 0) {
       let dep = /** @type {!Sender} */ (deps[i]);
       if (dep._version === stamp) {
-        clearReceiver(dep, /** @type {number} */ (deps[i + 1]));
+        clearReceiver(dep, /** @type {number} */(deps[i + 1]));
         write -= 2;
         if (i !== write) {
           let lastDep, lastSlot;
@@ -2859,6 +2871,7 @@ function send(awaiter, task, resolve, reject) {
   }
 
   let waiterSlot = addWaiter(responderCh, awaiter, resSlot, resolve, reject);
+  task._flag |= FLAG_WAITER;
 
   if (resSlot === -1) {
     awaiterCh._res1 = task;
@@ -2873,11 +2886,13 @@ function send(awaiter, task, resolve, reject) {
 /**
  * Removes a single waiter entry (4-stride swap-with-last).
  * Updates the swapped awaiter's back-reference.
+ * Clears FLAG_WAITER on the responder when the last waiter is removed.
+ * @param {!Compute} responder
  * @param {!Channel} responderCh
  * @param {number} slot
  * @returns {void}
  */
-function removeWaiter(responderCh, slot) {
+function removeWaiter(responder, responderCh, slot) {
   let waiters = responderCh._waiters;
   let lastReject = waiters.pop();
   let lastResolve = waiters.pop();
@@ -2897,6 +2912,7 @@ function removeWaiter(responderCh, slot) {
   }
   if (waiters.length === 0) {
     responderCh._waiters = null;
+    responder._flag &= ~FLAG_WAITER;
   }
 }
 
@@ -2908,7 +2924,7 @@ function removeWaiter(responderCh, slot) {
 function clearChannel(channel) {
   let res = channel._res1;
   if (res !== null) {
-    removeWaiter(res._args._fiber._channel, channel._res1slot);
+    removeWaiter(res, res._args._fiber._channel, channel._res1slot);
     channel._res1 = null;
   }
   let responds = channel._responds;
@@ -2919,7 +2935,7 @@ function clearChannel(channel) {
         continue;
       }
       let slot = responds[i + 1];
-      removeWaiter(responder._args._fiber._channel, slot);
+      removeWaiter(responder, responder._args._fiber._channel, slot);
     }
     channel._responds = null;
   }
@@ -2969,6 +2985,7 @@ function resolveWaiters(responder, responderCh, value, isError, panic) {
     }
   }
   responderCh._waiters = null;
+  responder._flag &= ~FLAG_WAITER;
 }
 
 /**
@@ -3389,7 +3406,7 @@ function batch(fn) {
  * Top-level clock object. The entry point to the library.
  * @const
  */
-function Clock() {}
+function Clock() { }
 Clock.prototype.signal = signal;
 Clock.prototype.compute = compute;
 Clock.prototype.task = task;
@@ -3412,13 +3429,12 @@ export {
   FLAG_RECEIVER,
   FLAG_DEFER,
   FLAG_STABLE,
-	FLAG_SINGLE,
+  FLAG_SINGLE,
   FLAG_WEAK,
   FLAG_EQUAL,
   FLAG_NOTEQUAL,
   FLAG_ASYNC,
   FLAG_BOUND,
-  FLAG_SUSPEND,
   FLAG_FIBER,
   FLAG_EAGER,
   FLAG_BLOCKED,

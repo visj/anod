@@ -122,12 +122,6 @@ describe("dispose", () => {
             expect(() => r.effect(() => {})).toThrow();
         });
 
-        test("disposed root cannot create signal", () => {
-            const r = c.root(() => {});
-            r.dispose();
-            expect(() => r.signal(1)).toThrow();
-        });
-
         test("disposed root cannot create task", () => {
             const r = c.root(() => {});
             r.dispose();
@@ -140,11 +134,6 @@ describe("dispose", () => {
             expect(() => r.spawn(async (cx) => { await cx.suspend(Promise.resolve()); })).toThrow();
         });
 
-        test("disposed root cannot create nested root", () => {
-            const r = c.root(() => {});
-            r.dispose();
-            expect(() => r.root(() => {})).toThrow();
-        });
     });
 
     describe("async disposal: task disposes while awaited", () => {

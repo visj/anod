@@ -661,14 +661,6 @@ describe("async", () => {
       expect(c1.get()).toBe(20);
     });
 
-    test("throws ASSERT_SUSPEND when async fn returns promise without suspend", () => {
-      expect(() => {
-        c.task(() => {
-          return Promise.resolve(42);
-        });
-      }).toThrow("Async node must call c.suspend() on all awaited promises");
-    });
-
     test("suspend propagates rejections when node is current", async () => {
       const c1 = c.task(async (c) => {
         return await c.suspend(Promise.reject(new Error("boom")));
@@ -1349,6 +1341,103 @@ describe("async", () => {
       await settle();
       expect(taskRuns).toBe(2);
       expect(taskA.get()).toBe(20);
+    });
+
+    test("task does not re-run until a spawn conditionally reads it", async () => {
+      const toggle = c.signal(false);
+      const source = c.signal(1);
+      let taskRuns = 0;
+
+      const task1 = c.task((cx) => {
+        taskRuns++;
+        return cx.suspend(Promise.resolve(cx.val(source) * 10));
+      }, 0);
+      await settle();
+
+      /** Task ran once on creation — that's expected. */
+      expect(taskRuns).toBe(1);
+      expect(task1.get()).toBe(10);
+
+      /** Invalidate the task's dep while no one reads it. */
+      source.set(2);
+      await settle();
+      expect(taskRuns).toBe(1);
+
+      /** Spawn only reads task1 when toggle is true. */
+      let observed = -1;
+      c.spawn(async (cx) => {
+        if (cx.val(toggle)) {
+          observed = await cx.suspend(task1);
+        }
+      });
+      await settle();
+      expect(observed).toBe(-1);
+
+      /** Flip the toggle — spawn now reads the task, pulling it. */
+      toggle.set(true);
+      await settle();
+
+      expect(taskRuns).toBe(2);
+      expect(observed).toBe(20);
+    });
+
+    test("task stops running when spawn stops reading it", async () => {
+      const toggle = c.signal(true);
+      const source = c.signal(1);
+      let taskRuns = 0;
+
+      const task1 = c.task((cx) => {
+        taskRuns++;
+        return cx.suspend(Promise.resolve(cx.val(source) * 10));
+      }, 0);
+
+      let observed = 0;
+      c.spawn(async (cx) => {
+        if (cx.val(toggle)) {
+          observed = await cx.suspend(task1);
+        }
+      });
+      await settle();
+      expect(taskRuns).toBe(1);
+      expect(observed).toBe(10);
+
+      /** Stop reading the task. */
+      toggle.set(false);
+      await settle();
+
+      /** Change the task's dep — it should NOT re-run (nobody reads it). */
+      let before = taskRuns;
+      source.set(2);
+      await settle();
+      expect(taskRuns).toBe(before);
+    });
+
+    test("unread task does not re-fire network-like work", async () => {
+      const dep = c.signal("a");
+      let fetches = 0;
+
+      const task1 = c.task((cx) => {
+        let val = cx.val(dep);
+        fetches++;
+        return cx.suspend(Promise.resolve(val));
+      }, "");
+      await settle();
+
+      /** Initial creation fires once. */
+      expect(fetches).toBe(1);
+      expect(task1.get()).toBe("a");
+
+      /** No one reads task1 — subsequent changes should not re-fire. */
+      dep.set("b");
+      dep.set("c");
+      await settle();
+      expect(fetches).toBe(1);
+
+      /** Pull it — only one fetch for current value. */
+      task1.get();
+      await settle();
+      expect(fetches).toBe(2);
+      expect(task1.get()).toBe("c");
     });
   });
 });

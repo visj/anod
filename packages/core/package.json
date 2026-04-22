@@ -8,7 +8,8 @@
     "make": "bun scripts/build.js",
     "make:bench": "bun scripts/bench.js",
     "closure": "bun scripts/closure.js",
-    "test": "node --expose-gc --test test/*.test.js"
+    "test": "node --expose-gc --test test/*.test.js",
+    "bench:web": "python3 -m http.server 8080 -d bench/browser"
   },
   "keywords": [],
   "author": "Vilhelm Sjölund",
