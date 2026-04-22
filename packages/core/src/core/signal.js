@@ -33,6 +33,7 @@ const FLAG_BOUND = 1 << 14;
 const FLAG_WAITER = 1 << 15;
 const FLAG_FIBER = 1 << 16;
 const FLAG_BLOCKED = 1 << 17;
+const FLAG_LOCK = 1 << 18;
 
 /* Shared Sender | Receiver flags — read on generic Sender-typed variables.
  * Code that reads them MUST also check FLAG_RECEIVER to avoid false positives
@@ -288,6 +289,8 @@ function Effect(opts, fn, dep1, owner, args) {
   this._dep1slot = 0;
   /** @type {Array<Sender | number> | null} */
   this._deps = null;
+  /** @type {number} */
+  this._version = 0;
   /** @type {number} */
   this._time = 0;
   /** @type {(function(): void) | Array<(function(): void)> | null} */
@@ -612,7 +615,7 @@ function refreshDep1(dep) {
  * @returns {!Signal<T>}
  */
 function signal(value, guard) {
-  return new Signal(value, guard);
+  return new Signal(value, guard || null);
 }
 
 /**
@@ -842,9 +845,23 @@ function root(fn) {
       taskNode._refresh();
     }
 
-    /** Fast-path: task is settled — subscribe and return value. */
+    /** Fast-path: task is settled — track as dep and return value.
+     *  Mirrors val(): in the sync scope use version stamping so
+     *  patchDeps handles lifecycle; in async scope use subscribe()
+     *  and let settleDeps deduplicate. */
     if (!(taskNode._flag & FLAG_LOADING)) {
-      subscribe(this, taskNode);
+      if (this._flag & FLAG_LOADING) {
+        subscribe(this, taskNode);
+      } else {
+        let version = VERSION;
+        let stamp = taskNode._version;
+        taskNode._version = version;
+        if (stamp !== version - 1) {
+          this._read(taskNode, stamp);
+        } else {
+          REUSED++;
+        }
+      }
       if (taskNode._flag & FLAG_ERROR) {
         if (onReject) {
           onReject(taskNode._value);
@@ -1025,6 +1042,26 @@ function root(fn) {
   }
 
   ComputeProto.suspend = EffectProto.suspend = suspend;
+
+  /** @this {!Compute | !Effect} */
+  ComputeProto.lock = EffectProto.lock = function () {
+    this._flag |= FLAG_LOCK;
+  };
+
+  /** @this {!Compute | !Effect} */
+  ComputeProto.unlock = EffectProto.unlock = function () {
+    this._flag &= ~FLAG_LOCK;
+  };
+
+  /**
+   * Lifts a sync node to async mode. Enables suspend(), lock(),
+   * controller(), and other async context methods. Once set, the
+   * node stays async for all subsequent runs.
+   * @this {!Compute | !Effect}
+   */
+  ComputeProto.async = EffectProto.async = function () {
+    this._flag |= FLAG_ASYNC;
+  };
 
   /**
    * Lazily allocates the Fiber for this node. If no fiber exists yet,
@@ -1338,6 +1375,9 @@ function root(fn) {
    */
   ComputeProto._update = function (time) {
     let flag = this._flag;
+    if (flag & FLAG_LOCK) {
+      return;
+    }
     this._time = time;
     this._flag =
       flag & ~(FLAG_STALE | FLAG_LOADING | FLAG_EQUAL | FLAG_NOTEQUAL);
@@ -1460,8 +1500,9 @@ function root(fn) {
 
     this._flag &= ~(FLAG_STALE | FLAG_PENDING | FLAG_SETUP);
 
-    /** Async: if fn returned a promise/iterator, dispatch and return. */
-    if (flag & FLAG_ASYNC) {
+    /** Async: if fn returned a promise/iterator, dispatch and return.
+     *  Re-read _flag in case c.async() was called during _fn. */
+    if (this._flag & FLAG_ASYNC) {
       let kind = asyncKind(value);
       if (kind !== ASYNC_SYNC) {
         this._flag |= FLAG_LOADING;
@@ -1511,8 +1552,10 @@ function root(fn) {
    */
   ComputeProto._receive = function () {
     let flag = this._flag;
-    if (!(flag & (FLAG_EAGER | FLAG_WAITER))) {
+    if (!(flag & (FLAG_EAGER | FLAG_WAITER | FLAG_LOCK))) {
       notify(this, FLAG_PENDING);
+    } else if (flag & FLAG_LOCK) {
+      return;
     } else {
       COMPUTES[COMPUTE_COUNT++] = this;
       if (flag & FLAG_EAGER) {
@@ -1551,6 +1594,9 @@ function root(fn) {
    */
   EffectProto._update = function (time) {
     let flag = this._flag;
+    if (flag & FLAG_LOCK) {
+      return;
+    }
 
     this._time = time;
     if (!(flag & FLAG_INIT)) {
@@ -1664,8 +1710,8 @@ function root(fn) {
       }
     }
 
-    if (flag & FLAG_ASYNC) {
-      /** Async result handling. */
+    /** Async: re-read _flag in case c.async() was called during _fn. */
+    if (this._flag & FLAG_ASYNC) {
       let kind = asyncKind(value);
       if (kind !== ASYNC_SYNC) {
         this._flag |= FLAG_LOADING;
@@ -1712,6 +1758,9 @@ function root(fn) {
    * @returns {void}
    */
   EffectProto._receive = function () {
+    if (this._flag & FLAG_LOCK) {
+      return;
+    }
     if (this._owned === null) {
       RECEIVERS[RECEIVER_COUNT++] = this;
     } else {
@@ -1905,23 +1954,20 @@ function clearReceiver(send, slot) {
     }
   }
   /**
-   * When the last subscriber is removed:
-   * - FLAG_EAGER: task reverts to pull-based (no eager re-run).
-   * - FLAG_WEAK: release cached value and mark STALE so next
-   *   .val() recomputes fresh.
+   * When the last subscriber is removed from a weak node that isn't
+   * loading, release cached value and mark STALE so the next .val()
+   * recomputes fresh. Loading nodes keep their value — they still
+   * have active channel waiters that will re-subscribe on settle.
    */
   let flag = send._flag;
   if (
     flag & FLAG_RECEIVER &&
-    flag & (FLAG_WEAK | FLAG_EAGER) &&
+    (flag & (FLAG_WEAK | FLAG_LOADING)) === FLAG_WEAK &&
     send._sub1 === null &&
     (send._subs === null || send._subs.length === 0)
   ) {
-    send._flag &= ~FLAG_EAGER;
-    if (send._flag & FLAG_WEAK) {
-      send._flag |= FLAG_STALE;
-      /** @type {Compute} */ (send)._value = null;
-    }
+    send._flag |= FLAG_STALE;
+    /** @type {Compute} */ (send)._value = null;
   }
 }
 
@@ -2587,9 +2633,9 @@ function checkRun(node, time) {
 
 /**
  * @template T
- * @param {Compute<T>} node 
- * @param {T} value 
- * @param {number} time 
+ * @param {Compute<T>} node
+ * @param {T} value
+ * @param {number} time
  * @returns {boolean}
  */
 function waitFor(node, value, time) {
@@ -2722,6 +2768,86 @@ function resolveIterator(ref, iterable, time) {
 }
 
 /**
+ * Three-pass settle notification. Resolves waiters without triggering
+ * redundant stale notifications on nodes that appear in both the sync
+ * subscriber list and the async waiter list.
+ *
+ * Pass 1: Stamp all sync subs with `version - 1` ("belongs to us").
+ * Pass 2: Walk waiters — resolve callback, skip subscribe if already
+ *         a sync sub (version - 1), stamp with `version` ("notified").
+ * Pass 3: Inline notify — OR FLAG_STALE on all subs, but only call
+ *         _receive() on subs not stamped `version` (not a waiter).
+ *
+ * @param {!Sender} node
+ * @param {*} value
+ * @param {boolean} isError
+ * @param {!Array} waiters
+ * @param {number} waiterCount
+ */
+function settleNotify(node, value, isError, waiters, waiterCount) {
+  let version = (SEED += 2);
+
+  /** Pass 1: stamp all sync subs with version - 1. */
+  let sub = node._sub1;
+  if (sub !== null) {
+    sub._version = version - 1;
+  }
+  let subs = node._subs;
+  if (subs !== null) {
+    let count = subs.length;
+    for (let i = 0; i < count; i += 2) {
+      /** @type {Receiver} */ (subs[i])._version = version - 1;
+    }
+  }
+
+  /** Pass 2: resolve waiters, skip subscribe if already a sync sub. */
+  for (let i = 0; i < waiterCount; i += 4) {
+    let awaiter = waiters[i];
+    let resSlot = waiters[i + 1];
+    if (isError) {
+      waiters[i + 3](value);
+    } else {
+      waiters[i + 2](value);
+    }
+    if (!(awaiter._flag & FLAG_BLOCKED)) {
+      if (awaiter._version !== version - 1) {
+        subscribe(awaiter, node);
+      }
+    }
+    awaiter._version = version;
+    /** Clear the awaiter's back-reference to this responder. */
+    let awaiterCh = awaiter._args._fiber._channel;
+    if (resSlot === -1) {
+      awaiterCh._res1 = null;
+    } else {
+      awaiterCh._responds[resSlot] = null;
+    }
+  }
+
+  /** Pass 3: inline notify — skip subs that were resolved as waiters. */
+  if (sub !== null && sub._version !== version) {
+    let flags = sub._flag;
+    sub._flag |= FLAG_STALE;
+    if (!(flags & (FLAG_PENDING | FLAG_STALE))) {
+      sub._receive();
+    }
+  }
+  if (subs !== null) {
+    let count = subs.length;
+    for (let i = 0; i < count; i += 2) {
+      sub = /** @type {Receiver} */ (subs[i]);
+      if (sub._version !== version) {
+        let flags = sub._flag;
+        sub._flag |= FLAG_STALE;
+        if (!(flags & (FLAG_PENDING | FLAG_STALE))) {
+          sub._receive();
+        }
+      }
+    }
+  }
+}
+
+/**
  * @template T
  * @param {Compute<T>} node
  * @param {T | *} value
@@ -2729,7 +2855,11 @@ function resolveIterator(ref, iterable, time) {
  */
 function settle(node, value) {
   let flag = node._flag;
-  node._flag &= ~(FLAG_LOADING | FLAG_INIT);
+  node._flag &= ~(FLAG_LOADING | FLAG_INIT | FLAG_LOCK);
+
+  /** If the node was locked and marked stale while locked, it needs
+   *  to re-run regardless of whether the value changed. */
+  let wasLocked = flag & FLAG_LOCK;
 
   if (value !== node._value || flag & (FLAG_INIT | FLAG_ERROR)) {
     node._value = value;
@@ -2745,20 +2875,39 @@ function settle(node, value) {
       }
     }
 
-    /** Resolve any awaiters waiting on this task. */
+    let waiters = null;
+    let waiterCount = 0;
     if (node._flag & FLAG_FIBER) {
       let ch = node._args._fiber._channel;
       if (ch !== null && ch._waiters !== null) {
-        resolveWaiters(node, ch, value, !!(node._flag & FLAG_ERROR), false);
+        waiters = ch._waiters;
+        waiterCount = waiters.length;
+        settleNotify(node, value, !!(node._flag & FLAG_ERROR), waiters, waiterCount);
+        ch._waiters = null;
+        node._flag &= ~FLAG_WAITER;
       }
     }
+    if (waiters === null) {
+      notify(node, FLAG_STALE);
+    }
 
-    notify(node, FLAG_STALE);
     flush();
 
-    if (stale) {
+    if (stale || (wasLocked && node._flag & FLAG_STALE)) {
       node._update(TIME);
     }
+  } else if (wasLocked && node._flag & FLAG_STALE) {
+    node._update(TIME);
+  }
+
+  /** Weak node with no subscribers after settle — release value. */
+  if (
+    node._flag & FLAG_WEAK &&
+    node._sub1 === null &&
+    (node._subs === null || node._subs.length === 0)
+  ) {
+    node._flag |= FLAG_STALE;
+    node._value = null;
   }
 }
 
@@ -3052,22 +3201,23 @@ function resolveEffectPromise(ref, promise) {
     () => {
       let node = ref.deref();
       if (node !== void 0 && !(node._flag & FLAG_DISPOSED)) {
-        node._flag &= ~FLAG_LOADING;
+        let wasLocked = node._flag & FLAG_LOCK;
+        node._flag &= ~(FLAG_LOADING | FLAG_LOCK);
+        let stale = false;
         if (node._flag & FLAG_FIBER && node._args._fiber._defers !== null) {
-          let stale = settleDeps(node);
-          if (stale) {
-            notify(node, FLAG_STALE);
-            flush();
-            node._flag |= FLAG_STALE;
-            node._update(TIME);
-          }
+          stale = settleDeps(node);
+        }
+        if (stale || (wasLocked && node._flag & FLAG_STALE)) {
+          node._flag |= FLAG_STALE;
+          node._receive();
+          flush();
         }
       }
     },
     (err) => {
       let node = ref.deref();
       if (node !== void 0 && !(node._flag & FLAG_DISPOSED)) {
-        node._flag &= ~FLAG_LOADING;
+        node._flag &= ~(FLAG_LOADING | FLAG_LOCK);
         let result = tryRecover(node, err);
         if (result !== RECOVER_SELF) {
           node._dispose();
@@ -3098,15 +3248,16 @@ function resolveEffectIterator(ref, iterable) {
       return;
     }
     if (result.done) {
-      node._flag &= ~FLAG_LOADING;
+      let wasLocked = node._flag & FLAG_LOCK;
+      node._flag &= ~(FLAG_LOADING | FLAG_LOCK);
+      let stale = false;
       if (node._flag & FLAG_FIBER && node._args._fiber._defers !== null) {
-        let stale = settleDeps(node);
-        if (stale) {
-          notify(node, FLAG_STALE);
-          flush();
-          node._flag |= FLAG_STALE;
-          node._update(TIME);
-        }
+        stale = settleDeps(node);
+      }
+      if (stale || (wasLocked && node._flag & FLAG_STALE)) {
+        node._flag |= FLAG_STALE;
+        node._receive();
+        flush();
       }
       return;
     }
@@ -3116,7 +3267,7 @@ function resolveEffectIterator(ref, iterable) {
   let onError = (err) => {
     let node = ref.deref();
     if (node !== void 0 && !(node._flag & FLAG_DISPOSED)) {
-      node._flag &= ~FLAG_LOADING;
+      node._flag &= ~(FLAG_LOADING | FLAG_LOCK);
       let result = tryRecover(node, err);
       if (result !== RECOVER_SELF) {
         node._dispose();
@@ -3490,6 +3641,7 @@ export {
   FLAG_FIBER,
   FLAG_EAGER,
   FLAG_BLOCKED,
+  FLAG_LOCK,
   OPT_DEFER,
   OPT_STABLE,
   OPT_SETUP,

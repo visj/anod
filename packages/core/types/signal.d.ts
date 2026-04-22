@@ -17,7 +17,8 @@ export const enum Flag {
   ASYNC = 65536,
   BOUND = 131072,
   FIBER = 524288,
-  EAGER = 1048576
+  EAGER = 1048576,
+  LOCK = 262144
 }
 
 export const enum Opt {
@@ -49,6 +50,10 @@ interface IBaseContext {
   stable(): void;
   cleanup(fn: () => void): void;
   peek<R>(signal: Sender<R>): R;
+}
+
+/** Async-only context methods, available in task/spawn callbacks. */
+interface IAsyncContext {
   suspend<T>(promise: Promise<T>): Promise<T>;
   suspend<T>(task: ICompute<T>): T | Promise<T>;
   suspend<T>(
@@ -66,20 +71,26 @@ interface IBaseContext {
   ): void;
   controller(): AbortController;
   pending(tasks: ICompute<any> | ICompute<any>[]): boolean;
+  lock(): void;
+  unlock(): void;
 }
 
 /** Bound compute callback context. */
-export interface IComputeContext extends IBaseContext {}
+export interface IComputeContext extends IBaseContext {
+  async(): asserts this is IAsyncComputeContext;
+}
 
 /** Unbound compute callback context — adds dependency tracking. */
 export interface IComputeReader extends IBaseContext {
   val<R>(signal: Sender<R>): R;
   defer<R>(signal: Sender<R>): R;
+  async(): asserts this is IAsyncComputeReader;
 }
 
 /** Bound effect/spawn callback context — adds recover. */
 export interface IEffectContext extends IBaseContext {
   recover(fn: (error: any) => boolean): void;
+  async(): asserts this is IAsyncEffectContext;
 }
 
 /** Unbound effect/spawn callback context — adds dep tracking + recover. */
@@ -87,7 +98,20 @@ export interface IEffectReader extends IBaseContext {
   val<R>(signal: Sender<R>): R;
   defer<R>(signal: Sender<R>): R;
   recover(fn: (error: any) => boolean): void;
+  async(): asserts this is IAsyncEffectReader;
 }
+
+/** Async bound compute context (task). */
+export interface IAsyncComputeContext extends IComputeContext, IAsyncContext {}
+
+/** Async unbound compute context (task). */
+export interface IAsyncComputeReader extends IComputeReader, IAsyncContext {}
+
+/** Async bound effect context (spawn). */
+export interface IAsyncEffectContext extends IEffectContext, IAsyncContext {}
+
+/** Async unbound effect context (spawn). */
+export interface IAsyncEffectReader extends IEffectReader, IAsyncContext {}
 
 /** Root callback context — factories + ownership. */
 export interface IRootContext extends IFactory {
@@ -171,12 +195,12 @@ export interface IFactory {
 
   // Unbound task
   task<U>(
-    fn: (c: IComputeReader, prev: Resolve<U>) => Promise<U>,
+    fn: (c: IAsyncComputeReader, prev: Resolve<U>) => Promise<U>,
     seed?: Resolve<U>,
     opts?: number
   ): ICompute<Resolve<U>>;
   task<U, W>(
-    fn: (c: IComputeReader, prev: Resolve<U>, args: W) => Promise<U>,
+    fn: (c: IAsyncComputeReader, prev: Resolve<U>, args: W) => Promise<U>,
     seed?: Resolve<U>,
     opts?: number,
     args?: W
@@ -184,7 +208,7 @@ export interface IFactory {
   // Bound task
   task<T, U>(
     dep: Sender<T>,
-    fn: (val: T, c: IComputeContext, prev: Resolve<U>) => Promise<U>,
+    fn: (val: T, c: IAsyncComputeContext, prev: Resolve<U>) => Promise<U>,
     seed?: Resolve<U>,
     opts?: number
   ): ICompute<Resolve<U>>;
@@ -204,16 +228,16 @@ export interface IFactory {
   ): IEffect;
 
   // Unbound spawn
-  spawn(fn: (c: IEffectReader) => Promise<void>, opts?: number): IEffect;
+  spawn(fn: (c: IAsyncEffectReader) => Promise<void>, opts?: number): IEffect;
   spawn<W>(
-    fn: (c: IEffectReader, args: W) => Promise<void>,
+    fn: (c: IAsyncEffectReader, args: W) => Promise<void>,
     opts?: number,
     args?: W
   ): IEffect;
   // Bound spawn
   spawn<T>(
     dep: Sender<T>,
-    fn: (val: T, c: IEffectContext) => Promise<void>,
+    fn: (val: T, c: IAsyncEffectContext) => Promise<void>,
     opts?: number
   ): IEffect;
 
