@@ -569,6 +569,35 @@ function normalize(err) {
   return { message: "Compute threw error: " + String(err) };
 }
 
+/**
+ * Absorbs an error or disposed state into a compute node.
+ * Sets FLAG_ERROR, stores the normalized error, and stamps _ctime.
+ * @param {!Compute} node
+ * @param {*} value
+ * @param {number} time
+ */
+function absorb(node, value, time) {
+  node._value = normalize(value);
+  node._flag =
+    (node._flag & ~(FLAG_STALE | FLAG_PENDING | FLAG_INIT)) | FLAG_ERROR;
+  node._ctime = time;
+}
+
+/**
+ * Refreshes a bound dep1 if stale/pending and returns its flag.
+ * Returns FLAG_DISPOSED when dep1 is null (already disposed).
+ * @param {Sender | null} dep
+ * @returns {number}
+ */
+function refreshDep1(dep) {
+  let dflag = dep !== null ? dep._flag : FLAG_DISPOSED;
+  if (dflag & (FLAG_STALE | FLAG_PENDING)) {
+    dep._refresh();
+    return dep._flag;
+  }
+  return dflag;
+}
+
 // ─── Shared factories (used by both `c` and prototypes) ───────────────────
 
 /**
@@ -1337,10 +1366,7 @@ function root(fn) {
             dflag = dep._flag;
           }
           if (dflag & (FLAG_ERROR | FLAG_DISPOSED)) {
-            this._value = (dflag & FLAG_DISPOSED) ? { message: ASSERT_DISPOSED } : normalize(dep._value);
-            this._flag =
-              (this._flag & ~(FLAG_STALE | FLAG_PENDING | FLAG_INIT)) | FLAG_ERROR;
-            this._ctime = time;
+            absorb(this, (dflag & FLAG_DISPOSED) ? ASSERT_DISPOSED : dep._value, time);
             return;
           }
           value = this._fn(dep._value, this, this._value, args);
@@ -1348,10 +1374,7 @@ function root(fn) {
           value = this._fn(this, this._value, args);
         }
       } catch (err) {
-        this._value = normalize(err);
-        this._flag =
-          (this._flag & ~(FLAG_STALE | FLAG_PENDING | FLAG_INIT)) | FLAG_ERROR;
-        this._ctime = time;
+        absorb(this, err, time);
         return;
       }
     } else {
@@ -1376,15 +1399,8 @@ function root(fn) {
 
       call: try {
         if (flag & FLAG_BOUND) {
-          /** Bound + setup/dynamic: refresh dep1, stamp its version
-           *  so val() treats it as already-tracked, then pass its
-           *  value as the first argument. */
           let dep = this._dep1;
-          let dflag = dep !== null ? dep._flag : FLAG_DISPOSED;
-          if (dflag & (FLAG_STALE | FLAG_PENDING)) {
-            dep._refresh();
-            dflag = dep._flag;
-          }
+          let dflag = refreshDep1(dep);
           if (dflag & (FLAG_ERROR | FLAG_DISPOSED)) {
             value = (dflag & FLAG_DISPOSED) ? { message: ASSERT_DISPOSED } : normalize(dep._value);
             this._flag |= FLAG_ERROR;
