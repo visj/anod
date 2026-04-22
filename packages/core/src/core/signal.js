@@ -1363,6 +1363,13 @@ function root(fn) {
           if (dep._flag & (FLAG_STALE | FLAG_PENDING)) {
             dep._refresh();
           }
+          if (dep._flag & FLAG_ERROR) {
+            this._value = normalize(dep._value);
+            this._flag =
+              (this._flag & ~(FLAG_STALE | FLAG_PENDING | FLAG_INIT)) | FLAG_ERROR;
+            this._ctime = time;
+            return;
+          }
           value = this._fn(dep._value, this, this._value, args);
         } else {
           value = this._fn(this, this._value, args);
@@ -1394,7 +1401,7 @@ function root(fn) {
         depsLen = this._deps !== null ? this._deps.length : 0;
       }
 
-      try {
+      call: try {
         if (flag & FLAG_BOUND) {
           /** Bound + setup/dynamic: refresh dep1, stamp its version
            *  so val() treats it as already-tracked, then pass its
@@ -1402,6 +1409,11 @@ function root(fn) {
           let dep = this._dep1;
           if (dep._flag & (FLAG_STALE | FLAG_PENDING)) {
             dep._refresh();
+          }
+          if (dep._flag & FLAG_ERROR) {
+            value = normalize(dep._value);
+            this._flag |= FLAG_ERROR;
+            break call;
           }
           dep._version = version;
           value = this._fn(dep._value, this, this._value, args);
