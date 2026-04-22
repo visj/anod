@@ -3,5 +3,8 @@ export {
     OPT_STABLE,
     OPT_SETUP,
     OPT_WEAK,
-    c,
+    signal,
+    root,
+    batch,
+    flush,
 } from "./core/fyren.js";

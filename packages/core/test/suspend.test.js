@@ -1,5 +1,7 @@
 import { describe, test, expect, collectAsync } from "#test-runner";
-import { c } from "#fyren";
+import { signal, root } from "#fyren";
+
+let c; root((_c) => { c = _c; });
 
 const tick = () => Promise.resolve();
 const settle = () => tick().then(tick).then(tick);
@@ -70,7 +72,7 @@ describe("pull-flow: c.pending() with tasks", () => {
 	});
 
 	test("task re-runs when dep changes, effect re-waits", async () => {
-		const s1 = c.signal(1);
+		const s1 = signal(1);
 		let taskRuns = 0;
 		const taskA = c.task((cx) => {
 			taskRuns++;
@@ -158,7 +160,7 @@ describe("pull-flow: c.pending() with tasks", () => {
 
 	test("loading suppresses downstream: effect not notified while task restarts", async () => {
 		let resolveA;
-		const s1 = c.signal(1);
+		const s1 = signal(1);
 		const taskA = c.task((cx) => {
 			cx.val(s1);
 			return cx.suspend(new Promise((r) => { resolveA = r; }));
@@ -190,10 +192,10 @@ describe("pull-flow: c.pending() with tasks", () => {
 
 describe("suspend(promise): memory safety", () => {
 	test("discarded promise does not retain spawn after re-run", async () => {
-		const s1 = c.signal(1);
+		const s1 = signal(1);
 		const promises = [];
 
-		const r = c.root((r) => {
+		const r = root((r) => {
 			r.spawn(async (cx) => {
 				const v = cx.val(s1);
 				const p = new Promise((resolve) => {
@@ -229,10 +231,10 @@ describe("suspend(promise): memory safety", () => {
 	});
 
 	test("rapid signal updates: spawn doesn't crash or hang", async () => {
-		const s1 = c.signal(0);
+		const s1 = signal(0);
 		let runs = 0;
 
-		const r = c.root((r) => {
+		const r = root((r) => {
 			r.spawn(async (cx) => {
 				runs++;
 				cx.val(s1);
@@ -254,7 +256,7 @@ describe("suspend(promise): memory safety", () => {
 
 	test("task: stale activation promise is discarded", async () => {
 		let resolvers = [];
-		const s1 = c.signal(1);
+		const s1 = signal(1);
 
 		const taskA = c.task((cx) => {
 			const v = cx.val(s1);
@@ -295,7 +297,7 @@ describe("suspend(promise): memory safety", () => {
 		let resolve;
 		let cleanupRan = false;
 
-		const r = c.root((r) => {
+		const r = root((r) => {
 			r.spawn(async (cx) => {
 				cx.cleanup(() => { cleanupRan = true; });
 				await cx.suspend(new Promise((r2) => { resolve = r2; }));
@@ -315,11 +317,11 @@ describe("suspend(promise): memory safety", () => {
 	});
 
 	test("spawn re-run aborts controller and clears old promise", async () => {
-		const s1 = c.signal(1);
+		const s1 = signal(1);
 		let aborted = false;
 		let controllers = [];
 
-		const r = c.root((r) => {
+		const r = root((r) => {
 			r.spawn(async (cx) => {
 				const ctrl = cx.controller();
 				controllers.push(ctrl);
@@ -351,7 +353,7 @@ describe("suspend(task): two-way binding lifecycle", () => {
 
 		const refs = capture(() => {
 			const nodes = [];
-			const r = c.root((r) => {
+			const r = root((r) => {
 				r.spawn(async (cx) => {
 					await cx.suspend(taskA);
 				});
@@ -376,7 +378,7 @@ describe("suspend(task): two-way binding lifecycle", () => {
 		const refs = capture(() => {
 			const nodes = [];
 			let taskA;
-			const r = c.root((r) => {
+			const r = root((r) => {
 				taskA = r.task((cx) => cx.suspend(new Promise(() => {}))); // never resolves
 				r.spawn(async (cx) => {
 					await cx.suspend(taskA);
@@ -399,7 +401,7 @@ describe("suspend(task): two-way binding lifecycle", () => {
 
 		const refs = capture(() => {
 			const nodes = [];
-			const r = c.root((r) => {
+			const r = root((r) => {
 				for (let i = 0; i < 5; i++) {
 					r.spawn(async (cx) => {
 						await cx.suspend(taskA);
@@ -421,13 +423,13 @@ describe("suspend(task): two-way binding lifecycle", () => {
 	});
 
 	test("task settles, awaiter subscribes, then dep changes — full cycle", async () => {
-		const s1 = c.signal(1);
+		const s1 = signal(1);
 		const taskA = c.task((cx) => cx.suspend(Promise.resolve(cx.val(s1) * 10)));
 		await settle();
 
 		let observed = null;
 		let runs = 0;
-		const r = c.root((r) => {
+		const r = root((r) => {
 			r.spawn(async (cx) => {
 				runs++;
 				observed = await cx.suspend(taskA);
@@ -449,7 +451,7 @@ describe("suspend(task): two-way binding lifecycle", () => {
 	test("chained tasks: A awaits B awaits C — all freed on dispose", async () => {
 		const refs = capture(() => {
 			const nodes = [];
-			const r = c.root((r) => {
+			const r = root((r) => {
 				const taskC = r.task((cx) => cx.suspend(Promise.resolve(1)));
 				const taskB = r.task(async (cx) => {
 					const v = await cx.suspend(taskC);
@@ -475,10 +477,10 @@ describe("suspend(task): two-way binding lifecycle", () => {
 		let resolve;
 		const taskA = c.task((cx) => cx.suspend(new Promise((r) => { resolve = r; })));
 
-		const s1 = c.signal(1);
+		const s1 = signal(1);
 		let runs = 0;
 
-		const r = c.root((r) => {
+		const r = root((r) => {
 			r.spawn(async (cx) => {
 				runs++;
 				cx.val(s1);
@@ -506,14 +508,14 @@ describe("suspend(task): two-way binding lifecycle", () => {
 	});
 
 	test("task value updates propagate to awaiter via dep subscription", async () => {
-		const s1 = c.signal(1);
+		const s1 = signal(1);
 		const taskA = c.task((cx) => cx.suspend(Promise.resolve(cx.val(s1) * 100)));
 		await settle();
 		expect(taskA.get()).toBe(100);
 
 		let observed = null;
 		let runs = 0;
-		const r = c.root((r) => {
+		const r = root((r) => {
 			r.spawn(async (cx) => {
 				runs++;
 				observed = await cx.suspend(taskA);
@@ -541,7 +543,7 @@ describe("ownership: async nodes and disposal", () => {
 		let taskResolved = false;
 		let spawnResolved = false;
 
-		const r = c.root((r) => {
+		const r = root((r) => {
 			r.task(async (cx) => {
 				const v = await cx.suspend(new Promise((resolve) => setTimeout(resolve, 100, 1)));
 				taskResolved = true;
@@ -564,10 +566,10 @@ describe("ownership: async nodes and disposal", () => {
 	});
 
 	test("effect disposal clears owned async nodes", async () => {
-		const s1 = c.signal(1);
+		const s1 = signal(1);
 		let innerRuns = 0;
 
-		const r = c.root((r) => {
+		const r = root((r) => {
 			r.effect((eff) => {
 				eff.spawn(async (cx) => {
 					innerRuns++;
@@ -588,11 +590,11 @@ describe("ownership: async nodes and disposal", () => {
 	});
 
 	test("nested roots with async: inner dispose doesn't affect outer", async () => {
-		const s1 = c.signal(1);
+		const s1 = signal(1);
 		let outerRuns = 0;
 		let innerRuns = 0;
 
-		const outer = c.root((r) => {
+		const outer = root((r) => {
 			r.spawn(async (cx) => {
 				outerRuns++;
 				cx.val(s1);
@@ -626,7 +628,7 @@ describe("ownership: async nodes and disposal", () => {
 		const taskA = c.task((cx) => cx.suspend(new Promise((r) => { resolve = r; })));
 
 		let observed = null;
-		const r = c.root((r) => {
+		const r = root((r) => {
 			r.spawn(async (cx) => {
 				observed = await cx.suspend(taskA);
 			});
@@ -643,7 +645,7 @@ describe("ownership: async nodes and disposal", () => {
 	test("GC: spawn with long promise chain — all freed after dispose", async () => {
 		const refs = capture(() => {
 			const nodes = [];
-			const r = c.root((r) => {
+			const r = root((r) => {
 				r.spawn(async (cx) => {
 					await cx.suspend(Promise.resolve(1));
 					await cx.suspend(Promise.resolve(2));
@@ -667,8 +669,8 @@ describe("ownership: async nodes and disposal", () => {
 	test("GC: task with dep + awaiter + controller — all freed", async () => {
 		const refs = capture(() => {
 			const nodes = [];
-			const r = c.root((r) => {
-				const s1 = c.signal(1);
+			const r = root((r) => {
+				const s1 = signal(1);
 				const taskA = r.task(async (cx) => {
 					cx.controller();
 					return cx.suspend(Promise.resolve(cx.val(s1)));
@@ -692,7 +694,7 @@ describe("ownership: async nodes and disposal", () => {
 		const refs = capture(() => {
 			const nodes = [];
 			let resolve;
-			const r = c.root((r) => {
+			const r = root((r) => {
 				const taskA = r.task((cx) => cx.suspend(new Promise((r2) => { resolve = r2; })));
 				for (let i = 0; i < 5; i++) {
 					r.spawn(async (cx) => {
@@ -724,7 +726,7 @@ describe("suspend(tasks[]): concurrent task await", () => {
 		await settle();
 
 		let result = null;
-		const r = c.root((r) => {
+		const r = root((r) => {
 			r.spawn(async (cx) => {
 				result = await cx.suspend([taskA, taskB, taskC]);
 			});
@@ -741,7 +743,7 @@ describe("suspend(tasks[]): concurrent task await", () => {
 		const taskC = c.task((cx) => cx.suspend(new Promise((r) => { resolveC = r; })));
 
 		let result = null;
-		const r = c.root((r) => {
+		const r = root((r) => {
 			r.spawn(async (cx) => {
 				result = await cx.suspend([taskA, taskB, taskC]);
 			});
@@ -770,7 +772,7 @@ describe("suspend(tasks[]): concurrent task await", () => {
 		await settle();
 
 		let result = null;
-		const r = c.root((r) => {
+		const r = root((r) => {
 			r.spawn(async (cx) => {
 				result = await cx.suspend([taskA, taskB, taskC]);
 			});
@@ -790,7 +792,7 @@ describe("suspend(tasks[]): concurrent task await", () => {
 		await settle();
 
 		let caught = null;
-		const r = c.root((r) => {
+		const r = root((r) => {
 			r.spawn(async (cx) => {
 				cx.recover((err) => { caught = err; return true; });
 				await cx.suspend([taskA, taskB, taskC]);
@@ -808,7 +810,7 @@ describe("suspend(tasks[]): concurrent task await", () => {
 		const taskC = c.task((cx) => cx.suspend(new Promise((r) => { resolveC = r; })));
 
 		let result = null;
-		const r = c.root((r) => {
+		const r = root((r) => {
 			r.spawn(async (cx) => {
 				result = await cx.suspend([taskA, taskB, taskC]);
 			});
@@ -825,14 +827,14 @@ describe("suspend(tasks[]): concurrent task await", () => {
 	});
 
 	test("subscribes to all tasks after array completes", async () => {
-		const s1 = c.signal(1);
+		const s1 = signal(1);
 		const taskA = c.task((cx) => cx.suspend(Promise.resolve(cx.val(s1) * 10)));
 		const taskB = c.task((cx) => cx.suspend(Promise.resolve(cx.val(s1) * 100)));
 		await settle();
 
 		let result = null;
 		let runs = 0;
-		const r = c.root((r) => {
+		const r = root((r) => {
 			r.spawn(async (cx) => {
 				runs++;
 				result = await cx.suspend([taskA, taskB]);
@@ -853,7 +855,7 @@ describe("suspend(tasks[]): concurrent task await", () => {
 
 	test("does not subscribe during walk (FLAG_BLOCKED)", async () => {
 		let resolveA, resolveB;
-		const s1 = c.signal(1);
+		const s1 = signal(1);
 		const taskA = c.task((cx) => {
 			cx.val(s1);
 			return cx.suspend(new Promise((r) => { resolveA = r; }));
@@ -862,7 +864,7 @@ describe("suspend(tasks[]): concurrent task await", () => {
 
 		let result = null;
 		let runs = 0;
-		const r = c.root((r) => {
+		const r = root((r) => {
 			r.spawn(async (cx) => {
 				runs++;
 				result = await cx.suspend([taskA, taskB]);
@@ -889,7 +891,7 @@ describe("suspend(tasks[]): concurrent task await", () => {
 		const taskB = c.task((cx) => cx.suspend(new Promise(() => {})));
 
 		let cleanupRan = false;
-		const r = c.root((r) => {
+		const r = root((r) => {
 			r.spawn(async (cx) => {
 				cx.cleanup(() => { cleanupRan = true; });
 				await cx.suspend([taskA, taskB]);
@@ -904,7 +906,7 @@ describe("suspend(tasks[]): concurrent task await", () => {
 
 	test("empty array: returns empty array immediately", async () => {
 		let result = null;
-		const r = c.root((r) => {
+		const r = root((r) => {
 			r.spawn(async (cx) => {
 				result = await cx.suspend([]);
 			});
@@ -921,7 +923,7 @@ describe("suspend(tasks[]): concurrent task await", () => {
 
 		let result = null;
 		let errorVal = null;
-		const r = c.root((r) => {
+		const r = root((r) => {
 			r.spawn(async (cx) => {
 				cx.suspend(
 					[taskA, taskB],
@@ -943,7 +945,7 @@ describe("suspend(tasks[]): concurrent task await", () => {
 		const taskB = c.task((cx) => cx.suspend(new Promise((r) => { resolveB = r; })));
 
 		let result = null;
-		const r = c.root((r) => {
+		const r = root((r) => {
 			r.spawn(async (cx) => {
 				cx.suspend(
 					[taskA, taskB],
@@ -971,7 +973,7 @@ describe("suspend(tasks[]): concurrent task await", () => {
 
 		let errorVal = null;
 		let result = null;
-		const r = c.root((r) => {
+		const r = root((r) => {
 			r.spawn(async (cx) => {
 				cx.recover(() => true);
 				cx.suspend(
@@ -993,7 +995,7 @@ describe("suspend(tasks[]): concurrent task await", () => {
 		await settle();
 
 		let result = null;
-		const r = c.root((r) => {
+		const r = root((r) => {
 			r.spawn(async (cx) => {
 				cx.suspend(taskA,
 					(val) => { result = val; },
@@ -1012,7 +1014,7 @@ describe("suspend(tasks[]): concurrent task await", () => {
 		const taskA = c.task((cx) => cx.suspend(new Promise((r) => { resolve = r; })));
 
 		let result = null;
-		const r = c.root((r) => {
+		const r = root((r) => {
 			r.spawn(async (cx) => {
 				cx.suspend(taskA,
 					(val) => { result = val; },

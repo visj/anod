@@ -1,20 +1,22 @@
 import { describe, test, expect } from "#test-runner";
-import { c } from "#fyren";
+import { signal, root } from "#fyren";
+
+let c; root((_c) => { c = _c; });
 
 describe("signal", () => {
     test("takes and returns an initial value", () => {
-        const s1 = c.signal(1);
+        const s1 = signal(1);
         expect(s1.get()).toBe(1); // "Initial value should match"
     });
 
     test("can be set by passing in a new value", () => {
-        const s1 = c.signal(1);
+        const s1 = signal(1);
         s1.set(2);
         expect(s1.get()).toBe(2); // "Value should update"
     });
 
     test("does not propagate if set to equal value", () => {
-        const s1 = c.signal(1);
+        const s1 = signal(1);
         let count = 0;
 
         const c1 = c.compute(c => {
@@ -28,7 +30,7 @@ describe("signal", () => {
     });
 
     test("propagates if set to unequal value", () => {
-        const s1 = c.signal(1);
+        const s1 = signal(1);
         let count = 0;
 
         const c1 = c.compute(c => {
@@ -43,14 +45,14 @@ describe("signal", () => {
 
     describe("val", () => {
         test("returns the value of a signal", () => {
-            const s1 = c.signal(1);
+            const s1 = signal(1);
             expect(s1.get()).toBe(1); // "val should return current value"
         });
 
         test("tracks all val() calls as dependencies", () => {
-            const s1 = c.signal(1);
-            const s2 = c.signal(2);
-            const s3 = c.signal(3);
+            const s1 = signal(1);
+            const s2 = signal(2);
+            const s3 = signal(3);
             let count = 0;
 
             const c1 = c.compute(c => {

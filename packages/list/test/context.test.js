@@ -1,11 +1,12 @@
 import { describe, test, expect } from "#test-runner";
-import { c } from "@fyren/core";
-import "#list";
+import { signal } from "@fyren/core";
+import { compute } from "@fyren/core/internal";
+import { list } from "#list";
 
 describe("list context access", () => {
   describe("map", () => {
     test("callback receives context as 4th argument", () => {
-      const l = c.list([1, 2, 3]);
+      const l = list([1, 2, 3]);
       let ctx = null;
       const m = l.map((val, idx, arr, c) => {
         ctx = c;
@@ -17,7 +18,7 @@ describe("list context access", () => {
     });
 
     test("c.cleanup() inside map runs on re-evaluation", () => {
-      const l = c.list([1, 2]);
+      const l = list([1, 2]);
       let cleaned = 0;
       const m = l.map((val, idx, arr, c) => {
         c.cleanup(() => { cleaned++; });
@@ -33,13 +34,13 @@ describe("list context access", () => {
     });
 
     test("c.equal() suppresses downstream when values match", () => {
-      const l = c.list([1, 2, 3]);
+      const l = list([1, 2, 3]);
       const m = l.map((val, idx, arr, c) => {
         c.equal(true);
         return val > 0 ? "positive" : "negative";
       });
       let downstream = 0;
-      const d = c.compute(m, () => { downstream++; return 0; });
+      const d = compute(m, () => { downstream++; return 0; });
       d.get();
       expect(downstream).toBe(1);
 
@@ -53,8 +54,8 @@ describe("list context access", () => {
     });
 
     test("c.peek() reads without subscribing", () => {
-      const l = c.list([1, 2]);
-      const other = c.signal(100);
+      const l = list([1, 2]);
+      const other = signal(100);
       let runs = 0;
       const m = l.map((val, idx, arr, c) => {
         runs++;
@@ -77,7 +78,7 @@ describe("list context access", () => {
 
   describe("filter", () => {
     test("callback receives context", () => {
-      const l = c.list([1, 2, 3, 4]);
+      const l = list([1, 2, 3, 4]);
       let ctx = null;
       const f = l.filter((val, idx, arr, c) => {
         ctx = c;
@@ -88,7 +89,7 @@ describe("list context access", () => {
     });
 
     test("c.cleanup() in filter runs on re-evaluation", () => {
-      const l = c.list([1, 2, 3]);
+      const l = list([1, 2, 3]);
       let cleaned = 0;
       const f = l.filter((val, idx, arr, c) => {
         c.cleanup(() => { cleaned++; });
@@ -106,7 +107,7 @@ describe("list context access", () => {
 
   describe("every", () => {
     test("callback receives context", () => {
-      const l = c.list([2, 4, 6]);
+      const l = list([2, 4, 6]);
       let ctx = null;
       const e = l.every((val, idx, arr, c) => {
         ctx = c;
@@ -119,7 +120,7 @@ describe("list context access", () => {
 
   describe("some", () => {
     test("callback receives context", () => {
-      const l = c.list([1, 2, 3]);
+      const l = list([1, 2, 3]);
       let ctx = null;
       const s = l.some((val, idx, arr, c) => {
         ctx = c;
@@ -132,7 +133,7 @@ describe("list context access", () => {
 
   describe("find / findIndex", () => {
     test("find callback receives context", () => {
-      const l = c.list([10, 20, 30]);
+      const l = list([10, 20, 30]);
       let ctx = null;
       const f = l.find((val, idx, arr, c) => {
         ctx = c;
@@ -143,7 +144,7 @@ describe("list context access", () => {
     });
 
     test("findIndex callback receives context", () => {
-      const l = c.list([10, 20, 30]);
+      const l = list([10, 20, 30]);
       let ctx = null;
       const f = l.findIndex((val, idx, arr, c) => {
         ctx = c;
@@ -156,7 +157,7 @@ describe("list context access", () => {
 
   describe("reduce / reduceRight", () => {
     test("reduce callback receives context as 5th arg", () => {
-      const l = c.list([1, 2, 3]);
+      const l = list([1, 2, 3]);
       let ctx = null;
       const r = l.reduce((acc, val, idx, arr, c) => {
         ctx = c;
@@ -167,7 +168,7 @@ describe("list context access", () => {
     });
 
     test("reduceRight callback receives context", () => {
-      const l = c.list(["a", "b", "c"]);
+      const l = list(["a", "b", "c"]);
       let ctx = null;
       const r = l.reduceRight((acc, val, idx, arr, c) => {
         ctx = c;
@@ -180,7 +181,7 @@ describe("list context access", () => {
 
   describe("flatMap", () => {
     test("callback receives context", () => {
-      const l = c.list([1, 2, 3]);
+      const l = list([1, 2, 3]);
       let ctx = null;
       const f = l.flatMap((val, idx, arr, c) => {
         ctx = c;
@@ -193,7 +194,7 @@ describe("list context access", () => {
 
   describe("findLast / findLastIndex", () => {
     test("findLast callback receives context", () => {
-      const l = c.list([1, 2, 3, 4]);
+      const l = list([1, 2, 3, 4]);
       let ctx = null;
       const f = l.findLast((val, idx, arr, c) => {
         ctx = c;
@@ -204,7 +205,7 @@ describe("list context access", () => {
     });
 
     test("findLastIndex callback receives context", () => {
-      const l = c.list([1, 2, 3, 4]);
+      const l = list([1, 2, 3, 4]);
       let ctx = null;
       const f = l.findLastIndex((val, idx, arr, c) => {
         ctx = c;

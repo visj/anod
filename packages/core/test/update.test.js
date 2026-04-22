@@ -1,10 +1,12 @@
 import { describe, test, expect } from "#test-runner";
-import { c } from "#fyren";
+import { signal, root } from "#fyren";
+
+let c; root((_c) => { c = _c; });
 
 describe("update", () => {
     test("does not register a dependency on the subcomputation", () => {
-        c.root(r => {
-            const s1 = c.signal(1);
+        root(r => {
+            const s1 = signal(1);
             let outerCount = 0;
             let innerCount = 0;
 
@@ -26,7 +28,7 @@ describe("update", () => {
 
     describe("may update", () => {
         test("does not trigger downstream computations unless changed", () => {
-            const s1 = c.signal(1);
+            const s1 = signal(1);
             let order = "";
             const c1 = c.compute(c => {
                 order += "c1";
@@ -49,8 +51,8 @@ describe("update", () => {
         });
 
         test("updates downstream pending nodes", () => {
-            const s1 = c.signal(0);
-            const s2 = c.signal(0);
+            const s1 = signal(0);
+            const s2 = signal(0);
             let order = "";
 
             const c1 = c.compute(c => {
@@ -58,7 +60,7 @@ describe("update", () => {
                 return c.val(s1) === 0;
             });
 
-            c.root(r => {
+            root(r => {
                 r.effect(c => {
                     c.val(c1);
                     order += "e1";

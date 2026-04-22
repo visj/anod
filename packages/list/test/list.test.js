@@ -1,23 +1,23 @@
 import { describe, test, expect } from "#test-runner";
-import { c } from "@fyren/core";
-import "#list";
+import { compute } from "@fyren/core/internal";
+import { list } from "#list";
 
 describe("list", () => {
     test("creates a signal holding an array", () => {
-        const l = c.list([1, 2, 3]);
+        const l = list([1, 2, 3]);
         expect(l.get()).toEqual([1, 2, 3]);
     });
 
     test("setting a new array replaces the value", () => {
-        const l = c.list([1, 2, 3]);
+        const l = list([1, 2, 3]);
         l.set([4, 5]);
         expect(l.get()).toEqual([4, 5]);
     });
 
     test("propagates changes to downstream computes", () => {
-        const l = c.list([1, 2, 3]);
+        const l = list([1, 2, 3]);
         let count = 0;
-        const comp = c.compute((cx) => {
+        const comp = compute((cx) => {
             count++;
             return cx.val(l);
         });
@@ -30,7 +30,7 @@ describe("list", () => {
     });
 
     test("works with an empty array", () => {
-        const l = c.list([]);
+        const l = list([]);
         expect(l.get()).toEqual([]);
     });
 });

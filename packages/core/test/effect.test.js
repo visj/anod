@@ -1,11 +1,13 @@
 import { describe, test, expect } from "#test-runner";
-import { c } from "#fyren";
+import { signal, root, batch } from "#fyren";
+
+let c; root((_c) => { c = _c; });
 
 describe("effect", () => {
     describe("modifies signals", () => {
         test("batches data while executing", () => {
-            const s1 = c.signal(false);
-            const s2 = c.signal(0);
+            const s1 = signal(false);
+            const s2 = signal(0);
             let v1;
 
             c.effect(c => {
@@ -22,7 +24,7 @@ describe("effect", () => {
         });
 
         test("throws when continually setting a direct dependency", () => {
-            const s1 = c.signal(1);
+            const s1 = signal(1);
             expect(() => {
                 c.effect(c => {
                     c.val(s1);
@@ -32,7 +34,7 @@ describe("effect", () => {
         });
 
         test("throws when continually setting an indirect dependency", () => {
-            const s1 = c.signal(1);
+            const s1 = signal(1);
             const c1 = c.compute(c => c.val(s1));
             const c2 = c.compute(c => c.val(c1));
             const c3 = c.compute(c => c.val(c2));
@@ -46,8 +48,8 @@ describe("effect", () => {
         });
 
         test("throws on error inside batch", () => {
-            const s1 = c.signal(false);
-            const s2 = c.signal(1);
+            const s1 = signal(false);
+            const s2 = signal(1);
 
             c.effect(c => {
                 if (c.val(s1)) {
@@ -57,7 +59,7 @@ describe("effect", () => {
             c.effect(c => { c.val(s2); });
 
             expect(() => {
-                c.batch(() => {
+                batch(() => {
                     s1.set(true);
                     s2.set(2);
                 });
@@ -69,8 +71,8 @@ describe("effect", () => {
 
     test("propagates changes topologically", () => {
         let seq = "";
-        const s1 = c.signal(0);
-        const s2 = c.signal(0);
+        const s1 = signal(0);
+        const s2 = signal(0);
         const c1 = c.compute(c => { seq += "c1"; return c.val(s1); });
 
         c.effect(c => {
@@ -96,7 +98,7 @@ describe("effect", () => {
 
     describe("cleanup", () => {
         test("is called when effect is updated", () => {
-            const s1 = c.signal(1);
+            const s1 = signal(1);
             let count = 0;
 
             c.effect(c => {
@@ -110,10 +112,10 @@ describe("effect", () => {
         });
 
         test("can be called from within a subcomputation", () => {
-            const s1 = c.signal(1);
+            const s1 = signal(1);
             let calls = 0;
 
-            c.root(r => {
+            root(r => {
                 r.effect(c => {
                     c.val(s1);
                     c.effect(c2 => {
@@ -128,10 +130,10 @@ describe("effect", () => {
         });
 
         test("is run only once when a scope is disposed", () => {
-            const s1 = c.signal(1);
+            const s1 = signal(1);
             let calls = 0;
 
-            const r1 = c.root(r => {
+            const r1 = root(r => {
                 r.effect(c => {
                     c.val(s1);
                     c.cleanup(() => { calls++; });

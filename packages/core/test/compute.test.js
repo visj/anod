@@ -1,5 +1,7 @@
 import { describe, test, expect } from "#test-runner";
-import { c } from "#fyren";
+import { signal, root, batch } from "#fyren";
+
+let c; root((_c) => { c = _c; });
 
 describe("compute", () => {
     test("returns initial value of wrapped function", () => {
@@ -19,7 +21,7 @@ describe("compute", () => {
 
     describe("with a dependency on signal", () => {
         test("updates when data is set", () => {
-            const s1 = c.signal(1);
+            const s1 = signal(1);
             let count = 0;
             const c1 = c.compute(c => {
                 count++;
@@ -32,7 +34,7 @@ describe("compute", () => {
         });
 
         test("does not update when data is merely read", () => {
-            const s1 = c.signal(1);
+            const s1 = signal(1);
             let count = 0;
             c.compute(c => {
                 count++;
@@ -45,9 +47,9 @@ describe("compute", () => {
     });
 
     describe("with changing dependencies", () => {
-        const s1 = c.signal(true);
-        const s2 = c.signal(1);
-        const s3 = c.signal(2);
+        const s1 = signal(true);
+        const s2 = signal(1);
+        const s3 = signal(2);
         let count = 0;
 
         const c1 = c.compute(c => {
@@ -91,7 +93,7 @@ describe("compute", () => {
 
         const c1 = c.compute(() => {
             count++;
-            s1 = c.signal(1);
+            s1 = signal(1);
         });
 
         c1.get();
@@ -108,7 +110,7 @@ describe("compute", () => {
     });
 
     describe("with a dependency on a computation", () => {
-        const s1 = c.signal(1);
+        const s1 = signal(1);
         let countOne = 0;
         let countTwo = 0;
 
@@ -138,7 +140,7 @@ describe("compute", () => {
     describe("with converging dependencies", () => {
         test("propagates in topological order", () => {
             let order = "";
-            const s1 = c.signal(0);
+            const s1 = signal(0);
 
             const c1 = c.compute(c => { order += "c1"; return c.val(s1); });
             const c2 = c.compute(c => { order += "c2"; return c.val(s1); });
@@ -151,7 +153,7 @@ describe("compute", () => {
         });
 
         test("only propagates once with linear convergences", () => {
-            const s1 = c.signal(0);
+            const s1 = signal(0);
             const c1 = c.compute(c => c.val(s1));
             const c2 = c.compute(c => c.val(s1));
             const c3 = c.compute(c => c.val(s1));
@@ -173,7 +175,7 @@ describe("compute", () => {
 
     describe("writable (set on compute)", () => {
         test("set overrides the derived value and val() returns it", () => {
-            const s1 = c.signal(5);
+            const s1 = signal(5);
             const c1 = c.compute(c => c.val(s1) * 2);
             expect(c1.get()).toBe(10);
 
@@ -182,7 +184,7 @@ describe("compute", () => {
         });
 
         test("set does not re-run the compute's fn", () => {
-            const s1 = c.signal(1);
+            const s1 = signal(1);
             let runs = 0;
             const c1 = c.compute(c => {
                 runs++;
@@ -197,7 +199,7 @@ describe("compute", () => {
         });
 
         test("setting the same value is a no-op (no notification)", () => {
-            const s1 = c.signal(3);
+            const s1 = signal(3);
             const c1 = c.compute(c => c.val(s1));
             let downstream = 0;
             const c2 = c.compute(c => {
@@ -213,7 +215,7 @@ describe("compute", () => {
         });
 
         test("set propagates to downstream computes", () => {
-            const s1 = c.signal(1);
+            const s1 = signal(1);
             const c1 = c.compute(c => c.val(s1));
             const c2 = c.compute(c => c.val(c1) + 10);
             expect(c2.get()).toBe(11);
@@ -223,9 +225,9 @@ describe("compute", () => {
         });
 
         test("set propagates to downstream effects", () => {
-            c.root(r => {
-                const s1 = c.signal(1);
-                const c1 = c.compute(c => c.val(s1));
+            root(r => {
+                const s1 = signal(1);
+                const c1 = r.compute(c => c.val(s1));
                 let observed;
                 r.effect(c => {
                     observed = c.val(c1);
@@ -238,7 +240,7 @@ describe("compute", () => {
         });
 
         test("upstream change after set re-runs the fn and clobbers the override", () => {
-            const s1 = c.signal(1);
+            const s1 = signal(1);
             const c1 = c.compute(c => c.val(s1) * 10);
             expect(c1.get()).toBe(10);
 
@@ -250,7 +252,7 @@ describe("compute", () => {
         });
 
         test("batched sets coalesce and fire subs once", () => {
-            const s1 = c.signal(1);
+            const s1 = signal(1);
             const c1 = c.compute(c => c.val(s1));
             let runs = 0;
             const c2 = c.compute(c => {
@@ -260,7 +262,7 @@ describe("compute", () => {
             expect(c2.get()).toBe(1);
             expect(runs).toBe(1);
 
-            c.batch(() => {
+            batch(() => {
                 c1.set(2);
                 c1.set(3);
                 c1.set(4);
@@ -271,7 +273,7 @@ describe("compute", () => {
 
         describe("form field defaulted from server data", () => {
             test("tracks the source until user edits, then holds the edit", () => {
-                const serverValue = c.signal("alice");
+                const serverValue = signal("alice");
                 /** Derived initial value for the input; user can overwrite. */
                 const draft = c.compute(c => c.val(serverValue));
                 expect(draft.get()).toBe("alice");
@@ -283,7 +285,7 @@ describe("compute", () => {
                 /** Another field change from the server arrives for an
                  *  unrelated key — shouldn't trample the user's edit
                  *  because `serverValue` didn't change. */
-                const unrelated = c.signal(0);
+                const unrelated = signal(0);
                 unrelated.set(1);
                 expect(draft.get()).toBe("alice the great");
 
@@ -296,11 +298,11 @@ describe("compute", () => {
 
         describe("optimistic local state", () => {
             test("local set shows immediately; later server value replaces", () => {
-                const serverCount = c.signal(0);
+                const serverCount = signal(0);
                 const displayed = c.compute(c => c.val(serverCount));
                 let rendered = null;
 
-                c.root(r => {
+                root(r => {
                     r.effect(c => {
                         rendered = c.val(displayed);
                     });
@@ -320,7 +322,7 @@ describe("compute", () => {
         });
 
         test("set on a compute that was STALE still propagates the new value", () => {
-            const s1 = c.signal(1);
+            const s1 = signal(1);
             const c1 = c.compute(c => c.val(s1));
             expect(c1.get()).toBe(1);
 
@@ -332,10 +334,10 @@ describe("compute", () => {
         });
 
         test("set on an initialized compute triggers stale notifications synchronously", () => {
-            const s1 = c.signal(1);
+            const s1 = signal(1);
             const c1 = c.compute(c => c.val(s1));
             let seen = [];
-            c.root(r => {
+            root(r => {
                 r.effect(c => {
                     seen.push(c.val(c1));
                 });

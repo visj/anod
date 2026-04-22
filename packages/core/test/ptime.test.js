@@ -1,5 +1,7 @@
 import { describe, test, expect } from "#test-runner";
-import { c } from "#fyren";
+import { signal, root, batch } from "#fyren";
+
+let c; root((_c) => { c = _c; });
 
 /**
  * Tests exploring whether _ptime is necessary when the library
@@ -21,8 +23,8 @@ describe("ptime guard: correct usage patterns", () => {
              * pruneDeps unsubscribes. comp's leftover STALE is irrelevant
              * because comp has no subscriber.
              */
-            const s_gate = c.signal(true);
-            const s_data = c.signal(0);
+            const s_gate = signal(true);
+            const s_data = signal(0);
             const comp = c.compute(r => r.val(s_data) + 1);
 
             let effectRuns = 0;
@@ -39,7 +41,7 @@ describe("ptime guard: correct usage patterns", () => {
             expect(lastVal).toBe(1);
 
             /** Gate off + data change: effect drops comp as dep */
-            c.batch(() => {
+            batch(() => {
                 s_gate.set(false);
                 s_data.set(1);
             });
@@ -61,7 +63,7 @@ describe("ptime guard: correct usage patterns", () => {
         });
 
         test("dynamic effect always pulls compute when reading it", () => {
-            const s = c.signal(0);
+            const s = signal(0);
             const comp = c.compute(r => r.val(s) + 1);
 
             let effectRuns = 0;
@@ -86,7 +88,7 @@ describe("ptime guard: correct usage patterns", () => {
     describe("stable effect with fixed deps", () => {
 
         test("stable effect always reads all deps -- compute is always pulled", () => {
-            const s = c.signal(0);
+            const s = signal(0);
             const comp = c.compute(r => { r.stable(); return r.val(s) + 1; });
 
             let effectRuns = 0;
@@ -109,8 +111,8 @@ describe("ptime guard: correct usage patterns", () => {
         });
 
         test("stable effect with two deps always pulls both", () => {
-            const s1 = c.signal(0);
-            const s2 = c.signal(10);
+            const s1 = signal(0);
+            const s2 = signal(10);
             const c1 = c.compute(r => { r.stable(); return r.val(s1) + 1; });
             const c2 = c.compute(r => { r.stable(); return r.val(s2) + 1; });
 
@@ -137,7 +139,7 @@ describe("ptime guard: correct usage patterns", () => {
     describe("diamond topologies", () => {
 
         test("diamond: both arms stale in same round", () => {
-            const s = c.signal(0);
+            const s = signal(0);
             const left = c.compute(r => { r.stable(); return r.val(s) + 1; });
             const right = c.compute(r => { r.stable(); return r.val(s) * 10; });
             const join = c.compute(r => { r.stable(); return r.val(left) + r.val(right); });
@@ -160,7 +162,7 @@ describe("ptime guard: correct usage patterns", () => {
         });
 
         test("deep diamond with pending/stale split", () => {
-            const s = c.signal(0);
+            const s = signal(0);
             const a = c.compute(r => { r.stable(); return r.val(s) + 1; });
             const b = c.compute(r => { r.stable(); return r.val(a) + 1; });
             const d = c.compute(r => { r.stable(); return r.val(a) + r.val(b); });
@@ -193,8 +195,8 @@ describe("ptime guard: correct usage patterns", () => {
              * E writes S2 -> round 2 -> C._setStale again.
              * C's flags were cleared in round 1 -> propagates correctly.
              */
-            const s1 = c.signal(0);
-            const s2 = c.signal(0);
+            const s1 = signal(0);
+            const s2 = signal(0);
             const comp = c.compute(r => r.val(s1) + r.val(s2));
 
             let effectRuns = 0;
@@ -219,9 +221,9 @@ describe("ptime guard: correct usage patterns", () => {
         });
 
         test("chain: effect writes signal feeding another effect", () => {
-            const s = c.signal(0);
+            const s = signal(0);
             const comp = c.compute(r => r.val(s) + 1);
-            const s_out = c.signal(-1);
+            const s_out = signal(-1);
 
             c.effect(r => {
                 s_out.set(r.val(comp));
@@ -244,7 +246,7 @@ describe("ptime guard: correct usage patterns", () => {
     describe("absorb pattern (value unchanged)", () => {
 
         test("absorbing compute prevents unnecessary downstream work", () => {
-            const s = c.signal(0);
+            const s = signal(0);
             let c1Runs = 0;
             let c2Runs = 0;
             const c1 = c.compute(r => {
@@ -283,7 +285,7 @@ describe("ptime guard: correct usage patterns", () => {
     describe("lazy compute (no subscribers)", () => {
 
         test("compute with no subscribers: val() always returns correct value", () => {
-            const s = c.signal(0);
+            const s = signal(0);
             const comp = c.compute(r => r.val(s) + 1);
             expect(comp.get()).toBe(1);
 
@@ -295,7 +297,7 @@ describe("ptime guard: correct usage patterns", () => {
         });
 
         test("compute gains subscriber after being stale -- subscriber sees current value", () => {
-            const s = c.signal(0);
+            const s = signal(0);
             const comp = c.compute(r => r.val(s) + 1);
             expect(comp.get()).toBe(1);
 
@@ -319,8 +321,8 @@ describe("ptime guard: correct usage patterns", () => {
     describe("batch coalescing", () => {
 
         test("batch: two signals feeding same compute", () => {
-            const s1 = c.signal(0);
-            const s2 = c.signal(0);
+            const s1 = signal(0);
+            const s2 = signal(0);
             const comp = c.compute(r => r.val(s1) + r.val(s2));
 
             let effectRuns = 0;
@@ -330,7 +332,7 @@ describe("ptime guard: correct usage patterns", () => {
             });
             effectRuns = 0;
 
-            c.batch(() => {
+            batch(() => {
                 s1.set(1);
                 s2.set(1);
             });
@@ -340,7 +342,7 @@ describe("ptime guard: correct usage patterns", () => {
         });
 
         test("batch: same signal set twice, compute runs once", () => {
-            const s = c.signal(0);
+            const s = signal(0);
             const comp = c.compute(r => r.val(s) + 1);
 
             let effectRuns = 0;
@@ -350,7 +352,7 @@ describe("ptime guard: correct usage patterns", () => {
             });
             effectRuns = 0;
 
-            c.batch(() => {
+            batch(() => {
                 s.set(1);
                 s.set(2);
             });
@@ -362,7 +364,7 @@ describe("ptime guard: correct usage patterns", () => {
     describe("deep chains", () => {
 
         test("20-deep chain propagates correctly across multiple updates", () => {
-            const head = c.signal(0);
+            const head = signal(0);
             let current = head;
             for (let i = 0; i < 20; i++) {
                 let prev = current;
@@ -386,7 +388,7 @@ describe("ptime guard: correct usage patterns", () => {
         });
 
         test("deep absorb chain: only first node runs", () => {
-            const head = c.signal(0);
+            const head = signal(0);
             let c1Runs = 0;
             const c1 = c.compute(r => {
                 c1Runs++;

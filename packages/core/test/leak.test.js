@@ -1,5 +1,5 @@
 import { describe, test, expect, collectAsync } from "#test-runner";
-import { c } from "#fyren";
+import { signal, root } from "#fyren";
 import { inspect } from "node:util";
 
 /**
@@ -23,17 +23,21 @@ describe("stack retention after disposal", () => {
 		 * slot is overwritten by another setup.
 		 */
 		const refs = capture(() => {
-			const s1 = c.signal(1);
-			const s2 = c.signal(2);
-			const s3 = c.signal(3);
-			const s4 = c.signal(4);
-			const s5 = c.signal(5);
-			const cx = c.compute(
-				(c) => c.val(s1) + c.val(s2) + c.val(s3) + c.val(s4) + c.val(s5)
-			);
+			const s1 = signal(1);
+			const s2 = signal(2);
+			const s3 = signal(3);
+			const s4 = signal(4);
+			const s5 = signal(5);
+			let cx;
+			const r = root((_c) => {
+				cx = _c.compute(
+					(c) => c.val(s1) + c.val(s2) + c.val(s3) + c.val(s4) + c.val(s5)
+				);
+			});
 			// Trigger setup.
 			cx.get();
 			cx.dispose();
+			r.dispose();
 			s1.dispose();
 			s2.dispose();
 			s3.dispose();
@@ -60,10 +64,10 @@ describe("stack retention after disposal", () => {
 		 */
 		const refs = capture(() => {
 			const holders = [];
-			c.root((r) => {
-				const s1 = c.signal(1);
-				const s2 = c.signal(2);
-				const s3 = c.signal(3);
+			root((r) => {
+				const s1 = signal(1);
+				const s2 = signal(2);
+				const s3 = signal(3);
 				holders.push(s1, s2, s3);
 
 				r.effect((r2) => {
@@ -117,13 +121,13 @@ describe("stack retention after disposal", () => {
 		 */
 		const holders = capture(() => {
 			let s1, s2, c1, c2, c3, c4;
-			const r = c.root((r) => {
-				s1 = c.signal(1);
-				s2 = c.signal(10);
-				c1 = c.compute((c) => c.val(s1));
-				c2 = c.compute((c) => c.val(c1));
-				c3 = c.compute((c) => c.val(s2));
-				c4 = c.compute((c) => c.val(c2) + c.val(c3));
+			const r = root((r) => {
+				s1 = signal(1);
+				s2 = signal(10);
+				c1 = r.compute((c) => c.val(s1));
+				c2 = r.compute((c) => c.val(c1));
+				c3 = r.compute((c) => c.val(s2));
+				c4 = r.compute((c) => c.val(c2) + c.val(c3));
 				r.effect((c) => c.val(c4));
 				s1.set(2); // effect re-runs in transaction, drives checkRun
 			});
@@ -149,10 +153,10 @@ describe("stack retention after disposal", () => {
 		 */
 		const refs = capture(() => {
 			let outer, sGate, sShared, sOther;
-			const r = c.root((r) => {
-				sGate = c.signal(true);
-				sShared = c.signal("shared");
-				sOther = c.signal("other");
+			const r = root((r) => {
+				sGate = signal(true);
+				sShared = signal("shared");
+				sOther = signal("other");
 
 				outer = r.compute((c) => {
 					if (c.val(sGate)) {

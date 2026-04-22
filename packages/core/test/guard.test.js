@@ -1,10 +1,12 @@
 import { describe, test, expect } from "#test-runner";
-import { c } from "#fyren";
+import { signal, root } from "#fyren";
+
+let c; root((_c) => { c = _c; });
 
 describe.skip("signal guard", () => {
     describe("custom equality", () => {
         test("skips set when guard returns true (equal)", () => {
-            const s = c.signal(
+            const s = signal(
                 { id: 1, name: "a" },
                 (prev, next) => prev.id === next.id
             );
@@ -17,7 +19,7 @@ describe.skip("signal guard", () => {
         });
 
         test("allows set when guard returns false (not equal)", () => {
-            const s = c.signal(
+            const s = signal(
                 { id: 1, name: "a" },
                 (prev, next) => prev.id === next.id
             );
@@ -30,7 +32,7 @@ describe.skip("signal guard", () => {
         });
 
         test("falls back to !== when no guard provided", () => {
-            const s = c.signal(5);
+            const s = signal(5);
             let runs = 0;
             c.effect(s, () => { runs++; });
             expect(runs).toBe(1);
@@ -45,7 +47,7 @@ describe.skip("signal guard", () => {
 
     describe("validation via throw", () => {
         test("passes valid value", () => {
-            const s = c.signal(1, (prev, next) => {
+            const s = signal(1, (prev, next) => {
                 if (typeof next !== "number") {
                     throw new Error("Must be number");
                 }
@@ -56,7 +58,7 @@ describe.skip("signal guard", () => {
         });
 
         test("throws on invalid value", () => {
-            const s = c.signal(1, (prev, next) => {
+            const s = signal(1, (prev, next) => {
                 if (typeof next !== "number") {
                     throw new Error("Must be number");
                 }
@@ -67,7 +69,7 @@ describe.skip("signal guard", () => {
         });
 
         test("does not update value when guard throws", () => {
-            const s = c.signal(5, (prev, next) => {
+            const s = signal(5, (prev, next) => {
                 if (next <= 0) {
                     throw new Error("Must be positive");
                 }
@@ -80,7 +82,7 @@ describe.skip("signal guard", () => {
 
     describe("reactive integration", () => {
         test("bound compute reads guarded signal", () => {
-            const s = c.signal(3, (prev, next) => prev === next);
+            const s = signal(3, (prev, next) => prev === next);
             const doubled = c.compute(s, (val) => val * 2);
             expect(doubled.get()).toBe(6);
 
@@ -89,7 +91,7 @@ describe.skip("signal guard", () => {
         });
 
         test("dynamic compute reads guarded signal", () => {
-            const s = c.signal(3, (prev, next) => prev === next);
+            const s = signal(3, (prev, next) => prev === next);
             const doubled = c.compute((cx) => cx.val(s) * 2);
             expect(doubled.get()).toBe(6);
 
@@ -98,7 +100,7 @@ describe.skip("signal guard", () => {
         });
 
         test("bound effect fires on guarded signal update", () => {
-            const s = c.signal(0, (prev, next) => prev === next);
+            const s = signal(0, (prev, next) => prev === next);
             let last = -1;
             c.effect(s, (val) => { last = val; });
             expect(last).toBe(0);
@@ -108,7 +110,7 @@ describe.skip("signal guard", () => {
         });
 
         test("guarded signal works in compute chain", () => {
-            const s = c.signal(1, (prev, next) => {
+            const s = signal(1, (prev, next) => {
                 if (typeof next !== "number") {
                     throw new Error("Must be number");
                 }

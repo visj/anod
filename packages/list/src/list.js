@@ -3,7 +3,7 @@ import {
 } from '@fyren/core';
 
 import {
-    Signal, Compute, Effect, Clock, Root,
+    Signal, Compute, Effect,
     IDLE,
     FLAG_STALE, FLAG_INIT, FLAG_BOUND, FLAG_SCHEDULED, OPT_DEFER,
     connect, schedule, notify, flush,
@@ -1547,6 +1547,4 @@ SignalProto.unshift = function (...items) {
     }
 };
 
-Clock.prototype.list = Root.prototype.list = Effect.prototype.list = signal;
-
-export { computeArray };
+export { computeArray, signal as list };

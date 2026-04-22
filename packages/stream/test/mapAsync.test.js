@@ -1,6 +1,7 @@
 import { describe, test, expect } from "bun:test";
-import { c } from '@fyren/core';
-import '@fyren/list';
+import { signal, root } from '@fyren/core';
+import { compute } from '@fyren/core/internal';
+import { list } from '@fyren/list';
 import '../src/stream.js';
 
 const tick = () => Promise.resolve();
@@ -8,7 +9,7 @@ const settle = () => tick().then(tick).then(tick).then(tick).then(tick);
 
 describe("mapAsync", () => {
     test("maps array elements through async callback", async () => {
-        const l = c.list([1, 2, 3]);
+        const l = list([1, 2, 3]);
         const m = l.mapAsync(async (val) => {
             return val * 10;
         });
@@ -19,7 +20,7 @@ describe("mapAsync", () => {
     });
 
     test("executes callbacks sequentially", async () => {
-        const l = c.list([1, 2, 3]);
+        const l = list([1, 2, 3]);
         let order = [];
 
         const m = l.mapAsync(async (val) => {
@@ -38,7 +39,7 @@ describe("mapAsync", () => {
     });
 
     test("re-runs when source list changes", async () => {
-        const l = c.list([1, 2]);
+        const l = list([1, 2]);
         const m = l.mapAsync(async (val) => {
             return val * 10;
         });
@@ -54,7 +55,7 @@ describe("mapAsync", () => {
     });
 
     test("source change during async: re-run produces new result", async () => {
-        const l = c.list([1, 2, 3]);
+        const l = list([1, 2, 3]);
 
         const m = l.mapAsync(async (val) => {
             await tick();
@@ -74,10 +75,10 @@ describe("mapAsync", () => {
     });
 
     test("downstream compute reacts after settle", async () => {
-        const l = c.list([1, 2, 3]);
+        const l = list([1, 2, 3]);
         const m = l.mapAsync(async (val) => val * 10);
 
-        const sum = c.compute(m, (arr) => arr ? arr.reduce((a, b) => a + b, 0) : 0);
+        const sum = compute(m, (arr) => arr ? arr.reduce((a, b) => a + b, 0) : 0);
 
         /** m is loading, sum sees undefined → 0. */
         expect(sum.get()).toBe(0);
@@ -87,7 +88,7 @@ describe("mapAsync", () => {
     });
 
     test("handles sync and async return values mixed", async () => {
-        const l = c.list([1, 2, 3]);
+        const l = list([1, 2, 3]);
         const m = l.mapAsync((val) => {
             if (val % 2 === 0) {
                 return Promise.resolve(val * 100);
@@ -100,7 +101,7 @@ describe("mapAsync", () => {
     });
 
     test("callback receives index and array", async () => {
-        const l = c.list(["a", "b"]);
+        const l = list(["a", "b"]);
         let indices = [];
         let arrays = [];
 
@@ -116,7 +117,7 @@ describe("mapAsync", () => {
     });
 
     test("empty array resolves immediately", async () => {
-        const l = c.list([]);
+        const l = list([]);
         const m = l.mapAsync(async (val) => val);
 
         await settle();
@@ -124,7 +125,7 @@ describe("mapAsync", () => {
     });
 
     test("error in callback sets error on compute", async () => {
-        const l = c.list([1, 2, 3]);
+        const l = list([1, 2, 3]);
         const m = l.mapAsync(async (val) => {
             if (val === 2) {
                 throw new Error("bad value");

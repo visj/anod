@@ -1,5 +1,7 @@
 import { describe, test, expect } from "#test-runner";
-import { c } from "#fyren";
+import { signal, root } from "#fyren";
+
+let c; root((_c) => { c = _c; });
 
 const tick = () => Promise.resolve();
 const settle = () => tick().then(tick).then(tick);
@@ -7,7 +9,7 @@ const settle = () => tick().then(tick).then(tick);
 describe("lock", () => {
   describe("task", () => {
     test("locked task does not re-run when dependency changes", async () => {
-      const s1 = c.signal(1);
+      const s1 = signal(1);
       let runs = 0;
       const t1 = c.task(async (c) => {
         runs++;
@@ -27,7 +29,7 @@ describe("lock", () => {
     });
 
     test("locked task re-runs after settling when dep changed during lock", async () => {
-      const s1 = c.signal(1);
+      const s1 = signal(1);
       let runs = 0;
       let resolve;
       const t1 = c.task(async (c) => {
@@ -58,7 +60,7 @@ describe("lock", () => {
     });
 
     test("locked task returns stale value to downstream computes", async () => {
-      const s1 = c.signal(1);
+      const s1 = signal(1);
       let resolve;
       const t1 = c.task(async (c) => {
         let val = c.val(s1);
@@ -92,7 +94,7 @@ describe("lock", () => {
 
   describe("spawn", () => {
     test("locked spawn completes body before re-running", async () => {
-      const s1 = c.signal([1, 2, 3]);
+      const s1 = signal([1, 2, 3]);
       let saved = [];
       let runs = 0;
 
@@ -121,7 +123,7 @@ describe("lock", () => {
     });
 
     test("locked spawn ignores mid-flight dep changes", async () => {
-      const s1 = c.signal(1);
+      const s1 = signal(1);
       let steps = [];
       let resolve;
 
@@ -155,7 +157,7 @@ describe("lock", () => {
 
   describe("spawn awaiting locked task", () => {
     test("spawn waits for locked task, then gets value after settle", async () => {
-      const s1 = c.signal(1);
+      const s1 = signal(1);
       let taskResolve;
       const t1 = c.task(async (c) => {
         let val = c.val(s1);
@@ -178,8 +180,8 @@ describe("lock", () => {
     });
 
     test("spawn invalidated by another signal while awaiting locked task", async () => {
-      const s1 = c.signal(1);
-      const s2 = c.signal("a");
+      const s1 = signal(1);
+      const s2 = signal("a");
       let taskResolve;
       let observed = [];
 

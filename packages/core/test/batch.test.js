@@ -1,10 +1,12 @@
 import { describe, test, expect } from "#test-runner";
-import { c } from "#fyren";
+import { signal, root, batch } from "#fyren";
+
+let c; root((_c) => { c = _c; });
 
 describe("batch", () => {
     test("batches changes until end", () => {
-        const s1 = c.signal(1);
-        c.batch(() => {
+        const s1 = signal(1);
+        batch(() => {
             s1.set(2);
             expect(s1.get()).toBe(1);
         });
@@ -12,10 +14,10 @@ describe("batch", () => {
     });
 
     test("stops propagation within batch scope", () => {
-        const s1 = c.signal(1);
+        const s1 = signal(1);
         const c1 = c.compute(c => c.val(s1));
 
-        c.batch(() => {
+        batch(() => {
             s1.set(2);
             expect(c1.get()).toBe(1);
         });

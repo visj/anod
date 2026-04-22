@@ -1,5 +1,7 @@
 import { describe, test, expect } from "#test-runner";
-import { c } from "#fyren-src";
+import { signal, root } from "#fyren-src";
+
+let c; root((_c) => { c = _c; });
 
 /**
  * Tests for dynamic dep reconciliation (patchDeps) in compute() and
@@ -99,7 +101,7 @@ function verifyDropped(node, droppedSenders) {
  * To trigger a re-run we bump whichever signal is currently `_dep1`.
  */
 function harness(kind, pattern, n = 10) {
-    const signals = Array.from({ length: n }, (_, i) => c.signal(i));
+    const signals = Array.from({ length: n }, (_, i) => signal(i));
     let modeVar = 'A';
     let node;
     const fn = cx => {
@@ -108,7 +110,7 @@ function harness(kind, pattern, n = 10) {
             cx.val(signals[i]);
         }
     };
-    const r = c.root(r => {
+    const r = root(r => {
         node = kind === 'compute' ? c.compute(fn) : r.effect(fn);
     });
     if (kind === 'compute') {
@@ -461,14 +463,14 @@ describe("patchDeps -- post-drop notify (checkRun must tolerate state)", () => {
          * node in a non-IDLE context hits `checkRun`, which reads
          * `node._dep1._flag` directly -- NPE.
          */
-        const sX = c.signal(1);
-        const sY = c.signal(2);
+        const sX = signal(1);
+        const sY = signal(2);
         const cX = c.compute(cx => cx.val(sX));
         const cY = c.compute(cx => cx.val(sY));
 
         let mode = 'A';
         let test2;
-        const r = c.root(r => {
+        const r = root(r => {
             test2 = c.compute(cx => {
                 if (mode === 'A') {
                     cx.val(sX);
@@ -487,13 +489,13 @@ describe("patchDeps -- post-drop notify (checkRun must tolerate state)", () => {
     });
 
     test("effect: re-notify after dep1 drop with multi-dep array", () => {
-        const sX = c.signal(1);
-        const sY = c.signal(2);
+        const sX = signal(1);
+        const sY = signal(2);
         const cX = c.compute(cx => cx.val(sX));
         const cY = c.compute(cx => cx.val(sY));
 
         let mode = 'A';
-        const r = c.root(r => {
+        const r = root(r => {
             r.effect(cx => {
                 if (mode === 'A') {
                     cx.val(sX);

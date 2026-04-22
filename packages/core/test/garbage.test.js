@@ -1,10 +1,13 @@
 import { describe, test, expect, collect } from "#test-runner";
-import { c } from "#fyren";
+import { signal, root } from "#fyren";
 
 describe("garbage collection", () => {
     test("should not be collected when referenced", async () => {
-        const s1 = c.signal(1);
-        const ref = new WeakRef(c.compute(c => c.val(s1)));
+        const s1 = signal(1);
+        let ref;
+        root((_c) => {
+            ref = new WeakRef(_c.compute(c => c.val(s1)));
+        });
 
         // Bind dependencies to ensure bidirectional link exists.
         ref.deref()?.get();
@@ -18,13 +21,17 @@ describe("garbage collection", () => {
     });
 
     test("should be collected when disposed", async () => {
-        const s1 = c.signal(1);
-        const c1 = new WeakRef(c.compute(c => c.val(s1)));
+        const s1 = signal(1);
+        let c1;
+        const r = root((_c) => {
+            c1 = new WeakRef(_c.compute(c => c.val(s1)));
+        });
 
         c1.deref()?.get();
 
         // Severing the hard link back to c1.
         s1.dispose();
+        r.dispose();
 
         await new Promise((resolve) => {
             collect(() => {

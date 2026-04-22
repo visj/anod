@@ -1,5 +1,7 @@
 import { describe, test, expect } from "#test-runner";
-import { c } from "#fyren";
+import { signal, root } from "#fyren";
+
+let c; root((_c) => { c = _c; });
 
 const tick = () => Promise.resolve();
 /** suspend() adds one extra microtask layer; settle needs 2 ticks for
@@ -81,7 +83,7 @@ describe("async", () => {
     });
 
     test("clears error on subsequent successful resolution", async () => {
-      const s1 = c.signal(true);
+      const s1 = signal(true);
       const c1 = c.task((c) => {
         return c.val(s1)
           ? c.suspend(Promise.reject(new Error("fail")))
@@ -117,7 +119,7 @@ describe("async", () => {
 
     test("ignores stale promise when signal updates before it resolves", async () => {
       const resolvers = [];
-      const s1 = c.signal(0);
+      const s1 = signal(0);
 
       const c1 = c.task((c) => {
         const v = c.val(s1);
@@ -274,7 +276,7 @@ describe("async", () => {
         }
       };
 
-      const s1 = c.signal(true);
+      const s1 = signal(true);
       const c1 = c.task((c) => {
         if (c.val(s1)) {
           return staleIter;
@@ -301,8 +303,8 @@ describe("async", () => {
 
   describe("context", () => {
     test("reads a signal before and after await", async () => {
-      const s1 = c.signal(1);
-      const s2 = c.signal(10);
+      const s1 = signal(1);
+      const s2 = signal(10);
       const c1 = c.task(async (c) => {
         let a = c.val(s1);
         await c.suspend(tick());
@@ -314,8 +316,8 @@ describe("async", () => {
     });
 
     test("re-runs when a dep added post-await changes", async () => {
-      const s1 = c.signal(1);
-      const s2 = c.signal(10);
+      const s1 = signal(1);
+      const s2 = signal(10);
       let runs = 0;
       const c1 = c.task(async (c) => {
         runs++;
@@ -335,9 +337,9 @@ describe("async", () => {
     });
 
     test("tear-down: stale dep is not re-subscribed if not re-read", async () => {
-      const s1 = c.signal(true);
-      const sA = c.signal("a");
-      const sB = c.signal("b");
+      const s1 = signal(true);
+      const sA = signal("a");
+      const sB = signal("b");
       let runs = 0;
       const c1 = c.task(async (c) => {
         runs++;
@@ -367,7 +369,7 @@ describe("async", () => {
     });
 
     test("duplicate reads in same sync chunk are cleaned by checkDeps", async () => {
-      const s1 = c.signal(5);
+      const s1 = signal(5);
       let runs = 0;
       const c1 = c.task(async (c) => {
         runs++;
@@ -396,8 +398,8 @@ describe("async", () => {
     });
 
     test("cross-compute pollution: same signal read twice across await is deduped", async () => {
-      const s1 = c.signal(1);
-      const s2 = c.signal(10);
+      const s1 = signal(1);
+      const s2 = signal(10);
       const c0 = c.compute((c) => c.val(s2) * 100);
       expect(c0.get()).toBe(1000);
 
@@ -427,7 +429,7 @@ describe("async", () => {
     });
 
     test("captured context is the node itself", async () => {
-      const s1 = c.signal(1);
+      const s1 = signal(1);
       let captured;
       const c1 = c.task(async (c) => {
         if (captured === undefined) {
@@ -443,7 +445,7 @@ describe("async", () => {
     });
 
     test("task with bound signal dependency", async () => {
-      const s1 = c.signal(5);
+      const s1 = signal(5);
       const c1 = c.task(s1, async (val, c) => {
         return await c.suspend(Promise.resolve(val * 2));
       });
@@ -457,7 +459,7 @@ describe("async", () => {
     });
 
     test("spawn with bound signal dependency", async () => {
-      const s1 = c.signal(1);
+      const s1 = signal(1);
       let observed = null;
       c.spawn(s1, async (val, c) => {
         observed = await c.suspend(Promise.resolve(val));
@@ -471,8 +473,8 @@ describe("async", () => {
     });
 
     test("dynamic spawn: reads signals across await in an effect", async () => {
-      const s1 = c.signal(1);
-      const s2 = c.signal(10);
+      const s1 = signal(1);
+      const s2 = signal(10);
       let observed = null;
       c.spawn(async (c) => {
         let a = c.val(s1);
@@ -491,8 +493,8 @@ describe("async", () => {
 
   describe("stable context", () => {
     test("c.stable(): post-stable reads do not register new deps", async () => {
-      const s1 = c.signal(1);
-      const s2 = c.signal(10);
+      const s1 = signal(1);
+      const s2 = signal(10);
       let runs = 0;
       const c1 = c.task(async (c) => {
         runs++;
@@ -512,8 +514,8 @@ describe("async", () => {
     });
 
     test("c.stable(): pre-stable reads stay tracked and trigger reruns", async () => {
-      const s1 = c.signal(1);
-      const s2 = c.signal(10);
+      const s1 = signal(1);
+      const s2 = signal(10);
       let runs = 0;
       const c1 = c.task(async (c) => {
         runs++;
@@ -534,7 +536,7 @@ describe("async", () => {
     });
 
     test("c.equal() is callable on the context and propagates to node", async () => {
-      const src = c.signal(0);
+      const src = signal(0);
       const c1 = c.task(async (c) => {
         const v = c.val(src);
         c.equal(true);
@@ -546,8 +548,8 @@ describe("async", () => {
     });
 
     test("c.stable() on spawn()", async () => {
-      const s1 = c.signal(1);
-      const s2 = c.signal(100);
+      const s1 = signal(1);
+      const s2 = signal(100);
       let runs = 0;
       let observed;
       c.spawn(async (c) => {
@@ -573,7 +575,7 @@ describe("async", () => {
     });
 
     test("c.stable() before any reads: node goes dormant", async () => {
-      const s1 = c.signal(1);
+      const s1 = signal(1);
       let runs = 0;
       const c1 = c.task(async (c) => {
         runs++;
@@ -624,7 +626,7 @@ describe("async", () => {
     });
 
     test("never resumes when node re-runs (stale activation)", async () => {
-      const s1 = c.signal(1);
+      const s1 = signal(1);
       let firstContinued = false;
       let firstResolve;
       let runs = 0;
@@ -672,7 +674,7 @@ describe("async", () => {
     });
 
     test("suspend works with bound task", async () => {
-      const s1 = c.signal(5);
+      const s1 = signal(5);
       const c1 = c.task(s1, async (val, c) => {
         const result = await c.suspend(Promise.resolve(val + 1));
         return result;
@@ -709,7 +711,7 @@ describe("async", () => {
     });
 
     test("controller is aborted on re-run", async () => {
-      const s1 = c.signal(1);
+      const s1 = signal(1);
       let captured = null;
 
       const c1 = c.task(async (c) => {
@@ -748,7 +750,7 @@ describe("async", () => {
     });
 
     test("controller works with spawn", async () => {
-      const s1 = c.signal(1);
+      const s1 = signal(1);
       let captured = null;
 
       c.spawn(async (c) => {
@@ -769,7 +771,7 @@ describe("async", () => {
     });
 
     test("each run gets a fresh controller", async () => {
-      const s1 = c.signal(1);
+      const s1 = signal(1);
       let controllers = [];
 
       const c1 = c.task(async (c) => {
@@ -792,8 +794,8 @@ describe("async", () => {
 
   describe("defer", () => {
     test("reads value without subscribing during execution", async () => {
-      const s1 = c.signal(1);
-      const s2 = c.signal(10);
+      const s1 = signal(1);
+      const s2 = signal(10);
       let runs = 0;
       let resolve;
 
@@ -817,8 +819,8 @@ describe("async", () => {
     });
 
     test("re-runs after settle if deferred dep changed", async () => {
-      const s1 = c.signal(1);
-      const s2 = c.signal(10);
+      const s1 = signal(1);
+      const s2 = signal(10);
       let runs = 0;
       let resolve;
 
@@ -844,8 +846,8 @@ describe("async", () => {
     });
 
     test("does not re-run if deferred dep unchanged at settle", async () => {
-      const s1 = c.signal(1);
-      const s2 = c.signal(10);
+      const s1 = signal(1);
+      const s2 = signal(10);
       let runs = 0;
 
       const c1 = c.task((c) => {
@@ -865,8 +867,8 @@ describe("async", () => {
     });
 
     test("deferred deps are subscribed after settle", async () => {
-      const s1 = c.signal(1);
-      const s2 = c.signal(10);
+      const s1 = signal(1);
+      const s2 = signal(10);
       let runs = 0;
 
       const c1 = c.task((c) => {
@@ -886,8 +888,8 @@ describe("async", () => {
     });
 
     test("defer works with spawn", async () => {
-      const s1 = c.signal(1);
-      const s2 = c.signal(10);
+      const s1 = signal(1);
+      const s2 = signal(10);
       let observed = null;
       let runs = 0;
 
@@ -956,7 +958,7 @@ describe("async", () => {
         );
       });
 
-      const s1 = c.signal(1);
+      const s1 = signal(1);
       let observed = null;
       let runs = 0;
       c.spawn(async (c) => {
@@ -980,7 +982,7 @@ describe("async", () => {
     });
 
     test("after settle, awaiter reacts to future task changes", async () => {
-      const s1 = c.signal(1);
+      const s1 = signal(1);
       const taskA = c.task((c) => {
         return c.suspend(Promise.resolve(c.val(s1) * 10));
       });
@@ -1088,7 +1090,7 @@ describe("async", () => {
       });
 
       let observed = null;
-      const r = c.root((r) => {
+      const r = root((r) => {
         r.spawn(async (c) => {
           observed = await c.suspend(taskA);
         });
@@ -1107,7 +1109,7 @@ describe("async", () => {
   describe("loading suppresses downstream", () => {
     test("effect does not re-run when a task dependency changes while loading", async () => {
       let resolve1, resolve2;
-      const s1 = c.signal(1);
+      const s1 = signal(1);
       let taskRuns = 0;
       const c1 = c.task((c) => {
         taskRuns++;
@@ -1157,7 +1159,7 @@ describe("async", () => {
 
     test("chained computes: intermediate task loading blocks downstream effect", async () => {
       let resolve;
-      const s1 = c.signal(1);
+      const s1 = signal(1);
       const c1 = c.task((c) => {
         const v = c.val(s1);
         return c.suspend(
@@ -1193,8 +1195,8 @@ describe("async", () => {
 
     test("multiple dep changes while loading do not cause multiple effect runs", async () => {
       let resolve;
-      const s1 = c.signal(1);
-      const s2 = c.signal(10);
+      const s1 = signal(1);
+      const s2 = signal(10);
       const c1 = c.task((c) => {
         const a = c.val(s1);
         const b = c.val(s2);
@@ -1320,7 +1322,7 @@ describe("async", () => {
     });
 
     test("task stays pull-based when no promise waiters", async () => {
-      const s1 = c.signal(1);
+      const s1 = signal(1);
       let taskRuns = 0;
 
       const taskA = c.task((c) => {
@@ -1344,8 +1346,8 @@ describe("async", () => {
     });
 
     test("task does not re-run until a spawn conditionally reads it", async () => {
-      const toggle = c.signal(false);
-      const source = c.signal(1);
+      const toggle = signal(false);
+      const source = signal(1);
       let taskRuns = 0;
 
       const task1 = c.task((cx) => {
@@ -1382,8 +1384,8 @@ describe("async", () => {
     });
 
     test("task stops running when spawn stops reading it", async () => {
-      const toggle = c.signal(true);
-      const source = c.signal(1);
+      const toggle = signal(true);
+      const source = signal(1);
       let taskRuns = 0;
 
       const task1 = c.task((cx) => {
@@ -1413,7 +1415,7 @@ describe("async", () => {
     });
 
     test("unread task does not re-fire network-like work", async () => {
-      const dep = c.signal("a");
+      const dep = signal("a");
       let fetches = 0;
 
       const task1 = c.task((cx) => {

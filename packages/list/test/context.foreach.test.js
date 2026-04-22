@@ -1,10 +1,10 @@
 import { describe, test, expect } from "#test-runner";
-import { c } from "@fyren/core";
-import "#list";
+import { root } from "@fyren/core";
+import { list } from "#list";
 
 describe("forEach context", () => {
   test("callback receives context as 4th argument", () => {
-    const l = c.list([1, 2]);
+    const l = list([1, 2]);
     let ctx = null;
     l.forEach((val, idx, arr, c) => {
       ctx = c;
@@ -14,7 +14,7 @@ describe("forEach context", () => {
   });
 
   test("c.recover() inside forEach handles errors", () => {
-    const l = c.list([1, 2, 3]);
+    const l = list([1, 2, 3]);
     let recovered = false;
     let error = null;
     const e = l.forEach((val, idx, arr, c) => {
@@ -33,7 +33,7 @@ describe("forEach context", () => {
   });
 
   test("c.cleanup() inside forEach runs on re-evaluation", () => {
-    const l = c.list([1, 2]);
+    const l = list([1, 2]);
     let cleaned = 0;
     l.forEach((val, idx, arr, c) => {
       c.cleanup(() => { cleaned++; });
@@ -47,11 +47,11 @@ describe("forEach context", () => {
 
   describe("owned children", () => {
     test("effect creates owned computes that dispose on re-run", () => {
-      const l = c.list([1, 2]);
+      const l = list([1, 2]);
       let childRuns = 0;
       let childDisposed = 0;
 
-      c.root((r) => {
+      root((r) => {
         r.spawn(async (cx) => {
           let items = cx.val(l);
           /** This just tests that reading signals from forEach context works. */
@@ -69,7 +69,7 @@ describe("forEach context", () => {
     });
 
     test("forEach effect disposes and re-runs on list change", () => {
-      const l = c.list([10, 20]);
+      const l = list([10, 20]);
       let runs = 0;
       let lastValues = [];
 
@@ -93,7 +93,7 @@ describe("forEach context", () => {
 
   describe("recover in forEach", () => {
     test("recover swallows error and keeps effect alive", () => {
-      const l = c.list([1]);
+      const l = list([1]);
       let runs = 0;
       let errors = 0;
 
@@ -120,7 +120,7 @@ describe("forEach context", () => {
     });
 
     test("recover returning false disposes the effect", () => {
-      const l = c.list([1]);
+      const l = list([1]);
       const e = l.forEach((val, idx, arr, c) => {
         c.recover(() => false);
         if (val === 2) {

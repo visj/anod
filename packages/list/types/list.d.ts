@@ -1,6 +1,6 @@
 import {
   Signal, Compute, Effect, Sender,
-  ComputeContext, EffectContext, Factory
+  ComputeContext, EffectContext
 } from "@fyren/core";
 
 export type ListParam<T> = T | Sender<T>;
@@ -42,8 +42,4 @@ export interface List<T> extends Collection<T>, Signal<readonly T[]> {
   copyWithin(target: number, start: number, end?: number): void;
 }
 
-declare module "@fyren/core" {
-  interface Factory {
-    list<T>(value: T[]): List<T>;
-  }
-}
+export declare function list<T>(value: T[]): List<T>;

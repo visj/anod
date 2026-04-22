@@ -1,5 +1,7 @@
 import { describe, test, expect } from "#test-runner";
-import { c, OPT_DEFER } from "#fyren";
+import { signal, root, OPT_DEFER } from "#fyren";
+
+let c; root((_c) => { c = _c; });
 
 describe("OPT_DEFER", () => {
     describe("compute", () => {
@@ -14,7 +16,7 @@ describe("OPT_DEFER", () => {
 
     describe("stable compute", () => {
         test("defers initial run", () => {
-            const s1 = c.signal(1);
+            const s1 = signal(1);
             let runs = 0;
             const c1 = c.compute(c => { c.stable(); runs++; return c.val(s1) * 2; }, undefined, OPT_DEFER);
             expect(runs).toBe(0);
@@ -25,7 +27,7 @@ describe("OPT_DEFER", () => {
 
     describe("task (async stable)", () => {
         test("defers async compute until read", () => {
-            const s1 = c.signal(3);
+            const s1 = signal(3);
             let runs = 0;
             const c1 = c.compute(c => { c.stable(); runs++; return c.val(s1); }, undefined, OPT_DEFER);
             expect(runs).toBe(0);
@@ -35,7 +37,7 @@ describe("OPT_DEFER", () => {
     describe("unbound effect", () => {
         test("ignores OPT_DEFER -- always runs initially", () => {
             let runs = 0;
-            c.root(r => {
+            root(r => {
                 r.effect(c => { runs++; }, OPT_DEFER);
                 expect(runs).toBe(1);
             });
@@ -44,8 +46,8 @@ describe("OPT_DEFER", () => {
 
     describe("owned variants via root", () => {
         test("compute(fn, seed, OPT_DEFER) defers", () => {
-            c.root(r => {
-                const s1 = c.signal(10);
+            root(r => {
+                const s1 = signal(10);
                 let runs = 0;
                 const c1 = r.compute(c => { c.stable(); runs++; return c.val(s1) * 2; }, undefined, OPT_DEFER);
                 expect(runs).toBe(0);

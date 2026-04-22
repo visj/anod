@@ -91,10 +91,6 @@ export declare class Root {
   _cleanup: Function | Function[] | null;
 }
 
-export declare class Clock {
-  constructor();
-}
-
 // ─── Internal functions ──────────────────────────────────────────────
 
 export declare function connect(sender: any, receiver: any, depslot: number): number;
@@ -103,6 +99,12 @@ export declare function schedule(node: any, payload: any, fn: Function): void;
 export declare function assignSignal(node: any, value: any): void;
 export declare function notify(node: any, flag: number): void;
 export declare function flush(): void;
+export declare function batch(fn: () => void): void;
 export declare function startEffect(node: Effect): void;
 export declare function startCompute(node: Compute): void;
 export declare function signal<T>(value: T): Signal<T>;
+export declare function compute(depOrFn: any, ...args: any[]): Compute;
+export declare function task(depOrFn: any, ...args: any[]): Compute;
+export declare function effect(depOrFn: any, ...args: any[]): Effect;
+export declare function spawn(depOrFn: any, ...args: any[]): Effect;
+export declare function root(fn: (c: any) => void): Root;

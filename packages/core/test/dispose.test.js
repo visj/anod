@@ -1,5 +1,7 @@
 import { describe, test, expect, collectAsync } from "#test-runner";
-import { c } from "#fyren";
+import { signal, root } from "#fyren";
+
+let c; root((_c) => { c = _c; });
 
 const tick = () => Promise.resolve();
 const settle = () => tick().then(tick).then(tick);
@@ -11,9 +13,9 @@ describe("dispose", () => {
             let s1;
             let c1;
 
-            const r1 = c.root(r => {
+            const r1 = root(r => {
                 count = 0;
-                s1 = c.signal(0);
+                s1 = signal(0);
                 c1 = r.compute(c => {
                     count++;
                     return c.val(s1);
@@ -37,9 +39,9 @@ describe("dispose", () => {
 
     describe("computations", () => {
         test("persists through cycle when manually disposed", () => {
-            c.root(r => {
-                const s1 = c.signal(0);
-                const c1 = c.compute(c => c.val(s1));
+            root(r => {
+                const s1 = signal(0);
+                const c1 = r.compute(c => c.val(s1));
                 let count = 0;
 
                 r.effect(c => {
@@ -68,7 +70,7 @@ describe("dispose", () => {
 
     describe("bound dep1 error/dispose guards", () => {
         test("bound compute throws when dep1 has FLAG_ERROR", () => {
-            const s1 = c.signal(1);
+            const s1 = signal(1);
             const bad = c.compute((cx) => {
                 if (cx.val(s1) > 1) {
                     throw new Error("boom");
@@ -92,7 +94,7 @@ describe("dispose", () => {
         });
 
         test("bound compute throws when dep1 is disposed", () => {
-            const s1 = c.signal(1);
+            const s1 = signal(1);
             const dep = c.compute((cx) => cx.val(s1));
             const bound = c.compute(dep, (val) => val * 2);
             expect(bound.get()).toBe(2);
@@ -111,25 +113,25 @@ describe("dispose", () => {
 
     describe("disposed owner guards", () => {
         test("disposed root cannot create compute", () => {
-            const r = c.root(() => {});
+            const r = root(() => {});
             r.dispose();
             expect(() => r.compute((cx) => 1)).toThrow();
         });
 
         test("disposed root cannot create effect", () => {
-            const r = c.root(() => {});
+            const r = root(() => {});
             r.dispose();
             expect(() => r.effect(() => {})).toThrow();
         });
 
         test("disposed root cannot create task", () => {
-            const r = c.root(() => {});
+            const r = root(() => {});
             r.dispose();
             expect(() => r.task((cx) => cx.suspend(Promise.resolve(1)))).toThrow();
         });
 
         test("disposed root cannot create spawn", () => {
-            const r = c.root(() => {});
+            const r = root(() => {});
             r.dispose();
             expect(() => r.spawn(async (cx) => { await cx.suspend(Promise.resolve()); })).toThrow();
         });
@@ -174,7 +176,7 @@ describe("dispose", () => {
 
             let recovered = null;
             let cleanupRan = false;
-            const r = c.root((r) => {
+            const r = root((r) => {
                 r.spawn(async (cx) => {
                     cx.cleanup(() => { cleanupRan = true; });
                     cx.recover((err) => {
@@ -207,7 +209,7 @@ describe("dispose", () => {
             const taskB = c.task((cx) => cx.suspend(new Promise((r) => { resolve = r; })));
 
             let errors = 0;
-            const r = c.root((r) => {
+            const r = root((r) => {
                 for (let i = 0; i < 3; i++) {
                     r.spawn(async (cx) => {
                         cx.recover(() => { errors++; return true; });
@@ -235,7 +237,7 @@ describe("dispose", () => {
             const taskB = c.task((cx) => cx.suspend(new Promise((r) => { resolve = r; })));
 
             let cleanups = 0;
-            const r = c.root((r) => {
+            const r = root((r) => {
                 r.spawn(async (cx) => {
                     cx.cleanup(() => { cleanups++; });
                     await cx.suspend(taskB);
@@ -258,7 +260,7 @@ describe("dispose", () => {
 
             const refs = (() => {
                 const nodes = [];
-                const r = c.root((r) => {
+                const r = root((r) => {
                     r.spawn(async (cx) => {
                         await cx.suspend(taskB);
                     });

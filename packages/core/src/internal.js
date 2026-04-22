@@ -31,12 +31,17 @@ export {
   assignSignal,
   notify,
   flush,
+  batch,
   startEffect,
   startCompute,
   signal,
+  compute,
+  task,
+  effect,
+  spawn,
+  root,
   Signal,
   Compute,
   Effect,
-  Root,
-  Clock
+  Root
 } from "./core/fyren.js";

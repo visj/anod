@@ -134,6 +134,9 @@ var TIME = 1;
  */
 var IDLE = true;
 
+/** Whether a microtask flush is already scheduled. */
+var POSTING = false;
+
 /**
  * @type {number}
  */
@@ -309,14 +312,6 @@ function Effect(opts, fn, dep1, owner, args) {
 }
 
 /**
- * Guarded signal. Subclass of Signal with type guards (validated
- * on set) and custom equality checks (skip set when equal).
- * Copies all Signal fields inline to avoid prototype chain overhead.
- * @constructor
- * @template T
- * @param {T} value
- */
-/**
  * Async execution context for task/spawn nodes. Created lazily on first
  * call to a context utility (e.g. controller(), defer()). Stored in the
  * _args wrapper as { _args, _fiber: Fiber }.
@@ -378,7 +373,9 @@ function dispose() {
  */
 function val(sender) {
   let flag = this._flag;
-
+  if (sender._flag & FLAG_DISPOSED) {
+    throw new Error(ASSERT_DISPOSED);
+  }
   if (flag & FLAG_LOADING) {
     return this._readAsync(sender);
   }
@@ -1207,6 +1204,9 @@ function root(fn) {
     if (this._flag & FLAG_DISPOSED) {
       throw new Error(ASSERT_DISPOSED);
     }
+    if (typeof value === "function") {
+      value = value(this._value);
+    }
     if (this._value !== value) {
       if (IDLE) {
         this._value = value;
@@ -1214,6 +1214,32 @@ function root(fn) {
         flush();
       } else {
         schedule(this, value, assignSignal);
+      }
+    }
+  };
+
+  /**
+   * Microtask-deferred set. Writes the value immediately and notifies
+   * subscribers, but defers the flush to the next microtask. Multiple
+   * post() calls within the same tick coalesce into a single flush.
+   * Accepts a value or an updater function.
+   * @this {!Signal<T>}
+   * @param {T | function(T): T} value
+   * @returns {void}
+   */
+  SignalProto.post = function (value) {
+    if (this._flag & FLAG_DISPOSED) {
+      throw new Error(ASSERT_DISPOSED);
+    }
+    if (typeof value === "function") {
+      value = value(this._value);
+    }
+    if (this._value !== value) {
+      this._value = value;
+      notify(this, FLAG_STALE);
+      if (!POSTING) {
+        POSTING = true;
+        queueMicrotask(microflush);
       }
     }
   };
@@ -1870,7 +1896,6 @@ function root(fn) {
   RootProto.effect = EffectProto.effect = _effect;
   RootProto.spawn = EffectProto.spawn = _spawn;
 	RootProto.root = EffectProto.root = root;
-	RootProto.batch = EffectProto.batch = batch;
 }
 
 // ─── Global helpers (non-prototype) ────────────────────────────────────────
@@ -3566,6 +3591,16 @@ function spawn(depOrFn, fnOrOpts, optsOrArgs, args) {
   return node;
 }
 
+
+/**
+ * Microtask flush callback. Drains the queue if idle,
+ * otherwise the active transaction will handle it.
+ */
+function microflush() {
+  POSTING = false;
+    flush();
+}
+
 /**
  * @param {function(): void} fn
  * @returns {void}
@@ -3584,26 +3619,8 @@ function batch(fn) {
   }
 }
 
-// ─── IClock singleton ──────────────────────────────────────────────────────
-
-/**
- * Top-level clock object. The entry point to the library.
- * @const
- */
-function Clock() { }
-Clock.prototype.signal = signal;
-Clock.prototype.compute = compute;
-Clock.prototype.task = task;
-Clock.prototype.effect = effect;
-Clock.prototype.spawn = spawn;
-Clock.prototype.root = root;
-Clock.prototype.batch = batch;
-
-export const c = new Clock();
-
-export { Clock, Root, Signal, Compute, Effect };
-
 export {
+  Root, Signal, Compute, Effect,
   FLAG_STALE,
   FLAG_PENDING,
   FLAG_SCHEDULED,
@@ -3637,7 +3654,13 @@ export {
   assignSignal,
   notify,
   flush,
+  batch,
   startEffect,
-	startCompute,
-  signal
+  startCompute,
+  signal,
+  compute,
+  task,
+  effect,
+  spawn,
+  root
 };

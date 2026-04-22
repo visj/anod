@@ -21,7 +21,8 @@ export declare const OPT_WEAK: number;
 export interface Signal<T = any> {
   readonly disposed: boolean;
   get(): T;
-  set(value: T): void;
+  set(value: T | ((prev: T) => T)): void;
+  post(value: T | ((prev: T) => T)): void;
   dispose(): void;
 }
 
@@ -42,7 +43,6 @@ export interface Root {
   readonly disposed: boolean;
   recover(fn: (error: any) => boolean): void;
   cleanup(fn: () => void): void;
-  batch(fn: () => void): void;
   dispose(): void;
 }
 
@@ -110,8 +110,6 @@ export interface ComputeReader extends ComputeContext, Reader {}
 export interface RootContext extends Factory {
   cleanup(fn: () => void): void;
   recover(fn: (error: any) => boolean): void;
-  batch(fn: () => void): void;
-  dispose(): void;
 }
 
 /** Bound effect callback context. */
@@ -135,8 +133,6 @@ export interface SpawnReader extends SpawnContext, Reader {}
 // ─── Factory interface ────────────────────────────────────────────────
 
 export interface Factory {
-  signal<T>(value: T, guard?: EqualityFn<T>): Signal<T>;
-
   // Unbound compute
   compute<U>(fn: (c: ComputeReader) => U): Compute<Resolve<U>>;
   compute<U>(
@@ -221,13 +217,11 @@ export interface Factory {
     opts?: number
   ): Spawn;
 
-  root(fn: (c: RootContext) => void): Root;
 }
 
-// ─── Top-level API ────────────��───────────────────────────��───────────
+// ─── Top-level API ────────────────────────────────────────────────────
 
-export interface Clock extends Factory {
-  batch(fn: () => void): void;
-}
-
-export declare const c: Clock;
+export declare function signal<T>(value: T, guard?: EqualityFn<T>): Signal<T>;
+export declare function root(fn: (c: RootContext) => void): Root;
+export declare function batch(fn: () => void): void;
+export declare function flush(): void;

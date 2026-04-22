@@ -1,5 +1,7 @@
 import { describe, test, expect, collectAsync } from "#test-runner";
-import { c } from "#fyren";
+import { signal, root } from "#fyren";
+
+let c; root((_c) => { c = _c; });
 
 /**
  * Runs `fn` in a child scope and returns WeakRefs to everything `fn`
@@ -14,7 +16,7 @@ function capture(fn) {
 
 describe("equal()", () => {
     test("equal(true) suppresses notification when value changes", () => {
-        const s1 = c.signal(1);
+        const s1 = signal(1);
         let runs = 0;
         const c1 = c.compute(c => {
             c.equal(true);
@@ -33,7 +35,7 @@ describe("equal()", () => {
     });
 
     test("equal(false) forces notification when value stays the same", () => {
-        const s1 = c.signal(1);
+        const s1 = signal(1);
         let runs = 0;
         const c1 = c.compute(c => {
             c.equal(false);
@@ -54,7 +56,7 @@ describe("equal()", () => {
     });
 
     test("equal(false) forces notification on effects", () => {
-        const s1 = c.signal(1);
+        const s1 = signal(1);
         let runs = 0;
         const c1 = c.compute(c => {
             c.equal(false);
@@ -72,7 +74,7 @@ describe("equal()", () => {
     });
 
     test("default behavior: no notification when value stays the same", () => {
-        const s1 = c.signal(1);
+        const s1 = signal(1);
         let runs = 0;
         const c1 = c.compute(c => {
             c.val(s1);
@@ -91,7 +93,7 @@ describe("equal()", () => {
     });
 
     test("default behavior: notifies when value changes", () => {
-        const s1 = c.signal(1);
+        const s1 = signal(1);
         let runs = 0;
         const c1 = c.compute(c => {
             return c.val(s1) * 2;
@@ -118,10 +120,10 @@ describe("equal()", () => {
 	// 	 */
 	// 	const refs = capture(() => {
 	// 		let outer, sGate, sShared, sOther;
-	// 		const r = c.root((r) => {
-	// 			sGate = c.signal(true);
-	// 			sShared = c.signal("shared");
-	// 			sOther = c.signal("other");
+	// 		const r = root((r) => {
+	// 			sGate = signal(true);
+	// 			sShared = signal("shared");
+	// 			sOther = signal("other");
 
 	// 			outer = r.compute((c) => {
 	// 				if (c.val(sGate)) {
@@ -146,7 +148,7 @@ describe("equal()", () => {
 	// });
 
     test("equal(true) then equal(false) uses last call", () => {
-        const s1 = c.signal(1);
+        const s1 = signal(1);
         let runs = 0;
         const c1 = c.compute(c => {
             c.equal(true);
@@ -167,7 +169,7 @@ describe("equal()", () => {
     });
 
     test("equal(false) then equal(true) uses last call", () => {
-        const s1 = c.signal(1);
+        const s1 = signal(1);
         let runs = 0;
         const c1 = c.compute(c => {
             c.equal(false);
@@ -187,7 +189,7 @@ describe("equal()", () => {
     });
 
     test("equal() resets between compute runs", () => {
-        const s1 = c.signal(1);
+        const s1 = signal(1);
         let forceNotify = false;
         let runs = 0;
         const c1 = c.compute(c => {

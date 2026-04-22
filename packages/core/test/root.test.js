@@ -1,11 +1,11 @@
 import { describe, test, expect } from "#test-runner";
-import { c } from "#fyren";
+import { signal, root } from "#fyren";
 
 describe("root", () => {
     test("allows subcomputations to escape their parents via nested scope", () => {
-        c.root(r => {
-            const s1 = c.signal(0);
-            const s2 = c.signal(0);
+        root(r => {
+            const s1 = signal(0);
+            const s2 = signal(0);
             let count = 0;
 
             r.effect(c => {
@@ -30,9 +30,9 @@ describe("root", () => {
     });
 
     test("does not batch updates within scope", () => {
-        c.root(r => {
-            const s1 = c.signal(1);
-            const c1 = c.compute(c => c.val(s1));
+        root(r => {
+            const s1 = signal(1);
+            const c1 = r.compute(c => c.val(s1));
 
             expect(c1.get()).toBe(1);
             s1.set(2);

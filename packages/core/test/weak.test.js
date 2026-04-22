@@ -1,9 +1,11 @@
 import { describe, test, expect } from "#test-runner";
-import { c, OPT_WEAK } from "#fyren";
+import { signal, root, batch, OPT_WEAK } from "#fyren";
+
+let c; root((_c) => { c = _c; });
 
 describe("OPT_WEAK", () => {
     test("releases value when last subscriber disposes", () => {
-        const s1 = c.signal({ data: "large" });
+        const s1 = signal({ data: "large" });
         const c1 = c.compute(c => {
             return c.val(s1);
         }, undefined, OPT_WEAK);
@@ -22,7 +24,7 @@ describe("OPT_WEAK", () => {
 
     test("recomputes fresh after value is released", () => {
         let runs = 0;
-        const s1 = c.signal(1);
+        const s1 = signal(1);
         const c1 = c.compute(c => {
             runs++;
             return c.val(s1);
@@ -45,7 +47,7 @@ describe("OPT_WEAK", () => {
 
     test("retains value while at least one subscriber exists", () => {
         let runs = 0;
-        const s1 = c.signal(1);
+        const s1 = signal(1);
         const c1 = c.compute(c => {
             runs++;
             return c.val(s1);
@@ -71,7 +73,7 @@ describe("OPT_WEAK", () => {
 
     test("releases only when all subscribers are gone", () => {
         let runs = 0;
-        const s1 = c.signal(1);
+        const s1 = signal(1);
         const c1 = c.compute(c => {
             runs++;
             return c.val(s1);
@@ -95,7 +97,7 @@ describe("OPT_WEAK", () => {
 
     test("works with weak compute", () => {
         let runs = 0;
-        const s1 = c.signal(1);
+        const s1 = signal(1);
         const c1 = c.compute(c => {
             runs++;
             return c.val(s1) * 2;
@@ -117,7 +119,7 @@ describe("OPT_WEAK", () => {
 
     test("re-subscribing after release works correctly", () => {
         let runs = 0;
-        const s1 = c.signal(1);
+        const s1 = signal(1);
         const c1 = c.compute(c => {
             runs++;
             return c.val(s1);
@@ -157,8 +159,8 @@ describe("OPT_WEAK", () => {
 
     test("dynamic dep changes release weak compute", () => {
         let runs = 0;
-        const s1 = c.signal(1);
-        const s2 = c.signal(true);
+        const s1 = signal(1);
+        const s2 = signal(true);
         const weak1 = c.compute(c => {
             runs++;
             return c.val(s1);
@@ -189,7 +191,7 @@ describe("OPT_WEAK", () => {
 
     test("updates correctly when source changes while released", () => {
         let runs = 0;
-        const s1 = c.signal(1);
+        const s1 = signal(1);
         const c1 = c.compute(c => {
             runs++;
             return c.val(s1);
@@ -212,7 +214,7 @@ describe("OPT_WEAK", () => {
 
     test("non-weak compute does NOT release value when unsubscribed", () => {
         let runs = 0;
-        const s1 = c.signal(1);
+        const s1 = signal(1);
         const c1 = c.compute(c => {
             runs++;
             return c.val(s1);
@@ -232,7 +234,7 @@ describe("OPT_WEAK", () => {
 
     test("weak compute in a chain retains while intermediate subscribes", () => {
         let runs1 = 0;
-        const s1 = c.signal(1);
+        const s1 = signal(1);
         const c1 = c.compute(c => {
             runs1++;
             return c.val(s1);
@@ -259,7 +261,7 @@ describe("OPT_WEAK", () => {
 
     test("weak compute in a chain releases when intermediate disposes", () => {
         let runs1 = 0;
-        const s1 = c.signal(1);
+        const s1 = signal(1);
         const c1 = c.compute(c => {
             runs1++;
             return c.val(s1);
@@ -286,7 +288,7 @@ describe("OPT_WEAK", () => {
 
     test("OPT_WEAK with batch", () => {
         let runs = 0;
-        const s1 = c.signal(1);
+        const s1 = signal(1);
         const c1 = c.compute(c => {
             runs++;
             return c.val(s1);
@@ -298,7 +300,7 @@ describe("OPT_WEAK", () => {
         });
 
         runs = 0;
-        c.batch(() => {
+        batch(() => {
             s1.set(2);
             s1.set(3);
         });
@@ -309,7 +311,7 @@ describe("OPT_WEAK", () => {
         e1.dispose();
 
         /** After release, batch update then read */
-        c.batch(() => {
+        batch(() => {
             s1.set(10);
         });
         expect(c1.get()).toBe(10);

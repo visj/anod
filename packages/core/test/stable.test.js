@@ -1,5 +1,7 @@
 import { describe, test, expect } from "#test-runner";
-import { c } from "#fyren";
+import { signal, root } from "#fyren";
+
+let c; root((_c) => { c = _c; });
 
 describe("stable compute", () => {
 	test("val() returns stale value for unread compute (version 0 collision)", () => {
@@ -14,8 +16,8 @@ describe("stable compute", () => {
 		 * evaluates 0 === 0 → true, returning _value without checking
 		 * FLAG_STALE. The compute never refreshes.
 		 */
-		const trigger = c.signal(1);
-		const stableTrigger = c.signal("a");
+		const trigger = signal(1);
+		const stableTrigger = signal("a");
 
 		// The "victim" compute: created but never pulled during setup.
 		// It reads trigger, so when trigger changes it becomes stale.
@@ -61,8 +63,8 @@ describe("stable compute", () => {
 		 * This variant just confirms the fix also handles the case where
 		 * victim._version = 0 because it was never read.
 		 */
-		const s1 = c.signal(1);
-		const s2 = c.signal(100);
+		const s1 = signal(1);
+		const s2 = signal(100);
 
 		// victim: never pulled
 		const victim = c.compute((cx) => cx.val(s1) + 1);

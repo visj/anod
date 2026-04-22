@@ -1,12 +1,12 @@
 import { describe, test, expect } from "#test-runner";
-import { c } from "#fyren";
+import { signal, root, batch } from "#fyren";
 
 describe("recover", () => {
     describe("root recovery", () => {
         test("swallows error when recover returns true", () => {
             let recovered = null;
 
-            const r1 = c.root(r => {
+            const r1 = root(r => {
                 r.recover(err => {
                     recovered = err;
                     return true;
@@ -26,7 +26,7 @@ describe("recover", () => {
             let recovered = null;
 
             expect(() => {
-                c.root(r => {
+                root(r => {
                     r.recover(err => {
                         recovered = err;
                         return false;
@@ -43,7 +43,7 @@ describe("recover", () => {
 
         test("propagates error when no recover is registered", () => {
             expect(() => {
-                c.root(r => {
+                root(r => {
                     r.effect(c => {
                         throw new Error("unhandled");
                     });
@@ -56,7 +56,7 @@ describe("recover", () => {
         test("stops bubbling when first handler returns true", () => {
             let calls = [];
 
-            const r1 = c.root(r => {
+            const r1 = root(r => {
                 r.recover(err => {
                     calls.push("first");
                     return true;
@@ -78,7 +78,7 @@ describe("recover", () => {
         test("tries second handler when first returns false", () => {
             let calls = [];
 
-            const r1 = c.root(r => {
+            const r1 = root(r => {
                 r.recover(err => {
                     calls.push("first");
                     return false;
@@ -101,9 +101,9 @@ describe("recover", () => {
     describe("compute error to effect", () => {
         test("recovers when effect throws on errored compute value", () => {
             let recovered = null;
-            const s1 = c.signal(0);
+            const s1 = signal(0);
 
-            const r1 = c.root(r => {
+            const r1 = root(r => {
                 r.recover(err => {
                     recovered = err;
                     return true;
@@ -129,7 +129,7 @@ describe("recover", () => {
             let innerCalled = false;
             let outerCalled = false;
 
-            const r1 = c.root(r => {
+            const r1 = root(r => {
                 r.recover(() => {
                     outerCalled = true;
                     return true;
@@ -156,7 +156,7 @@ describe("recover", () => {
             let innerCalled = false;
             let outerCalled = false;
 
-            const r1 = c.root(r => {
+            const r1 = root(r => {
                 r.recover(() => {
                     outerCalled = true;
                     return true;
@@ -182,10 +182,10 @@ describe("recover", () => {
 
     describe("effect disposal", () => {
         test("errored effect is disposed even when recovered", () => {
-            const s1 = c.signal(0);
+            const s1 = signal(0);
             let runs = 0;
 
-            const r1 = c.root(r => {
+            const r1 = root(r => {
                 r.recover(() => true);
 
                 r.effect(c => {
@@ -208,12 +208,12 @@ describe("recover", () => {
 
     describe("batch recovery", () => {
         test("recovers error during batch and completes normally", () => {
-            const s1 = c.signal(false);
-            const s2 = c.signal(1);
+            const s1 = signal(false);
+            const s2 = signal(1);
             let recovered = null;
             let s2val = 0;
 
-            const r1 = c.root(r => {
+            const r1 = root(r => {
                 r.recover(err => {
                     recovered = err;
                     return true;
@@ -230,7 +230,7 @@ describe("recover", () => {
                 });
             });
 
-            c.batch(() => {
+            batch(() => {
                 s1.set(true);
                 s2.set(42);
             });
@@ -244,10 +244,10 @@ describe("recover", () => {
 
     describe("recovery on triggered update", () => {
         test("recovers error triggered by signal change", () => {
-            const s1 = c.signal(false);
+            const s1 = signal(false);
             let recovered = null;
 
-            const r1 = c.root(r => {
+            const r1 = root(r => {
                 r.recover(err => {
                     recovered = err;
                     return true;
@@ -270,11 +270,11 @@ describe("recover", () => {
 
     describe("recover re-registration", () => {
         test("old recover handler is cleared on effect re-run", () => {
-            const s1 = c.signal(0);
+            const s1 = signal(0);
             let handlerVersion = 0;
             let recoveredVersion = -1;
 
-            const r1 = c.root(r => {
+            const r1 = root(r => {
                 r.effect(c => {
                     let version = c.val(s1);
                     handlerVersion = version;
@@ -303,10 +303,10 @@ describe("recover", () => {
 
     describe("dispose clears recover", () => {
         test("dispose nullifies recover handlers", () => {
-            const s1 = c.signal(0);
+            const s1 = signal(0);
             let recovered = false;
 
-            const r1 = c.root(r => {
+            const r1 = root(r => {
                 r.recover(() => {
                     recovered = true;
                     return true;
@@ -318,7 +318,7 @@ describe("recover", () => {
             // We verify by checking that creating effects outside the disposed root
             // that throw will not be caught
             expect(() => {
-                c.root(r => {
+                root(r => {
                     r.effect(c => {
                         throw new Error("after dispose");
                     });
