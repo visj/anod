@@ -1360,21 +1360,18 @@ function root(fn) {
       try {
         if (flag & FLAG_BOUND) {
           let dep = this._dep1;
-          let dflag = dep !== null ? dep._flag : FLAG_DISPOSED;
-          if (dflag & (FLAG_STALE | FLAG_PENDING)) {
+          if (dep._flag & (FLAG_STALE | FLAG_PENDING)) {
             dep._refresh();
-            dflag = dep._flag;
-          }
-          if (dflag & (FLAG_ERROR | FLAG_DISPOSED)) {
-            absorb(this, (dflag & FLAG_DISPOSED) ? ASSERT_DISPOSED : dep._value, time);
-            return;
           }
           value = this._fn(dep._value, this, this._value, args);
         } else {
           value = this._fn(this, this._value, args);
         }
       } catch (err) {
-        absorb(this, err, time);
+        this._value = normalize(err);
+        this._flag =
+          (this._flag & ~(FLAG_STALE | FLAG_PENDING | FLAG_INIT)) | FLAG_ERROR;
+        this._ctime = time;
         return;
       }
     } else {
@@ -1397,14 +1394,14 @@ function root(fn) {
         depsLen = this._deps !== null ? this._deps.length : 0;
       }
 
-      call: try {
+      try {
         if (flag & FLAG_BOUND) {
+          /** Bound + setup/dynamic: refresh dep1, stamp its version
+           *  so val() treats it as already-tracked, then pass its
+           *  value as the first argument. */
           let dep = this._dep1;
-          let dflag = refreshDep1(dep);
-          if (dflag & (FLAG_ERROR | FLAG_DISPOSED)) {
-            value = (dflag & FLAG_DISPOSED) ? { message: ASSERT_DISPOSED } : normalize(dep._value);
-            this._flag |= FLAG_ERROR;
-            break call;
+          if (dep._flag & (FLAG_STALE | FLAG_PENDING)) {
+            dep._refresh();
           }
           dep._version = version;
           value = this._fn(dep._value, this, this._value, args);
@@ -1448,18 +1445,34 @@ function root(fn) {
       }
       VERSION = prevRVer;
     }
-    flag = this._flag;
 
-    
+    this._flag &= ~(FLAG_STALE | FLAG_PENDING | FLAG_SETUP);
+
     /** Async: if fn returned a promise/iterator, dispatch and return. */
-    if (
-      (flag & (FLAG_ASYNC | FLAG_ERROR)) === FLAG_ASYNC &&
-      waitFor(this, value, time)
-    ) {
-      return;
+    if (flag & FLAG_ASYNC) {
+      let kind = asyncKind(value);
+      if (kind !== ASYNC_SYNC) {
+        this._flag |= FLAG_LOADING;
+        if (kind === ASYNC_PROMISE) {
+          resolvePromise(
+            new WeakRef(this),
+            /** @type {IThenable} */ (value),
+            time
+          );
+        } else {
+          resolveIterator(
+            new WeakRef(this),
+            /** @type {AsyncIterator | AsyncIterable} */ (value),
+            time
+          );
+        }
+        return;
+      }
     }
-    this._flag &= ~(FLAG_INIT | FLAG_SETUP | FLAG_STALE | FLAG_PENDING);
-    
+
+    this._flag &= ~FLAG_INIT;
+    /** Value comparison (shared by sync and async SYNC_SYNC). */
+    flag = this._flag;
     if (flag & FLAG_ERROR) {
       this._value = value;
       this._ctime = time;
@@ -1474,18 +1487,29 @@ function root(fn) {
   };
 
   /**
-   * Compute notification handler. Three cases:
-   * 1. Default: notify PENDING downstream (pure pull).
-   * 2. Eager notify STALE downstream (pure push).
+   * Compute notification handler. Four cases:
+   * 1. Default: propagate PENDING downstream (pure pull).
+   * 2. FLAG_WAITER: enqueue to COMPUTES + notify PENDING.
+   * 3. FLAG_EAGER + FLAG_ASYNC: enqueue to COMPUTES for eager re-run.
+   *    Downstream is notified at settle time.
+   * 4. FLAG_EAGER + sync: notify FLAG_STALE directly — pure push node
+   *    that eagerly updates and forces downstream to re-evaluate.
    * @this {Compute}
    * @returns {void}
    */
   ComputeProto._receive = function () {
-    if (this._flag & (FLAG_EAGER | FLAG_WAITER)) {
-      COMPUTES[COMPUTE_COUNT++] = this;
-      notify(this, this._flag & FLAG_EAGER ? FLAG_STALE : FLAG_PENDING);
-    } else {
+    let flag = this._flag;
+    if (!(flag & (FLAG_EAGER | FLAG_WAITER))) {
       notify(this, FLAG_PENDING);
+    } else {
+      COMPUTES[COMPUTE_COUNT++] = this;
+      if (flag & FLAG_EAGER) {
+        if (!(flag & FLAG_ASYNC)) {
+          notify(this, FLAG_STALE);
+        }
+      } else {
+        notify(this, FLAG_PENDING);
+      }
     }
   };
 
