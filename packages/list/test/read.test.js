@@ -1,5 +1,5 @@
 import { describe, test, expect } from "#test-runner";
-import "../src/list.js";
+import "#list";
 import { c } from "@fyren/core";
 
 // ─── at ─────────────────────────────────────────────────────────────────────

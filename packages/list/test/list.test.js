@@ -1,6 +1,6 @@
 import { describe, test, expect } from "#test-runner";
 import { c } from "@fyren/core";
-import "../src/list.js";
+import "#list";
 
 describe("list", () => {
     test("creates a signal holding an array", () => {

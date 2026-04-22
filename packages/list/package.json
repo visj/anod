@@ -37,6 +37,7 @@
       "bun": "./test/env/bun.js",
       "node": "./test/env/node.js",
       "default": "./test/env/node.js"
-    }
+    },
+    "#list": "./dist/index.mjs"
   }
 }
