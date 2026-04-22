@@ -76,21 +76,17 @@ interface IAsyncContext {
 }
 
 /** Bound compute callback context. */
-export interface IComputeContext extends IBaseContext {
-  async(): asserts this is IAsyncComputeContext;
-}
+export interface IComputeContext extends IBaseContext {}
 
 /** Unbound compute callback context — adds dependency tracking. */
 export interface IComputeReader extends IBaseContext {
   val<R>(signal: Sender<R>): R;
   defer<R>(signal: Sender<R>): R;
-  async(): asserts this is IAsyncComputeReader;
 }
 
 /** Bound effect/spawn callback context — adds recover. */
 export interface IEffectContext extends IBaseContext {
   recover(fn: (error: any) => boolean): void;
-  async(): asserts this is IAsyncEffectContext;
 }
 
 /** Unbound effect/spawn callback context — adds dep tracking + recover. */
@@ -98,7 +94,6 @@ export interface IEffectReader extends IBaseContext {
   val<R>(signal: Sender<R>): R;
   defer<R>(signal: Sender<R>): R;
   recover(fn: (error: any) => boolean): void;
-  async(): asserts this is IAsyncEffectReader;
 }
 
 /** Async bound compute context (task). */

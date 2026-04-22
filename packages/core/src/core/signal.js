@@ -66,6 +66,9 @@ const ASYNC_SYNC = 3;
  */
 const REGRET = { then: function () { } };
 
+/** @const */
+const NOOP = function () { };
+
 /**
  * Thrown (synchronously) when an async node's fn returns a non-sync
  * value (promise/iterator) without having called `c.suspend()`. This
@@ -1052,16 +1055,6 @@ function root(fn) {
   };
 
   /**
-   * Lifts a sync node to async mode. Enables suspend(), lock(),
-   * controller(), and other async context methods. Once set, the
-   * node stays async for all subsequent runs.
-   * @this {!Compute | !Effect}
-   */
-  ComputeProto.async = EffectProto.async = function () {
-    this._flag |= FLAG_ASYNC;
-  };
-
-  /**
    * Lazily allocates the Fiber for this node. If no fiber exists yet,
    * creates one and lifts _args into { _args, _fiber }.
    * @this {!Compute | !Effect}
@@ -1154,7 +1147,8 @@ function root(fn) {
   function pending(tasks) {
     let loading = false;
     if (tasks._flag !== undefined) {
-      /** Single task. */
+			/** Single task. */
+			// this.val(tasks); @Claude why not like this? you wrote the line below.
       val.call(this, tasks);
       if (tasks._flag & FLAG_LOADING) {
         loading = true;
@@ -1497,9 +1491,8 @@ function root(fn) {
 
     this._flag &= ~(FLAG_STALE | FLAG_PENDING | FLAG_SETUP);
 
-    /** Async: if fn returned a promise/iterator, dispatch and return.
-     *  Re-read _flag in case c.async() was called during _fn. */
-    if (this._flag & FLAG_ASYNC) {
+    /** Async: if fn returned a promise/iterator, dispatch and return. */
+    if (flag & FLAG_ASYNC) {
       let kind = asyncKind(value);
       if (kind !== ASYNC_SYNC) {
         this._flag |= FLAG_LOADING;
@@ -1705,8 +1698,7 @@ function root(fn) {
       }
     }
 
-    /** Async: re-read _flag in case c.async() was called during _fn. */
-    if (this._flag & FLAG_ASYNC) {
+    if (flag & FLAG_ASYNC) {
       let kind = asyncKind(value);
       if (kind !== ASYNC_SYNC) {
         this._flag |= FLAG_LOADING;
@@ -1770,18 +1762,18 @@ function root(fn) {
   // ─── Owned factory methods (Root + Effect prototypes) ───────────────
 
   /** @this {!Root | !Effect} */
-  function _compute(a, b, c, d, e) {
+  function _compute(depOrFn, fnOrSeed, optsOrSeed, argsOrOpts, args) {
     if (this._flag & FLAG_DISPOSED) {
       throw new Error(ASSERT_DISPOSED);
     }
     let flag, node;
-    if (typeof a === "function") {
-      flag = FLAG_SETUP | ((0 | c) & OPTIONS);
-      node = new Compute(flag, a, null, b, d);
+    if (typeof depOrFn === "function") {
+      flag = FLAG_SETUP | ((0 | optsOrSeed) & OPTIONS);
+      node = new Compute(flag, depOrFn, null, fnOrSeed, argsOrOpts);
     } else {
-      flag = FLAG_STABLE | FLAG_BOUND | FLAG_SINGLE | ((0 | d) & OPTIONS);
-      node = new Compute(flag, b, a, c, e);
-      node._dep1slot = connect(a, node, -1);
+      flag = FLAG_STABLE | FLAG_BOUND | FLAG_SINGLE | ((0 | argsOrOpts) & OPTIONS);
+      node = new Compute(flag, fnOrSeed, depOrFn, optsOrSeed, args);
+      node._dep1slot = connect(depOrFn, node, -1);
     }
     addOwned(this, node);
     if (!(flag & FLAG_DEFER)) {
@@ -1791,23 +1783,23 @@ function root(fn) {
   }
 
   /** @this {!Root | !Effect} */
-  function _task(a, b, c, d, e) {
+  function _task(depOrFn, fnOrSeed, optsOrSeed, argsOrOpts, args) {
     if (this._flag & FLAG_DISPOSED) {
       throw new Error(ASSERT_DISPOSED);
     }
     let flag, node;
-    if (typeof a === "function") {
-      flag = FLAG_ASYNC | FLAG_SETUP | ((0 | c) & OPTIONS);
-      node = new Compute(flag, a, null, b, d);
+    if (typeof depOrFn === "function") {
+      flag = FLAG_ASYNC | FLAG_SETUP | ((0 | optsOrSeed) & OPTIONS);
+      node = new Compute(flag, depOrFn, null, fnOrSeed, argsOrOpts);
     } else {
       flag =
         FLAG_ASYNC |
         FLAG_STABLE |
         FLAG_BOUND |
         FLAG_SINGLE |
-        ((0 | d) & OPTIONS);
-      node = new Compute(flag, b, a, c, e);
-      node._dep1slot = connect(a, node, -1);
+        ((0 | argsOrOpts) & OPTIONS);
+      node = new Compute(flag, fnOrSeed, depOrFn, optsOrSeed, args);
+      node._dep1slot = connect(depOrFn, node, -1);
     }
     addOwned(this, node);
     if (!(flag & FLAG_DEFER)) {
@@ -1817,18 +1809,18 @@ function root(fn) {
   }
 
   /** @this {!Root | !Effect} */
-  function _effect(a, b, c, d) {
+  function _effect(depOrFn, fnOrOpts, optsOrArgs, args) {
     if (this._flag & FLAG_DISPOSED) {
       throw new Error(ASSERT_DISPOSED);
     }
     let flag, node;
-    if (typeof a === "function") {
-      flag = FLAG_SETUP | ((0 | b) & OPTIONS);
-      node = new Effect(flag, a, null, this, c);
+    if (typeof depOrFn === "function") {
+      flag = FLAG_SETUP | ((0 | fnOrOpts) & OPTIONS);
+      node = new Effect(flag, depOrFn, null, this, optsOrArgs);
     } else {
-      flag = FLAG_STABLE | FLAG_BOUND | FLAG_SINGLE | ((0 | c) & OPTIONS);
-      node = new Effect(flag, b, a, this, d);
-      node._dep1slot = connect(a, node, -1);
+      flag = FLAG_STABLE | FLAG_BOUND | FLAG_SINGLE | ((0 | optsOrArgs) & OPTIONS);
+      node = new Effect(flag, fnOrOpts, depOrFn, this, args);
+      node._dep1slot = connect(depOrFn, node, -1);
     }
     let level = this._level + 1;
     if (this._level > 2 && level >= LEVELS.length) {
@@ -1842,23 +1834,23 @@ function root(fn) {
   }
 
   /** @this {!Root | !Effect} */
-  function _spawn(a, b, c, d) {
+  function _spawn(depOrFn, fnOrOpts, optsOrArgs, args) {
     if (this._flag & FLAG_DISPOSED) {
       throw new Error(ASSERT_DISPOSED);
     }
     let flag, node;
-    if (typeof a === "function") {
-      flag = FLAG_ASYNC | FLAG_SETUP | ((0 | b) & OPTIONS);
-      node = new Effect(flag, a, null, this, c);
+    if (typeof depOrFn === "function") {
+      flag = FLAG_ASYNC | FLAG_SETUP | ((0 | fnOrOpts) & OPTIONS);
+      node = new Effect(flag, depOrFn, null, this, optsOrArgs);
     } else {
       flag =
         FLAG_ASYNC |
         FLAG_STABLE |
         FLAG_BOUND |
         FLAG_SINGLE |
-        ((0 | c) & OPTIONS);
-      node = new Effect(flag, b, a, this, d);
-      node._dep1slot = connect(a, node, -1);
+        ((0 | optsOrArgs) & OPTIONS);
+      node = new Effect(flag, fnOrOpts, depOrFn, this, args);
+      node._dep1slot = connect(depOrFn, node, -1);
     }
     let level = this._level + 1;
     if (this._level > 2 && level >= LEVELS.length) {
@@ -3054,6 +3046,8 @@ function addWaiter(responderCh, awaiter, awaiterResSlot, resolve, reject) {
  * @returns {void}
  */
 function send(awaiter, task, resolve, reject) {
+  resolve = resolve || NOOP;
+  reject = reject || NOOP;
   let awaiterCh = awaiter._channel();
   let responderCh = task._channel();
 
@@ -3137,15 +3131,6 @@ function clearChannel(channel) {
   }
 }
 
-/**
- * Resolves (or rejects) all waiters of a responder, subscribes each
- * awaiter as a dep of the responder, and clears their channel references.
- * @param {!Compute} responder
- * @param {!Channel} responderCh
- * @param {*} value
- * @param {boolean} isError
- * @returns {void}
- */
 /**
  * Resolves (or rejects) all waiters of a responder and clears their
  * channel references. When panic is false, subscribes each awaiter as
@@ -3613,7 +3598,9 @@ Clock.prototype.spawn = spawn;
 Clock.prototype.root = root;
 Clock.prototype.batch = batch;
 
-const c = new Clock();
+export const c = new Clock();
+
+export { Clock, Root, Signal, Compute, Effect };
 
 export {
   FLAG_STALE,
@@ -3649,50 +3636,7 @@ export {
   assignSignal,
   notify,
   flush,
-  startEffect
+  startEffect,
+	startCompute,
+  signal
 };
-
-/**
- * DEBUG: Returns all internal global arrays/stacks that could retain references.
- * Each entry is [name, array]. Only for leak testing.
- */
-function _internals() {
-  return [
-    ["VSTACK", VSTACK],
-    ["CSTACK", CSTACK],
-    ["CINDEX", CINDEX],
-    ["DSTACK", DSTACK],
-    ["DISPOSES", DISPOSES],
-    ["SENDERS", SENDERS],
-    ["PAYLOADS", PAYLOADS],
-    ["COMPUTES", COMPUTES],
-    ["RECEIVERS", RECEIVERS],
-    ["SCOPES[0]", SCOPES[0]],
-    ["SCOPES[1]", SCOPES[1]],
-    ["SCOPES[2]", SCOPES[2]],
-    ["SCOPES[3]", SCOPES[3]],
-  ];
-}
-
-/**
- * DEBUG: Scans all internal arrays and returns a list of retained non-primitive
- * values (objects/functions) with their location.
- * @returns {Array<{name: string, index: number, value: *}>}
- */
-function _checkLeaks() {
-  let leaks = [];
-  let stacks = _internals();
-  for (let s = 0; s < stacks.length; s++) {
-    let name = stacks[s][0];
-    let arr = stacks[s][1];
-    for (let i = 0; i < arr.length; i++) {
-      let v = arr[i];
-      if (v !== null && v !== undefined && typeof v === "object" || typeof v === "function") {
-        leaks.push({ name, index: i, value: v });
-      }
-    }
-  }
-  return leaks;
-}
-
-export { c, Clock, Root, Signal, Compute, Effect, _checkLeaks };

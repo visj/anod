@@ -31,5 +31,7 @@ export {
   assignSignal,
   notify,
   flush,
-  startEffect
+  startEffect,
+	startCompute,
+  signal
 } from "./core/signal.js";

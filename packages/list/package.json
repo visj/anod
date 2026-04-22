@@ -16,21 +16,20 @@
     "test": "bun test",
     "test:min": "bun dist/test.min.js"
   },
+  "sideEffects": true,
   "keywords": [],
   "author": "Vilhelm Sjölund",
   "license": "MIT",
   "description": "",
-  "dependencies": {
-    "@fyren/core": "file:../core"
-  },
   "devDependencies": {
     "@ampproject/remapping": "^2.3.0",
+    "@fyren/core": "workspace:*",
     "@preact/signals": "^2.8.1",
     "@preact/signals-core": "^1.13.0",
+    "alien-signals": "^3.1.2",
     "mitata": "^1.0.34",
     "rolldown": "^1.0.0-rc.9",
-    "terser": "^5.0.0",
-    "alien-signals": "^3.1.2"
+    "terser": "^5.0.0"
   },
   "imports": {
     "#test-runner": {

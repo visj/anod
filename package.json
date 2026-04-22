@@ -1,8 +1,10 @@
 {
   "name": "fyren",
+  "private": "true",
   "workspaces": [
     "packages/core",
     "packages/list",
+    "packages/stream",
     "packages/tools"
   ],
   "version": "0.6.0",
