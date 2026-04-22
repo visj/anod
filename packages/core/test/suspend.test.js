@@ -916,119 +916,139 @@ describe("suspend(tasks[]): concurrent task await", () => {
 		r.dispose();
 	});
 
-	test("callback variant: all settled, zero Promise allocation", async () => {
-		const taskA = c.task((cx) => cx.suspend(Promise.resolve(10)));
-		const taskB = c.task((cx) => cx.suspend(Promise.resolve(20)));
-		await settle();
+});
 
+describe("suspend(setupFn): callback constructor", () => {
+	test("settles node when resolve is called", async () => {
 		let result = null;
-		let errorVal = null;
 		const r = root((r) => {
-			r.spawn(async (cx) => {
-				cx.suspend(
-					[taskA, taskB],
-					(values) => { result = values; },
-					(err) => { errorVal = err; }
-				);
-				await cx.suspend(tick());
+			r.spawn((c) => {
+				c.suspend((resolve) => {
+					setTimeout(() => resolve(42), 1);
+				});
 			});
 		});
-		await settle();
-		expect(result).toEqual([10, 20]);
-		expect(errorVal).toBe(null);
+		await new Promise((r) => setTimeout(r, 10));
 		r.dispose();
 	});
 
-	test("callback variant: loading tasks, callbacks fire on settle", async () => {
-		let resolveA, resolveB;
-		const taskA = c.task((cx) => cx.suspend(new Promise((r) => { resolveA = r; })));
-		const taskB = c.task((cx) => cx.suspend(new Promise((r) => { resolveB = r; })));
-
-		let result = null;
+	test("sync spawn with callback suspend", async () => {
+		let observed = null;
+		const s = signal(0);
 		const r = root((r) => {
-			r.spawn(async (cx) => {
-				cx.suspend(
-					[taskA, taskB],
-					(values) => { result = values; },
-					() => {}
-				);
-				await cx.suspend(tick());
+			const t = r.task(s, (val, c) => {
+				return c.suspend((resolve) => {
+					setTimeout(() => resolve(val * 10), 1);
+				});
+			});
+			r.spawn(async (c) => {
+				observed = await c.suspend(t);
 			});
 		});
-		await settle();
-		expect(result).toBe(null);
-
-		resolveA(10); await settle();
-		expect(result).toBe(null);
-
-		resolveB(20); await settle();
-		expect(result).toEqual([10, 20]);
+		await new Promise((r) => setTimeout(r, 10));
+		expect(observed).toBe(0);
 		r.dispose();
 	});
 
-	test("callback variant: error calls onReject", async () => {
-		const taskA = c.task((cx) => cx.suspend(Promise.resolve(10)));
-		const taskB = c.task((cx) => cx.suspend(Promise.reject(new Error("fail"))));
-		await settle();
-
-		let errorVal = null;
-		let result = null;
+	test("reject path calls error handler", async () => {
+		let caught = null;
 		const r = root((r) => {
-			r.spawn(async (cx) => {
-				cx.recover(() => true);
-				cx.suspend(
-					[taskA, taskB],
-					(values) => { result = values; },
-					(err) => { errorVal = err; }
-				);
-				await cx.suspend(tick());
+			r.spawn((c) => {
+				c.recover((err) => {
+					caught = err;
+					return true;
+				});
+				c.suspend((resolve, reject) => {
+					setTimeout(() => reject(new Error("boom")), 1);
+				});
 			});
 		});
-		await settle();
-		expect(result).toBe(null);
-		expect(errorVal).not.toBeNull();
+		await new Promise((r) => setTimeout(r, 10));
+		expect(caught).not.toBeNull();
+		expect(caught.message).toBe("boom");
 		r.dispose();
 	});
 
-	test("callback variant: single task settled", async () => {
-		const taskA = c.task((cx) => cx.suspend(Promise.resolve(42)));
-		await settle();
-
-		let result = null;
+	test("stale activation: resolve is ignored after re-run", async () => {
+		let staleResolve = null;
+		let runs = 0;
+		const trigger = signal(0);
 		const r = root((r) => {
-			r.spawn(async (cx) => {
-				cx.suspend(taskA,
-					(val) => { result = val; },
-					() => {}
-				);
-				await cx.suspend(tick());
+			r.spawn((c) => {
+				runs++;
+				c.val(trigger);
+				c.suspend((resolve) => {
+					staleResolve = resolve;
+				});
 			});
 		});
+		expect(runs).toBe(1);
+
+		/** Re-run the spawn — old activation is stale. */
+		trigger.set(1);
+		expect(runs).toBe(2);
+
+		/** Call the old resolve — should be silently ignored. */
+		staleResolve(99);
 		await settle();
-		expect(result).toBe(42);
 		r.dispose();
 	});
 
-	test("callback variant: single task loading", async () => {
-		let resolve;
-		const taskA = c.task((cx) => cx.suspend(new Promise((r) => { resolve = r; })));
+	test("throws on double suspend with callback", () => {
+		expect(() => {
+			root((r) => {
+				r.spawn((c) => {
+					c.suspend((resolve) => {});
+					c.suspend((resolve) => {});
+				});
+			});
+		}).toThrow();
+	});
 
-		let result = null;
+	test("websocket-style pattern: sync spawn with event callbacks", async () => {
+		let opened = false;
+		let closed = false;
+		/** Simulate a WebSocket with events. */
+		class FakeWS {
+			constructor() { this._listeners = {}; }
+			addEventListener(name, fn) {
+				this._listeners[name] = fn;
+			}
+			close() { closed = true; }
+			_fire(name) { this._listeners[name]?.(); }
+		}
+
+		const url = signal("ws://localhost");
+		let ws = null;
 		const r = root((r) => {
-			r.spawn(async (cx) => {
-				cx.suspend(taskA,
-					(val) => { result = val; },
-					() => {}
-				);
-				await cx.suspend(tick());
+			r.spawn((c) => {
+				ws = new FakeWS();
+				c.cleanup(() => ws.close());
+				c.val(url);
+				c.suspend((resolve) => {
+					ws.addEventListener("open", () => {
+						opened = true;
+						resolve();
+					});
+				});
 			});
 		});
+		expect(opened).toBe(false);
+		ws._fire("open");
 		await settle();
-		expect(result).toBe(null);
+		expect(opened).toBe(true);
 
-		resolve(99);
+		/** Change url — spawn re-runs, old ws is closed. */
+		opened = false;
+		closed = false;
+		url.set("ws://other");
+		expect(closed).toBe(true);
+		expect(opened).toBe(false);
+
+		/** New ws opens. */
+		ws._fire("open");
 		await settle();
-		expect(result).toBe(99);
+		expect(opened).toBe(true);
 		r.dispose();
 	});
 });

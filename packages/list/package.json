@@ -2,32 +2,44 @@
   "name": "@fyren/list",
   "version": "0.5.0",
   "type": "module",
-  "main": "./dist/index.mjs",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "import": "./dist/index.mjs"
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
     },
     "./src": {
       "import": "./src/list.js"
     }
   },
+  "files": [
+    "dist",
+    "types"
+  ],
+  "sideEffects": true,
   "scripts": {
     "make": "bun scripts/build.js",
-    "test": "bun test",
-    "test:min": "bun dist/test.min.js"
+    "test": "bun test"
   },
-  "sideEffects": true,
-  "keywords": [],
+  "keywords": ["reactive", "signals", "list", "array"],
   "author": "Vilhelm Sjölund",
   "license": "MIT",
-  "description": "",
+  "description": "Reactive array methods for @fyren/core",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/visj/fyren.git",
+    "directory": "packages/list"
+  },
+  "homepage": "https://github.com/visj/fyren#readme",
+  "bugs": {
+    "url": "https://github.com/visj/fyren/issues"
+  },
+  "peerDependencies": {
+    "@fyren/core": "^0.5.0"
+  },
   "devDependencies": {
-    "@ampproject/remapping": "^2.3.0",
-    "@fyren/core": "../core",
-    "@preact/signals": "^2.8.1",
-    "@preact/signals-core": "^1.13.0",
-    "alien-signals": "^3.1.2",
-    "mitata": "^1.0.34",
+    "@fyren/core": "workspace:*",
     "rolldown": "^1.0.0-rc.9",
     "terser": "^5.0.0"
   },
@@ -37,6 +49,6 @@
       "node": "./test/env/node.js",
       "default": "./test/env/node.js"
     },
-    "#list": "./dist/index.mjs"
+    "#list": "./dist/index.js"
   }
 }

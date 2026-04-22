@@ -4,6 +4,7 @@
   "workspaces": [
     "packages/core",
     "packages/list",
+    "packages/fyren",
     "packages/stream",
     "packages/tools"
   ],

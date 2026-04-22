@@ -8,8 +8,6 @@ import {
   IEffect
 } from "./types.js";
 
-// ─── Flags ─────────────────────────────────────────────────────────────────
-
 /* Sender flags (bits 0-5) — readable on any Sender (Signal or Compute).
  * Bits 6+ on a plain Signal are free for extension (e.g. mod encoding
  * in @fyren/list). FLAG_RECEIVER distinguishes Compute/Effect from Signal. */
@@ -34,6 +32,7 @@ const FLAG_WAITER = 1 << 15;
 const FLAG_FIBER = 1 << 16;
 const FLAG_BLOCKED = 1 << 17;
 const FLAG_LOCK = 1 << 18;
+const FLAG_SUSPEND = 1 << 19;
 
 /* Shared Sender | Receiver flags — read on generic Sender-typed variables.
  * Code that reads them MUST also check FLAG_RECEIVER to avoid false positives
@@ -77,8 +76,6 @@ const NOOP = function () { };
  * @const
  */
 const ASSERT_DISPOSED = "Cannot access a disposed node";
-
-// ─── Global state ──────────────────────────────────────────────────────────
 
 /**
  * @type {Array<Sender | number>}
@@ -192,7 +189,6 @@ var RECEIVERS = [];
 
 var RECEIVER_COUNT = 0;
 
-// ─── Constructors ──────────────────────────────────────────────────────────
 // All five node types declared together. Fields only — methods are installed
 // on the prototypes further down, after the prototype-method implementations
 // they reference are in scope.
@@ -342,7 +338,6 @@ function Channel() {
   this._waiters = null;
 }
 
-// ─── Prototype method implementations ──────────────────────────────────────
 // Top-level named functions so they aren't anonymous closures and can be
 // shared between prototypes. Installed onto prototypes in the single
 // assignment block further down.
@@ -599,8 +594,6 @@ function refreshDep1(dep) {
   return dflag;
 }
 
-// ─── Shared factories (used by both `c` and prototypes) ───────────────────
-
 /**
  * @param {*} value
  * @returns {!Signal}
@@ -626,8 +619,6 @@ function root(fn) {
   return node;
 }
 
-// ─── Prototype assignments ─────────────────────────────────────────────────
-
 {
   /** @const */
   let RootProto = Root.prototype;
@@ -638,15 +629,11 @@ function root(fn) {
   /** @const */
   let EffectProto = Effect.prototype;
 
-  // ─── Prototype-level default fields ────────────────────────────────────
-
   RootProto._flag = 0;
   RootProto._owner = null;
   RootProto._level = -1;
 
   SignalProto._ctime = 0;
-
-  // ─── Shared methods ────────────────────────────────────────────────────
 
   // Disposer#dispose — shared by all four node types
   RootProto.dispose =
@@ -674,8 +661,6 @@ function root(fn) {
   Object.defineProperties(ComputeProto, _disposed);
   Object.defineProperties(EffectProto, _disposed);
   Object.defineProperties(RootProto, _disposed);
-
-  // ─── Shared owner methods — Root + Effect ──────────────────────────────
 
   /**
    * Registers a cleanup fn on this owner. Stored compactly: _cleanup holds
@@ -780,18 +765,51 @@ function root(fn) {
    * @param {!Promise | !Compute} promiseOrTask
    * @returns {*}
    */
-  function suspend(promiseOrTask, onResolve, onReject) {
-    /** Branch: array of tasks → concurrent await with single cursor.
-     *  If onResolve/onReject are provided, uses pure callbacks (zero
-     *  Promise allocation). Otherwise returns a Promise. */
+  function suspend(promiseOrTask) {
+    /** Branch: setup function → callback constructor path.
+     *  Sets FLAG_SUSPEND so _update knows the node is waiting
+     *  for a callback-driven settlement, not a returned promise. */
+    if (typeof promiseOrTask === "function") {
+      if (this._flag & FLAG_SUSPEND) {
+        throw new Error("Cannot call suspend() with callbacks after a previous suspend()");
+      }
+      this._flag |= FLAG_SUSPEND | FLAG_LOADING;
+      let ref = new WeakRef(this);
+      let time = this._time;
+      promiseOrTask(
+        function (val) {
+          let node = ref.deref();
+          if (
+            node !== void 0 &&
+            !(node._flag & FLAG_DISPOSED) &&
+            node._time === time
+          ) {
+            node._settle(val);
+          }
+        },
+        function (err) {
+          let node = ref.deref();
+          if (
+            node !== void 0 &&
+            !(node._flag & FLAG_DISPOSED) &&
+            node._time === time
+          ) {
+            node._error(err);
+          }
+        }
+      );
+      return;
+    }
+    this._flag |= FLAG_SUSPEND;
+    /** Branch: array of tasks → concurrent await. */
     if (Array.isArray(promiseOrTask)) {
-      return _suspendArray.call(this, promiseOrTask, onResolve, onReject);
+      return _suspendArray.call(this, promiseOrTask);
     }
     /** Branch: Compute node with FLAG_ASYNC → task-await path. */
     if (promiseOrTask._flag !== undefined && promiseOrTask._flag & FLAG_ASYNC) {
-      return _suspendTask.call(this, promiseOrTask, onResolve, onReject);
+      return _suspendTask.call(this, promiseOrTask);
     }
-    /** Existing promise path. */
+    /** Promise path — wrap with staleness guard. */
     let ref = new WeakRef(this);
     let time = this._time;
     return promiseOrTask.then(
@@ -835,7 +853,7 @@ function root(fn) {
    * @param {!Compute} taskNode
    * @returns {*}
    */
-  function _suspendTask(taskNode, onResolve, onReject) {
+  function _suspendTask(taskNode) {
     if (taskNode._flag & FLAG_DISPOSED) {
       throw new Error(ASSERT_DISPOSED);
     }
@@ -861,31 +879,16 @@ function root(fn) {
         }
       }
       if (taskNode._flag & FLAG_ERROR) {
-        if (onReject) {
-          onReject(taskNode._value);
-          return;
-        }
         throw taskNode._value;
-      }
-      if (onResolve) {
-        onResolve(taskNode._value);
-        return;
       }
       return taskNode._value;
     }
 
-    if (onResolve) {
-      send(this, taskNode, onResolve, onReject);
-      return;
-    }
-
-    /** Promise mode. */
+    /** Task is loading — create channel binding and return a Promise. */
     let self = this;
-    let promise = new Promise(function (resolve, reject) {
+    return new Promise(function (resolve, reject) {
       send(self, taskNode, resolve, reject);
     });
-
-    return promise;
   }
 
   /**
@@ -903,15 +906,11 @@ function root(fn) {
    * @param {!Array<!Compute>} tasks
    * @returns {!Array | !Promise<!Array>}
    */
-  function _suspendArray(tasks, onResolve, onReject) {
+  function _suspendArray(tasks) {
     this._flag |= FLAG_BLOCKED;
     let count = tasks.length;
     if (count === 0) {
       this._flag &= ~FLAG_BLOCKED;
-      if (onResolve) {
-        onResolve([]);
-        return;
-      }
       return [];
     }
     let results = new Array(count);
@@ -928,10 +927,6 @@ function root(fn) {
         break;
       }
       if (task._flag & FLAG_ERROR) {
-        if (onReject) {
-          onReject(task._value);
-          return;
-        }
         throw task._value;
       }
       results[i] = task._value;
@@ -944,20 +939,10 @@ function root(fn) {
       for (let i = 0; i < count; i++) {
         subscribe(this, tasks[i]);
       }
-      if (onResolve) {
-        onResolve(results);
-        return;
-      }
       return results;
     }
 
-    /** At least one is loading — start the callback-driven walk. */
-    if (onResolve) {
-      _stepArray(this, tasks, results, visited, filled, onResolve, onReject);
-      return;
-    }
-
-    /** No callbacks — allocate one Promise. */
+    /** At least one is loading — allocate one Promise. */
     let self = this;
     return new Promise(function (resolve, reject) {
       _stepArray(self, tasks, results, visited, filled, resolve, reject);
@@ -1166,8 +1151,6 @@ function root(fn) {
 
   ComputeProto.pending = EffectProto.pending = pending;
 
-  // ─── Root — single-use methods ─────────────────────────────────────────
-
   /**
    * @this {!Root}
    * @returns {void}
@@ -1182,8 +1165,6 @@ function root(fn) {
     }
     this._owned = this._recover = null;
   };
-
-  // ─── Signal — single-use methods ───────────────────────────────────────
 
   /**
    * Returns the signal's current value. No dependency tracking —
@@ -1244,11 +1225,6 @@ function root(fn) {
     }
   };
 
-
-  /**
-   * @this {!Signal<T>}
-   * @returns {void}
-   */
   /**
    * Returns true if the sender's current value differs from `value`.
    * Used by deferred dep settlement to detect changes.
@@ -1260,13 +1236,15 @@ function root(fn) {
     return this._value !== value;
   };
 
+  /**
+   * @this {!Signal<T>}
+   * @returns {void}
+   */
   SignalProto._dispose = function () {
     this._flag = FLAG_DISPOSED;
     clearSubs(this);
     this._value = null;
   };
-
-  // ─── Compute — single-use methods ──────────────────────────────────────
 
   /**
    * Pulls and returns the compute's current value. Triggers lazy
@@ -1351,6 +1329,26 @@ function root(fn) {
    * @this {!Compute<T,U,V,W>}
    * @returns {void}
    */
+  /**
+   * Settles an async compute with a resolved value.
+   * @this {!Compute}
+   * @param {*} value
+   */
+  ComputeProto._settle = function (value) {
+    this._flag &= ~FLAG_ERROR;
+    settle(this, value);
+  };
+
+  /**
+   * Settles an async compute with an error.
+   * @this {!Compute}
+   * @param {*} err
+   */
+  ComputeProto._error = function (err) {
+    this._flag |= FLAG_ERROR;
+    settle(this, err);
+  };
+
   ComputeProto._dispose = function () {
     let flag = this._flag;
     this._flag = FLAG_DISPOSED;
@@ -1397,7 +1395,7 @@ function root(fn) {
     }
     this._time = time;
     this._flag =
-      flag & ~(FLAG_STALE | FLAG_LOADING | FLAG_EQUAL | FLAG_NOTEQUAL);
+      flag & ~(FLAG_STALE | FLAG_LOADING | FLAG_EQUAL | FLAG_NOTEQUAL | FLAG_SUSPEND);
 
     if (!(flag & FLAG_INIT) && this._cleanup !== null) {
       clearCleanup(this);
@@ -1517,8 +1515,16 @@ function root(fn) {
 
     this._flag &= ~(FLAG_STALE | FLAG_PENDING | FLAG_SETUP);
 
-    /** Async: if fn returned a promise/iterator, dispatch and return. */
+    /** Async: if fn used callback suspend, the node is already
+     *  FLAG_LOADING via the setup function. Skip async dispatch.
+     *  Check both FLAG_SUSPEND and FLAG_LOADING: the callback path
+     *  sets both, while promise/task paths only set FLAG_SUSPEND
+     *  (FLAG_LOADING is set later by this dispatch code). */
     if (flag & FLAG_ASYNC) {
+      if (this._flag & FLAG_SUSPEND && this._flag & FLAG_LOADING) {
+        this._flag &= ~FLAG_INIT;
+        return;
+      }
       let kind = asyncKind(value);
       if (kind !== ASYNC_SYNC) {
         this._flag |= FLAG_LOADING;
@@ -1554,23 +1560,34 @@ function root(fn) {
   };
 
   /**
-   * Compute notification handler. Four cases:
+   * Compute notification handler.
    * 1. Default: propagate PENDING downstream (pure pull).
-   * 2. FLAG_WAITER: enqueue to COMPUTES + notify PENDING.
-   * 3. FLAG_EAGER + FLAG_ASYNC: enqueue to COMPUTES for eager re-run.
-   *    Downstream is notified at settle time.
-   * 4. FLAG_EAGER + sync: notify FLAG_STALE directly — pure push node
-   *    that eagerly updates and forces downstream to re-evaluate.
+   * 2. FLAG_LOADING: abort in-flight async work immediately so
+   *    stale fetches/promises are cancelled without waiting for a pull.
+   * 3. FLAG_WAITER: enqueue to COMPUTES + notify PENDING.
+   * 4. FLAG_EAGER + FLAG_ASYNC: enqueue to COMPUTES for eager re-run.
+   * 5. FLAG_EAGER + sync: notify FLAG_STALE directly (pure push).
    * @this {Compute}
    * @returns {void}
    */
   ComputeProto._receive = function () {
     let flag = this._flag;
-    if (!(flag & (FLAG_EAGER | FLAG_WAITER | FLAG_LOCK))) {
+    if (!(flag & (FLAG_EAGER | FLAG_WAITER | FLAG_LOCK | FLAG_LOADING))) {
       notify(this, FLAG_PENDING);
     } else if (flag & FLAG_LOCK) {
       return;
     } else {
+      /** Abort in-flight async work. Bump _time so old resolve/reject
+       *  callbacks see a stale activation and silently ignore. */
+      if (flag & FLAG_LOADING && flag & FLAG_FIBER) {
+        this._time++;
+        clearFiber(this);
+        this._flag &= ~FLAG_LOADING;
+      }
+      if (!(flag & (FLAG_EAGER | FLAG_WAITER))) {
+        notify(this, FLAG_PENDING);
+        return;
+      }
       COMPUTES[COMPUTE_COUNT++] = this;
       if (flag & FLAG_EAGER) {
         if (!(flag & FLAG_ASYNC)) {
@@ -1582,10 +1599,7 @@ function root(fn) {
     }
   };
 
-  // ─── Effect — single-use methods ───────────────────────────────────────
-
   /**
-   * IScope: dependency-tracking read for effects.
    * @this {!Effect}
    * @param {!Sender} sender
    * @returns {*}
@@ -1623,12 +1637,12 @@ function root(fn) {
       this._recover = null;
     }
 
-    /** Async prep: reset fiber state, clear loading from previous activation. */
+    /** Async prep: reset fiber state, clear loading/suspend from previous activation. */
     if (flag & FLAG_ASYNC) {
       if (flag & FLAG_FIBER) {
         clearFiber(this);
       }
-      this._flag &= ~FLAG_LOADING;
+      this._flag &= ~(FLAG_LOADING | FLAG_SUSPEND);
     }
 
     /** @type {(function(): void) | null | undefined} */
@@ -1725,19 +1739,56 @@ function root(fn) {
     }
 
     if (flag & FLAG_ASYNC) {
+      if (this._flag & FLAG_SUSPEND && this._flag & FLAG_LOADING) {
+        this._flag &= ~FLAG_INIT;
+        return;
+      }
       let kind = asyncKind(value);
       if (kind !== ASYNC_SYNC) {
         this._flag |= FLAG_LOADING;
         if (kind === ASYNC_PROMISE) {
-          resolveEffectPromise(new WeakRef(this), value);
+          resolvePromise(new WeakRef(this), value, time);
         } else {
-          resolveEffectIterator(new WeakRef(this), value);
+          resolveIterator(new WeakRef(this), value, time);
         }
         return;
       }
     }
 
     this._flag &= ~FLAG_INIT;
+  };
+
+  /**
+   * Settles an async effect after its promise/callback resolves.
+   * Clears loading/lock, checks deferred deps, re-runs if stale.
+   * @this {!Effect}
+   */
+  EffectProto._settle = function () {
+    let wasLocked = this._flag & FLAG_LOCK;
+    this._flag &= ~(FLAG_LOADING | FLAG_LOCK);
+    let stale = false;
+    if (this._flag & FLAG_FIBER && this._args._fiber._defers !== null) {
+      stale = settleDeps(this);
+    }
+    if (stale || (wasLocked && this._flag & FLAG_STALE)) {
+      this._flag |= FLAG_STALE;
+      this._receive();
+      flush();
+    }
+  };
+
+  /**
+   * Handles an error in an async effect. Clears loading/lock,
+   * attempts recovery, disposes if unrecoverable.
+   * @this {!Effect}
+   * @param {*} err
+   */
+  EffectProto._error = function (err) {
+    this._flag &= ~(FLAG_LOADING | FLAG_LOCK);
+    let result = tryRecover(this, err);
+    if (result !== RECOVER_SELF) {
+      this._dispose();
+    }
   };
 
   /**
@@ -1784,8 +1835,6 @@ function root(fn) {
       SCOPE_COUNT++;
     }
   };
-
-  // ─── Owned factory methods (Root + Effect prototypes) ───────────────
 
   /** @this {!Root | !Effect} */
   function _compute(depOrFn, fnOrSeed, optsOrSeed, argsOrOpts, args) {
@@ -1897,8 +1946,6 @@ function root(fn) {
   RootProto.spawn = EffectProto.spawn = _spawn;
 	RootProto.root = EffectProto.root = root;
 }
-
-// ─── Global helpers (non-prototype) ────────────────────────────────────────
 
 /**
  *
@@ -2148,22 +2195,20 @@ const RECOVER_OWNER = 2;
  * @returns {number}
  */
 function tryRecover(node, error) {
-  /** Self-recovery: node stays alive. */
-  if (node._recover !== null && _checkRecover(node, error)) {
-    return RECOVER_SELF;
-  }
-  /** Bubble up the owner chain. Node will be disposed by caller. */
-  let owner = node._owner;
-  while (owner !== null) {
-    if (_checkRecover(owner, error)) {
-      return RECOVER_OWNER;
-    }
-    owner = owner._owner;
-  }
-  return RECOVER_NONE;
+	/** Self-recovery: node stays alive. */
+	if (node._recover !== null && _checkRecover(node, error)) {
+		return RECOVER_SELF;
+	}
+	/** Bubble up the owner chain. Node will be disposed by caller. */
+	let owner = node._owner;
+	while (owner !== null) {
+		if (_checkRecover(owner, error)) {
+			return RECOVER_OWNER;
+		}
+		owner = owner._owner;
+	}
+	return RECOVER_NONE;
 }
-
-// ─── patchDeps ─────────────────────────────────────────────────────────────
 
 /**
  * After a dynamic fn re-execution, reconciles dep subscriptions.
@@ -2711,8 +2756,7 @@ function resolvePromise(ref, promise, time) {
         !(node._flag & FLAG_DISPOSED) &&
         node._time === time
       ) {
-        node._flag &= ~FLAG_ERROR;
-        settle(node, val);
+        node._settle(val);
       }
     },
     (err) => {
@@ -2722,8 +2766,7 @@ function resolvePromise(ref, promise, time) {
         !(node._flag & FLAG_DISPOSED) &&
         node._time === time
       ) {
-        node._flag |= FLAG_ERROR;
-        settle(node, err);
+        node._error(err);
       }
     }
   );
@@ -2760,8 +2803,7 @@ function resolveIterator(ref, iterable, time) {
 
     iterator.next().then(onNext, onError);
 
-    node._flag &= ~FLAG_ERROR;
-    settle(node, result.value);
+    node._settle(result.value);
   };
 
   /** @param {*} err */
@@ -2772,8 +2814,7 @@ function resolveIterator(ref, iterable, time) {
       !(node._flag & FLAG_DISPOSED) &&
       node._time === time
     ) {
-      node._flag |= FLAG_ERROR;
-      settle(node, err);
+      node._error(err);
     }
   };
 
@@ -3037,8 +3078,6 @@ function clearFiber(node) {
   }
 }
 
-// ─── Awaiter/Responder two-way binding ────────────────────────────────────
-
 /**
  * Adds a waiter entry to a responder's _waiters array (4-stride).
  * @param {!Channel} responderCh
@@ -3195,93 +3234,6 @@ function resolveWaiters(responder, responderCh, value, isError, panic) {
   responder._flag &= ~FLAG_WAITER;
 }
 
-/**
- * Resolves a promise returned by an async effect. If the
- * resolved value is a function, registers it as cleanup.
- * @param {WeakRef<!Effect>} ref
- * @param {!Promise} promise
- * @returns {void}
- */
-function resolveEffectPromise(ref, promise) {
-  promise.then(
-    () => {
-      let node = ref.deref();
-      if (node !== void 0 && !(node._flag & FLAG_DISPOSED)) {
-        let wasLocked = node._flag & FLAG_LOCK;
-        node._flag &= ~(FLAG_LOADING | FLAG_LOCK);
-        let stale = false;
-        if (node._flag & FLAG_FIBER && node._args._fiber._defers !== null) {
-          stale = settleDeps(node);
-        }
-        if (stale || (wasLocked && node._flag & FLAG_STALE)) {
-          node._flag |= FLAG_STALE;
-          node._receive();
-          flush();
-        }
-      }
-    },
-    (err) => {
-      let node = ref.deref();
-      if (node !== void 0 && !(node._flag & FLAG_DISPOSED)) {
-        node._flag &= ~(FLAG_LOADING | FLAG_LOCK);
-        let result = tryRecover(node, err);
-        if (result !== RECOVER_SELF) {
-          node._dispose();
-        }
-      }
-    }
-  );
-}
-
-/**
- * Resolves an async iterable returned by a streaming effect.
- * Each yielded function is registered as cleanup.
- * @param {WeakRef<!Effect>} ref
- * @param {AsyncIterable | AsyncIterator} iterable
- * @returns {void}
- */
-function resolveEffectIterator(ref, iterable) {
-  let iterator =
-    typeof iterable[Symbol.asyncIterator] === "function"
-      ? iterable[Symbol.asyncIterator]()
-      : iterable;
-  let onNext = (result) => {
-    let node = ref.deref();
-    if (node === void 0 || node._flag & FLAG_DISPOSED) {
-      if (typeof iterator.return === "function") {
-        iterator.return();
-      }
-      return;
-    }
-    if (result.done) {
-      let wasLocked = node._flag & FLAG_LOCK;
-      node._flag &= ~(FLAG_LOADING | FLAG_LOCK);
-      let stale = false;
-      if (node._flag & FLAG_FIBER && node._args._fiber._defers !== null) {
-        stale = settleDeps(node);
-      }
-      if (stale || (wasLocked && node._flag & FLAG_STALE)) {
-        node._flag |= FLAG_STALE;
-        node._receive();
-        flush();
-      }
-      return;
-    }
-    iterator.next().then(onNext, onError);
-    node._flag &= ~FLAG_LOADING;
-  };
-  let onError = (err) => {
-    let node = ref.deref();
-    if (node !== void 0 && !(node._flag & FLAG_DISPOSED)) {
-      node._flag &= ~(FLAG_LOADING | FLAG_LOCK);
-      let result = tryRecover(node, err);
-      if (result !== RECOVER_SELF) {
-        node._dispose();
-      }
-    }
-  };
-  iterator.next().then(onNext, onError);
-}
 
 /**
  * Runs `fn` with the root node itself as the argument. Prototype methods
@@ -3484,8 +3436,6 @@ function flush() {
   }
 }
 
-// ─── Public API ────────────────────────────────────────────────────────────
-
 /** Unowned compute. */
 /**
  * Creates a sync compute node.
@@ -3642,6 +3592,7 @@ export {
   FLAG_EAGER,
   FLAG_BLOCKED,
   FLAG_LOCK,
+  FLAG_SUSPEND,
   OPT_DEFER,
   OPT_STABLE,
   OPT_SETUP,

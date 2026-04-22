@@ -25,7 +25,7 @@ async function build() {
         dir: outputDir,
         format: 'esm',
         sourcemap: true,
-        entryFileNames: '[name].mjs',
+        entryFileNames: '[name].js',
     });
 
     console.log('2. Minifying and mangling properties with Terser...');
@@ -72,6 +72,9 @@ async function build() {
 
     /** Save the combined property map (signal's entries + any new list-specific ones) */
     fs.writeFileSync(nameCachePath, JSON.stringify(nameCache, null, 2));
+
+    /** Copy type declarations to dist */
+    fs.copyFileSync('./types/list.d.ts', path.resolve(outputDir, 'index.d.ts'));
 
     console.log('Success! Output written to dist/');
 }
