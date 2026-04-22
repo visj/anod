@@ -1,5 +1,5 @@
 {
-  "name": "fyren",
+  "name": "fyren-ws",
   "private": "true",
   "workspaces": [
     "packages/core",

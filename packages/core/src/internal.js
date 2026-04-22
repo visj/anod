@@ -32,6 +32,11 @@ export {
   notify,
   flush,
   startEffect,
-	startCompute,
-  signal
-} from "./core/signal.js";
+  startCompute,
+  signal,
+  Signal,
+  Compute,
+  Effect,
+  Root,
+  Clock
+} from "./core/fyren.js";

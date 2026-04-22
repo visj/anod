@@ -19,7 +19,7 @@ const args = [
   '--externs' ,'externs/externs.js',
   '--js', 'src/core/api.js',
   '--js', 'src/core/types.js',
-  '--js', 'src/core/signal.js',
+  '--js', 'src/core/fyren.js',
   '--chunk', 'signal.min:3',
   '--js', 'src/internal.js',
   '--chunk', 'internal.min:1:signal.min',

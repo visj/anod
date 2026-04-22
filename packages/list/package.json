@@ -23,7 +23,7 @@
   "description": "",
   "devDependencies": {
     "@ampproject/remapping": "^2.3.0",
-    "@fyren/core": "workspace:*",
+    "@fyren/core": "../core",
     "@preact/signals": "^2.8.1",
     "@preact/signals-core": "^1.13.0",
     "alien-signals": "^3.1.2",

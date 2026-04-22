@@ -9,5 +9,9 @@
   "keywords": [],
   "author": "",
   "license": "MIT",
-  "type": "module"
+  "type": "module",
+  "devDependencies": {
+    "@fyren/core": "../core",
+    "@fyren/list": "../list"
+  }
 }

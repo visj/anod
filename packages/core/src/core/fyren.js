@@ -1869,7 +1869,8 @@ function root(fn) {
   RootProto.task = EffectProto.task = _task;
   RootProto.effect = EffectProto.effect = _effect;
   RootProto.spawn = EffectProto.spawn = _spawn;
-  RootProto.root = EffectProto.root = root;
+	RootProto.root = EffectProto.root = root;
+	RootProto.batch = EffectProto.batch = batch;
 }
 
 // ─── Global helpers (non-prototype) ────────────────────────────────────────

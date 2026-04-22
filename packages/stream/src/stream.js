@@ -1,5 +1,5 @@
-import { Signal, Compute } from '@fyren/core';
 import {
+    Signal, Compute,
     FLAG_ASYNC, FLAG_BOUND, OPT_STABLE, OPT_SETUP, OPT_DEFER,
     connect, startCompute
 } from '@fyren/core/internal';

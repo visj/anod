@@ -3,62 +3,10 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "fyren-ws",
-    },
-    "packages/core": {
-      "name": "@fyren/core",
-      "version": "0.5.0",
+      "name": "fyren",
       "devDependencies": {
-        "@ampproject/remapping": "^2.3.0",
-        "@mitata/counters": "^0.0.8",
-        "@preact/signals": "^2.8.1",
-        "@preact/signals-core": "^1.13.0",
-        "@reactively/core": "^0.0.8",
-        "@rollup/plugin-terser": "^1.0.0",
-        "@solidjs/signals": "^0.12.0",
-        "@zeix/cause-effect": "^1.0.0",
-        "alien-signals": "^3.1.2",
-        "google-closure-compiler": "^20260225.0.0",
-        "magic-string": "^0.30.21",
-        "mitata": "^1.0.34",
-        "rolldown": "^1.0.0-rc.9",
-        "rollup": "^4.59.0",
-        "s-js": "^0.4.9",
-        "terser": "^5.46.0",
-        "usignal": "^0.10.0",
-      },
-    },
-    "packages/list": {
-      "name": "@fyren/list",
-      "version": "0.5.0",
-      "devDependencies": {
-        "@ampproject/remapping": "^2.3.0",
         "@fyren/core": "../core",
-        "@preact/signals": "^2.8.1",
-        "@preact/signals-core": "^1.13.0",
-        "alien-signals": "^3.1.2",
-        "mitata": "^1.0.34",
-        "rolldown": "^1.0.0-rc.9",
-        "terser": "^5.0.0",
-      },
-    },
-    "packages/stream": {
-      "name": "@fyren/stream",
-      "version": "0.5.0",
-      "dependencies": {
-        "@fyren/core": "workspace:*",
-        "@fyren/list": "workspace:*",
-      },
-    },
-    "packages/tools": {
-      "name": "@fyren/tools",
-      "version": "0.5.0",
-      "dependencies": {
-        "@fyren/core": "file:../core",
-      },
-      "devDependencies": {
-        "rolldown": "^1.0.0-rc.9",
-        "terser": "^5.46.0",
+        "@fyren/list": "../list",
       },
     },
   },
@@ -71,13 +19,9 @@
 
     "@emnapi/wasi-threads": ["@emnapi/wasi-threads@1.2.1", "", { "dependencies": { "tslib": "^2.4.0" } }, "sha512-uTII7OYF+/Mes/MrcIOYp5yOtSMLBWSIoLPpcgwipoiKbli6k322tcoFsxoIIxPDqW01SQGAgko4EzZi2BNv2w=="],
 
-    "@fyren/core": ["@fyren/core@workspace:packages/core"],
+    "@fyren/core": ["@fyren/core@file:../core", { "devDependencies": { "@ampproject/remapping": "^2.3.0", "@mitata/counters": "^0.0.8", "@preact/signals": "^2.8.1", "@preact/signals-core": "^1.13.0", "@reactively/core": "^0.0.8", "@rollup/plugin-terser": "^1.0.0", "@solidjs/signals": "^0.12.0", "@zeix/cause-effect": "^1.0.0", "alien-signals": "^3.1.2", "google-closure-compiler": "^20260225.0.0", "magic-string": "^0.30.21", "mitata": "^1.0.34", "rolldown": "^1.0.0-rc.9", "rollup": "^4.59.0", "s-js": "^0.4.9", "terser": "^5.46.0", "usignal": "^0.10.0" } }],
 
-    "@fyren/list": ["@fyren/list@workspace:packages/list"],
-
-    "@fyren/stream": ["@fyren/stream@workspace:packages/stream"],
-
-    "@fyren/tools": ["@fyren/tools@workspace:packages/tools"],
+    "@fyren/list": ["@fyren/list@file:../list", { "devDependencies": { "@ampproject/remapping": "^2.3.0", "@fyren/core": "../core", "@preact/signals": "^2.8.1", "@preact/signals-core": "^1.13.0", "alien-signals": "^3.1.2", "mitata": "^1.0.34", "rolldown": "^1.0.0-rc.9", "terser": "^5.0.0" } }],
 
     "@jridgewell/gen-mapping": ["@jridgewell/gen-mapping@0.3.13", "", { "dependencies": { "@jridgewell/sourcemap-codec": "^1.5.0", "@jridgewell/trace-mapping": "^0.3.24" } }, "sha512-2kkt/7niJ6MgEPxF0bYdQ6etZaA+fQvDcLKckhy1yIQOzaoKjBBjSj63/aLVjYE3qhRt5dvM+uUyfCg6UKCBbA=="],
 
@@ -270,6 +214,8 @@
     "vinyl": ["vinyl@3.0.1", "", { "dependencies": { "clone": "^2.1.2", "remove-trailing-separator": "^1.1.0", "replace-ext": "^2.0.0", "teex": "^1.0.1" } }, "sha512-0QwqXteBNXgnLCdWdvPQBX6FXRHtIH3VhJPTd5Lwn28tJXc34YqSCWUmkOvtJHBmB3gGoPtrOKk3Ts8/kEZ9aA=="],
 
     "vinyl-sourcemaps-apply": ["vinyl-sourcemaps-apply@0.2.1", "", { "dependencies": { "source-map": "^0.5.1" } }, "sha512-+oDh3KYZBoZC8hfocrbrxbLUeaYtQK7J5WU5Br9VqWqmCll3tFJqKp97GC9GmMsVIL0qnx2DgEDVxdo5EZ5sSw=="],
+
+    "@fyren/list/@fyren/core": ["@fyren/core@file:../core", {}],
 
     "source-map-support/source-map": ["source-map@0.6.1", "", {}, "sha512-UjgapumWlbMhkBgzT7Ykc5YXUT46F0iKu8SGXq0bcwP5dz/h0Plj6enJqjz1Zbq2l5WaqYnrVbwWOWMyF3F47g=="],
   }

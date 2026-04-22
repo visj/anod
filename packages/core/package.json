@@ -22,7 +22,7 @@
       "import": "./dist/index.js"
     },
     "./internal": {
-      "types": "./dist/index.d.ts",
+      "types": "./dist/internal.d.ts",
       "src": "./src/internal.js",
       "import": "./dist/internal.js"
     }

@@ -1,12 +1,13 @@
 import {
-    Signal, Compute, Effect, Clock, Root, OPT_SETUP, OPT_STABLE
+    OPT_SETUP, OPT_STABLE
 } from '@fyren/core';
 
 import {
+    Signal, Compute, Effect, Clock, Root,
     IDLE,
     FLAG_STALE, FLAG_INIT, FLAG_BOUND, FLAG_SCHEDULED, OPT_DEFER,
-	connect, schedule, assignSignal, notify, flush,
-	startEffect, startCompute, signal
+    connect, schedule, notify, flush,
+    startEffect, startCompute, signal
 } from '@fyren/core/internal';
 
 /**

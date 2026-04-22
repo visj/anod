@@ -6,7 +6,7 @@ import { minify } from 'terser';
 const outputDir = './dist';
 /** Stable property map that the list package will reuse */
 const nameCachePath = path.resolve(outputDir, 'mangle.json');
-const typeFile = './types/signal.d.ts';
+const typeFiles = ['./types/index.d.ts', './types/internal.d.ts'];
 
 async function build() {
     console.log('1. Bundling with Rolldown...');
@@ -79,7 +79,10 @@ async function build() {
     }
 
     fs.writeFileSync(nameCachePath, JSON.stringify(nameCache, null, 2));
-    fs.copyFileSync(typeFile, path.resolve(outputDir, 'index.d.ts'));
+    for (const typeFile of typeFiles) {
+        const basename = path.basename(typeFile);
+        fs.copyFileSync(typeFile, path.resolve(outputDir, basename));
+    }
 
     console.log('Success! Outputs written to dist/ and stable map saved to mangle.json.');
 }

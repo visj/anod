@@ -1,35 +1,36 @@
 import {
-  ISignal, ICompute, IEffect, IComputeContext, IEffectContext, IFactory
+  Signal, Compute, Effect, Sender,
+  ComputeContext, EffectContext, Factory
 } from "@fyren/core";
 
-export type ListParam<T> = T | ISignal<T> | ICompute<T>;
+export type ListParam<T> = T | Sender<T>;
 
-export interface ICollection<T> extends ICompute<readonly T[]> {
-  at(index: ListParam<number>): ICompute<T | undefined>;
-  concat(...items: ListParam<any>[]): ICollection<T>;
-  entries(): ICompute<IterableIterator<[number, T]>>;
-  every(cb: (value: T, index: number, array: T[], c: IComputeContext) => boolean, opts?: number): ICompute<boolean>;
-  filter(cb: (value: T, index: number, array: T[], c: IComputeContext) => boolean, opts?: number): ICollection<T>;
-  find(cb: (value: T, index: number, array: T[], c: IComputeContext) => boolean, opts?: number): ICompute<T | undefined>;
-  findIndex(cb: (value: T, index: number, array: T[], c: IComputeContext) => boolean, opts?: number): ICompute<number>;
-  findLast(cb: (value: T, index: number, array: T[], c: IComputeContext) => boolean, opts?: number): ICompute<T | undefined>;
-  findLastIndex(cb: (value: T, index: number, array: T[], c: IComputeContext) => boolean, opts?: number): ICompute<number>;
-  flat(depth?: ListParam<number>): ICollection<any>;
-  flatMap<U>(cb: (value: T, index: number, array: T[], c: IComputeContext) => U[], opts?: number): ICollection<U>;
-  forEach(cb: (value: T, index: number, array: T[], c: IEffectContext) => void | (() => void), opts?: number): IEffect;
-  includes(searchElement: any, fromIndex?: ListParam<number>): ICompute<boolean>;
-  indexOf(searchElement: any, fromIndex?: ListParam<number>): ICompute<number>;
-  join(separator?: ListParam<string>): ICompute<string>;
-  keys(): ICompute<IterableIterator<number>>;
-  map<U>(cb: (value: T, index: number, array: T[], c: IComputeContext) => U, opts?: number): ICollection<U>;
-  reduce<U>(cb: (accumulator: U, currentValue: T, currentIndex: number, array: T[], c: IComputeContext) => U, initialValue?: ListParam<U>, opts?: number): ICompute<U>;
-  reduceRight<U>(cb: (accumulator: U, currentValue: T, currentIndex: number, array: T[], c: IComputeContext) => U, initialValue?: ListParam<U>, opts?: number): ICompute<U>;
-  slice(start?: ListParam<number>, end?: ListParam<number>): ICollection<T>;
-  some(cb: (value: T, index: number, array: T[], c: IComputeContext) => boolean, opts?: number): ICompute<boolean>;
-  values(): ICompute<IterableIterator<T>>;
+export interface Collection<T> extends Compute<readonly T[]> {
+  at(index: ListParam<number>): Compute<T | undefined>;
+  concat(...items: ListParam<any>[]): Collection<T>;
+  entries(): Compute<IterableIterator<[number, T]>>;
+  every(cb: (value: T, index: number, array: T[], c: ComputeContext) => boolean, opts?: number): Compute<boolean>;
+  filter(cb: (value: T, index: number, array: T[], c: ComputeContext) => boolean, opts?: number): Collection<T>;
+  find(cb: (value: T, index: number, array: T[], c: ComputeContext) => boolean, opts?: number): Compute<T | undefined>;
+  findIndex(cb: (value: T, index: number, array: T[], c: ComputeContext) => boolean, opts?: number): Compute<number>;
+  findLast(cb: (value: T, index: number, array: T[], c: ComputeContext) => boolean, opts?: number): Compute<T | undefined>;
+  findLastIndex(cb: (value: T, index: number, array: T[], c: ComputeContext) => boolean, opts?: number): Compute<number>;
+  flat(depth?: ListParam<number>): Collection<any>;
+  flatMap<U>(cb: (value: T, index: number, array: T[], c: ComputeContext) => U[], opts?: number): Collection<U>;
+  forEach(cb: (value: T, index: number, array: T[], c: EffectContext) => void | (() => void), opts?: number): Effect;
+  includes(searchElement: any, fromIndex?: ListParam<number>): Compute<boolean>;
+  indexOf(searchElement: any, fromIndex?: ListParam<number>): Compute<number>;
+  join(separator?: ListParam<string>): Compute<string>;
+  keys(): Compute<IterableIterator<number>>;
+  map<U>(cb: (value: T, index: number, array: T[], c: ComputeContext) => U, opts?: number): Collection<U>;
+  reduce<U>(cb: (accumulator: U, currentValue: T, currentIndex: number, array: T[], c: ComputeContext) => U, initialValue?: ListParam<U>, opts?: number): Compute<U>;
+  reduceRight<U>(cb: (accumulator: U, currentValue: T, currentIndex: number, array: T[], c: ComputeContext) => U, initialValue?: ListParam<U>, opts?: number): Compute<U>;
+  slice(start?: ListParam<number>, end?: ListParam<number>): Collection<T>;
+  some(cb: (value: T, index: number, array: T[], c: ComputeContext) => boolean, opts?: number): Compute<boolean>;
+  values(): Compute<IterableIterator<T>>;
 }
 
-export interface IList<T> extends ICollection<T>, ISignal<readonly T[]> {
+export interface List<T> extends Collection<T>, Signal<readonly T[]> {
   push(...items: T[]): void;
   pop(): void;
   shift(): void;
@@ -42,7 +43,7 @@ export interface IList<T> extends ICollection<T>, ISignal<readonly T[]> {
 }
 
 declare module "@fyren/core" {
-  interface IFactory {
-    list<T>(value: T[]): IList<T>;
+  interface Factory {
+    list<T>(value: T[]): List<T>;
   }
 }
