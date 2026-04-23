@@ -876,13 +876,18 @@ describe("suspend(tasks[]): concurrent task await", () => {
 		// Settle A — should NOT subscribe yet (blocked)
 		resolveA(10); await settle();
 
-		// Change s1 — if subscribed to taskA, this causes a re-run
+		// Change s1 — taskA re-runs on next refresh
 		s1.set(2); await settle();
 		expect(runs).toBe(1); // no premature re-run
 
-		// Settle B — array completes, subscribe to both
+		// Settle B — re-scan finds taskA stale, refreshes it,
+		// taskA goes back to loading. Must wait for it.
 		resolveB(20); await settle();
-		expect(result).toEqual([10, 20]);
+		expect(result).toBeNull();
+
+		// Settle A again — now all settled with consistent snapshot
+		resolveA(100); await settle();
+		expect(result).toEqual([100, 20]);
 		r.dispose();
 	});
 

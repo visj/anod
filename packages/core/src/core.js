@@ -324,7 +324,11 @@ function Channel(args) {
   this._args = args;
   /** @type {AbortController | null} */
   this._controller = null;
-  /** @type {Array<Sender | *> | null} Paired [sender, value] entries. */
+  /** @type {Sender | null} First deferred dep (inline fast path). */
+  this._defer1 = null;
+  /** @type {*} Snapshot of _defer1's value at defer() time. */
+  this._defer1val = undefined;
+  /** @type {Array<Sender | *> | null} Paired [sender, value] entries for 2+ defers. */
   this._defers = null;
   /** @type {Compute | null} First responder we're waiting on. */
   this._res1 = null;
@@ -804,7 +808,7 @@ function root(fn) {
   /**
    * Intercepts a promise so the async continuation is silently dropped
    * when the owning node has been disposed or re-run since this call.
-   * Uses a WeakRef + activation timestamp to detect staleness.
+   * Uses an activation timestamp to detect staleness.
    *
    * If the node is still current, resolves/rejects normally.
    * If stale or disposed, resolves to REGRET — a thenable whose
@@ -823,12 +827,11 @@ function root(fn) {
         throw new Error("Cannot call suspend() with callbacks after a previous suspend()");
       }
       this._flag |= FLAG_SUSPEND | FLAG_LOADING;
-      let ref = new WeakRef(this);
+      let node = this;
       let time = this._time;
       promiseOrTask(
         function (val) {
-          let node = ref.deref();
-          if (node === void 0 || node._time !== time || (node._flag & FLAG_DISPOSED && !(node._flag & FLAG_LOCK))) {
+          if (node._time !== time || (node._flag & FLAG_DISPOSED && !(node._flag & FLAG_LOCK))) {
             return;
           }
           if (!(node._flag & FLAG_LOCK)) {
@@ -843,8 +846,7 @@ function root(fn) {
           node._settle(val);
         },
         function (err) {
-          let node = ref.deref();
-          if (node === void 0 || node._time !== time || (node._flag & FLAG_DISPOSED && !(node._flag & FLAG_LOCK))) {
+          if (node._time !== time || (node._flag & FLAG_DISPOSED && !(node._flag & FLAG_LOCK))) {
             return;
           }
           if (!(node._flag & FLAG_LOCK)) {
@@ -871,13 +873,11 @@ function root(fn) {
       return _suspendTask.call(this, promiseOrTask);
     }
     /** Promise path — wrap with staleness guard. */
-    let ref = new WeakRef(this);
+    let node = this;
     let time = this._time;
     return promiseOrTask.then(
       function (val) {
-        let node = ref.deref();
         if (
-          node !== void 0 &&
           node._time === time &&
           (!(node._flag & FLAG_DISPOSED) || node._flag & FLAG_LOCK)
         ) {
@@ -886,9 +886,7 @@ function root(fn) {
         return REGRET;
       },
       function (err) {
-        let node = ref.deref();
         if (
-          node !== void 0 &&
           node._time === time &&
           (!(node._flag & FLAG_DISPOSED) || node._flag & FLAG_LOCK)
         ) {
@@ -945,7 +943,9 @@ function root(fn) {
       return taskNode._value;
     }
 
-    /** Task is loading — create channel binding and return a Promise. */
+    /** Task is loading — create channel binding and return a Promise.
+     *  Staleness is handled by resetChannel: if the node re-runs,
+     *  the old waiter is removed and this Promise never resolves. */
     let self = this;
     return new Promise(function (resolve, reject) {
       send(self, taskNode, resolve, reject);
@@ -975,27 +975,25 @@ function root(fn) {
       return [];
     }
     let results = new Array(count);
-    let visited = new Array(count);
 
     /** Fast-path: try to collect everything synchronously. */
-    let filled = 0;
+    let allSettled = true;
     for (let i = 0; i < count; i++) {
       let task = tasks[i];
       if (task._flag & (FLAG_STALE | FLAG_PENDING)) {
         task._refresh();
       }
       if (task._flag & FLAG_LOADING) {
+        allSettled = false;
         break;
       }
       if (task._flag & FLAG_ERROR) {
         throw task._value;
       }
       results[i] = task._value;
-      visited[i] = 1;
-      filled++;
     }
 
-    if (filled === count) {
+    if (allSettled) {
       this._flag &= ~FLAG_BLOCKED;
       for (let i = 0; i < count; i++) {
         subscribe(this, tasks[i]);
@@ -1003,52 +1001,47 @@ function root(fn) {
       return results;
     }
 
-    /** At least one is loading — allocate one Promise. */
+    /** At least one is loading — allocate one Promise.
+     *  _stepArray re-scans from scratch on each wake-up,
+     *  guaranteeing a consistent snapshot when it resolves. */
     let self = this;
     return new Promise(function (resolve, reject) {
-      _stepArray(self, tasks, results, visited, filled, resolve, reject);
+      _stepArray(self, tasks, results, resolve, reject);
     });
   }
 
   /**
-   * Walk the task array from `start`, wrapping around. Collects
-   * settled values into `results`. On the first loading task,
-   * peeks all remaining, binds one waiter that resumes the walk.
-   * When all slots are filled, subscribes and resolves.
+   * Scan all tasks for a consistent settled snapshot. Walks every
+   * task — if any is loading, binds a waiter that re-scans from
+   * scratch when it settles. Only resolves when a full scan finds
+   * zero loading tasks, guaranteeing a consistent snapshot (all
+   * values from the same moment). Mirrors c.pending() semantics.
    * @param {!Compute | !Effect} node
    * @param {!Array<!Compute>} tasks
    * @param {!Array} results
-   * @param {!Array} visited
-   * @param {number} start
    * @param {function(!Array)} resolve
    * @param {function(*)} reject
    */
-  function _stepArray(node, tasks, results, visited, start, resolve, reject) {
+  function _stepArray(node, tasks, results, resolve, reject) {
     let count = tasks.length;
     let blocked = -1;
-    let steps = 0;
-    while (steps < count) {
-      let idx = (start + steps) % count;
-      if (!visited[idx]) {
-        let task = tasks[idx];
-        if (task._flag & (FLAG_STALE | FLAG_PENDING)) {
-          task._refresh();
-        }
-        if (task._flag & FLAG_LOADING) {
-          blocked = idx;
-          break;
-        }
-        if (task._flag & FLAG_ERROR) {
-          reject(task._value);
-          return;
-        }
-        results[idx] = task._value;
-        visited[idx] = 1;
+    for (let i = 0; i < count; i++) {
+      let task = tasks[i];
+      if (task._flag & (FLAG_STALE | FLAG_PENDING)) {
+        task._refresh();
       }
-      steps++;
+      if (task._flag & FLAG_LOADING) {
+        blocked = i;
+        break;
+      }
+      if (task._flag & FLAG_ERROR) {
+        reject(task._value);
+        return;
+      }
+      results[i] = task._value;
     }
 
-    /** All filled — subscribe and resolve. */
+    /** All settled — subscribe and resolve with consistent snapshot. */
     if (blocked === -1) {
       node._flag &= ~FLAG_BLOCKED;
       for (let i = 0; i < count; i++) {
@@ -1058,28 +1051,21 @@ function root(fn) {
       return;
     }
 
-    /** Peek remaining unfilled tasks so they're current. */
-    for (let j = 1; j < count; j++) {
-      let k = (blocked + j) % count;
-      if (!visited[k]) {
-        let t = tasks[k];
-        if (t._flag & (FLAG_STALE | FLAG_PENDING)) {
-          t._refresh();
-        }
+    /** Peek remaining tasks so they're current. */
+    for (let j = blocked + 1; j < count; j++) {
+      let t = tasks[j];
+      if (t._flag & (FLAG_STALE | FLAG_PENDING)) {
+        t._refresh();
       }
     }
 
-    /** Bind waiter to the blocked task. */
+    /** Bind waiter to the blocked task. On settle, re-scan
+     *  ALL tasks from scratch — a previously settled task may
+     *  have gone back to loading. */
     let task = tasks[blocked];
     send(node, task,
-      function (value) {
-        if (task._flag & FLAG_ERROR) {
-          reject(task._value);
-          return;
-        }
-        results[blocked] = value;
-        visited[blocked] = 1;
-        _stepArray(node, tasks, results, visited, (blocked + 1) % count, resolve, reject);
+      function () {
+        _stepArray(node, tasks, results, resolve, reject);
       },
       reject
     );
@@ -1148,11 +1134,16 @@ function root(fn) {
     }
     let value = sender._value;
     let channel = this._channel();
-    let defers = channel._defers;
-    if (defers === null) {
-      channel._defers = [sender, value];
+    if (channel._defer1 === null) {
+      channel._defer1 = sender;
+      channel._defer1val = value;
     } else {
-      defers.push(sender, value);
+      let defers = channel._defers;
+      if (defers === null) {
+        channel._defers = [sender, value];
+      } else {
+        defers.push(sender, value);
+      }
     }
     if (sender._flag & FLAG_ERROR) {
       throw value;
@@ -1403,7 +1394,7 @@ function root(fn) {
       let stale = false;
       if (this._flag & FLAG_ASYNC) {
         let hasDefers =
-          this._flag & FLAG_CHANNEL && this._args._defers !== null;
+          this._flag & FLAG_CHANNEL && (this._args._defer1 !== null || this._args._defers !== null);
         if (this._deps !== null || hasDefers) {
           stale = settleDeps(this);
         }
@@ -1644,13 +1635,13 @@ function root(fn) {
         this._flag |= FLAG_LOADING;
         if (kind === ASYNC_PROMISE) {
           resolvePromise(
-            new WeakRef(this),
+            this,
             /** @type {IThenable} */ (value),
             time
           );
         } else {
           resolveIterator(
-            new WeakRef(this),
+            this,
             /** @type {AsyncIterator | AsyncIterable} */ (value),
             time
           );
@@ -1749,11 +1740,9 @@ function root(fn) {
       this._recover = null;
     }
 
-    /** Async prep: reset fiber state, clear loading/suspend from previous activation. */
+    /** Async prep: clear loading/suspend from previous activation.
+     *  Channel reset is handled eagerly in _receive, not here. */
     if (flag & FLAG_ASYNC) {
-      if (flag & FLAG_CHANNEL) {
-        resetChannel(this);
-      }
       this._flag &= ~(FLAG_LOADING | FLAG_SUSPEND);
     }
 
@@ -1855,9 +1844,9 @@ function root(fn) {
       if (kind !== ASYNC_SYNC) {
         this._flag |= FLAG_LOADING;
         if (kind === ASYNC_PROMISE) {
-          resolvePromise(new WeakRef(this), value, time);
+          resolvePromise(this, value, time);
         } else {
-          resolveIterator(new WeakRef(this), value, time);
+          resolveIterator(this, value, time);
         }
         return;
       }
@@ -1895,7 +1884,7 @@ function root(fn) {
     }
 
     let stale = false;
-    if (this._flag & FLAG_CHANNEL && this._args._defers !== null) {
+    if (this._flag & FLAG_CHANNEL && (this._args._defer1 !== null || this._args._defers !== null)) {
       stale = settleDeps(this);
     }
     if (stale || (flag & FLAG_LOCK && (this._flag & FLAG_STALE || (this._flag & FLAG_PENDING && needsUpdate(this, TIME))))) {
@@ -1951,8 +1940,14 @@ function root(fn) {
    * @returns {void}
    */
   EffectProto._receive = function () {
-    if (this._flag & FLAG_LOCK) {
+    let flag = this._flag;
+    if (flag & FLAG_LOCK) {
       return;
+    }
+    /** Abort in-flight async work eagerly so stale fetches/promises
+     *  are cancelled without waiting for _update to run. */
+    if (flag & FLAG_LOADING && flag & FLAG_CHANNEL) {
+      resetChannel(this);
     }
     if (this._owned === null) {
       RECEIVERS[RECEIVER_COUNT++] = this;
@@ -2836,16 +2831,15 @@ function asyncKind(value) {
 
 /**
  * @template T
- * @param {WeakRef<!Compute<T>>} ref
+ * @param {!Compute<T>} node
  * @param {IThenable<T>} promise
  * @param {number} time
  * @returns {void}
  */
-	function resolvePromise(ref, promise, time) {
+	function resolvePromise(node, promise, time) {
   promise.then(
     (val) => {
-      let node = ref.deref();
-      if (node === void 0 || node._time !== time || (node._flag & FLAG_DISPOSED && !(node._flag & FLAG_LOCK))) {
+      if (node._time !== time || (node._flag & FLAG_DISPOSED && !(node._flag & FLAG_LOCK))) {
         return;
       }
       if (!(node._flag & FLAG_LOCK)) {
@@ -2860,8 +2854,7 @@ function asyncKind(value) {
       node._settle(val);
     },
     (err) => {
-      let node = ref.deref();
-      if (node === void 0 || node._time !== time || (node._flag & FLAG_DISPOSED && !(node._flag & FLAG_LOCK))) {
+      if (node._time !== time || (node._flag & FLAG_DISPOSED && !(node._flag & FLAG_LOCK))) {
         return;
       }
       if (!(node._flag & FLAG_LOCK)) {
@@ -2880,12 +2873,12 @@ function asyncKind(value) {
 
 /**
  * @template T
- * @param {WeakRef<!Compute<T>>} ref
+ * @param {!Compute<T>} node
  * @param {AsyncIterator<T> | AsyncIterable<T>} iterable
  * @param {number} time
  * @returns {void}
  */
-function resolveIterator(ref, iterable, time) {
+function resolveIterator(node, iterable, time) {
   /** @type {AsyncIterator<T>} */
   let iterator =
     typeof iterable[Symbol.asyncIterator] === "function"
@@ -2894,8 +2887,7 @@ function resolveIterator(ref, iterable, time) {
 
   /** @param {IteratorResult<T>} result */
   let onNext = (result) => {
-    let node = ref.deref();
-    if (node === void 0 || node._time !== time || (node._flag & FLAG_DISPOSED && !(node._flag & FLAG_LOCK))) {
+    if (node._time !== time || (node._flag & FLAG_DISPOSED && !(node._flag & FLAG_LOCK))) {
       if (typeof iterator.return === "function") {
         iterator.return();
       }
@@ -2928,8 +2920,7 @@ function resolveIterator(ref, iterable, time) {
 
   /** @param {*} err */
   let onError = (err) => {
-    let node = ref.deref();
-    if (node === void 0 || node._time !== time || (node._flag & FLAG_DISPOSED && !(node._flag & FLAG_LOCK))) {
+    if (node._time !== time || (node._flag & FLAG_DISPOSED && !(node._flag & FLAG_LOCK))) {
       return;
     }
     if (!(node._flag & FLAG_LOCK)) {
@@ -3041,9 +3032,16 @@ function settleDeps(node) {
   let deps = node._deps;
 
   /** Grab defers before clearing. */
+  let defer1 = null;
+  let defer1val;
   let defers = null;
   let deferLen = 0;
   if (node._flag & FLAG_CHANNEL) {
+    defer1 = node._args._defer1;
+    if (defer1 !== null) {
+      defer1val = node._args._defer1val;
+      node._args._defer1 = null;
+    }
     defers = node._args._defers;
     if (defers !== null) {
       deferLen = defers.length;
@@ -3057,7 +3055,7 @@ function settleDeps(node) {
   }
 
   /** Dedup scan of _deps — remove duplicates via swap-with-last. */
-  let hasDefers = deferLen > 0;
+  let hasDefers = defer1 !== null || deferLen > 0;
   if (deps !== null) {
     let i = deps.length - 2;
     let write = deps.length;
@@ -3097,11 +3095,28 @@ function settleDeps(node) {
   }
 
   /** Phase 2: subscribe deferred deps and detect changes. */
-  if (deferLen === 0) {
+  if (!hasDefers) {
     return false;
   }
 
   let changed = false;
+
+  /** Check defer1 first. */
+  if (defer1 !== null) {
+    if (defer1._version === stamp) {
+      if (defer1._changed(defer1val)) {
+        changed = true;
+      }
+    } else {
+      defer1._version = stamp;
+      subscribe(node, defer1);
+      if (defer1._changed(defer1val)) {
+        changed = true;
+      }
+    }
+  }
+
+  /** Check overflow defers. */
   for (let i = 0; i < deferLen; i += 2) {
     let sender = defers[i];
     let snapshot = defers[i + 1];
@@ -3133,8 +3148,9 @@ function resetChannel(node) {
     ch._controller.abort();
     ch._controller = null;
   }
+  ch._defer1 = null;
   ch._defers = null;
-  if (ch._res1 !== null) {
+  if (ch._res1 !== null || ch._responds !== null) {
     clearChannel(ch);
   }
 }

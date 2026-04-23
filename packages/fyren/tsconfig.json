@@ -1,0 +1,15 @@
+{
+  "compilerOptions": {
+    /* Target ES2015 to support Map and Typed Arrays */
+    "target": "ES2020",
+    "lib": ["ES2020", "DOM"],
+    "composite": true,
+    "strict": true,
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext"
+  },
+  "include": [
+    "src/**.js",
+    "types/*.d.ts"
+  ]
+}
