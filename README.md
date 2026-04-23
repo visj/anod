@@ -92,8 +92,9 @@ root((c) => {
 	const name = signal("Vilhelm");
 	/**
 	 * The .get() method only returns the current value.
-	 * Unlike other libraries, this method in itself does nothing, regardless
-	 * of being read in or outside a reactive context.
+	 * Unlike other libraries, this method by itself does
+	 * not have any reactive capabilities. Instead, reactivity
+	 * is controller through the context
 	 */
 	console.log(name.get());
 	c.effect((c) => {
@@ -246,10 +247,34 @@ root((c) => {
 	userId.set(2);
 });
 ```
+
 ### Spawn
 
 A Spawn is an async Effect. It runs eagerly, re-runs when dependencies change, and can await promises and tasks. When a spawn re-runs, any in-flight async work from the previous run is silently dropped through the `c.suspend()` mechanism.
 
+```ts
+import { root, signal } from "fyren";
+root((c) => {
+	const url = signal("/api/data");
+	c.spawn(async (c) => {
+		const endpoint = c.val(url);
+		c.cleanup(() => console.log("previous run cleaned up"));
+		const res = await c.suspend(fetch(endpoint));
+		const data = await c.suspend(res.json());
+		console.log(data);
+	});
+	/**
+	 * The first spawn is mid-flight, waiting for fetch.
+	 * Setting url causes the spawn to re-run. The old
+	 * fetch promise is abandoned: c.suspend() detects that
+	 * the activation is stale and silently drops the continuation.
+	 */
+	url.set("/api/other");
+});
+```
+
+### `c.suspend()`
+The suspend method is a critical part of fyren's async infrastructure. It acts as a guard to prevent stale async callbacks on invalidation. Consider this example
 ```ts
 import { root, signal } from "fyren";
 root((c) => {
@@ -475,7 +500,8 @@ fyren provides three ways to consume async values, each suited to a different us
 
 ```ts
 import { root, signal } from "fyren";
-const fetchData = () => new Promise((r) => setTimeout(() => r({ name: "fyren" }), 50));
+const fetchData = () =>
+	new Promise((r) => setTimeout(() => r({ name: "fyren" }), 50));
 
 root((c) => {
 	const data = c.task(async (c) => {
@@ -557,7 +583,7 @@ root((c) => {
 The callbacks are guarded with the same staleness protection as promises: if the node is disposed or re-run before `resolve` fires, the call is silently ignored.
 
 ```ts
-import { root, signal } from 'fyren';
+import { root, signal } from "fyren";
 root((c) => {
 	const url = signal("ws://localhost");
 	const messageSignal = signal(null);
@@ -594,7 +620,8 @@ This applies to both resolve and reject: if a promise rejects after the node was
 
 ```ts
 import { root, signal } from "fyren";
-const fetchWithAuth = (token) => new Promise((r) => setTimeout(() => r({ token, data: "ok" }), 50));
+const fetchWithAuth = (token) =>
+	new Promise((r) => setTimeout(() => r({ token, data: "ok" }), 50));
 
 root((c) => {
 	const authToken = signal("token_abc");
@@ -624,9 +651,7 @@ root((c) => {
 		const endpoint = c.val(url);
 		const ctrl = c.controller();
 		try {
-			const res = await c.suspend(
-				fetch(endpoint, { signal: ctrl.signal })
-			);
+			const res = await c.suspend(fetch(endpoint, { signal: ctrl.signal }));
 			console.log(await c.suspend(res.json()));
 		} catch (e) {
 			if (e.name === "AbortError") {
@@ -647,10 +672,13 @@ By default, when a task or spawn's dependencies change during async work, the no
 
 ```ts
 import { root, signal } from "fyren";
-const saveToDb = (item) => new Promise((r) => setTimeout(() => {
-	console.log("saved:", item);
-	r();
-}, 10));
+const saveToDb = (item) =>
+	new Promise((r) =>
+		setTimeout(() => {
+			console.log("saved:", item);
+			r();
+		}, 10)
+	);
 
 root((c) => {
 	const todoList = signal(["buy milk", "write docs"]);

@@ -779,23 +779,35 @@ function root(fn) {
       promiseOrTask(
         function (val) {
           let node = ref.deref();
-          if (
-            node !== void 0 &&
-            !(node._flag & FLAG_DISPOSED) &&
-            node._time === time
-          ) {
-            node._settle(val);
+          if (node === void 0 || node._time !== time || (node._flag & FLAG_DISPOSED && !(node._flag & FLAG_LOCK))) {
+            return;
           }
+          if (!(node._flag & FLAG_LOCK)) {
+            if (node._flag & FLAG_STALE) {
+              return;
+            }
+            if (node._flag & FLAG_PENDING && needsUpdate(node, TIME)) {
+              node._flag |= FLAG_STALE;
+              return;
+            }
+          }
+          node._settle(val);
         },
         function (err) {
           let node = ref.deref();
-          if (
-            node !== void 0 &&
-            !(node._flag & FLAG_DISPOSED) &&
-            node._time === time
-          ) {
-            node._error(err);
+          if (node === void 0 || node._time !== time || (node._flag & FLAG_DISPOSED && !(node._flag & FLAG_LOCK))) {
+            return;
           }
+          if (!(node._flag & FLAG_LOCK)) {
+            if (node._flag & FLAG_STALE) {
+              return;
+            }
+            if (node._flag & FLAG_PENDING && needsUpdate(node, TIME)) {
+              node._flag |= FLAG_STALE;
+              return;
+            }
+          }
+          node._error(err);
         }
       );
       return;
@@ -817,8 +829,8 @@ function root(fn) {
         let node = ref.deref();
         if (
           node !== void 0 &&
-          !(node._flag & FLAG_DISPOSED) &&
-          node._time === time
+          node._time === time &&
+          (!(node._flag & FLAG_DISPOSED) || node._flag & FLAG_LOCK)
         ) {
           return val;
         }
@@ -828,8 +840,8 @@ function root(fn) {
         let node = ref.deref();
         if (
           node !== void 0 &&
-          !(node._flag & FLAG_DISPOSED) &&
-          node._time === time
+          node._time === time &&
+          (!(node._flag & FLAG_DISPOSED) || node._flag & FLAG_LOCK)
         ) {
           throw err;
         }
@@ -1326,30 +1338,95 @@ function root(fn) {
   };
 
   /**
-   * @this {!Compute<T,U,V,W>}
-   * @returns {void}
-   */
-  /**
-   * Settles an async compute with a resolved value.
+   * Settles an async compute. Clears loading/lock/init, handles deferred
+   * dispose, resolves waiters, notifies subscribers, and re-runs if the
+   * node was marked stale while locked. Handles both value and error:
+   * when FLAG_ERROR is set before calling, the value is treated as an
+   * error. Uses err || { error: err } guard on errors to guarantee a
+   * non-falsy value (prevents skipping the comparison branch when user
+   * throws null/undefined/0).
    * @this {!Compute}
    * @param {*} value
    */
   ComputeProto._settle = function (value) {
-    this._flag &= ~FLAG_ERROR;
-    settle(this, value);
+    let flag = this._flag;
+    let isError = flag & FLAG_ERROR;
+    this._flag &= ~(FLAG_LOADING | FLAG_INIT | FLAG_LOCK);
+
+    /** Deferred dispose: owner disposed while we were locked.
+     *  FLAG_LOCK was cleared above, so _dispose runs full cleanup. */
+    if (flag & FLAG_DISPOSED) {
+      this._dispose();
+      return;
+    }
+
+    if (value !== this._value || flag & (FLAG_INIT | FLAG_ERROR)) {
+      this._value = value;
+      let time = TIME + 1;
+      this._ctime = time;
+
+      let stale = false;
+      if (this._flag & FLAG_ASYNC) {
+        let hasDefers =
+          this._flag & FLAG_FIBER && this._args._fiber._defers !== null;
+        if (this._deps !== null || hasDefers) {
+          stale = settleDeps(this);
+        }
+      }
+
+      let waiters = null;
+      if (this._flag & FLAG_FIBER) {
+        let ch = this._args._fiber._channel;
+        if (ch !== null && ch._waiters !== null) {
+          waiters = ch._waiters;
+          let waiterCount = waiters.length;
+          settleNotify(this, value, !!isError, waiters, waiterCount);
+          ch._waiters = null;
+          this._flag &= ~FLAG_WAITER;
+        }
+      }
+      if (waiters === null) {
+        notify(this, FLAG_STALE);
+      }
+
+      flush();
+
+      if (stale || (flag & FLAG_LOCK && (this._flag & FLAG_STALE || (this._flag & FLAG_PENDING && needsUpdate(this, TIME))))) {
+        this._flag |= FLAG_STALE;
+        this._update(TIME);
+      }
+    } else if (flag & FLAG_LOCK && (this._flag & FLAG_STALE || (this._flag & FLAG_PENDING && needsUpdate(this, TIME)))) {
+      this._flag |= FLAG_STALE;
+      this._update(TIME);
+    }
+
+    /** Weak node with no subscribers after settle — release value. */
+    if (
+      this._flag & FLAG_WEAK &&
+      this._sub1 === null &&
+      (this._subs === null || this._subs.length === 0)
+    ) {
+      this._flag |= FLAG_STALE;
+      this._value = null;
+    }
   };
 
   /**
-   * Settles an async compute with an error.
+   * Settles an async compute with an error. Sets FLAG_ERROR then
+   * delegates to _settle with a non-falsy error guard.
    * @this {!Compute}
    * @param {*} err
    */
   ComputeProto._error = function (err) {
     this._flag |= FLAG_ERROR;
-    settle(this, err);
+    this._settle(err || { error: err });
   };
 
   ComputeProto._dispose = function () {
+    if (this._flag & FLAG_LOCK) {
+      this._flag |= FLAG_DISPOSED;
+      return;
+    }
     let flag = this._flag;
     this._flag = FLAG_DISPOSED;
     clearSubs(this);
@@ -1761,14 +1838,28 @@ function root(fn) {
    * Clears loading/lock, checks deferred deps, re-runs if stale.
    * @this {!Effect}
    */
+  /**
+   * Settles an async effect after its promise/callback resolves.
+   * Clears loading/lock, handles deferred dispose, checks deferred
+   * deps, re-runs if stale.
+   * @this {!Effect}
+   */
   EffectProto._settle = function () {
-    let wasLocked = this._flag & FLAG_LOCK;
+    let flag = this._flag;
     this._flag &= ~(FLAG_LOADING | FLAG_LOCK);
+
+    /** Deferred dispose: owner disposed while we were locked.
+     *  FLAG_LOCK was cleared above, so _dispose runs full cleanup. */
+    if (flag & FLAG_DISPOSED) {
+      this._dispose();
+      return;
+    }
+
     let stale = false;
     if (this._flag & FLAG_FIBER && this._args._fiber._defers !== null) {
       stale = settleDeps(this);
     }
-    if (stale || (wasLocked && this._flag & FLAG_STALE)) {
+    if (stale || (flag & FLAG_LOCK && (this._flag & FLAG_STALE || (this._flag & FLAG_PENDING && needsUpdate(this, TIME))))) {
       this._flag |= FLAG_STALE;
       this._receive();
       flush();
@@ -1777,12 +1868,22 @@ function root(fn) {
 
   /**
    * Handles an error in an async effect. Clears loading/lock,
-   * attempts recovery, disposes if unrecoverable.
+   * handles deferred dispose, attempts recovery, disposes if
+   * unrecoverable.
    * @this {!Effect}
    * @param {*} err
    */
   EffectProto._error = function (err) {
+    let flag = this._flag;
     this._flag &= ~(FLAG_LOADING | FLAG_LOCK);
+
+    /** Deferred dispose: owner disposed while we were locked.
+     *  FLAG_LOCK was cleared above, so _dispose runs full cleanup. */
+    if (flag & FLAG_DISPOSED) {
+      this._dispose();
+      return;
+    }
+
     let result = tryRecover(this, err);
     if (result !== RECOVER_SELF) {
       this._dispose();
@@ -1794,6 +1895,10 @@ function root(fn) {
    * @returns {void}
    */
   EffectProto._dispose = function () {
+    if (this._flag & FLAG_LOCK) {
+      this._flag |= FLAG_DISPOSED;
+      return;
+    }
     let flag = this._flag;
     this._flag = FLAG_DISPOSED;
     clearDeps(this);
@@ -2745,35 +2850,37 @@ function asyncKind(value) {
  * @param {number} time
  * @returns {void}
  */
-function resolvePromise(ref, promise, time) {
+	function resolvePromise(ref, promise, time) {
   promise.then(
     (val) => {
       let node = ref.deref();
-      if (
-        node === void 0 ||
-        node._flag & FLAG_DISPOSED ||
-        node._time !== time ||
-        (!(node._flag & FLAG_LOCK) && (
-          node._flag & FLAG_STALE ||
-          (node._flag & FLAG_PENDING && needsUpdate(node, time))
-        ))
-      ) {
+      if (node === void 0 || node._time !== time || (node._flag & FLAG_DISPOSED && !(node._flag & FLAG_LOCK))) {
         return;
+      }
+      if (!(node._flag & FLAG_LOCK)) {
+        if (node._flag & FLAG_STALE) {
+          return;
+        }
+        if (node._flag & FLAG_PENDING && needsUpdate(node, TIME)) {
+          node._flag |= FLAG_STALE;
+          return;
+        }
       }
       node._settle(val);
     },
     (err) => {
       let node = ref.deref();
-      if (
-        node === void 0 ||
-        node._flag & FLAG_DISPOSED ||
-        node._time !== time ||
-        (!(node._flag & FLAG_LOCK) && (
-          node._flag & FLAG_STALE ||
-          (node._flag & FLAG_PENDING && needsUpdate(node, time))
-        ))
-      ) {
+      if (node === void 0 || node._time !== time || (node._flag & FLAG_DISPOSED && !(node._flag & FLAG_LOCK))) {
         return;
+      }
+      if (!(node._flag & FLAG_LOCK)) {
+        if (node._flag & FLAG_STALE) {
+          return;
+        }
+        if (node._flag & FLAG_PENDING && needsUpdate(node, TIME)) {
+          node._flag |= FLAG_STALE;
+          return;
+        }
       }
       node._error(err);
     }
@@ -2797,19 +2904,26 @@ function resolveIterator(ref, iterable, time) {
   /** @param {IteratorResult<T>} result */
   let onNext = (result) => {
     let node = ref.deref();
-    if (
-      node === void 0 ||
-      node._flag & FLAG_DISPOSED ||
-      node._time !== time ||
-      (!(node._flag & FLAG_LOCK) && (
-        node._flag & FLAG_STALE ||
-        (node._flag & FLAG_PENDING && needsUpdate(node, time))
-      ))
-    ) {
+    if (node === void 0 || node._time !== time || (node._flag & FLAG_DISPOSED && !(node._flag & FLAG_LOCK))) {
       if (typeof iterator.return === "function") {
         iterator.return();
       }
       return;
+    }
+    if (!(node._flag & FLAG_LOCK)) {
+      if (node._flag & FLAG_STALE) {
+        if (typeof iterator.return === "function") {
+          iterator.return();
+        }
+        return;
+      }
+      if (node._flag & FLAG_PENDING && needsUpdate(node, TIME)) {
+        node._flag |= FLAG_STALE;
+        if (typeof iterator.return === "function") {
+          iterator.return();
+        }
+        return;
+      }
     }
 
     if (result.done) {
@@ -2824,16 +2938,17 @@ function resolveIterator(ref, iterable, time) {
   /** @param {*} err */
   let onError = (err) => {
     let node = ref.deref();
-    if (
-      node === void 0 ||
-      node._flag & FLAG_DISPOSED ||
-      node._time !== time ||
-      (!(node._flag & FLAG_LOCK) && (
-        node._flag & FLAG_STALE ||
-        (node._flag & FLAG_PENDING && needsUpdate(node, time))
-      ))
-    ) {
+    if (node === void 0 || node._time !== time || (node._flag & FLAG_DISPOSED && !(node._flag & FLAG_LOCK))) {
       return;
+    }
+    if (!(node._flag & FLAG_LOCK)) {
+      if (node._flag & FLAG_STALE) {
+        return;
+      }
+      if (node._flag & FLAG_PENDING && needsUpdate(node, TIME)) {
+        node._flag |= FLAG_STALE;
+        return;
+      }
     }
     node._error(err);
   };
@@ -2918,70 +3033,6 @@ function settleNotify(node, value, isError, waiters, waiterCount) {
         }
       }
     }
-  }
-}
-
-/**
- * @template T
- * @param {Compute<T>} node
- * @param {T | *} value
- * @returns {void}
- */
-function settle(node, value) {
-  let flag = node._flag;
-  node._flag &= ~(FLAG_LOADING | FLAG_INIT | FLAG_LOCK);
-
-  /** If the node was locked and marked stale while locked, it needs
-   *  to re-run regardless of whether the value changed. */
-  let wasLocked = flag & FLAG_LOCK;
-
-  if (value !== node._value || flag & (FLAG_INIT | FLAG_ERROR)) {
-    node._value = value;
-    let time = TIME + 1;
-    node._ctime = time;
-
-    let stale = false;
-    if (node._flag & FLAG_ASYNC) {
-      let hasDefers =
-        node._flag & FLAG_FIBER && node._args._fiber._defers !== null;
-      if (node._deps !== null || hasDefers) {
-        stale = settleDeps(node);
-      }
-    }
-
-    let waiters = null;
-    let waiterCount = 0;
-    if (node._flag & FLAG_FIBER) {
-      let ch = node._args._fiber._channel;
-      if (ch !== null && ch._waiters !== null) {
-        waiters = ch._waiters;
-        waiterCount = waiters.length;
-        settleNotify(node, value, !!(node._flag & FLAG_ERROR), waiters, waiterCount);
-        ch._waiters = null;
-        node._flag &= ~FLAG_WAITER;
-      }
-    }
-    if (waiters === null) {
-      notify(node, FLAG_STALE);
-    }
-
-    flush();
-
-    if (stale || (wasLocked && node._flag & FLAG_STALE)) {
-      node._update(TIME);
-    }
-  } else if (wasLocked && node._flag & FLAG_STALE) {
-    node._update(TIME);
-  }
-
-  /** Weak node with no subscribers after settle — release value. */
-  if (
-    node._flag & FLAG_WEAK &&
-    node._sub1 === null &&
-    (node._subs === null || node._subs.length === 0)
-  ) {
-    node._flag |= FLAG_STALE;
-    node._value = null;
   }
 }
 
