@@ -28,7 +28,7 @@ function setFlag(node, flag) { }
 ```
 Always avoid heap allocations when possible. Prefer code duplication over heap allocs. Never allocate strings, arrays, destructured return arguments unless absolutely necessary.
 
-Fyren is extremely sensitive to V8 optimization. Code that looks equivalent often isn't — prototype methods beat free functions in polymorphic dispatch, `Array.prototype.pop()` beats `arr.length--` for swap-remove, and multiple call sites can prevent inlining that a single call site with an intermediate variable enables. Always prefer small flat structs with inline fields for the common case and arrays only on overflow.
+anod is extremely sensitive to V8 optimization. Code that looks equivalent often isn't — prototype methods beat free functions in polymorphic dispatch, `Array.prototype.pop()` beats `arr.length--` for swap-remove, and multiple call sites can prevent inlining that a single call site with an intermediate variable enables. Always prefer small flat structs with inline fields for the common case and arrays only on overflow.
 ### Comments
 Always write meaningful comments about how the code works. Do not insert meaningless section comments. Prefer JSDoc style comments over regular // comments.
 ### JSDoc
@@ -36,12 +36,12 @@ If you can, add correct JSDoc type definitions. Because we "fake" a lot of types
 
 ## Library overview
 
-Fyren is a fine-grained reactive signal library for JavaScript. It belongs to the same family as S.js, Solid signals, Preact signals, and Alien signals, but takes its own approach to scheduling, dependency tracking, and memory layout.
+anod is a fine-grained reactive signal library for JavaScript. It belongs to the same family as S.js, Solid signals, Preact signals, and Alien signals, but takes its own approach to scheduling, dependency tracking, and memory layout.
 
 The monorepo contains two packages:
 
-- **`@fyren/core`** — the core reactive engine
-- **`@fyren/list`** — reactive array methods built on top of the signal primitives
+- **`anod-core`** — the core reactive engine
+- **`anod-list`** — reactive array methods built on top of the signal primitives
 
 ### Core primitives
 
@@ -61,7 +61,7 @@ There are four sync node types plus two async variants, distinguished by bit-fla
 
 ### Propagation model
 
-Fyren separates notification from evaluation:
+anod separates notification from evaluation:
 
 - **Notification is push**: when a Signal writes, it walks its subscriber list and marks each receiver `FLAG_STALE` (direct dep) or `FLAG_PENDING` (transitive). Stale/pending propagation stops at nodes already marked for the current transaction time.
 - **Compute evaluation is pull**: Computes never re-run as part of notification. They re-run on the next read that finds them stale. This avoids work for values nobody reads.
@@ -142,16 +142,16 @@ Owner nodes track `_owned` children. Disposal is recursive. Cleanup functions ar
 
 ### Error handling
 
-All errors in fyren are `{ error, type }` POJOs with three type constants:
+All errors in anod are `{ error, type }` POJOs with three type constants:
 - `REFUSE` (1) — expected error from `c.refuse(val)`. Non-throwing, the compute returns the error value.
 - `PANIC` (2) — expected error from `c.panic(val)`. Throws, but `FLAG_PANIC` distinguishes it from unexpected errors.
 - `FATAL` (3) — unexpected error. Any uncaught throw without `FLAG_PANIC` is wrapped as `{ error: thrownValue, type: FATAL }`.
 
 Errors in compute bodies are caught and stored with `FLAG_ERROR` set. Reading an errored compute via `.val()` rethrows the full `{ error, type }` POJO. Errors in effects dispose the effect. `recover(fn)` on a compute/effect intercepts errors: the handler receives the POJO and can branch on `type` to distinguish user errors from crashes. Return true to swallow, false to propagate.
 
-### The `@fyren/list` package
+### The `anod-list` package
 
-`@fyren/list` extends `Signal.prototype` and `Compute.prototype` with reactive array methods. Two categories:
+`anod-list` extends `Signal.prototype` and `Compute.prototype` with reactive array methods. Two categories:
 
 **Read methods** (return a bound Compute that re-runs when the source array changes):
 `at`, `concat`, `entries`, `every`, `filter`, `find`, `findIndex`, `findLast`, `findLastIndex`, `flat`, `flatMap`, `includes`, `indexOf`, `join`, `keys`, `map`, `reduce`, `reduceRight`, `slice`, `some`, `values`

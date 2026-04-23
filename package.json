@@ -1,25 +1,23 @@
 {
-  "name": "fyren",
+  "name": "anod",
   "private": "true",
   "workspaces": [
-    "packages/core",
-    "packages/list",
-    "packages/fyren",
-    "packages/stream",
-    "packages/tools"
+    "packages/anod-core",
+    "packages/anod-list",
+    "packages/anod"
   ],
   "version": "0.5.0",
   "description": "",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/visj/fyren.git"
+    "url": "git+https://github.com/visj/anod.git"
   },
   "keywords": [],
-  "author": "",
+  "author": "Vilhelm Sjölund",
   "license": "MIT",
   "type": "module",
   "bugs": {
-    "url": "https://github.com/visj/fyren/issues"
+    "url": "https://github.com/visj/anod/issues"
   },
-  "homepage": "https://github.com/visj/fyren#readme"
+  "homepage": "https://github.com/visj/anod#readme"
 }

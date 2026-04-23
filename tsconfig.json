@@ -8,9 +8,8 @@
 		"moduleResolution": "NodeNext"
 	},
 	"references": [
-		{ "path": "./packages/fyren" },
-		{ "path": "./packages/core" },
-		{ "path": "./packages/list" },
-		{ "path": "./packages/tools" }
+		{ "path": "./packages/anod" },
+		{ "path": "./packages/anod-core" },
+		{ "path": "./packages/anod-list" }
 	]
 }

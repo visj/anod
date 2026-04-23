@@ -3,3 +3,5 @@
 .DS_STORE
 node_modules/
 dist/
+packages/anod-stream
+packages/anod-tools
