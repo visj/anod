@@ -96,7 +96,7 @@ export declare class Root {
 export declare function connect(sender: any, receiver: any, depslot: number): number;
 export declare function subscribe(receiver: any, sender: any): void;
 export declare function schedule(node: any, payload: any, fn: Function): void;
-export declare function assignSignal(node: any, value: any): void;
+export declare function assign(node: any, value: any): void;
 export declare function notify(node: any, flag: number): void;
 export declare function flush(): void;
 export declare function batch(fn: () => void): void;

@@ -321,16 +321,17 @@ describe("compute", () => {
             });
         });
 
-        test("set on a compute that was STALE still propagates the new value", () => {
+        test("dep update takes precedence over manual set in the same cycle", () => {
             const s1 = signal(1);
             const c1 = c.compute(c => c.val(s1));
             expect(c1.get()).toBe(1);
 
             /** Mark STALE by setting upstream, but don't read c1 yet. */
             s1.set(2);
-            /** Overwrite before the lazy re-run would have seen s1=2. */
+            /** Manually write — but c1 is still stale from s1's change.
+             *  On the next read, the dep update re-runs fn and wins. */
             c1.set(50);
-            expect(c1.get()).toBe(50);
+            expect(c1.get()).toBe(2);
         });
 
         test("set on an initialized compute triggers stale notifications synchronously", () => {

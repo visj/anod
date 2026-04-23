@@ -28,7 +28,7 @@ export {
   connect,
   subscribe,
   schedule,
-  assignSignal,
+  assign,
   notify,
   flush,
   batch,

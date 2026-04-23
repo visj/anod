@@ -423,54 +423,53 @@ function peek(sender) {
 }
 
 /**
- * @template T
- * @this {Sender<T>}
- * @param {T} value
- * @returns {void}
+ * Shared set implementation for Signal and Compute. When IDLE,
+ * resolves updater functions, writes via _assign, notifies and
+ * flushes. When not IDLE, schedules for drain. Updater functions
+ * are resolved at drain time by assign() to see the latest value.
+ * @this {!Signal | !Compute}
+ * @param {*} value
  */
 function set(value) {
-  if (this._value !== value) {
-    if (IDLE) {
-      this._value = value;
-      this._ctime = TIME + 1;
-      /** The manual value is now canonical: clear any pending
-       *  re-run so `val()` returns it directly instead of
-       *  invoking fn and clobbering. The next upstream change
-       *  will re-mark STALE via notify and fn runs again. */
-      this._flag &= ~(FLAG_STALE | FLAG_PENDING | FLAG_INIT);
+  if (this._flag & FLAG_DISPOSED) {
+    throw new Error(ASSERT_DISPOSED);
+  }
+  if (IDLE) {
+    if (typeof value === "function") {
+      value = value(this._value);
+    }
+    if (this._value !== value) {
+      this._assign(value, TIME + 1);
       notify(this, FLAG_STALE);
       flush();
-    } else {
-      schedule(this, value, assignCompute);
     }
+  } else if (typeof value === "function" || this._value !== value) {
+    schedule(this, value, assign);
   }
 }
 
 /**
- * Batch-drain handler for signals. Sets value and notifies.
- * @param {!Signal} node
+ * Batch-drain handler for both Signal and Compute. Resolves updater
+ * functions against the current value at drain time, compares, and
+ * only writes + notifies if the value actually changed. Delegates
+ * the actual write to node._assign() which handles type-specific
+ * fields (_ctime, FLAG_INIT for Compute; plain _value for Signal).
+ * @param {!Signal | !Compute} node
  * @param {*} value
+ * @param {number} time
  */
-function assignSignal(node, value) {
-  node._value = value;
-  if (node._flag & FLAG_SCHEDULED) {
+function assign(node, value, time) {
+  if (typeof value === "function") {
+    value = value(node._value);
+  }
+  if (node._value !== value) {
+    node._assign(value, time);
+    if (node._flag & FLAG_SCHEDULED) {
+      node._flag &= ~FLAG_SCHEDULED;
+      notify(node, FLAG_STALE);
+    }
+  } else {
     node._flag &= ~FLAG_SCHEDULED;
-    notify(node, FLAG_STALE);
-  }
-}
-
-/**
- * Batch-drain handler for writable computes. Sets value, clears
- * FLAG_INIT, stamps _ctime, and notifies.
- * @param {!Compute} node
- * @param {*} value
- */
-function assignCompute(node, value) {
-  node._value = value;
-  if (node._flag & FLAG_SCHEDULED) {
-    node._flag &= ~(FLAG_SCHEDULED | FLAG_INIT);
-    node._ctime = TIME;
-    notify(node, FLAG_STALE);
   }
 }
 
@@ -634,6 +633,29 @@ function root(fn) {
   RootProto._level = -1;
 
   SignalProto._ctime = 0;
+
+  /**
+   * Signal._assign: just writes the value.
+   * @this {!Signal}
+   * @param {*} value
+   * @param {number} time
+   */
+  SignalProto._assign = function (value, time) {
+    this._value = value;
+  };
+
+  /**
+   * Compute._assign: writes value and stamps _ctime. Does NOT
+   * clear FLAG_STALE — if a dep also changed this cycle, the
+   * dep update re-runs fn on the next read and takes precedence.
+   * @this {!Compute}
+   * @param {*} value
+   * @param {number} time
+   */
+  ComputeProto._assign = function (value, time) {
+    this._value = value;
+    this._ctime = time;
+  };
 
   // Disposer#dispose — shared by all four node types
   RootProto.dispose =
@@ -1188,34 +1210,18 @@ function root(fn) {
     return this._value;
   };
 
-  /**
-   * @this {!Signal<T>}
-   * @param {T} value
-   * @returns {void}
-   */
-  SignalProto.set = function (value) {
-    if (this._flag & FLAG_DISPOSED) {
-      throw new Error(ASSERT_DISPOSED);
-    }
-    if (typeof value === "function") {
-      value = value(this._value);
-    }
-    if (this._value !== value) {
-      if (IDLE) {
-        this._value = value;
-        notify(this, FLAG_STALE);
-        flush();
-      } else {
-        schedule(this, value, assignSignal);
-      }
-    }
-  };
+  SignalProto.set = set;
 
   /**
-   * Microtask-deferred set. Writes the value immediately and notifies
-   * subscribers, but defers the flush to the next microtask. Multiple
-   * post() calls within the same tick coalesce into a single flush.
-   * Accepts a value or an updater function.
+   * Microtask-deferred set. Never writes the value immediately —
+   * always schedules the update to the drain queue. The flush is
+   * deferred to the next microtask so multiple post() calls
+   * coalesce into a single flush. If called from inside a flush
+   * cycle (not IDLE), the current flush picks up the scheduled
+   * value without needing a microtask.
+   *
+   * Fast exit: when not already posting and the value is unchanged
+   * (non-function), nothing to do.
    * @this {!Signal<T>}
    * @param {T | function(T): T} value
    * @returns {void}
@@ -1224,16 +1230,13 @@ function root(fn) {
     if (this._flag & FLAG_DISPOSED) {
       throw new Error(ASSERT_DISPOSED);
     }
-    if (typeof value === "function") {
-      value = value(this._value);
+    if (!POSTING && typeof value !== "function" && this._value === value) {
+      return;
     }
-    if (this._value !== value) {
-      this._value = value;
-      notify(this, FLAG_STALE);
-      if (!POSTING) {
-        POSTING = true;
-        queueMicrotask(microflush);
-      }
+    schedule(this, value, assign);
+    if (!POSTING) {
+      POSTING = true;
+      queueMicrotask(microflush);
     }
   };
 
@@ -3410,7 +3413,7 @@ function flush() {
       if (SENDER_COUNT > 0) {
         let count = SENDER_COUNT;
         for (let i = 0; i < count; i++) {
-          UPDATES[i](SENDERS[i], PAYLOADS[i]);
+          UPDATES[i](SENDERS[i], PAYLOADS[i], time);
           SENDERS[i] = PAYLOADS[i] = UPDATES[i] = null;
         }
         SENDER_COUNT = 0;
@@ -3673,7 +3676,7 @@ export {
   connect,
   subscribe,
   schedule,
-  assignSignal,
+  assign,
   notify,
   flush,
   batch,
