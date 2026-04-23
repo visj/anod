@@ -14,8 +14,7 @@
     }
   },
   "files": [
-    "dist",
-    "types"
+    "dist"
   ],
   "sideEffects": true,
   "scripts": {

@@ -1,5 +1,5 @@
 {
-  "name": "fyren-ws",
+  "name": "fyren",
   "private": "true",
   "workspaces": [
     "packages/core",
@@ -8,7 +8,7 @@
     "packages/stream",
     "packages/tools"
   ],
-  "version": "0.6.0",
+  "version": "0.5.0",
   "description": "",
   "repository": {
     "type": "git",
