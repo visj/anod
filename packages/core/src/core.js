@@ -39,7 +39,7 @@ const FLAG_SINGLE = 1 << 22;
 const FLAG_EAGER = 1 << 23;
 
 /** Error type constants for { error, type } POJOs. */
-const ERROR = 1;
+const REFUSE = 1;
 const PANIC = 2;
 const FATAL = 3;
 
@@ -472,6 +472,20 @@ function assign(node, value, time) {
 }
 
 /**
+ * Batch-drain handler for notify(). No value write — just clears
+ * FLAG_SCHEDULED and notifies subscribers.
+ * @param {!Signal | !Compute} node
+ * @param {*} _
+ * @param {number} time
+ */
+function poke(node, _, time) {
+  if (node._flag & FLAG_SCHEDULED) {
+    node._flag &= ~FLAG_SCHEDULED;
+    notify(node, FLAG_STALE);
+  }
+}
+
+/**
  * Enqueues a deferred update to run during the next drain cycle.
  * Used by extension packages (e.g. @fyren/list) to schedule custom
  * mutations like push, pop, splice without branching in the drain loop.
@@ -640,7 +654,10 @@ function root(fn) {
       return;
     }
     this._flag |= FLAG_STALE;
-    this._value = null;
+		this._value = null;
+		if (this._cleanup !== null) {
+			clearCleanup(this._cleanup);
+    }
   };
 
   // Disposer#dispose — shared by all four node types
@@ -756,7 +773,7 @@ function root(fn) {
    */
   ComputeProto.refuse = function (val) {
     this._flag |= FLAG_ERROR;
-    return { error: val, type: ERROR };
+    return { error: val, type: REFUSE };
   };
 
   /**
@@ -1209,6 +1226,25 @@ function root(fn) {
   SignalProto.set = set;
 
   /**
+   * Notifies subscribers without changing the value. Useful after
+   * mutating an object held by the signal in place.
+   * @this {!Signal | !Compute}
+   */
+  function signal_notify() {
+    if (this._flag & FLAG_DISPOSED) {
+      throw new Error(ASSERT_DISPOSED);
+    }
+    if (IDLE) {
+      notify(this, FLAG_STALE);
+      flush();
+    } else {
+      schedule(this, null, poke);
+    }
+  }
+
+  SignalProto.notify = ComputeProto.notify = signal_notify;
+
+  /**
    * Microtask-deferred set. Never writes the value immediately —
    * always schedules the update to the drain queue. The flush is
    * deferred to the next microtask so multiple post() calls
@@ -1468,7 +1504,7 @@ function root(fn) {
     }
     this._time = time;
     this._flag =
-      flag & ~(FLAG_STALE | FLAG_LOADING | FLAG_EQUAL | FLAG_NOTEQUAL | FLAG_SUSPEND | FLAG_PANIC);
+      flag & ~(FLAG_STALE | FLAG_LOADING | FLAG_ERROR | FLAG_EQUAL | FLAG_NOTEQUAL | FLAG_SUSPEND | FLAG_PANIC);
 
     if (!(flag & FLAG_INIT) && this._cleanup !== null) {
       clearCleanup(this);
@@ -1548,7 +1584,6 @@ function root(fn) {
         } else {
           value = this._fn(this, this._value, args);
         }
-        this._flag &= ~FLAG_ERROR;
       } catch (err) {
         if (this._flag & FLAG_PANIC) {
           value = err;
@@ -1592,6 +1627,7 @@ function root(fn) {
     }
 
     this._flag &= ~(FLAG_STALE | FLAG_PENDING | FLAG_SETUP);
+    flag = this._flag;
 
     /** Async: if fn used callback suspend, the node is already
      *  FLAG_LOADING via the setup function. Skip async dispatch.
@@ -1830,11 +1866,6 @@ function root(fn) {
     this._flag &= ~FLAG_INIT;
   };
 
-  /**
-   * Settles an async effect after its promise/callback resolves.
-   * Clears loading/lock, checks deferred deps, re-runs if stale.
-   * @this {!Effect}
-   */
   /**
    * Settles an async effect. Clears loading/lock, handles deferred
    * dispose, checks deferred deps, re-runs if stale. When FLAG_ERROR
@@ -2191,11 +2222,15 @@ function clearSubs(send) {
   }
 }
 
-function clearCleanup(owner) {
-  let cleanup = owner._cleanup;
+/**
+ *
+ * @param {Disposer} node
+ */
+function clearCleanup(node) {
+  let cleanup = node._cleanup;
   if (typeof cleanup === "function") {
     cleanup();
-    owner._cleanup = null;
+    node._cleanup = null;
   } else {
     /** array form */
     let count = /** @type {!Array} */ (cleanup).length;
@@ -2776,36 +2811,6 @@ function checkRun(node, time) {
     }
     return;
   }
-}
-
-/**
- * @template T
- * @param {Compute<T>} node
- * @param {T} value
- * @param {number} time
- * @returns {boolean}
- */
-function waitFor(node, value, time) {
-  let kind = asyncKind(value);
-  if (kind !== ASYNC_SYNC) {
-    let flag = node._flag;
-    node._flag = (flag & ~(FLAG_STALE | FLAG_PENDING | FLAG_SETUP)) | FLAG_LOADING;
-    if (kind === ASYNC_PROMISE) {
-      resolvePromise(
-        new WeakRef(node),
-            /** @type {IThenable} */(value),
-        time
-      );
-    } else {
-      resolveIterator(
-        new WeakRef(node),
-            /** @type {AsyncIterator | AsyncIterable} */(value),
-        time
-      );
-    }
-    return true;
-  }
-  return false;
 }
 
 /**
@@ -3658,7 +3663,7 @@ export {
   FLAG_BLOCKED,
   FLAG_LOCK,
   FLAG_SUSPEND,
-  ERROR,
+  REFUSE,
   PANIC,
   FATAL,
   OPT_DEFER,

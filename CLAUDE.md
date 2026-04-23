@@ -28,7 +28,7 @@ function setFlag(node, flag) { }
 ```
 Always avoid heap allocations when possible. Prefer code duplication over heap allocs. Never allocate strings, arrays, destructured return arguments unless absolutely necessary.
 
-Anod is extremely sensitive to V8 optimization. Code that looks equivalent often isn't — prototype methods beat free functions in polymorphic dispatch, `Array.prototype.pop()` beats `arr.length--` for swap-remove, and multiple call sites can prevent inlining that a single call site with an intermediate variable enables. Always prefer small flat structs with inline fields for the common case and arrays only on overflow.
+Fyren is extremely sensitive to V8 optimization. Code that looks equivalent often isn't — prototype methods beat free functions in polymorphic dispatch, `Array.prototype.pop()` beats `arr.length--` for swap-remove, and multiple call sites can prevent inlining that a single call site with an intermediate variable enables. Always prefer small flat structs with inline fields for the common case and arrays only on overflow.
 ### Comments
 Always write meaningful comments about how the code works. Do not insert meaningless section comments. Prefer JSDoc style comments over regular // comments.
 ### JSDoc
@@ -36,18 +36,18 @@ If you can, add correct JSDoc type definitions. Because we "fake" a lot of types
 
 ## Library overview
 
-Anod is a fine-grained reactive signal library for JavaScript. It belongs to the same family as S.js, Solid signals, Preact signals, and Alien signals, but takes its own approach to scheduling, dependency tracking, and memory layout.
+Fyren is a fine-grained reactive signal library for JavaScript. It belongs to the same family as S.js, Solid signals, Preact signals, and Alien signals, but takes its own approach to scheduling, dependency tracking, and memory layout.
 
 The monorepo contains two packages:
 
-- **`anod`** — the core reactive engine (approaching 1.0)
-- **`anod-list`** — reactive array methods built on top of the signal primitives (work in progress)
+- **`@fyren/core`** — the core reactive engine
+- **`@fyren/list`** — reactive array methods built on top of the signal primitives
 
 ### Core primitives
 
-There are four sync node types plus two async variants, distinguished by bit-flag type tags. Type flags encode capabilities: `_SEND` (can broadcast changes), `_RECEIVE` (can subscribe to changes), `_OWNER` (can own child nodes for hierarchical disposal).
+There are four sync node types plus two async variants, distinguished by bit-flag type tags. Type flags encode capabilities: sender (can broadcast changes), receiver (can subscribe to changes), owner (can own child nodes for hierarchical disposal).
 
-**Signal** — a writable reactive cell. Holds a value, notifies subscribers on `set()` when the value changes (`!==` or custom equality). Has no dependencies, only subscribers. Created via `signal(value)`.
+**Signal** — a writable reactive cell. Holds a value, notifies subscribers on `set()` when the value changes (`!==`). Has no dependencies, only subscribers. Created via `signal(value)`. **Relay** — a signal variant that always notifies on `set()`, bypassing equality check. Created via `relay(value)`. Useful for mutable objects.
 
 **Compute** — a derived reactive value. Runs a function to produce its value, automatically tracking which senders it reads. **Purely pull-based**: notifications mark it stale/pending but it does not re-execute until something reads it. Created via `compute(fn)` (unbound, dynamic deps) or `compute(dep, fn)` (bound, single dep).
 
@@ -61,7 +61,7 @@ There are four sync node types plus two async variants, distinguished by bit-fla
 
 ### Propagation model
 
-Anod separates notification from evaluation:
+Fyren separates notification from evaluation:
 
 - **Notification is push**: when a Signal writes, it walks its subscriber list and marks each receiver `FLAG_STALE` (direct dep) or `FLAG_PENDING` (transitive). Stale/pending propagation stops at nodes already marked for the current transaction time.
 - **Compute evaluation is pull**: Computes never re-run as part of notification. They re-run on the next read that finds them stale. This avoids work for values nobody reads.
@@ -87,7 +87,7 @@ Tracking is dynamic at runtime. When a receiver's function calls `read(sender)`,
 Links use a **dual-pointer + overflow array** layout to avoid allocations in the common case:
 
 - **Sender side**: `_sub1` (first subscriber), `_subs[]` (packed array of `[receiver, depslot]` pairs for additional subscribers).
-- **Receiver side**: `_dep1`, `_dep2` (first two deps inline), `_deps[]` (packed array of `[sender, subslot]` pairs for 3+ deps).
+- **Receiver side**: `_dep1` (first dep inline), `_deps[]` (packed array of `[sender, subslot]` pairs for 2+ deps).
 
 Reconciliation on re-run uses `pruneDeps()` with version-tagging to handle three cases in one pass:
 
@@ -116,13 +116,6 @@ Callback signatures:
 - **Default**: dynamic dependency tracking with full reconciliation
 - **`Opt.STABLE`**: no dependency tracking at read time; the bound callback just receives the dep's value. Fastest but can't change deps
 - **`Opt.DEFER`**: don't auto-start on creation; remain STALE until explicitly read
-- **`Opt.DISABLED`**: node starts in a paused state. `FLAG_DISABLED` lives only on the root node of a scope; `_setStale` stops propagation when it sees DISABLED, marking FLAG_STALE but not enqueuing. Re-enable directly enqueues since FLAG_STALE is already set. O(1) enable/disable without tree walks.
-
-### Gate (validation wrapper)
-
-`Gate` extends `Signal` to add validation. Created via `gate(value).check(eqFn).guard(validator)`. It overrides `.set()` to run through user-supplied equality (`_equals` array) and validation (`_guards` array) functions before accepting a new value. Shared prototype with Signal for `_value`, `_version`, `_flag` access.
-
-Gate-on-Compute is possible but rare (users do `new Gate(compute, ...)` directly).
 
 ### Async
 
@@ -136,11 +129,6 @@ Tasks and spawns are async nodes. The body returns a Promise (or async iterable)
 
 **Stale activation semantics**: if a task re-runs before its previous promise resolves, the old activation is logically abandoned. When the old promise resolves, the library checks the node's current activation id — if it doesn't match, the resolution is discarded. This prevents stale values from overwriting newer results.
 
-**Not yet implemented** (design decided but not built):
-- `c.suspend(promise)` — wrap a native promise so its continuation never runs if the node is disposed / stale. Planned design: WeakRef + activation id check, returns a shared `NOOP` thenable on stale/disposed so the continuation is silently dropped and GC'd.
-- `c.wait(task)` with two-way slot binding for `await task` ergonomics — may or may not ship; the shape is uncertain.
-- `c.when([tasks], callback)` derived-compute helper.
-- `c.resolved([tasks])` zero-alloc subscribe+check.
 
 ### Batching
 
@@ -154,15 +142,16 @@ Owner nodes track `_owned` children. Disposal is recursive. Cleanup functions ar
 
 ### Error handling
 
-Errors in compute bodies are caught and stored with `FLAG_ERROR` set. Reading an errored compute via `.val()` rethrows. Errors in effects dispose the effect. `recover(fn)` on a compute/effect intercepts errors: return true to swallow, false or throw to propagate.
+All errors in fyren are `{ error, type }` POJOs with three type constants:
+- `REFUSE` (1) — expected error from `c.refuse(val)`. Non-throwing, the compute returns the error value.
+- `PANIC` (2) — expected error from `c.panic(val)`. Throws, but `FLAG_PANIC` distinguishes it from unexpected errors.
+- `FATAL` (3) — unexpected error. Any uncaught throw without `FLAG_PANIC` is wrapped as `{ error: thrownValue, type: FATAL }`.
 
-Errors are normalized — if the thrown value isn't an `Error`, it's wrapped with a descriptive message and the original value stored as `cause`.
+Errors in compute bodies are caught and stored with `FLAG_ERROR` set. Reading an errored compute via `.val()` rethrows the full `{ error, type }` POJO. Errors in effects dispose the effect. `recover(fn)` on a compute/effect intercepts errors: the handler receives the POJO and can branch on `type` to distinguish user errors from crashes. Return true to swallow, false to propagate.
 
-### The `@anod/list` package
+### The `@fyren/list` package
 
-The list package is currently completely out of date. We do not make any changes to that package at the moment. Any breaking change in the core library, just leave it. Don't run tests, don't patch anything. We will fix that later when the core stabilizes.
-
-`@anod/list` extends `Signal.prototype` and `Compute.prototype` with reactive array methods. Two categories:
+`@fyren/list` extends `Signal.prototype` and `Compute.prototype` with reactive array methods. Two categories:
 
 **Read methods** (return a bound Compute that re-runs when the source array changes):
 `at`, `concat`, `entries`, `every`, `filter`, `find`, `findIndex`, `findLast`, `findLastIndex`, `flat`, `flatMap`, `includes`, `indexOf`, `join`, `keys`, `map`, `reduce`, `reduceRight`, `slice`, `some`, `values`

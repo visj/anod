@@ -1,15 +1,19 @@
-/** 
+/**
  * @interface
  */
 function Disposer() { }
 /** @package @type {number} */
 Disposer.prototype._flag;
+/**
+ * @type {(function(): void) | Array<function(): void> | null}
+ */
+Disposer.prototype._cleanup;
 /** @package @returns {void} */
 Disposer.prototype._dispose = function () { };
 
-/** 
- * @interface 
- * @extends {Disposer} 
+/**
+ * @interface
+ * @extends {Disposer}
  */
 function Owner() { }
 /** @package @type {(function(): void) | Array<(function(): void)> | null} */
@@ -24,9 +28,9 @@ Owner.prototype._owner;
 Owner.prototype._recover;
 
 /**
- * @interface 
- * @template T 
- * @extends {Disposer} 
+ * @interface
+ * @template T
+ * @extends {Disposer}
  */
 function Sender() { }
 /** @package @type {T} */
@@ -87,7 +91,7 @@ ReadonlySignal.prototype.dispose = function() { };
 function ISignal() { }
 
 /**
- * 
+ *
  * @param {T} value
  * @returns {void}
  */

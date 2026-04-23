@@ -3,7 +3,7 @@ export {
     OPT_STABLE,
     OPT_SETUP,
     OPT_WEAK,
-    ERROR,
+    REFUSE,
     PANIC,
     FATAL,
     signal,

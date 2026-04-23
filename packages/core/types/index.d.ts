@@ -7,15 +7,13 @@ export type Resolve<T> =
         ? U
         : T;
 
-export type EqualityFn<T> = (prev: T, next: T) => boolean;
-
 // ─── Error type constants ────────────────────────────────────────────
 
 export declare const REFUSE: 1;
 export declare const PANIC: 2;
 export declare const FATAL: 3;
 
-export interface FyrenError<T = unknown> {
+export interface Err<T = unknown> {
   error: T;
   type: typeof REFUSE | typeof PANIC | typeof FATAL;
 }
@@ -26,6 +24,7 @@ export declare const OPT_DEFER: number;
 export declare const OPT_STABLE: number;
 export declare const OPT_SETUP: number;
 export declare const OPT_WEAK: number;
+export declare const OPT_EAGER: number;
 
 // ─── Node interfaces ────────────���───────────────────────────��─────────
 
@@ -34,11 +33,12 @@ export interface Signal<T = any> {
   get(): T;
   set(value: T | ((prev: T) => T)): void;
   post(value: T | ((prev: T) => T)): void;
+  notify(): void;
   dispose(): void;
 }
 
 export interface Compute<T = any> extends Signal<T> {
-  readonly error: FyrenError | null;
+  readonly error: Err | null;
   readonly disposed: boolean;
   weak(): void;
   eager(): void;
@@ -52,20 +52,20 @@ export interface Task<T = any> extends Signal<T> {
 
 export interface Root {
   readonly disposed: boolean;
-  recover(fn: (error: FyrenError) => boolean): void;
+  recover(fn: (error: Err) => boolean): void;
   cleanup(fn: () => void): void;
   dispose(): void;
 }
 
 export interface Effect extends Root {
-  readonly error: FyrenError | null;
+  readonly error: Err | null;
   stable(): void;
 }
 
 export interface Spawn {
   dispose(): void;
   readonly disposed: boolean;
-  readonly error: FyrenError | null;
+  readonly error: Err | null;
   readonly loading: boolean;
 }
 
@@ -77,12 +77,12 @@ export type Sender<T = any> = Signal<T> | Compute<T> | Task<T>;
 export interface Context {
   stable(): void;
   cleanup(fn: () => void): void;
-  peek<R>(signal: Sender<R>): R;
+  peek<T>(signal: Sender<T>): T;
 }
 
 /** Dependency tracking — adds val() for reading and subscribing. */
 export interface Reader {
-  val<R>(signal: Sender<R>): R;
+  val<T>(signal: Sender<T>): T;
 }
 
 /** Async context methods, available in task/spawn callbacks. */
@@ -112,7 +112,7 @@ export interface AsyncContext {
 /** Bound compute callback context. */
 export interface ComputeContext extends Context {
   equal(equal?: boolean): void;
-  refuse<E>(val: E): FyrenError<E>;
+  refuse<E>(val: E): Err<E>;
   panic(val: unknown): never;
 }
 
@@ -122,7 +122,7 @@ export interface ComputeReader extends ComputeContext, Reader {}
 /** Root callback context — factories + ownership. */
 export interface RootContext extends Factory {
   cleanup(fn: () => void): void;
-  recover(fn: (error: FyrenError) => boolean): void;
+  recover(fn: (error: Err) => boolean): void;
 }
 
 /** Bound effect callback context. */
@@ -236,7 +236,7 @@ export interface Factory {
 
 // ─── Top-level API ────────────────────────────────────────────────────
 
-export declare function signal<T>(value: T, guard?: EqualityFn<T>): Signal<T>;
+export declare function signal<T>(value: T): Signal<T>;
 export declare function relay<T>(value: T): Signal<T>;
 export declare function root(fn: (c: RootContext) => void): Root;
 export declare function batch(fn: () => void): void;

@@ -60,6 +60,7 @@ The following primitives exist in fyren:
 - Root, which owns inner primitives and dispose them on request
 - Context, a callback parameter that provides the current reactive context
 - Signal, holds a value and notifies when it changes
+- Relay, a signal that always notifies on every update
 - Compute, a derived signal, updates and notifies when it's derived value changes
 - Effect, a sink, that listens to signals and computes and performs actions
 - Task, an async compute, for awaiting promises
@@ -81,7 +82,7 @@ const app = root((c: RootContext) => {
 app.dispose();
 ```
 
-#### Signal & basic reactivity
+#### Signal & Relay
 
 A signal stores a value and notifies subscribers when changed. You can read it to get its current value, and write to it to update anyone who depends on it.
 
@@ -90,6 +91,7 @@ import { signal, root } from "fyren";
 
 root((c) => {
 	const name = signal("Vilhelm");
+	const shape = relay({ job: "dev", hobby: "fidology" });
 	/**
 	 * The .get() method only returns the current value.
 	 * Unlike other libraries, this method by itself does
@@ -103,7 +105,7 @@ root((c) => {
 		 * we use the `c.val()` function provided
 		 * by the current reactive context.
 		 */
-		console.log(c.val(name));
+		console.log(c.val(name), c.val(shape));
 	});
 	/**
 	 * Prints 'Leif' to console.
@@ -111,6 +113,15 @@ root((c) => {
 	 * flushes the internal queue synchronously.
 	 */
 	name.set("Leif");
+
+	/**
+	 * A relay is useful for mutable dispatch.
+	 * If we change its values to the same object, 
+		* it notifies the effect
+	 */
+	const currentShape = shape.get();
+	currentShape.job = 'self-employed';
+	shape.set(currentShape); // Notifies effect
 });
 ```
 
@@ -274,7 +285,9 @@ root((c) => {
 ```
 
 ### `c.suspend()`
+
 The suspend method is a critical part of fyren's async infrastructure. It acts as a guard to prevent stale async callbacks on invalidation. Consider this example
+
 ```ts
 import { root, signal } from "fyren";
 root((c) => {
@@ -298,18 +311,36 @@ root((c) => {
 
 #### Error handling
 
-Effects and spawns support `c.recover()` to intercept errors. If the recover callback returns `true`, the error is swallowed and the effect stays alive. If it returns `false`, the error propagates and the effect is disposed.
+All errors in fyren are `{ error, type }` objects with three type constants: `REFUSE`, `PANIC`, and `FATAL`. This lets you cleanly separate expected errors from unexpected crashes.
+
+- **`c.refuse(val)`** — non-throwing expected error for computes. Usage: `return c.refuse("invalid")`.
+- **`c.panic(val)`** — throwing expected error for computes and effects. Aborts the current run.
+- **`FATAL`** — any unexpected throw is automatically wrapped as `{ error: thrownValue, type: FATAL }`.
+
+Effects and spawns support `c.recover()` to intercept errors. The handler receives the `{ error, type }` object and can branch on the type. Return `true` to swallow, `false` to propagate.
 
 ```ts
-import { root, signal } from "fyren";
+import { root, signal, REFUSE, PANIC, FATAL } from "fyren";
 root((c) => {
+	// Root-level handler: only log truly unexpected crashes
+	c.recover((err) => {
+		if (err.type === FATAL) {
+			console.error("Bug detected:", err.error);
+		}
+		return true;
+	});
+
 	const url = signal("/api/data");
 	c.spawn(async (c) => {
 		c.recover((err) => {
-			console.error("Fetch failed:", err.message);
-			return true; // swallow, try again next time url changes
+			if (err.type === FATAL) return false; // bubble FATAL to root
+			console.warn("Stale data, retrying on next change");
+			return true; // swallow, stay alive
 		});
 		const res = await c.suspend(fetch(c.val(url)));
+		if (!res.ok) {
+			c.panic("Server returned " + res.status);
+		}
 		console.log(await c.suspend(res.json()));
 	});
 });
@@ -338,17 +369,19 @@ root((c) => {
 });
 ```
 
-Signals also expose `.post()` which writes the value immediately but defers the flush to a microtask. Multiple `.post()` calls within the same tick coalesce into a single flush automatically.
+Signals also expose `.post()` which defers the write to a microtask. Nothing is written immediately — the value is scheduled and applied when the microtask flush runs. Multiple `.post()` calls within the same tick coalesce into a single flush automatically.
 
 ```ts
 import { signal } from "fyren";
 const counter = signal(0);
-counter.post(1); // write now, flush on microtask
-counter.post(2); // same tick, overwrites, still one flush
-counter.post((prev) => prev + 1); // updater form
+counter.post(1); // scheduled, not written yet
+counter.post(2); // same tick, both scheduled, one flush
+counter.post((prev) => prev + 1); // updater resolved at flush time
+console.log(counter.get()); // still 0 — flush hasn't run
+// after microtask: counter is 3
 ```
 
-Both `.set()` and `.post()` accept an updater function `(prev) => next` as a shorthand for reading and transforming the current value.
+Both `.set()` and `.post()` accept an updater function `(prev) => next`. For `.set()`, the updater is called immediately when idle, or deferred to drain time when inside a flush cycle. For `.post()`, the updater is always deferred to flush time, so it sees the latest value at that point.
 
 ## The reactive graph in depth
 
@@ -401,28 +434,40 @@ root((c) => {
 
 #### `c.equal()`
 
-Controls whether the node suppresses downstream notifications when its value hasn't changed. By default, fyren uses `!==` comparison. Calling `c.equal(true)` enables deep equality suppression: if the new value is deeply equal to the old one, subscribers are not notified.
+Lets you control whether downstream subscribers are notified after a compute re-runs. By default, fyren uses `!==` — if the new value is a different reference, subscribers are notified. `c.equal()` gives you full control: you perform the comparison yourself and tell fyren the result.
+
+- `c.equal()` or `c.equal(true)` — "my result is equal to the previous one, don't notify subscribers"
+- `c.equal(false)` — "my result changed, always notify subscribers" (even if `===` would say otherwise)
+
+This is powerful because you can do any kind of equality — deep comparison, structural diffing, threshold checks — anywhere in the function body, without adding extra fields to the node.
 
 ```ts
 import { root, signal } from "fyren";
 root((c) => {
 	const x = signal(5);
 	let runs = 0;
-	const clamped = c.compute(x, (val, c) => {
-		c.equal(true);
-		return Math.min(val, 10);
-	});
-	c.effect(clamped, (val) => {
+	const clamped = c.compute(
+		x,
+		(val, c, prev) => {
+			let result = Math.min(val, 10);
+			c.equal(result === prev); // user performs the comparison
+			return result;
+		},
+		5
+	);
+	c.effect(clamped, () => {
 		runs++;
-		console.log("clamped:", val);
 	});
 	console.log(runs); // 1 — initial run
 
-	x.set(15); // clamped returns 10, same as before
-	console.log(runs); // 1 — effect did NOT re-run
+	x.set(15); // clamped=10, different from 5 → effect runs
+	console.log(runs); // 2
 
-	x.set(3); // clamped returns 3, different
-	console.log(runs); // 2 — effect re-ran
+	x.set(20); // clamped=10, same as before → suppressed
+	console.log(runs); // 2 — effect did NOT re-run
+
+	x.set(3); // clamped=3, different → effect runs
+	console.log(runs); // 3
 });
 ```
 
@@ -455,36 +500,65 @@ Converts a compute from pull-based to push-based. An eager compute re-evaluates 
 
 ### Error recovery in depth
 
-When an error occurs inside an effect or spawn, the default behavior is to dispose the node. `c.recover()` intercepts this by registering a handler that can inspect the error and decide whether to swallow or propagate it.
+Fyren provides a structured error model where every error is a `{ error, type }` object. The `type` field distinguishes three categories:
 
-Recovery follows the ownership chain. If a child effect doesn't handle an error, it bubbles to the parent. A root's `recover()` is the last line of defense before the error escapes to the caller.
+| Constant | Value | Meaning                      | How it's created       |
+| -------- | ----- | ---------------------------- | ---------------------- |
+| `REFUSE` | 1     | Expected error, non-throwing | `return c.refuse(val)` |
+| `PANIC`  | 2     | Expected error, throwing     | `c.panic(val)`         |
+| `FATAL`  | 3     | Unexpected crash             | Any uncaught `throw`   |
+
+**`c.refuse(val)`** is available on computes only. It sets the compute into an error state without throwing — the caller returns the error value. This is useful for validation: the compute can't produce a valid result, but it's not a crash.
+
+**`c.panic(val)`** is available on computes and effects. It throws, aborting the current run, but fyren marks it as an expected error so recover handlers can distinguish it from crashes.
+
+**`FATAL`** is what you get when something throws unexpectedly — a null dereference, a network error, a bug. Fyren wraps the thrown value as `{ error: thrownValue, type: FATAL }`.
+
+#### Recovery
+
+`c.recover()` intercepts errors before they dispose the node. The handler receives the `{ error, type }` object and returns `true` to swallow or `false` to propagate. Recovery follows the ownership chain — if a child doesn't handle it, it bubbles to the parent. A root's `recover()` is the last line of defense.
+
+This lets you build layered error handling: effects handle their own expected errors, and the root catches anything truly unexpected.
 
 ```ts
-import { root, signal } from "fyren";
+import { root, signal, REFUSE, PANIC, FATAL } from "fyren";
 root((c) => {
+	// Root: catch unexpected crashes, report to error tracker
 	c.recover((err) => {
-		console.error("Root caught:", err.message);
-		return true; // swallow all errors at root level
+		if (err.type === FATAL) {
+			reportToSentry(err.error);
+		}
+		return true;
 	});
-	const count = signal(0);
-	c.effect(count, (val, c) => {
+
+	// Compute uses refuse() for validation — no throw, no crash
+	const price = signal(100);
+	const discount = c.compute(price, (val, c) => {
+		if (val <= 0) {
+			return c.refuse("Price must be positive");
+		}
+		return val * 0.9;
+	});
+
+	// Spawn uses panic() when data is stale — throws, but expected
+	const token = signal("abc123");
+	c.spawn(async (c) => {
 		c.recover((err) => {
-			if (err.message === "expected") {
-				return true; // swallow, retry on next update
+			if (err.type === PANIC) {
+				console.warn("Auth issue, will retry:", err.error);
+				return true; // stay alive, retry on next token change
 			}
-			return false; // bubble anything else to root
+			return false; // bubble FATAL to root
 		});
-		if (val === 1) {
-			throw new Error("expected");
+		let res = await c.suspend(
+			fetch("/api/me", {
+				headers: { Authorization: c.val(token) }
+			})
+		);
+		if (res.status === 401) {
+			c.panic("Token expired");
 		}
-		if (val === 2) {
-			throw new Error("unexpected");
-		}
-		console.log("ok:", val);
 	});
-	count.set(1); // recover swallows "expected"
-	count.set(0); // effect runs again, prints "ok: 0"
-	count.set(2); // recover returns false, bubbles to root
 });
 ```
 
