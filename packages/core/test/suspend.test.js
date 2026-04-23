@@ -965,7 +965,8 @@ describe("suspend(setupFn): callback constructor", () => {
 		});
 		await new Promise((r) => setTimeout(r, 10));
 		expect(caught).not.toBeNull();
-		expect(caught.message).toBe("boom");
+		expect(caught.type).toBe(3);
+		expect(caught.error.message).toBe("boom");
 		r.dispose();
 	});
 

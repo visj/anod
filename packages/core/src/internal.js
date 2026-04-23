@@ -7,7 +7,6 @@ export {
   FLAG_SETUP,
   FLAG_LOADING,
   FLAG_ERROR,
-  FLAG_RECEIVER,
   FLAG_DEFER,
   FLAG_STABLE,
   FLAG_SINGLE,
@@ -16,6 +15,7 @@ export {
   FLAG_NOTEQUAL,
   FLAG_ASYNC,
   FLAG_BOUND,
+  FLAG_RELAY,
   FLAG_CHANNEL,
   FLAG_EAGER,
   FLAG_BLOCKED,
@@ -44,4 +44,4 @@ export {
   Compute,
   Effect,
   Root
-} from "./core/fyren.js";
+} from "./core.js";

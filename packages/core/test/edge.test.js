@@ -302,7 +302,14 @@ describe("edge cases", () => {
             await tick();
 
             expect(t.error).not.toBeNull();
-            expect(() => t.get()).toThrow("fail");
+            expect(t.error.type).toBe(3);
+            expect(t.error.error).toBeInstanceOf(Error);
+            try {
+                t.get();
+                expect(true).toBe(false);
+            } catch (e) {
+                expect(e.error.message).toBe("fail");
+            }
         });
 
         test("re-evaluates when dep changes", async () => {
@@ -827,8 +834,9 @@ describe("edge cases", () => {
 
             expect(caught).toBeNull();
             s1.set(1);
-            expect(caught).toBeInstanceOf(Error);
-            expect(caught.message).toBe("effect err");
+            expect(caught.type).toBe(3);
+            expect(caught.error).toBeInstanceOf(Error);
+            expect(caught.error.message).toBe("effect err");
             r.dispose();
         });
 
@@ -839,7 +847,13 @@ describe("edge cases", () => {
 
         test("compute.get() rethrows stored error", () => {
             const c1 = c.compute(() => { throw new Error("rethrow me"); });
-            expect(() => c1.get()).toThrow("rethrow me");
+            try {
+                c1.get();
+                expect(true).toBe(false);
+            } catch (e) {
+                expect(e.type).toBe(3);
+                expect(e.error.message).toBe("rethrow me");
+            }
         });
     });
 

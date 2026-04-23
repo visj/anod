@@ -9,6 +9,17 @@ export type Resolve<T> =
 
 export type EqualityFn<T> = (prev: T, next: T) => boolean;
 
+// ─── Error type constants ────────────────────────────────────────────
+
+export declare const REFUSE: 1;
+export declare const PANIC: 2;
+export declare const FATAL: 3;
+
+export interface FyrenError<T = unknown> {
+  error: T;
+  type: typeof REFUSE | typeof PANIC | typeof FATAL;
+}
+
 // ─── Option constants ──────────��──────────────────────────────────────
 
 export declare const OPT_DEFER: number;
@@ -27,7 +38,7 @@ export interface Signal<T = any> {
 }
 
 export interface Compute<T = any> extends Signal<T> {
-  readonly error: Error | null;
+  readonly error: FyrenError | null;
   readonly disposed: boolean;
   weak(): void;
   eager(): void;
@@ -41,20 +52,20 @@ export interface Task<T = any> extends Signal<T> {
 
 export interface Root {
   readonly disposed: boolean;
-  recover(fn: (error: any) => boolean): void;
+  recover(fn: (error: FyrenError) => boolean): void;
   cleanup(fn: () => void): void;
   dispose(): void;
 }
 
 export interface Effect extends Root {
-  readonly error: Error | null;
+  readonly error: FyrenError | null;
   stable(): void;
 }
 
 export interface Spawn {
   dispose(): void;
   readonly disposed: boolean;
-  readonly error: Error | null;
+  readonly error: FyrenError | null;
   readonly loading: boolean;
 }
 
@@ -101,6 +112,8 @@ export interface AsyncContext {
 /** Bound compute callback context. */
 export interface ComputeContext extends Context {
   equal(equal?: boolean): void;
+  refuse<E>(val: E): FyrenError<E>;
+  panic(val: unknown): never;
 }
 
 /** Unbound compute callback context. */
@@ -109,11 +122,13 @@ export interface ComputeReader extends ComputeContext, Reader {}
 /** Root callback context — factories + ownership. */
 export interface RootContext extends Factory {
   cleanup(fn: () => void): void;
-  recover(fn: (error: any) => boolean): void;
+  recover(fn: (error: FyrenError) => boolean): void;
 }
 
 /** Bound effect callback context. */
-export interface EffectContext extends RootContext, Context {}
+export interface EffectContext extends RootContext, Context {
+  panic(val: unknown): never;
+}
 
 /** Unbound effect callback context. */
 export interface EffectReader extends EffectContext, Reader {}
@@ -222,6 +237,7 @@ export interface Factory {
 // ─── Top-level API ────────────────────────────────────────────────────
 
 export declare function signal<T>(value: T, guard?: EqualityFn<T>): Signal<T>;
+export declare function relay<T>(value: T): Signal<T>;
 export declare function root(fn: (c: RootContext) => void): Root;
 export declare function batch(fn: () => void): void;
 export declare function flush(): void;

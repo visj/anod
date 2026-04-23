@@ -129,8 +129,16 @@ describe("forEach context", () => {
       });
       expect(e.disposed).toBe(false);
 
-      /** Error propagates through set() since recover returns false. */
-      expect(() => l.set([2])).toThrow("fatal");
+      /** Error propagates through set() since recover returns false.
+       *  Errors are now { error, type } POJOs. */
+      let thrown;
+      try {
+        l.set([2]);
+      } catch (e) {
+        thrown = e;
+      }
+      expect(thrown.type).toBe(3);
+      expect(thrown.error.message).toBe("fatal");
       expect(e.disposed).toBe(true);
     });
   });

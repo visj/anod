@@ -8,46 +8,49 @@ import {
   IEffect
 } from "./types.js";
 
-/* Sender flags (bits 0-5) — readable on any Sender (Signal or Compute).
- * Bits 6+ on a plain Signal are free for extension (e.g. mod encoding
- * in @fyren/list). FLAG_RECEIVER distinguishes Compute/Effect from Signal. */
+/* Sender flags (bits 0-6) — readable on any Sender (Signal or Compute).
+ * Bits 7+ on a plain Signal are free for extension (e.g. mod encoding
+ * in @fyren/list). */
 const FLAG_STALE = 1 << 0;
 const FLAG_PENDING = 1 << 1;
 const FLAG_SCHEDULED = 1 << 2;
 const FLAG_DISPOSED = 1 << 3;
 const FLAG_ERROR = 1 << 4;
-const FLAG_RECEIVER = 1 << 5;
+const FLAG_RELAY = 1 << 5;
+const FLAG_WEAK = 1 << 6;
 
-/* Receiver flags (bits 6+) — only valid when FLAG_RECEIVER is set. */
-const FLAG_INIT = 1 << 6;
-const FLAG_SETUP = 1 << 7;
-const FLAG_LOADING = 1 << 8;
-const FLAG_DEFER = 1 << 9;
-const FLAG_STABLE = 1 << 10;
-const FLAG_EQUAL = 1 << 11;
-const FLAG_NOTEQUAL = 1 << 12;
-const FLAG_ASYNC = 1 << 13;
-const FLAG_BOUND = 1 << 14;
-const FLAG_WAITER = 1 << 15;
-const FLAG_CHANNEL = 1 << 16;
-const FLAG_BLOCKED = 1 << 17;
-const FLAG_LOCK = 1 << 18;
-const FLAG_SUSPEND = 1 << 19;
+/* Receiver flags (bits 7+) — only valid on Compute/Effect nodes. */
+const FLAG_INIT = 1 << 7;
+const FLAG_SETUP = 1 << 8;
+const FLAG_LOADING = 1 << 9;
+const FLAG_DEFER = 1 << 10;
+const FLAG_STABLE = 1 << 11;
+const FLAG_EQUAL = 1 << 12;
+const FLAG_NOTEQUAL = 1 << 13;
+const FLAG_ASYNC = 1 << 14;
+const FLAG_BOUND = 1 << 15;
+const FLAG_WAITER = 1 << 16;
+const FLAG_CHANNEL = 1 << 17;
+const FLAG_BLOCKED = 1 << 18;
+const FLAG_LOCK = 1 << 19;
+const FLAG_SUSPEND = 1 << 20;
+const FLAG_PANIC = 1 << 21;
+const FLAG_SINGLE = 1 << 22;
+const FLAG_EAGER = 1 << 23;
 
-/* Shared Sender | Receiver flags — read on generic Sender-typed variables.
- * Code that reads them MUST also check FLAG_RECEIVER to avoid false positives
- * from Signal mod bits occupying the same bit positions. */
-const FLAG_SINGLE = 1 << 28;
-const FLAG_WEAK = 1 << 29;
-const FLAG_EAGER = 1 << 30;
+/** Error type constants for { error, type } POJOs. */
+const ERROR = 1;
+const PANIC = 2;
+const FATAL = 3;
 
 /* Option flags */
 const OPT_DEFER = FLAG_DEFER;
 const OPT_STABLE = FLAG_STABLE;
 const OPT_SETUP = FLAG_SETUP;
 const OPT_WEAK = FLAG_WEAK;
+const OPT_EAGER = FLAG_EAGER;
 
-const OPTIONS = OPT_DEFER | OPT_STABLE | OPT_SETUP | OPT_WEAK;
+const OPTIONS = OPT_DEFER | OPT_STABLE | OPT_SETUP | OPT_WEAK | OPT_EAGER;
 
 
 /* Async dispatch kinds — asyncKind() returns one of these so callers can
@@ -239,7 +242,7 @@ function Signal(value) {
  */
 function Compute(opts, fn, dep1, seed, args) {
   /** @type {number} */
-  this._flag = FLAG_RECEIVER | FLAG_INIT | FLAG_STALE | opts;
+  this._flag = FLAG_INIT | FLAG_STALE | opts;
   /** @type {T} */
   this._value = seed;
   /** @type {number} */
@@ -280,7 +283,7 @@ function Compute(opts, fn, dep1, seed, args) {
  */
 function Effect(opts, fn, dep1, owner, args) {
   /** @type {number} */
-  this._flag = FLAG_RECEIVER | FLAG_INIT | (0 | opts);
+  this._flag = FLAG_INIT | (0 | opts);
   /** @type {(function(W): (function(): void | void)) | (function(U,W): (function(): void | void)) | (function(U,V,W): (function(): void | void)) | null} */
   this._fn = fn;
   /** @type {Sender<U> | null} */
@@ -433,12 +436,12 @@ function set(value) {
     if (typeof value === "function") {
       value = value(this._value);
     }
-    if (this._value !== value) {
+    if (this._flag & FLAG_RELAY || this._value !== value) {
       this._assign(value, TIME + 1);
       notify(this, FLAG_STALE);
       flush();
     }
-  } else if (typeof value === "function" || this._value !== value) {
+  } else if (typeof value === "function" || this._flag & FLAG_RELAY || this._value !== value) {
     schedule(this, value, assign);
   }
 }
@@ -457,7 +460,7 @@ function assign(node, value, time) {
   if (typeof value === "function") {
     value = value(node._value);
   }
-  if (node._value !== value) {
+  if (node._flag & FLAG_RELAY || node._value !== value) {
     node._assign(value, time);
     if (node._flag & FLAG_SCHEDULED) {
       node._flag &= ~FLAG_SCHEDULED;
@@ -545,50 +548,6 @@ function _readAsync(sender) {
 }
 
 /**
- *
- * @param {*} err
- * @returns {{ message: string }}
- */
-function normalize(err) {
-  if (
-    err instanceof Error ||
-    (err != null && typeof err.message === "string")
-  ) {
-    return err;
-  }
-  return { message: "Compute threw error: " + String(err) };
-}
-
-/**
- * Absorbs an error or disposed state into a compute node.
- * Sets FLAG_ERROR, stores the normalized error, and stamps _ctime.
- * @param {!Compute} node
- * @param {*} value
- * @param {number} time
- */
-function absorb(node, value, time) {
-  node._value = normalize(value);
-  node._flag =
-    (node._flag & ~(FLAG_STALE | FLAG_PENDING | FLAG_INIT)) | FLAG_ERROR;
-  node._ctime = time;
-}
-
-/**
- * Refreshes a bound dep1 if stale/pending and returns its flag.
- * Returns FLAG_DISPOSED when dep1 is null (already disposed).
- * @param {Sender | null} dep
- * @returns {number}
- */
-function refreshDep1(dep) {
-  let dflag = dep !== null ? dep._flag : FLAG_DISPOSED;
-  if (dflag & (FLAG_STALE | FLAG_PENDING)) {
-    dep._refresh();
-    return dep._flag;
-  }
-  return dflag;
-}
-
-/**
  * @param {*} value
  * @returns {!Signal}
  */
@@ -601,6 +560,20 @@ function refreshDep1(dep) {
  */
 function signal(value) {
   return new Signal(value);
+}
+
+/**
+ * Creates a relay signal — a signal that always propagates on
+ * set(), bypassing the equality check. Useful for mutable
+ * objects where reference equality doesn't reflect changes.
+ * @template T
+ * @param {T} value
+ * @returns {!Signal<T>}
+ */
+function relay(value) {
+  let node = new Signal(value);
+  node._flag = FLAG_RELAY;
+  return node;
 }
 
 /**
@@ -652,6 +625,24 @@ function root(fn) {
     this._ctime = time;
   };
 
+  /** Signal._drop: NOOP — signals don't drop values. */
+  SignalProto._drop = function () { };
+
+  /**
+   * Compute._drop: releases cached value and marks STALE. Called
+   * from clearReceiver when FLAG_WEAK is set and no subscribers
+   * remain. Loading nodes keep their value — active channel
+   * waiters re-subscribe on settle.
+   * @this {!Compute}
+   */
+  ComputeProto._drop = function () {
+    if (this._flag & FLAG_LOADING) {
+      return;
+    }
+    this._flag |= FLAG_STALE;
+    this._value = null;
+  };
+
   // Disposer#dispose — shared by all four node types
   RootProto.dispose =
     SignalProto.dispose =
@@ -665,19 +656,19 @@ function root(fn) {
   ComputeProto._readAsync = EffectProto._readAsync = _readAsync;
   ComputeProto.peek = EffectProto.peek = peek;
 
+	let disposed = { get() { return (this._flag & FLAG_DISPOSED) !== 0; } };
+
+ 	let _disposed = { disposed };
+  Object.defineProperties(SignalProto, _disposed);
+  Object.defineProperties(RootProto, _disposed);
   // IAwaitable — Compute + Effect (getters)
-  let states = {
+	let states = {
+		disposed,
     error: { get() { return (this._flag & FLAG_ERROR) ? this._value : null; } },
     loading: { get() { return (this._flag & FLAG_LOADING) !== 0; } }
   };
   Object.defineProperties(ComputeProto, states);
   Object.defineProperties(EffectProto, states);
-
-  let _disposed = { disposed: { get() { return (this._flag & FLAG_DISPOSED) !== 0; } } };
-  Object.defineProperties(SignalProto, _disposed);
-  Object.defineProperties(ComputeProto, _disposed);
-  Object.defineProperties(EffectProto, _disposed);
-  Object.defineProperties(RootProto, _disposed);
 
   /**
    * Registers a cleanup fn on this owner. Stored compactly: _cleanup holds
@@ -754,6 +745,37 @@ function root(fn) {
   ComputeProto.stable = EffectProto.stable = stable;
 
   /**
+   * Signals an expected error from a compute. Sets FLAG_ERROR and
+   * returns a { error, type: ERROR } POJO. The caller returns this
+   * from their fn — _update sees FLAG_ERROR and stores it as the
+   * compute's error value without hitting the catch path.
+   * Named `fail` to avoid collision with the `.error` getter.
+   * @this {!Compute}
+   * @param {*} val
+   * @returns {{ error: *, type: number }}
+   */
+  ComputeProto.refuse = function (val) {
+    this._flag |= FLAG_ERROR;
+    return { error: val, type: ERROR };
+  };
+
+  /**
+   * Signals an expected panic from a compute or effect. Sets
+   * FLAG_PANIC and throws a { error, type: PANIC } POJO. The
+   * catch block checks FLAG_PANIC to distinguish this from
+   * unexpected throws (which are wrapped as FATAL).
+   * @this {!Compute | !Effect}
+   * @param {*} val
+   * @returns {void}
+   */
+  function panic(val) {
+    this._flag |= FLAG_PANIC;
+    throw { error: val, type: PANIC };
+  }
+
+  ComputeProto.panic = EffectProto.panic = panic;
+
+  /**
    * Marks this compute as eager (push-based). Once set, the node
    * eagerly re-runs on notification instead of waiting for a pull.
    * @this {!Compute}
@@ -771,13 +793,6 @@ function root(fn) {
    * If stale or disposed, resolves to REGRET — a thenable whose
    * `.then()` is a no-op, so `await` never resumes and the closure
    * becomes eligible for GC.
-   *
-   * @template T
-   * @this {!Compute | !Effect}
-   * @param {!Promise<T>} promise
-   * @returns {!Promise<T>}
-   */
-  /**
    * @this {!Compute | !Effect}
    * @param {!Promise | !Compute} promiseOrTask
    * @returns {*}
@@ -1211,7 +1226,7 @@ function root(fn) {
     if (this._flag & FLAG_DISPOSED) {
       throw new Error(ASSERT_DISPOSED);
     }
-    if (!POSTING && typeof value !== "function" && this._value === value) {
+    if (!POSTING && !(this._flag & FLAG_RELAY) && typeof value !== "function" && this._value === value) {
       return;
     }
     schedule(this, value, assign);
@@ -1270,7 +1285,7 @@ function root(fn) {
     }
     if (this._flag & FLAG_BOUND && this._dep1 === null) {
       this._flag |= FLAG_ERROR;
-      this._value = { message: ASSERT_DISPOSED };
+      this._value = { error: ASSERT_DISPOSED, type: FATAL };
     }
     if (this._flag & FLAG_ERROR) {
       throw this._value;
@@ -1390,20 +1405,19 @@ function root(fn) {
       this._sub1 === null &&
       (this._subs === null || this._subs.length === 0)
     ) {
-      this._flag |= FLAG_STALE;
-      this._value = null;
+      this._drop();
     }
   };
 
   /**
-   * Settles an async compute with an error. Sets FLAG_ERROR then
-   * delegates to _settle with a non-falsy error guard.
+   * Settles an async compute with an error. Wraps as FATAL,
+   * sets FLAG_ERROR, and delegates to _settle.
    * @this {!Compute}
    * @param {*} err
    */
   ComputeProto._error = function (err) {
     this._flag |= FLAG_ERROR;
-    this._settle(err || { error: err });
+    this._settle({ error: err, type: FATAL });
   };
 
   ComputeProto._dispose = function () {
@@ -1454,7 +1468,7 @@ function root(fn) {
     }
     this._time = time;
     this._flag =
-      flag & ~(FLAG_STALE | FLAG_LOADING | FLAG_EQUAL | FLAG_NOTEQUAL | FLAG_SUSPEND);
+      flag & ~(FLAG_STALE | FLAG_LOADING | FLAG_EQUAL | FLAG_NOTEQUAL | FLAG_SUSPEND | FLAG_PANIC);
 
     if (!(flag & FLAG_INIT) && this._cleanup !== null) {
       clearCleanup(this);
@@ -1471,29 +1485,29 @@ function root(fn) {
     let args = flag & FLAG_CHANNEL ? this._args._args : this._args;
 
     if ((flag & (FLAG_STABLE | FLAG_SETUP)) === FLAG_STABLE) {
-      try {
+      run: try {
         if (flag & FLAG_BOUND) {
           let dep = this._dep1;
           if (dep._flag & (FLAG_STALE | FLAG_PENDING)) {
             dep._refresh();
           }
           if (dep._flag & FLAG_ERROR) {
-            this._value = normalize(dep._value);
-            this._flag =
-              (this._flag & ~(FLAG_STALE | FLAG_PENDING | FLAG_INIT)) | FLAG_ERROR;
-            this._ctime = time;
-            return;
+            value = dep._value;
+            this._flag |= FLAG_ERROR;
+            break run;
           }
           value = this._fn(dep._value, this, this._value, args);
         } else {
           value = this._fn(this, this._value, args);
         }
       } catch (err) {
-        this._value = normalize(err);
-        this._flag =
-          (this._flag & ~(FLAG_STALE | FLAG_PENDING | FLAG_INIT)) | FLAG_ERROR;
-        this._ctime = time;
-        return;
+        if (this._flag & FLAG_PANIC) {
+          value = err;
+          this._flag &= ~FLAG_PANIC;
+        } else {
+          value = { error: err, type: FATAL };
+        }
+        this._flag |= FLAG_ERROR;
       }
     } else {
       /** Setup or dynamic: bump VERSION for dep tracking */
@@ -1525,7 +1539,7 @@ function root(fn) {
             dep._refresh();
           }
           if (dep._flag & FLAG_ERROR) {
-            value = normalize(dep._value);
+            value = dep._value;
             this._flag |= FLAG_ERROR;
             break call;
           }
@@ -1536,7 +1550,12 @@ function root(fn) {
         }
         this._flag &= ~FLAG_ERROR;
       } catch (err) {
-        value = normalize(err);
+        if (this._flag & FLAG_PANIC) {
+          value = err;
+          this._flag &= ~FLAG_PANIC;
+        } else {
+          value = { error: err, type: FATAL };
+        }
         this._flag |= FLAG_ERROR;
       }
 
@@ -1710,13 +1729,11 @@ function root(fn) {
       try {
         if (flag & FLAG_BOUND) {
           let dep = this._dep1;
-          if (dep._flag & FLAG_RECEIVER) {
-            if (dep._flag & (FLAG_STALE | FLAG_PENDING)) {
-              dep._refresh();
-            }
-            if (dep._flag & FLAG_ERROR) {
-              throw dep._value;
-            }
+          if (dep._flag & (FLAG_STALE | FLAG_PENDING)) {
+            dep._refresh();
+          }
+          if (dep._flag & FLAG_ERROR) {
+            throw dep._value;
           }
           value = this._fn(dep._value, this, args);
         } else {
@@ -1749,13 +1766,11 @@ function root(fn) {
       try {
         if (flag & FLAG_BOUND) {
           let dep = this._dep1;
-          if (dep._flag & FLAG_RECEIVER) {
-            if (dep._flag & (FLAG_STALE | FLAG_PENDING)) {
-              dep._refresh();
-            }
-            if (dep._flag & FLAG_ERROR) {
-              throw dep._value;
-            }
+          if (dep._flag & (FLAG_STALE | FLAG_PENDING)) {
+            dep._refresh();
+          }
+          if (dep._flag & FLAG_ERROR) {
+            throw dep._value;
           }
           value = this._fn(dep._value, this, args);
         } else {
@@ -1821,12 +1836,14 @@ function root(fn) {
    * @this {!Effect}
    */
   /**
-   * Settles an async effect after its promise/callback resolves.
-   * Clears loading/lock, handles deferred dispose, checks deferred
-   * deps, re-runs if stale.
+   * Settles an async effect. Clears loading/lock, handles deferred
+   * dispose, checks deferred deps, re-runs if stale. When FLAG_ERROR
+   * is set before calling, treats the value as an error: attempts
+   * recovery, disposes if unrecoverable.
    * @this {!Effect}
+   * @param {*=} err
    */
-  EffectProto._settle = function () {
+  EffectProto._settle = function (err) {
     let flag = this._flag;
     this._flag &= ~(FLAG_LOADING | FLAG_LOCK);
 
@@ -1834,6 +1851,15 @@ function root(fn) {
      *  FLAG_LOCK was cleared above, so _dispose runs full cleanup. */
     if (flag & FLAG_DISPOSED) {
       this._dispose();
+      return;
+    }
+
+    if (flag & FLAG_ERROR) {
+      this._flag &= ~FLAG_ERROR;
+      let result = tryRecover(this, err);
+      if (result !== RECOVER_SELF) {
+        this._dispose();
+      }
       return;
     }
 
@@ -1849,27 +1875,14 @@ function root(fn) {
   };
 
   /**
-   * Handles an error in an async effect. Clears loading/lock,
-   * handles deferred dispose, attempts recovery, disposes if
-   * unrecoverable.
+   * Settles an async effect with an error. Wraps as FATAL,
+   * sets FLAG_ERROR, and delegates to _settle.
    * @this {!Effect}
    * @param {*} err
    */
   EffectProto._error = function (err) {
-    let flag = this._flag;
-    this._flag &= ~(FLAG_LOADING | FLAG_LOCK);
-
-    /** Deferred dispose: owner disposed while we were locked.
-     *  FLAG_LOCK was cleared above, so _dispose runs full cleanup. */
-    if (flag & FLAG_DISPOSED) {
-      this._dispose();
-      return;
-    }
-
-    let result = tryRecover(this, err);
-    if (result !== RECOVER_SELF) {
-      this._dispose();
-    }
+    this._flag |= FLAG_ERROR;
+    this._settle({ error: err, type: FATAL });
   };
 
   /**
@@ -2098,21 +2111,12 @@ function clearReceiver(send, slot) {
       }
     }
   }
-  /**
-   * When the last subscriber is removed from a weak node that isn't
-   * loading, release cached value and mark STALE so the next .val()
-   * recomputes fresh. Loading nodes keep their value — they still
-   * have active channel waiters that will re-subscribe on settle.
-   */
-  let flag = send._flag;
   if (
-    flag & FLAG_RECEIVER &&
-    (flag & (FLAG_WEAK | FLAG_LOADING)) === FLAG_WEAK &&
+    send._flag & FLAG_WEAK &&
     send._sub1 === null &&
     (send._subs === null || send._subs.length === 0)
   ) {
-    send._flag |= FLAG_STALE;
-    /** @type {Compute} */ (send)._value = null;
+    send._drop();
   }
 }
 
@@ -3339,12 +3343,14 @@ function startEffect(node) {
         flush();
       }
     } catch (err) {
-      let result = tryRecover(node, err);
+      let error = node._flag & FLAG_PANIC ? err : { error: err, type: FATAL };
+      node._flag &= ~FLAG_PANIC;
+      let result = tryRecover(node, error);
       if (result !== RECOVER_SELF) {
         node._dispose();
       }
       if (result === RECOVER_NONE) {
-        throw err;
+        throw error;
       }
     } finally {
       IDLE = true;
@@ -3353,12 +3359,14 @@ function startEffect(node) {
     try {
       node._update(TIME);
     } catch (err) {
-      let result = tryRecover(node, err);
+      let error = node._flag & FLAG_PANIC ? err : { error: err, type: FATAL };
+      node._flag &= ~FLAG_PANIC;
+      let result = tryRecover(node, error);
       if (result !== RECOVER_SELF) {
         node._dispose();
       }
       if (result === RECOVER_NONE) {
-        throw err;
+        throw error;
       }
     }
   }
@@ -3427,12 +3435,14 @@ function flush() {
                 TRANSACTION = SEED;
                 node._update(time);
               } catch (err) {
-                let result = tryRecover(node, err);
+                let e = node._flag & FLAG_PANIC ? err : { error: err, type: FATAL };
+                node._flag &= ~FLAG_PANIC;
+                let result = tryRecover(node, e);
                 if (result !== RECOVER_SELF) {
                   node._dispose();
                 }
                 if (!thrown && result === RECOVER_NONE) {
-                  error = err;
+                  error = e;
                   thrown = true;
                 }
               }
@@ -3458,12 +3468,14 @@ function flush() {
             try {
               node._update(time);
             } catch (err) {
-              let result = tryRecover(node, err);
+              let e = node._flag & FLAG_PANIC ? err : { error: err, type: FATAL };
+              node._flag &= ~FLAG_PANIC;
+              let result = tryRecover(node, e);
               if (result !== RECOVER_SELF) {
                 node._dispose();
               }
               if (!thrown && result === RECOVER_NONE) {
-                error = err;
+                error = e;
                 thrown = true;
               }
             }
@@ -3631,7 +3643,7 @@ export {
   FLAG_SETUP,
   FLAG_LOADING,
   FLAG_ERROR,
-  FLAG_RECEIVER,
+  FLAG_RELAY,
   FLAG_DEFER,
   FLAG_STABLE,
   FLAG_SINGLE,
@@ -3646,6 +3658,9 @@ export {
   FLAG_BLOCKED,
   FLAG_LOCK,
   FLAG_SUSPEND,
+  ERROR,
+  PANIC,
+  FATAL,
   OPT_DEFER,
   OPT_STABLE,
   OPT_SETUP,
@@ -3662,6 +3677,7 @@ export {
   startEffect,
   startCompute,
   signal,
+  relay,
   compute,
   task,
   effect,

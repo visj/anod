@@ -17,15 +17,16 @@ describe("recover", () => {
                 });
             });
 
-            expect(recovered).toBeInstanceOf(Error);
-            expect(recovered.message).toBe("boom");
+            expect(recovered.type).toBe(3);
+            expect(recovered.error).toBeInstanceOf(Error);
+            expect(recovered.error.message).toBe("boom");
             r1.dispose();
         });
 
         test("propagates error when recover returns false", () => {
             let recovered = null;
 
-            expect(() => {
+            try {
                 root(r => {
                     r.recover(err => {
                         recovered = err;
@@ -36,19 +37,27 @@ describe("recover", () => {
                         throw new Error("boom");
                     });
                 });
-            }).toThrow("boom");
+                expect(true).toBe(false);
+            } catch (e) {
+                expect(e.error.message).toBe("boom");
+            }
 
-            expect(recovered).toBeInstanceOf(Error);
+            expect(recovered.type).toBe(3);
+            expect(recovered.error).toBeInstanceOf(Error);
         });
 
         test("propagates error when no recover is registered", () => {
-            expect(() => {
+            try {
                 root(r => {
                     r.effect(c => {
                         throw new Error("unhandled");
                     });
                 });
-            }).toThrow("unhandled");
+                expect(true).toBe(false);
+            } catch (e) {
+                expect(e.type).toBe(3);
+                expect(e.error.message).toBe("unhandled");
+            }
         });
     });
 
@@ -118,8 +127,9 @@ describe("recover", () => {
 
             expect(recovered).toBeNull();
             s1.set(1);
-            expect(recovered).toBeInstanceOf(Error);
-            expect(recovered.message).toBe("compute error");
+            expect(recovered.type).toBe(3);
+            expect(recovered.error).toBeInstanceOf(Error);
+            expect(recovered.error.message).toBe("compute error");
             r1.dispose();
         });
     });
@@ -235,8 +245,9 @@ describe("recover", () => {
                 s2.set(42);
             });
 
-            expect(recovered).toBeInstanceOf(Error);
-            expect(recovered.message).toBe("batch error");
+            expect(recovered.type).toBe(3);
+            expect(recovered.error).toBeInstanceOf(Error);
+            expect(recovered.error.message).toBe("batch error");
             expect(s2val).toBe(42); // "Other effects in the batch should still run"
             r1.dispose();
         });
@@ -262,8 +273,9 @@ describe("recover", () => {
 
             expect(recovered).toBeNull();
             s1.set(true);
-            expect(recovered).toBeInstanceOf(Error);
-            expect(recovered.message).toBe("triggered");
+            expect(recovered.type).toBe(3);
+            expect(recovered.error).toBeInstanceOf(Error);
+            expect(recovered.error.message).toBe("triggered");
             r1.dispose();
         });
     });
@@ -317,13 +329,17 @@ describe("recover", () => {
             // After dispose, the root's recover should be cleaned up
             // We verify by checking that creating effects outside the disposed root
             // that throw will not be caught
-            expect(() => {
+            try {
                 root(r => {
                     r.effect(c => {
                         throw new Error("after dispose");
                     });
                 });
-            }).toThrow("after dispose");
+                expect(true).toBe(false);
+            } catch (e) {
+                expect(e.type).toBe(3);
+                expect(e.error.message).toBe("after dispose");
+            }
 
             expect(recovered).toBe(false);
         });

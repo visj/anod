@@ -3,8 +3,12 @@ export {
     OPT_STABLE,
     OPT_SETUP,
     OPT_WEAK,
+    ERROR,
+    PANIC,
+    FATAL,
     signal,
+    relay,
     root,
     batch,
     flush,
-} from "./core/fyren.js";
+} from "./core.js";

@@ -11,24 +11,25 @@ import {
 } from '@fyren/core/internal';
 
 /**
- * Mutation tracking — encoded in the Signal's _flag, bits 6-31.
- * Bits 0-5 are reserved for sender flags (core).
+ * Mutation tracking — encoded in the Signal's _flag, bits 7-31.
+ * Bits 0-6 are reserved for sender flags (core). Bit 6 is
+ * FLAG_RELAY, added to support relay signals.
  *
- *   Bits  6– 8 : op type   (MUT_ADD=1, MUT_DEL=2, MUT_SORT=4)
- *   Bits  9–14 : length    (6 bits, max 63)
+ *   Bits  7– 9 : op type   (MUT_ADD=1, MUT_DEL=2, MUT_SORT=4)
+ *   Bits 10–14 : length    (5 bits, max 31)
  *   Bits 15–31 : position  (17 bits, max 131071)
  *
  * The op/len/mask constants are relative to the encoded value
- * AFTER shifting right by 6 (stripping sender flags).
+ * AFTER shifting right by 7 (stripping sender flags).
  */
-const MOD_SHIFT = 6;
+const MOD_SHIFT = 7;
 const MUT_ADD = 1;
 const MUT_DEL = 2;
 const MUT_SORT = 4;
 const MUT_OP_MASK = 7;
 const MUT_LEN_SHIFT = 3;
-const MUT_LEN_MASK = 0x3F;
-const MUT_POS_SHIFT = 9;
+const MUT_LEN_MASK = 0x1F;
+const MUT_POS_SHIFT = 8;
 const MUT_POS_MASK = 0x1FFFF;
 
 /** @const */
@@ -67,7 +68,7 @@ function encode(op, pos, len) {
  * @returns {void}
  */
 /** Sender flag mask — preserve bits 0-5, clear mod bits 6+. */
-const FLAG_SENDER_MASK = 0x3F;
+const FLAG_SENDER_MASK = 0x7F;
 
 /**
  * Sets mod on the signal, notifies, and flushes. The mod bits

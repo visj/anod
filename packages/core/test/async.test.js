@@ -79,7 +79,13 @@ describe("async", () => {
 
       await settle();
 
-      expect(() => c1.get()).toThrow("async error");
+      try {
+        c1.get();
+        expect(true).toBe(false);
+      } catch (e) {
+        expect(e.type).toBe(3);
+        expect(e.error.message).toBe("async error");
+      }
     });
 
     test("clears error on subsequent successful resolution", async () => {
@@ -254,7 +260,13 @@ describe("async", () => {
       await tick();
 
       expect(c1.error).not.toBeNull();
-      expect(() => c1.get()).toThrow("iterator error");
+      expect(c1.error.type).toBe(3);
+      try {
+        c1.get();
+        expect(true).toBe(false);
+      } catch (e) {
+        expect(e.error.message).toBe("iterator error");
+      }
     });
 
     test("calls return() on the stale iterator when it next yields", async () => {
@@ -670,7 +682,13 @@ describe("async", () => {
       await settle();
 
       expect(c1.error).not.toBeNull();
-      expect(() => c1.get()).toThrow("boom");
+      expect(c1.error.type).toBe(3);
+      try {
+        c1.get();
+        expect(true).toBe(false);
+      } catch (e) {
+        expect(e.error.message).toBe("boom");
+      }
     });
 
     test("suspend works with bound task", async () => {
@@ -1064,6 +1082,7 @@ describe("async", () => {
       });
       await settle();
       expect(taskA.error).not.toBeNull();
+      expect(taskA.error.type).toBe(3);
 
       let caught = null;
       c.spawn(async (c) => {
@@ -1075,8 +1094,9 @@ describe("async", () => {
         await c.suspend(tick());
       });
       await settle();
-      expect(caught).toBeInstanceOf(Error);
-      expect(caught.message).toBe("fail");
+      expect(caught.type).toBe(3);
+      expect(caught.error).toBeInstanceOf(Error);
+      expect(caught.error.message).toBe("fail");
     });
 
     test("dispose awaiter while waiting: no crash", async () => {
