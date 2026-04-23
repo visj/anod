@@ -16,7 +16,7 @@ export declare const FLAG_NOTEQUAL: number;
 export declare const FLAG_ASYNC: number;
 export declare const FLAG_BOUND: number;
 export declare const FLAG_WAITER: number;
-export declare const FLAG_FIBER: number;
+export declare const FLAG_CHANNEL: number;
 export declare const FLAG_BLOCKED: number;
 export declare const FLAG_LOCK: number;
 export declare const FLAG_SINGLE: number;

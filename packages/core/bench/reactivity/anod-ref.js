@@ -6,7 +6,7 @@
  */
 import { bench, run } from 'mitata';
 import { EXPECTED } from './expected.js';
-import { signal, compute, effect } from '../../dist/internal.js';
+import { signal, compute, effect, batch } from '../../dist/internal.js';
 import { saveRun } from './save-run.js';
 
 let sink = 0;
@@ -272,7 +272,7 @@ function setupCellx(layers) {
     let toggle = false;
     return () => {
         toggle = !toggle;
-        c.batch(() => {
+        batch(() => {
             start.prop1.set(toggle ? 4 : 1);
             start.prop2.set(toggle ? 3 : 2);
             start.prop3.set(toggle ? 2 : 3);
@@ -326,11 +326,11 @@ function setupMolWire() {
     let i = 0;
     return () => {
         i++;
-        c.batch(() => {
+        batch(() => {
             B.set(1);
             A.set(1 + i * 2);
         });
-        c.batch(() => {
+        batch(() => {
             A.set(2 + i * 2);
             B.set(2);
         });

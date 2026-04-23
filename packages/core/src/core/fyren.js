@@ -29,7 +29,7 @@ const FLAG_NOTEQUAL = 1 << 12;
 const FLAG_ASYNC = 1 << 13;
 const FLAG_BOUND = 1 << 14;
 const FLAG_WAITER = 1 << 15;
-const FLAG_FIBER = 1 << 16;
+const FLAG_CHANNEL = 1 << 16;
 const FLAG_BLOCKED = 1 << 17;
 const FLAG_LOCK = 1 << 18;
 const FLAG_SUSPEND = 1 << 19;
@@ -308,26 +308,21 @@ function Effect(opts, fn, dep1, owner, args) {
 }
 
 /**
- * Async execution context for task/spawn nodes. Created lazily on first
- * call to a context utility (e.g. controller(), defer()). Stored in the
- * _args wrapper as { _args, _fiber: Fiber }.
+ * Unified async context for task/spawn nodes. Created lazily on first
+ * async utility call (controller(), defer(), suspend(task)). Merges
+ * the old Fiber + Channel into a single object to reduce allocations
+ * and pointer chasing. Holds the original _args so the node's _args
+ * slot can point here directly.
  * @constructor
+ * @param {*} args - the node's original _args value
  */
-function Fiber() {
+function Channel(args) {
+  /** @type {*} Original user-supplied args for the node. */
+  this._args = args;
   /** @type {AbortController | null} */
   this._controller = null;
   /** @type {Array<Sender | *> | null} Paired [sender, value] entries. */
   this._defers = null;
-  /** @type {Channel | null} Async channel for awaiter/responder bindings. */
-  this._channel = null;
-}
-
-/**
- * Unified async channel. Implements both IAwaiter (can await other tasks)
- * and IResponder (can be awaited by others).
- * @constructor
- */
-function Channel() {
   /** @type {Compute | null} First responder we're waiting on. */
   this._res1 = null;
   /** @type {number} Our slot in _res1's _waiters (index into 4-stride). */
@@ -1071,34 +1066,20 @@ function root(fn) {
   };
 
   /**
-   * Lazily allocates the Fiber for this node. If no fiber exists yet,
-   * creates one and lifts _args into { _args, _fiber }.
-   * @this {!Compute | !Effect}
-   * @returns {!Fiber}
-   */
-  function _fiber() {
-    if (this._flag & FLAG_FIBER) {
-      return this._args._fiber;
-    }
-    let fiber = new Fiber();
-    this._args = { _args: this._args, _fiber: fiber };
-    this._flag |= FLAG_FIBER;
-    return fiber;
-  }
-
-  ComputeProto._fiber = EffectProto._fiber = _fiber;
-
-  /**
-   * Lazily allocates the Fiber and its Channel. Returns the channel.
+   * Lazily allocates the Channel for this node. Lifts _args into
+   * the Channel so the original args are preserved but the node's
+   * _args slot points directly to the Channel.
    * @this {!Compute | !Effect}
    * @returns {!Channel}
    */
   function _channel() {
-    let fiber = this._fiber();
-    if (fiber._channel === null) {
-      fiber._channel = new Channel();
+    if (this._flag & FLAG_CHANNEL) {
+      return this._args;
     }
-    return fiber._channel;
+    let channel = new Channel(this._args);
+    this._args = channel;
+    this._flag |= FLAG_CHANNEL;
+    return channel;
   }
 
   ComputeProto._channel = EffectProto._channel = _channel;
@@ -1110,10 +1091,10 @@ function root(fn) {
    * @returns {!AbortController}
    */
   function controller() {
-    let fiber = this._fiber();
-    let controller = new AbortController();
-    fiber._controller = controller;
-    return controller;
+    let channel = this._channel();
+    let ctrl = new AbortController();
+    channel._controller = ctrl;
+    return ctrl;
   }
 
   ComputeProto.controller = EffectProto.controller = controller;
@@ -1134,10 +1115,10 @@ function root(fn) {
       sender._refresh();
     }
     let value = sender._value;
-    let fiber = this._fiber();
-    let defers = fiber._defers;
+    let channel = this._channel();
+    let defers = channel._defers;
     if (defers === null) {
-      fiber._defers = [sender, value];
+      channel._defers = [sender, value];
     } else {
       defers.push(sender, value);
     }
@@ -1371,15 +1352,15 @@ function root(fn) {
       let stale = false;
       if (this._flag & FLAG_ASYNC) {
         let hasDefers =
-          this._flag & FLAG_FIBER && this._args._fiber._defers !== null;
+          this._flag & FLAG_CHANNEL && this._args._defers !== null;
         if (this._deps !== null || hasDefers) {
           stale = settleDeps(this);
         }
       }
 
       let waiters = null;
-      if (this._flag & FLAG_FIBER) {
-        let ch = this._args._fiber._channel;
+      if (this._flag & FLAG_CHANNEL) {
+        let ch = this._args;
         if (ch !== null && ch._waiters !== null) {
           waiters = ch._waiters;
           let waiterCount = waiters.length;
@@ -1434,20 +1415,18 @@ function root(fn) {
     this._flag = FLAG_DISPOSED;
     clearSubs(this);
     clearDeps(this);
-    if (flag & FLAG_FIBER) {
-      let fiber = this._args._fiber;
-      if (fiber._controller !== null) {
-        fiber._controller.abort();
+    if (flag & FLAG_CHANNEL) {
+      let ch = this._args;
+      if (ch._controller !== null) {
+        ch._controller.abort();
       }
-      if (fiber._channel !== null) {
-        /** Panic any nodes awaiting this task. */
-        if (fiber._channel._waiters !== null) {
-          resolveWaiters(this, fiber._channel, new Error("Awaited task was disposed"), true, true);
-        }
-        /** Remove ourselves from any responders we were awaiting. */
-        if (fiber._channel._res1 !== null) {
-          clearChannel(fiber._channel);
-        }
+      /** Panic any nodes awaiting this task. */
+      if (ch._waiters !== null) {
+        resolveWaiters(this, ch, new Error("Awaited task was disposed"), true, true);
+      }
+      /** Remove ourselves from any responders we were awaiting. */
+      if (ch._res1 !== null) {
+        clearChannel(ch);
       }
     }
     if (this._cleanup !== null) {
@@ -1483,13 +1462,13 @@ function root(fn) {
 
     /** Async prep: reset fiber state. */
     if (flag & FLAG_ASYNC) {
-      if (flag & FLAG_FIBER) {
-        clearFiber(this);
+      if (flag & FLAG_CHANNEL) {
+        resetChannel(this);
       }
     }
 
     let value;
-    let args = flag & FLAG_FIBER ? this._args._args : this._args;
+    let args = flag & FLAG_CHANNEL ? this._args._args : this._args;
 
     if ((flag & (FLAG_STABLE | FLAG_SETUP)) === FLAG_STABLE) {
       try {
@@ -1659,8 +1638,8 @@ function root(fn) {
     } else {
       /** Abort in-flight async work. The stale/pending flag check
        *  in resolvePromise ensures old callbacks are rejected. */
-      if (flag & FLAG_LOADING && flag & FLAG_FIBER) {
-        clearFiber(this);
+      if (flag & FLAG_LOADING && flag & FLAG_CHANNEL) {
+        resetChannel(this);
       }
       if (!(flag & (FLAG_EAGER | FLAG_WAITER))) {
         notify(this, FLAG_PENDING);
@@ -1717,15 +1696,15 @@ function root(fn) {
 
     /** Async prep: reset fiber state, clear loading/suspend from previous activation. */
     if (flag & FLAG_ASYNC) {
-      if (flag & FLAG_FIBER) {
-        clearFiber(this);
+      if (flag & FLAG_CHANNEL) {
+        resetChannel(this);
       }
       this._flag &= ~(FLAG_LOADING | FLAG_SUSPEND);
     }
 
     /** @type {(function(): void) | null | undefined} */
     let value;
-    let args = flag & FLAG_FIBER ? this._args._args : this._args;
+    let args = flag & FLAG_CHANNEL ? this._args._args : this._args;
 
     if ((flag & (FLAG_STABLE | FLAG_SETUP)) === FLAG_STABLE) {
       try {
@@ -1859,7 +1838,7 @@ function root(fn) {
     }
 
     let stale = false;
-    if (this._flag & FLAG_FIBER && this._args._fiber._defers !== null) {
+    if (this._flag & FLAG_CHANNEL && this._args._defers !== null) {
       stale = settleDeps(this);
     }
     if (stale || (flag & FLAG_LOCK && (this._flag & FLAG_STALE || (this._flag & FLAG_PENDING && needsUpdate(this, TIME))))) {
@@ -1911,13 +1890,13 @@ function root(fn) {
     if (this._owned !== null) {
       clearOwned(this);
     }
-    if (flag & FLAG_FIBER) {
-      let fiber = this._args._fiber;
-      if (fiber._controller !== null) {
-        fiber._controller.abort();
+    if (flag & FLAG_CHANNEL) {
+      let ch = this._args;
+      if (ch._controller !== null) {
+        ch._controller.abort();
       }
-      if (fiber._channel !== null && fiber._channel._res1 !== null) {
-        clearChannel(fiber._channel);
+      if (ch._res1 !== null) {
+        clearChannel(ch);
       }
     }
     this._fn = this._args = this._owned = this._owner = this._recover = null;
@@ -3008,7 +2987,7 @@ function settleNotify(node, value, isError, waiters, waiterCount) {
     }
     awaiter._version = version;
     /** Clear the awaiter's back-reference to this responder. */
-    let awaiterCh = awaiter._args._fiber._channel;
+    let awaiterCh = awaiter._args;
     if (resSlot === -1) {
       awaiterCh._res1 = null;
     } else {
@@ -3055,12 +3034,11 @@ function settleDeps(node) {
   /** Grab defers before clearing. */
   let defers = null;
   let deferLen = 0;
-  if (node._flag & FLAG_FIBER) {
-    let fiber = node._args._fiber;
-    defers = fiber._defers;
+  if (node._flag & FLAG_CHANNEL) {
+    defers = node._args._defers;
     if (defers !== null) {
       deferLen = defers.length;
-      fiber._defers = null;
+      node._args._defers = null;
     }
   }
 
@@ -3140,15 +3118,15 @@ function settleDeps(node) {
  * @param {!Receiver} node
  * @returns {void}
  */
-function clearFiber(node) {
-  let fiber = node._args._fiber;
-  if (fiber._controller !== null) {
-    fiber._controller.abort();
-    fiber._controller = null;
+function resetChannel(node) {
+  let ch = node._args;
+  if (ch._controller !== null) {
+    ch._controller.abort();
+    ch._controller = null;
   }
-  fiber._defers = null;
-  if (fiber._channel !== null && fiber._channel._res1 !== null) {
-    clearChannel(fiber._channel);
+  ch._defers = null;
+  if (ch._res1 !== null) {
+    clearChannel(ch);
   }
 }
 
@@ -3232,7 +3210,7 @@ function removeWaiter(responder, responderCh, slot) {
     waiters[slot + 1] = lastResSlot;
     waiters[slot + 2] = lastResolve;
     waiters[slot + 3] = lastReject;
-    let ch = lastAwaiter._args._fiber._channel;
+    let ch = lastAwaiter._args;
     if (lastResSlot === -1) {
       ch._res1slot = slot;
     } else {
@@ -3253,7 +3231,7 @@ function removeWaiter(responder, responderCh, slot) {
 function clearChannel(channel) {
   let res = channel._res1;
   if (res !== null) {
-    removeWaiter(res, res._args._fiber._channel, channel._res1slot);
+    removeWaiter(res, res._args, channel._res1slot);
     channel._res1 = null;
   }
   let responds = channel._responds;
@@ -3264,7 +3242,7 @@ function clearChannel(channel) {
         continue;
       }
       let slot = responds[i + 1];
-      removeWaiter(responder, responder._args._fiber._channel, slot);
+      removeWaiter(responder, responder._args, slot);
     }
     channel._responds = null;
   }
@@ -3297,7 +3275,7 @@ function resolveWaiters(responder, responderCh, value, isError, panic) {
       subscribe(awaiter, responder);
     }
     /** Clear the awaiter's back-reference to this responder. */
-    let awaiterCh = awaiter._args._fiber._channel;
+    let awaiterCh = awaiter._args;
     if (resSlot === -1) {
       awaiterCh._res1 = null;
     } else {
@@ -3662,7 +3640,8 @@ export {
   FLAG_NOTEQUAL,
   FLAG_ASYNC,
   FLAG_BOUND,
-  FLAG_FIBER,
+  FLAG_CHANNEL,
+
   FLAG_EAGER,
   FLAG_BLOCKED,
   FLAG_LOCK,
