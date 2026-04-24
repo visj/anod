@@ -1717,12 +1717,9 @@ function root(fn) {
    */
   ComputeProto._receive = function () {
     let flag = this._flag;
-    if (flag & FLAG_DISPOSED) {
-      return;
-    }
-    if (!(flag & (FLAG_EAGER | FLAG_WAITER | FLAG_LOCK | FLAG_LOADING))) {
+    if (!(flag & (FLAG_EAGER | FLAG_WAITER | FLAG_LOADING | FLAG_LOCK | FLAG_DISPOSED))) {
       notify(this, FLAG_PENDING);
-    } else if (flag & FLAG_LOCK) {
+    } else if (flag & (FLAG_LOCK | FLAG_DISPOSED)) {
       return;
     } else {
       /** Abort in-flight async work. The stale/pending flag check
@@ -1984,10 +1981,7 @@ function root(fn) {
    */
   EffectProto._receive = function () {
     let flag = this._flag;
-    if (flag & FLAG_DISPOSED) {
-      return;
-    }
-    if (flag & FLAG_LOCK) {
+    if (flag & (FLAG_LOCK | FLAG_DISPOSED)) {
       return;
     }
     /** Abort in-flight async work eagerly so stale fetches/promises
@@ -2509,7 +2503,7 @@ function notify(node, flag) {
   if (sub !== null) {
     let flags = sub._flag;
     sub._flag |= flag;
-    if (!(flags & (FLAG_PENDING | FLAG_STALE))) {
+    if (!(flags & (FLAG_PENDING | FLAG_STALE | FLAG_DISPOSED | FLAG_LOCK))) {
       sub._receive();
     }
   }
@@ -2521,7 +2515,7 @@ function notify(node, flag) {
       sub = subs[i];
       let flags = sub._flag;
       sub._flag |= flag;
-      if (!(flags & (FLAG_PENDING | FLAG_STALE))) {
+      if (!(flags & (FLAG_PENDING | FLAG_STALE | FLAG_DISPOSED | FLAG_LOCK))) {
         sub._receive();
       }
     }
