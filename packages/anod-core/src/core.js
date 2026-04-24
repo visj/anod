@@ -79,7 +79,7 @@ const NOOP = function () { };
  * let code continue executing after the node is disposed.
  * @const
  */
-const ASSERT_DISPOSED = "Cannot access a disposed node";
+const ASSERT_NOT_DISPOSED = "Cannot access a disposed node";
 
 /**
  * @type {Array<Sender | number>}
@@ -113,6 +113,9 @@ var CTOP = 0;
  * During FLAG_SETUP _update, deps are written here as flat [sender, ...]
  * entries. After the fn returns, _deps is created via slice() with
  * exact capacity — avoiding V8's push-based over-allocation.
+ * This allows the growth factor problem that arises when going from 
+ * dep2 -> dep3.
+ * @see {connect}
  * @type {Array<Sender>}
  */
 var DSTACK = [];
@@ -139,6 +142,12 @@ var IDLE = true;
 var POSTING = false;
 
 /**
+ * We use a 2-phase version system to handle dependency reuse.
+ * On every update, we bump VERSION = SEED + 2. Then, we sweep
+ * all existing deps and mark them with version - 1. When we run
+ * the fn again, we mark any reused dep with version. If they have
+ * some other version than version - 1, it means a new node.
+ * Then finally, we run patchDeps if anything changed to clean it up.
  * @type {number}
  */
 var SEED = 1;
@@ -149,9 +158,19 @@ var SEED = 1;
 var VERSION = 0;
 
 /**
+ * The fence is needed, because an outer Effect might have tagged 
+ * a Compute node with its own running version marker. When an inner
+ * compute Compute is marked stale, it will refresh itself before returning
+ * its value. If the outer Effect first reads SignalA, tags a version, and then
+ * the inner Compute depends on the same SignalA, it will overwrite the version,
+ * which would corrupt the Effect reconciliation. To handle this, we create the fence.
+ * It works like a transaction boundary which is set on all top level executions.
+ * The fence is the outermost possible version of this toplevel call. If any sender
+ * has a version above this, they have been tagged, and we need to store them in the VSTACK
+ * and reset them before returning back to the owner scope.
  * @type {number}
  */
-var TRANSACTION = 0;
+var FENCE = 0;
 
 /** @const @type {Array<Disposer>} */
 var DISPOSES = [];
@@ -193,7 +212,10 @@ var RECEIVERS = [];
 
 var RECEIVER_COUNT = 0;
 
-/** @const @type {Array<Sender>} */
+/** 
+ * @const
+ * @type {Array<Sender>}
+ */
 var PURGES = [];
 var PURGE_COUNT = 0;
 
@@ -294,8 +316,6 @@ function Effect(opts, fn, dep1, owner, args) {
   /** @type {Array<Sender> | null} */
   this._deps = null;
   /** @type {number} */
-  this._version = 0;
-  /** @type {number} */
   this._time = 0;
   /** @type {(function(): void) | Array<(function(): void)> | null} */
   this._cleanup = null;
@@ -311,6 +331,8 @@ function Effect(opts, fn, dep1, owner, args) {
   this._finalize = null;
   /** @type {Channel | null} */
   this._chan = null;
+  /** @type {number} */
+  this._version = 0;
   /** @type {W | undefined} */
   this._args = args;
 }
@@ -333,7 +355,7 @@ function Channel() {
   /** @type {Sender | null} First deferred dep (inline fast path). */
   this._defer1 = null;
   /** @type {*} Snapshot of _defer1's value at defer() time. */
-  this._defer1val = undefined;
+  this._defer1val = null;
   /** @type {Array<Sender | *> | null} Paired [sender, value] entries for 2+ defers. */
   this._defers = null;
 }
@@ -369,7 +391,7 @@ function dispose() {
 function val(sender) {
   let flag = this._flag;
   if (sender._flag & FLAG_DISPOSED) {
-    throw new Error(ASSERT_DISPOSED);
+    throw new Error(ASSERT_NOT_DISPOSED);
   }
   if (flag & FLAG_LOADING) {
     return this._readAsync(sender);
@@ -411,7 +433,7 @@ function val(sender) {
  */
 function peek(sender) {
   if (sender._flag & FLAG_DISPOSED) {
-    throw new Error(ASSERT_DISPOSED);
+    throw new Error(ASSERT_NOT_DISPOSED);
   }
   if (sender._flag & (FLAG_STALE | FLAG_PENDING)) {
     sender._refresh();
@@ -427,23 +449,30 @@ function peek(sender) {
  * resolves updater functions, writes via _assign, notifies and
  * flushes. When not IDLE, schedules for drain. Updater functions
  * are resolved at drain time by assign() to see the latest value.
- * @this {Signal | Compute}
- * @param {*} value
+ * @template T
+ * @this {Sender<T>}
+ * @param {T | (function(T): T)} value
+ * @returns {void}
  */
 function set(value) {
   if (this._flag & FLAG_DISPOSED) {
-    throw new Error(ASSERT_DISPOSED);
+    throw new Error(ASSERT_NOT_DISPOSED);
   }
+  let callback = typeof value === "function";
   if (IDLE) {
-    if (typeof value === "function") {
-      value = value(this._value);
+    /** @type {T} */
+    let _value;
+    if (callback) {
+      _value = value(this._value);
+    } else {
+      _value = value;
     }
-    if (this._flag & FLAG_RELAY || this._value !== value) {
-      this._assign(value, TIME + 1);
+    if (this._flag & FLAG_RELAY || this._value !== _value) {
+      this._assign(_value, TIME + 1);
       notify(this, FLAG_STALE);
       flush();
     }
-  } else if (typeof value === "function" || this._flag & FLAG_RELAY || this._value !== value) {
+  } else if (callback || this._flag & FLAG_RELAY || this._value !== value) {
     schedule(this, value, assign);
   }
 }
@@ -454,16 +483,21 @@ function set(value) {
  * only writes + notifies if the value actually changed. Delegates
  * the actual write to node._assign() which handles type-specific
  * fields (_ctime, FLAG_INIT for Compute; plain _value for Signal).
- * @param {Signal | Compute} node
- * @param {*} value
+ * @template T
+ * @param {Sender<T>} node
+ * @param {T | (function(T): T)} value
  * @param {number} time
+ * @returns {void}
  */
 function assign(node, value, time) {
+  let _value;
   if (typeof value === "function") {
-    value = value(node._value);
+    _value = value(node._value);
+  } else {
+    _value = value;
   }
-  if (node._flag & FLAG_RELAY || node._value !== value) {
-    node._assign(value, time);
+  if (node._value !== _value || (node._flag & FLAG_RELAY)) {
+    node._assign(_value, time);
     if (node._flag & FLAG_SCHEDULED) {
       node._flag &= ~FLAG_SCHEDULED;
       notify(node, FLAG_STALE);
@@ -476,7 +510,7 @@ function assign(node, value, time) {
 /**
  * Batch-drain handler for notify(). No value write — just clears
  * FLAG_SCHEDULED and notifies subscribers.
- * @param {Signal | Compute} node
+ * @param {Sender} node
  * @param {*} _
  * @param {number} time
  */
@@ -491,9 +525,10 @@ function poke(node, _, time) {
  * Enqueues a deferred update to run during the next drain cycle.
  * Used by extension packages (e.g. anod-list) to schedule custom
  * mutations like push, pop, splice without branching in the drain loop.
+ * @template T
  * @param {Sender} node
- * @param {*} payload
- * @param {function(Sender, *)} fn
+ * @param {T | (function(T): T)} payload
+ * @param {function(Sender, (T | (function(T): T)), number)} fn
  */
 function schedule(node, payload, fn) {
   node._flag |= FLAG_SCHEDULED;
@@ -516,7 +551,7 @@ function schedule(node, payload, fn) {
 function _read(sender, stamp) {
   /** Conflict: tagged by some other running node in this execution
    *  tree. Save [sender, oldVersion] to VSTACK for restoration. */
-  if (stamp > TRANSACTION) {
+  if (stamp > FENCE) {
     VSTACK[VCOUNT++] = sender;
     VSTACK[VCOUNT++] = stamp;
   }
@@ -971,7 +1006,7 @@ function root(fn) {
    */
   function _suspendTask(node, taskNode) {
     if (taskNode._flag & FLAG_DISPOSED) {
-      throw new Error(ASSERT_DISPOSED);
+      throw new Error(ASSERT_NOT_DISPOSED);
     }
     if (taskNode._flag & (FLAG_STALE | FLAG_PENDING)) {
       taskNode._refresh();
@@ -1021,7 +1056,7 @@ function root(fn) {
    *
    * @this {Receiver}
    * @param {Array<Compute>} tasks
-   * @returns {Array | !Promise<!Array>}
+   * @returns {Array | Promise<Array>}
    */
   function _suspendArray(node, tasks) {
     node._flag |= FLAG_BLOCKED;
@@ -1074,7 +1109,7 @@ function root(fn) {
    * @param {Receiver} node
    * @param {Array<Compute>} tasks
    * @param {Array} results
-   * @param {function(!Array)} resolve
+   * @param {function(Array)} resolve
    * @param {function(*)} reject
    */
   function _stepArray(node, tasks, results, resolve, reject) {
@@ -1216,7 +1251,7 @@ function root(fn) {
    * Usage: `if (c.pending([taskA, taskB])) return;`
    *
    * @this {Receiver}
-   * @param {Compute | !Array<Compute>} tasks
+   * @param {Compute | Array<Compute>} tasks
    * @returns {boolean} true if any task has FLAG_LOADING set
    */
   function pending(tasks) {
@@ -1275,9 +1310,9 @@ function root(fn) {
    * mutating an object held by the signal in place.
    * @this {Signal | Compute}
    */
-  function signal_notify() {
+  function _notify() {
     if (this._flag & FLAG_DISPOSED) {
-      throw new Error(ASSERT_DISPOSED);
+      throw new Error(ASSERT_NOT_DISPOSED);
     }
     if (IDLE) {
       notify(this, FLAG_STALE);
@@ -1287,7 +1322,7 @@ function root(fn) {
     }
   }
 
-  SignalProto.notify = ComputeProto.notify = signal_notify;
+  SignalProto.notify = ComputeProto.notify = _notify;
 
   /**
    * Microtask-deferred set. Never writes the value immediately —
@@ -1305,7 +1340,7 @@ function root(fn) {
    */
   SignalProto.post = function (value) {
     if (this._flag & FLAG_DISPOSED) {
-      throw new Error(ASSERT_DISPOSED);
+      throw new Error(ASSERT_NOT_DISPOSED);
     }
     if (!POSTING && !(this._flag & FLAG_RELAY) && typeof value !== "function" && this._value === value) {
       return;
@@ -1318,15 +1353,24 @@ function root(fn) {
   };
 
   /**
+  * Returns true if the sender's current value differs from `value`.
+  * Used by deferred dep settlement to detect changes.
+  * @this {Sender<T>}
+  * @param {T} value
+  * @returns {boolean}
+  */
+  function _changed(value) {
+    return this._value !== value;
+  }
+
+  /**
    * Returns true if the sender's current value differs from `value`.
    * Used by deferred dep settlement to detect changes.
-   * @this {Signal<T> | Compute<T>}
+   * @this {Sender<T>}
    * @param {T} value
    * @returns {boolean}
    */
-  SignalProto._changed = ComputeProto._changed = function (value) {
-    return this._value !== value;
-  };
+  SignalProto._changed = ComputeProto._changed = _changed;
 
   /**
    * @this {Signal<T>}
@@ -1341,7 +1385,8 @@ function root(fn) {
   /**
    * Pulls and returns the compute's current value. Triggers lazy
    * re-evaluation if stale or pending. Rethrows if in error state.
-   * @this {Compute<T,U,V,W>}
+   * @template T
+   * @this {Compute<T>}
    * @returns {T}
    */
   ComputeProto.get = function () {
@@ -1351,7 +1396,7 @@ function root(fn) {
         IDLE = false;
         try {
           if (flag & FLAG_STALE || needsUpdate(this, TIME)) {
-            TRANSACTION = SEED;
+            FENCE = SEED;
             this._update(TIME);
           }
           if (SENDER_COUNT > 0 || DISPOSER_COUNT > 0) {
@@ -1366,7 +1411,7 @@ function root(fn) {
     }
     if (this._flag & FLAG_BOUND && (this._dep1 === null || this._dep1._flag & FLAG_DISPOSED)) {
       this._flag |= FLAG_ERROR;
-      this._value = { error: ASSERT_DISPOSED, type: FATAL };
+      this._value = { error: ASSERT_NOT_DISPOSED, type: FATAL };
     }
     if (this._flag & FLAG_ERROR) {
       throw this._value;
@@ -1511,17 +1556,17 @@ function root(fn) {
     clearSubs(this);
     clearDeps(this);
     if (flag & FLAG_CHANNEL) {
-      let ch = this._chan;
-      if (ch._controller !== null) {
-        ch._controller.abort();
+      let chan = this._chan;
+      if (chan._controller !== null) {
+        chan._controller.abort();
       }
       /** Panic any nodes awaiting this task. */
-      if (ch._waiters !== null) {
-        resolveWaiters(this, ch, new Error("Awaited task was disposed"), true, true);
+      if (chan._waiters !== null) {
+        resolveWaiters(this, chan, new Error("Awaited task was disposed"), true, true);
       }
       /** Remove ourselves from any responders we were awaiting. */
-      if (ch._res1 !== null || ch._responds !== null) {
-        clearChannel(ch, this);
+      if (chan._res1 !== null || chan._responds !== null) {
+        clearChannel(chan, this);
       }
     }
     if (this._cleanup !== null) {
@@ -1555,11 +1600,10 @@ function root(fn) {
       clearCleanup(this);
     }
 
-    /** Async prep: reset fiber state. */
-    if (flag & FLAG_ASYNC) {
-      if (flag & FLAG_CHANNEL) {
-        resetChannel(this);
-      }
+    /** Reset channel state from previous activation. Handles both
+     *  async nodes and sync nodes using controller/callback suspend. */
+    if (flag & FLAG_CHANNEL) {
+      resetChannel(this);
     }
 
     let value;
@@ -1797,12 +1841,6 @@ function root(fn) {
       }
     }
 
-    /** Async prep: clear loading/suspend from previous activation.
-     *  Channel reset is handled eagerly in _receive, not here. */
-    if (flag & FLAG_ASYNC) {
-      this._flag &= ~(FLAG_LOADING | FLAG_SUSPEND);
-    }
-
     /** @type {(function(): void) | null | undefined} */
     let value;
     let args = this._args;
@@ -1925,7 +1963,7 @@ function root(fn) {
    */
   EffectProto._settle = function (err) {
     let flag = this._flag;
-    this._flag &= ~(FLAG_LOADING | FLAG_LOCK);
+    this._flag &= ~(FLAG_LOADING | FLAG_SUSPEND | FLAG_LOCK);
 
     /** Deferred dispose: owner disposed while we were locked.
      *  FLAG_LOCK was cleared above, so _dispose runs full cleanup. */
@@ -2022,8 +2060,11 @@ function root(fn) {
     }
     /** Abort in-flight async work eagerly so stale fetches/promises
      *  are cancelled without waiting for _update to run. */
-    if (flag & FLAG_LOADING && flag & FLAG_CHANNEL) {
-      resetChannel(this);
+    if (flag & FLAG_LOADING) {
+      this._flag &= ~(FLAG_LOADING | FLAG_SUSPEND);
+      if (flag & FLAG_CHANNEL) {
+        resetChannel(this);
+      }
     }
     if (this._owned === null) {
       RECEIVERS[RECEIVER_COUNT++] = this;
@@ -2039,7 +2080,7 @@ function root(fn) {
   /** @this {Owner} */
   function _compute(depOrFn, fnOrSeed, optsOrSeed, argsOrOpts, args) {
     if (this._flag & FLAG_DISPOSED) {
-      throw new Error(ASSERT_DISPOSED);
+      throw new Error(ASSERT_NOT_DISPOSED);
     }
     let flag, node;
     if (typeof depOrFn === "function") {
@@ -2060,7 +2101,7 @@ function root(fn) {
   /** @this {Owner} */
   function _task(depOrFn, fnOrSeed, optsOrSeed, argsOrOpts, args) {
     if (this._flag & FLAG_DISPOSED) {
-      throw new Error(ASSERT_DISPOSED);
+      throw new Error(ASSERT_NOT_DISPOSED);
     }
     let flag, node;
     if (typeof depOrFn === "function") {
@@ -2086,7 +2127,7 @@ function root(fn) {
   /** @this {Owner} */
   function _effect(depOrFn, fnOrOpts, optsOrArgs, args) {
     if (this._flag & FLAG_DISPOSED) {
-      throw new Error(ASSERT_DISPOSED);
+      throw new Error(ASSERT_NOT_DISPOSED);
     }
     let flag, node;
     if (typeof depOrFn === "function") {
@@ -2111,7 +2152,7 @@ function root(fn) {
   /** @this {Owner} */
   function _spawn(depOrFn, fnOrOpts, optsOrArgs, args) {
     if (this._flag & FLAG_DISPOSED) {
-      throw new Error(ASSERT_DISPOSED);
+      throw new Error(ASSERT_NOT_DISPOSED);
     }
     let flag, node;
     if (typeof depOrFn === "function") {
@@ -2167,6 +2208,22 @@ function subscribe(receiver, sender) {
 }
 
 /**
+ * This is a highly problematic function.
+ * It's the same issue as with deps, but for subs.
+ * We cannot pre-allocate a packed array, because anyone
+ * can subscribe at any time. So, one alternative would be to re-allocate
+ * the array, through slice, and compact it.
+ * I am not 100% sure, but it seems the formula is something like this:
+ * ```
+ * new_capacity = old_capacity + ((old_capacity - 1) >> 1) + 18
+ * ```
+ * It means that the bucket boundaries will be:
+ * 1 -> 19 -> 46 -> 86 -> 146 -> 235
+ * Out of these, obviously it's just the first bucket transition that is
+ * truly problematic. Once you have allocated 19 subs, the jump to 46 is
+ * not so much more expensive. But right now, going from 2 to 3 subs
+ * will cause a sudden big spike in memory. Since most senders have a few subs,
+ * this is a real concern.
  * @param {Sender} send
  * @param {Receiver} receiver
  * @returns {void}
@@ -2323,7 +2380,7 @@ function clearOwned(owner) {
 /**
  * Checks a single owner's _recover handlers.
  * @param {Owner} owner
- * @param {*} error
+ * @param {?} error
  * @returns {boolean}
  */
 function _checkRecover(owner, error) {
@@ -2351,12 +2408,12 @@ const RECOVER_OWNER = 2;
 
 /**
  * Attempts to recover from an error.
- * - RECOVER_SELF: the node's own _recover handled it — node survives.
- * - RECOVER_OWNER: an ancestor handled it — node still disposes, error swallowed.
- * - RECOVER_NONE: unhandled — node disposes, error propagates.
+ * - RECOVER_SELF:  the node's own _recover handled it - node survives.
+ * - RECOVER_OWNER: an ancestor handled it - node still disposes, error swallowed.
+ * - RECOVER_NONE:  unhandled - node disposes, error propagates.
  *
  * @param {Effect} node
- * @param {*} error
+ * @param {?} error
  * @returns {number}
  */
 function tryRecover(node, error) {
@@ -2396,7 +2453,7 @@ function patchDeps(node, version, depCount, newLen) {
   let existingLen = depCount > 1 ? depCount - 1 : 0;
   let newidx = existingLen;
 
-  /** Check dep1 — always exists when depCount >= 1, and _read never
+  /** Check dep1 - always exists when depCount >= 1, and _read never
    *  writes new deps into dep1 (only setup does), so the only
    *  question is whether dep1 was reused or dropped. */
   let dep1 = node._dep1;
@@ -2495,6 +2552,10 @@ function patchDeps(node, version, depCount, newLen) {
     node._flag &= ~FLAG_SINGLE;
     let excess = deps.length - tail;
     if (excess > 0) {
+      /**
+       * pop() is vastly faster than setting .length
+       * likely even beyond 20, but it's a reasonable limit
+       */
       if (excess < 20) {
         while (excess-- > 0) {
           deps.pop();
@@ -2516,7 +2577,7 @@ function sweepDeps(stamp, dep1, deps) {
   let depCount = 0;
   let vstack = VSTACK;
   let vcount = VCOUNT;
-  let transaction = TRANSACTION;
+  let transaction = FENCE;
   if (dep1 !== null) {
     let depver = dep1._version;
     if (depver > transaction) {
@@ -2583,10 +2644,10 @@ function needsUpdate(node, time) {
   if (dep !== null) {
     let flag = dep._flag;
     if (flag & FLAG_STALE) {
-      TRANSACTION = SEED;
+      FENCE = SEED;
       dep._update(time);
     } else if (flag & FLAG_PENDING) {
-      TRANSACTION = SEED;
+      FENCE = SEED;
       if (flag & FLAG_SINGLE) {
         checkSingle(dep, time);
       } else {
@@ -2604,10 +2665,10 @@ function needsUpdate(node, time) {
       dep = deps[i];
       let flag = dep._flag;
       if (flag & FLAG_STALE) {
-        TRANSACTION = SEED;
+        FENCE = SEED;
         dep._update(time);
       } else if (flag & FLAG_PENDING) {
-        TRANSACTION = SEED;
+        FENCE = SEED;
         if (flag & FLAG_SINGLE) {
           checkSingle(dep, time);
         } else {
@@ -2748,7 +2809,7 @@ function checkRun(node, time) {
         }
       }
 
-      /** No dep changed — clear flags without re-executing */
+      /** No dep changed - clear flags without re-executing */
       node._time = time;
       node._flag &= ~(FLAG_STALE | FLAG_PENDING);
     }
@@ -2768,7 +2829,7 @@ function checkRun(node, time) {
        *  CINDEX holds numbers, so no cleanup needed there. */
       CSTACK[CTOP] = null;
       /**
-       * `node` is always the child that the parent was scanning
+       * node is always the child that the parent was scanning
        * when it pushed — no need to look it up from parent._dep1
        * or parent._deps[idx]. The common deep-propagation case
        * falls into the cascade branch below, which doesn't need
@@ -2989,7 +3050,7 @@ function settleNotify(node, value, isError, waiters, waiterCount) {
   if (sub !== null && sub._version !== version) {
     let flags = sub._flag;
     sub._flag |= FLAG_STALE;
-    if (!(flags & (FLAG_PENDING | FLAG_STALE))) {
+    if (!(flags & (FLAG_PENDING | FLAG_STALE | FLAG_BLOCK | FLAG_DISPOSED))) {
       sub._receive();
     }
   }
@@ -3000,7 +3061,7 @@ function settleNotify(node, value, isError, waiters, waiterCount) {
       if (sub._version !== version) {
         let flags = sub._flag;
         sub._flag |= FLAG_STALE;
-        if (!(flags & (FLAG_PENDING | FLAG_STALE))) {
+        if (!(flags & (FLAG_PENDING | FLAG_STALE | FLAG_BLOCK | FLAG_DISPOSED))) {
           sub._receive();
         }
       }
@@ -3159,8 +3220,8 @@ function addWaiter(responderCh, awaiter, resolve, reject) {
  * in the task's waiters list.
  * @param {Receiver} awaiter
  * @param {Compute} task
- * @param {function(*)} resolve
- * @param {function(*)} reject
+ * @param {function(*): *} resolve
+ * @param {function(*): *} reject
  * @returns {void}
  */
 function send(awaiter, task, resolve, reject) {
@@ -3318,7 +3379,7 @@ function startCompute(node) {
   if (IDLE) {
     IDLE = false;
     try {
-      TRANSACTION = SEED;
+      FENCE = SEED;
       node._update(TIME);
       if (SENDER_COUNT > 0 || DISPOSER_COUNT > 0) {
         flush();
@@ -3339,7 +3400,7 @@ function startEffect(node) {
   if (IDLE) {
     IDLE = false;
     try {
-      TRANSACTION = SEED;
+      FENCE = SEED;
       node._update(TIME);
       if (SENDER_COUNT > 0 || DISPOSER_COUNT > 0) {
         flush();
@@ -3378,6 +3439,84 @@ function startEffect(node) {
       }
     }
   }
+}
+
+/**
+ * Runs a single effect node: checks staleness, updates, handles
+ * errors with finalize/recover/dispose. Returns the error POJO
+ * if unrecoverable, null otherwise.
+ * @param {!Effect} node
+ * @param {number} time
+ * @returns {*}
+ */
+function runEffect(node, time) {
+  if (
+    node._flag & FLAG_STALE ||
+    (node._flag & FLAG_PENDING && needsUpdate(node, time))
+  ) {
+    FENCE = SEED;
+    try {
+      node._update(time);
+    } catch (error) {
+      if (node._finalize !== null) {
+        clearFinalize(node);
+      }
+      let err = node._flag & FLAG_PANIC ? error : { error, type: FATAL };
+      node._flag &= ~FLAG_PANIC;
+      let result = tryRecover(node, err);
+      if (result !== RECOVER_SELF) {
+        node._dispose();
+      }
+      if (result === RECOVER_NONE) {
+        return err;
+      }
+    }
+  } else {
+    node._flag &= ~(FLAG_STALE | FLAG_PENDING);
+  }
+  return null;
+}
+
+/**
+ * Drains a queue of effect nodes: checks staleness, updates,
+ * handles errors with finalize/recover/dispose. Returns the
+ * first unrecoverable error POJO, or null if all succeeded.
+ * @param {Array<Effect>} queue
+ * @param {number} count
+ * @param {number} time
+ * @returns {*}
+ */
+function flushEffects(queue, count, time) {
+  let thrown = null;
+  for (let i = 0; i < count; i++) {
+    let node = queue[i];
+    queue[i] = null;
+    if (
+      node._flag & FLAG_STALE ||
+      (node._flag & FLAG_PENDING && needsUpdate(node, time))
+    ) {
+      FENCE = SEED;
+      try {
+        node._update(time);
+      } catch (error) {
+        if (node._finalize !== null) {
+          clearFinalize(node);
+        }
+        let err = node._flag & FLAG_PANIC ? error : { error, type: FATAL };
+        node._flag &= ~FLAG_PANIC;
+        let result = tryRecover(node, err);
+        if (result !== RECOVER_SELF) {
+          node._dispose();
+        }
+        if (thrown === null && result === RECOVER_NONE) {
+          thrown = err;
+        }
+      }
+    } else {
+      node._flag &= ~(FLAG_STALE | FLAG_PENDING);
+    }
+  }
+  return thrown;
 }
 
 /**
@@ -3431,35 +3570,11 @@ function flush() {
       if (SCOPE_COUNT > 0) {
         let levels = LEVELS.length;
         for (let i = 0; i < levels; i++) {
-          let count = LEVELS[i];
-          let effects = SCOPES[i];
-          for (let j = 0; j < count; j++) {
-            let node = effects[j];
-            effects[j] = null;
-            if (
-              node._flag & FLAG_STALE ||
-              (node._flag & FLAG_PENDING && needsUpdate(node, time))
-            ) {
-              try {
-                TRANSACTION = SEED;
-                node._update(time);
-              } catch (error) {
-                if (node._finalize !== null) {
-                  clearFinalize(node);
-                }
-                let err = node._flag & FLAG_PANIC ? error : { error, type: FATAL };
-                node._flag &= ~FLAG_PANIC;
-                let result = tryRecover(node, err);
-                if (result !== RECOVER_SELF) {
-                  node._dispose();
-                }
-                if (!thrown && result === RECOVER_NONE) {
-                  error = err;
-                  thrown = true;
-                }
-              }
-            } else {
-              node._flag &= ~(FLAG_STALE | FLAG_PENDING);
+          if (!thrown) {
+            let err = flushEffects(SCOPES[i], LEVELS[i], time);
+            if (err !== null) {
+              error = err;
+              thrown = true;
             }
           }
           LEVELS[i] = 0;
@@ -3467,34 +3582,11 @@ function flush() {
         SCOPE_COUNT = 0;
       }
       if (RECEIVER_COUNT > 0) {
-        let count = RECEIVER_COUNT;
-        for (let i = 0; i < count; i++) {
-          let node = RECEIVERS[i];
-          RECEIVERS[i] = null;
-          if (
-            node._flag & FLAG_STALE ||
-            (node._flag & FLAG_PENDING && needsUpdate(node, time))
-          ) {
-            TRANSACTION = SEED;
-            try {
-              node._update(time);
-            } catch (error) {
-              if (node._finalize !== null) {
-                clearFinalize(node);
-              }
-              let err = node._flag & FLAG_PANIC ? error : { error, type: FATAL };
-              node._flag &= ~FLAG_PANIC;
-              let result = tryRecover(node, err);
-              if (result !== RECOVER_SELF) {
-                node._dispose();
-              }
-              if (!thrown && result === RECOVER_NONE) {
-                error = err;
-                thrown = true;
-              }
-            }
-          } else {
-            node._flag &= ~(FLAG_STALE | FLAG_PENDING);
+        if (!thrown) {
+          let err = flushEffects(RECEIVERS, RECEIVER_COUNT, time);
+          if (err !== null) {
+            error = err;
+            thrown = true;
           }
         }
         RECEIVER_COUNT = 0;
@@ -3515,7 +3607,11 @@ function flush() {
     } while (!thrown && (SENDER_COUNT > 0 || DISPOSER_COUNT > 0));
   } finally {
     IDLE = true;
-    DISPOSER_COUNT = SENDER_COUNT = SCOPE_COUNT = RECEIVER_COUNT = PURGE_COUNT = 0;
+    DISPOSER_COUNT =
+      SENDER_COUNT =
+      SCOPE_COUNT =
+      RECEIVER_COUNT =
+      PURGE_COUNT = 0;
     if (thrown) {
       throw error;
     }

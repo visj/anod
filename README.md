@@ -372,6 +372,44 @@ root((c) => {
 });
 ```
 
+#### Finalize
+
+Effects and spawns support `c.finalize()` for guaranteed cleanup at the end of the current activation, regardless of whether it succeeded or threw. It mirrors `try/finally` — `cleanup` runs at the start of the *next* run, `recover` handles errors, and `finalize` runs at the end of *this* run.
+
+The primary use case is async effects that acquire resources mid-activation and need guaranteed release. Without `finalize`, you'd have to duplicate cleanup logic in both the normal path and `recover`.
+
+```ts
+import { root, signal, FATAL } from "anod";
+root((c) => {
+	const record = signal({ id: 1, name: "Ada" });
+	c.spawn(async (c) => {
+		const db = await c.suspend(indexedDB.open("mydb"));
+		const tx = db.transaction("store", "readwrite");
+		const store = tx.objectStore("store");
+		/**
+		 * try:     insert the record (may throw on duplicate key)
+		 * catch:   recover aborts the transaction, keeps the effect alive
+		 * finally: finalize always closes the database handle
+		 */
+		c.finalize(() => db.close());
+		c.recover((err) => {
+			tx.abort();
+			console.warn("Write failed, rolled back:", err.error);
+			return true;
+		});
+		await c.suspend(store.put(c.val(record)));
+		tx.commit();
+	});
+});
+```
+
+A few things to note:
+- Multiple `finalize` calls accumulate and run forward in registration order
+- Errors inside finalizers are swallowed, matching JS `finally` semantics
+- `finalize` does not bubble to parent effects, it's scoped to the activation it was registered in
+- On re-run, any leftover finalize from the previous activation is cleared before the new run starts
+- This differs from `cleanup`, which runs in reverse order (stack unwinding). Finalize is sequential post-completion work, not resource teardown
+
 #### Batching
 
 `batch()` groups multiple signal writes into a single notification pass. Without batch, each `.set()` immediately flushes the reactive graph. Inside a batch, writes are coalesced and the graph flushes once at the end.
@@ -434,9 +472,23 @@ Lets you control whether downstream subscribers are notified after a compute re-
 - `c.equal()` or `c.equal(true)` — "my result is equal to the previous one, don't notify subscribers"
 - `c.equal(false)` — "my result changed, always notify subscribers" (even if `===` would say otherwise)
 
+```ts
+import { root, signal } from "anod";
+import { deepEqual } from "some-util";
+
+root((c) => {
+	const userId = signal(1);
+	const profile = c.compute((c, prev) => {
+		const data = fetchProfileSync(c.val(userId));
+		c.equal(deepEqual(data, prev));
+		return data;
+	}, null);
+});
+```
+
 #### `c.cleanup()`
 
-Runs a cleanup method every time the node updates, and finally when it disposes. To get an 'on disposed' callback, register the cleanup in the scope above.
+Runs a cleanup method every time the node updates, and finally when it disposes. Multiple cleanups run in reverse registration order, mirroring how destructors and `defer` statements unwind a stack — resources acquired later are released first. To get an 'on disposed' callback, register the cleanup in the scope above.
 
 ```ts
 import { root, signal, OPT_DEFER } from 'anod';
@@ -486,7 +538,7 @@ Anod allows you to modify the behaviour of nodes in different ways. These method
 
 #### `stable()`
 
-Marks the current node as stable: after this call, any further `c.val()` reads do not register new dependencies. Useful when you want to read a value without subscribing to it for future updates.
+Marks the current node as stable, and freezes the dependencies in place. This is useful if you have a compute/effect that subscribe to a long array of signals, but the signals never change. By marking the node stable(), you can skip the overhead of the reconcile machinery that handles dynamic cases.
 
 ```ts
 import { root, signal } from "anod";
@@ -570,7 +622,7 @@ anod provides a structured error model where every error is a `{ error, type }` 
 
 #### Recovery
 
-`c.recover()` intercepts errors before they dispose the node. The handler receives the `{ error, type }` object and returns `true` to swallow or `false` to propagate. Recovery follows the ownership chain — if a child doesn't handle it, it bubbles to the parent. A root's `recover()` is the last line of defense.
+`c.recover()` intercepts errors before they dispose the node. The handler receives the `{ error, type }` object and returns `true` to swallow or `false` to propagate. When multiple handlers are registered, they run forward in registration order — the first handler that returns `true` wins. Recovery follows the ownership chain — if a child doesn't handle it, it bubbles to the parent. A root's `recover()` is the last line of defense.
 
 This lets you build layered error handling: effects handle their own expected errors, and the root catches anything truly unexpected.
 

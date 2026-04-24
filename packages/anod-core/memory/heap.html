@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"><title>heap test</title></head>
+<body>
+<pre id="log"></pre>
+<button onclick="run()">Allocate</button>
+<button onclick="window._alloc=null; log('cleared')">Clear</button>
+<script>
+// ---- CONFIGURE HERE ----
+const DEP_COUNT = 87;   // change this: 1..10, 15, 20, 25, 30
+const N = 10_000;
+// ------------------------
+
+const FLAG_INIT = 1 << 7;
+const FLAG_STALE = 1 << 0;
+
+function Signal(value) {
+  this._flag = 0; this._value = value; this._version = -1;
+  this._sub1 = null; this._subs = null; this._tombstones = 0;
+}
+function Compute(opts, fn, dep1, seed, args) {
+  this._flag = FLAG_INIT | FLAG_STALE | opts; this._value = seed;
+  this._version = -1; this._sub1 = null; this._subs = null;
+  this._tombstones = 0; this._fn = fn; this._dep1 = dep1;
+  this._deps = null; this._time = 0; this._ctime = 0;
+  this._cleanup = null; this._chan = null; this._args = args;
+}
+function Effect(opts, fn, dep1, owner, args) {
+  this._flag = FLAG_INIT | (0 | opts); this._fn = fn;
+  this._dep1 = dep1; this._deps = null; this._time = 0;
+  this._cleanup = null; this._owned = null; this._level = 0;
+  this._owner = owner; this._recover = null; this._finalize = null;
+  this._chan = null; this._version = 0; this._args = args;
+}
+
+const SENDER   = new Signal(0);
+const RECEIVER = new Effect(0, null, null, null, undefined);
+
+function log(msg) { document.getElementById('log').textContent += msg + '\n'; }
+
+function run() {
+  document.getElementById('log').textContent = '';
+  log('DEP_COUNT = ' + DEP_COUNT + ', N = ' + N);
+
+  const nodes = new Array(N);
+  for (let i = 0; i < N; i++) {
+    const node = new Compute(0, null, null, undefined, undefined);
+    node._deps = [SENDER];
+    nodes[i] = node;
+  }
+  // push in second pass
+  for (let i = 0; i < N; i++) {
+    for (let j = 1; j < DEP_COUNT; j++) nodes[i]._deps.push(SENDER);
+  }
+
+  window._alloc = nodes;
+  log('Done. Take snapshot now.');
+  log('Filter by "Compute" — retained size / ' + N + ' = bytes per node');
+}
+</script>
+</body>
+</html>
