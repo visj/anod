@@ -286,26 +286,52 @@ root((c) => {
 
 ### `c.suspend()`
 
-The suspend method is a critical part of anod's async infrastructure. It acts as a guard to prevent stale async callbacks on invalidation. Consider this example
+The suspend method is a critical part of anod's async infrastructure. It acts as a guard to prevent stale async callbacks on invalidation. It's strongly recommended to not await raw promises within the reactive graph. By using `c.suspend()`, it handles staleness guarantee, ensuring that disposed callbacks never yield back to do unexpected side effects.
 
 ```ts
-import { root, signal } from "anod";
+import { root, signal } from 'anod';
+
+function sideEffect(source, data) {
+	console.log(`Side effect from ${source} with data ${data}`);
+}
+
+let time = 0;
+
+function load(url) {
+	// Simulate network call
+	return new Promise(resolve => setTimeout(() => resolve(time++), 200));
+}
+
 root((c) => {
-	const url = signal("/api/data");
+	const url = signal('vilhelm.se');
 	c.spawn(async (c) => {
-		const endpoint = c.val(url);
-		c.cleanup(() => console.log("previous run cleaned up"));
-		const res = await c.suspend(fetch(endpoint));
-		const data = await c.suspend(res.json());
-		console.log(data);
+		// Here we load a raw promise
+		const data = await load(c.val(url));
+		/**
+		 * This is going to log twice, first upon creation,
+		 * and then again after the value updates. There is nothing
+		 * blocking re-entry after the promise resolves.
+		 */
+		sideEffect('raw promise', data);
 	});
+
+	c.spawn(async c => {
+		/**
+		 * Here, by guarding the load inside a suspend,
+		 * when setting the url value the first spawn is disposed and never yields.
+		 * This only runs the sideEffect once.
+		 */
+		const data = await c.suspend(load(c.val(url)));
+		sideEffect('suspended promise', data);
+	});
+
 	/**
-	 * The first spawn is mid-flight, waiting for fetch.
-	 * Setting url causes the spawn to re-run. The old
-	 * fetch promise is abandoned: c.suspend() detects that
-	 * the activation is stale and silently drops the continuation.
+	 * This will invalidate the spawn and trigger it to re-run
+	 * But we cannot stop the existing promise that is still mid-flight
+	 * This causes a leak, where both promises resolve, despite the first one 
+	 * being disposed.
 	 */
-	url.set("/api/other");
+	url.set('github.com');
 });
 ```
 
@@ -393,8 +419,6 @@ When a compute or task is created, it runs immediately to establish its initial 
 
 Effects and spawns are different: they are always push-based. When their dependencies change, they are enqueued into the flush loop and re-run automatically, without anyone needing to pull them.
 
-This hybrid model avoids unnecessary computation (computes that nobody reads are skipped) while guaranteeing side effects always run (effects never go stale silently).
-
 ### Dependency tracking
 
 Dependencies are tracked dynamically at runtime. When your callback calls `c.val(sender)`, a bidirectional link is created between the sender and the receiver. On re-run, anod reconciles the dependency list: new deps are added, stale deps are removed, reused deps are kept in place. This all happens in a single pass.
@@ -403,32 +427,44 @@ The bound signature `compute(dep, fn)` skips dependency tracking entirely. The s
 
 ### Evaluation helpers
 
-#### `c.stable()`
+#### `stable()`
 
 Marks the current node as stable: after this call, any further `c.val()` reads do not register new dependencies. Useful when you want to read a value without subscribing to it for future updates.
 
 ```ts
 import { root, signal } from "anod";
 root((c) => {
-	const config = signal("dark");
-	const data = signal([1, 2, 3]);
-	let runs = 0;
+	const signals = [];
+	for (let i = 0; i < 100; i++) {
+		signals[i] = signal(i);
+	}
 	const formatted = c.compute((c) => {
-		runs++;
-		const d = c.val(data); // subscribes to data
-		c.stable();
-		const cfg = c.val(config); // reads config but does NOT subscribe
-		return `${cfg}: ${d.join(",")}`;
+		return signals.map(i => `Item: ${c.val(i)}`);
 	});
-	console.log(formatted.get()); // "dark: 1,2,3"
+	/**
+	 * We know this node only reads the same dependencies
+	 * It always reads the same 100 signals every time 
+	 * mark it stable and avoid subscription overhead
+	 */
+	formatted.stable(); 
 
-	config.set("light");
-	console.log(formatted.get()); // still "dark: 1,2,3" — config is not a dep
-	console.log(runs); // 1 — did not re-evaluate
+	const first = signal(false);
+	const second = signal(2);
+	const wrong = c.compute(c => {
+		if (c.val(first)) {
+			return c.val(second);
+		}
+	});
+	wrong.stable();
 
-	data.set([4, 5]);
-	console.log(formatted.get()); // "light: 4,5" — picks up config on re-run
-	console.log(runs); // 2
+	/**
+	 * Since we marked the node stable,
+	 * it doesn't automatically track any new 
+	 * dependencies on update. Even though we 
+	 * read through c.val(), because we marked the 
+	 * node stable, it doesn't listen to changes from second.
+	 */
+	first.set(true);
 });
 ```
 
@@ -438,38 +474,6 @@ Lets you control whether downstream subscribers are notified after a compute re-
 
 - `c.equal()` or `c.equal(true)` — "my result is equal to the previous one, don't notify subscribers"
 - `c.equal(false)` — "my result changed, always notify subscribers" (even if `===` would say otherwise)
-
-This is powerful because you can do any kind of equality — deep comparison, structural diffing, threshold checks — anywhere in the function body, without adding extra fields to the node.
-
-```ts
-import { root, signal } from "anod";
-root((c) => {
-	const x = signal(5);
-	let runs = 0;
-	const clamped = c.compute(
-		x,
-		(val, c, prev) => {
-			let result = Math.min(val, 10);
-			c.equal(result === prev); // user performs the comparison
-			return result;
-		},
-		5
-	);
-	c.effect(clamped, () => {
-		runs++;
-	});
-	console.log(runs); // 1 — initial run
-
-	x.set(15); // clamped=10, different from 5 → effect runs
-	console.log(runs); // 2
-
-	x.set(20); // clamped=10, same as before → suppressed
-	console.log(runs); // 2 — effect did NOT re-run
-
-	x.set(3); // clamped=3, different → effect runs
-	console.log(runs); // 3
-});
-```
 
 #### `c.weak()`
 
