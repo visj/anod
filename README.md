@@ -425,7 +425,64 @@ Dependencies are tracked dynamically at runtime. When your callback calls `c.val
 
 The bound signature `compute(dep, fn)` skips dependency tracking entirely. The single dependency is fixed at creation time. This is significantly faster for the common single-dep case and avoids all reconciliation overhead.
 
+### Contextual helpers
+
+#### `c.equal()`
+
+Lets you control whether downstream subscribers are notified after a compute re-runs. By default, anod uses `!==` — if the new value is a different reference, subscribers are notified. `c.equal()` gives you full control: you perform the comparison yourself and tell anod the result.
+
+- `c.equal()` or `c.equal(true)` — "my result is equal to the previous one, don't notify subscribers"
+- `c.equal(false)` — "my result changed, always notify subscribers" (even if `===` would say otherwise)
+
+#### `c.cleanup()`
+
+Runs a cleanup method every time the node updates, and finally when it disposes. To get an 'on disposed' callback, register the cleanup in the scope above.
+
+```ts
+import { root, signal, OPT_DEFER } from 'anod';
+root(c => {
+	const eventbus = signal('');
+	const socketUrl = signal("ws://localhost:8080");
+	c.effect(c => {
+		const socket = new WebSocket(socketUrl);
+		/**
+		 * We register the cleanup to close the old socket if they
+		 * change which url we are posting to
+		 */
+		c.cleanup(() => socket.close());
+		c.suspend((resolve, reject) => {
+			socket.addEventListener("open", (event) => {
+				socket.send("Hello Server!");
+				/**
+				 * Websocket is open, register an effect
+				 * that susbcribes to a signal and sends to socket.
+				 * We set OPT_DEFER to not run initially, but instead
+				 * wait for the first signal change to trigger.
+				 * Unlike other libraries, in anod, you can freely create 
+				 * owned scopes throughout the async execution lifecycle.
+				 * Since anod doesn' rely on global state, the context 
+				 * allows you to treat every async boundary as if it was 
+				 * called from the initial sync path.
+				 */
+				c.effect(eventbus, (message, c) => {
+					socket.send(message);
+				}, OPT_DEFER);
+				resolve();
+			});
+		});
+	});
+});
+setTimeout(() => {
+	eventbus.set('Hello');
+	eventbus.set('World');
+}, 100);
+```
+
+#### `c.recover()`, `c.refuse()`, `c.panic()`
+See dedicated error lifecycle section.
+
 ### Evaluation helpers
+Anod allows you to modify the behaviour of nodes in different ways. These methods can be called on the context itself, but typically, it makes more sense to set it outside, once, upon creation.
 
 #### `stable()`
 
@@ -468,14 +525,7 @@ root((c) => {
 });
 ```
 
-#### `c.equal()`
-
-Lets you control whether downstream subscribers are notified after a compute re-runs. By default, anod uses `!==` — if the new value is a different reference, subscribers are notified. `c.equal()` gives you full control: you perform the comparison yourself and tell anod the result.
-
-- `c.equal()` or `c.equal(true)` — "my result is equal to the previous one, don't notify subscribers"
-- `c.equal(false)` — "my result changed, always notify subscribers" (even if `===` would say otherwise)
-
-#### `c.weak()`
+#### `weak()`
 
 A weak compute releases its cached value when it loses all subscribers. The next read triggers a fresh recompute. This is useful for expensive computations that should not retain memory when nobody is listening.
 
@@ -486,9 +536,9 @@ root((c) => {
 	let runs = 0;
 	const processed = c.compute((c) => {
 		runs++;
-		c.weak();
 		return c.val(raw) * 2;
 	});
+	c.weak();
 	const e = c.effect(processed, (val) => {});
 	console.log(runs); // 1 — computed once
 
@@ -498,7 +548,7 @@ root((c) => {
 });
 ```
 
-#### `c.eager()`
+#### `eager()`
 
 Converts a compute from pull-based to push-based. An eager compute re-evaluates immediately when notified, rather than waiting to be pulled. Use sparingly: this removes the laziness optimization but guarantees the value is always fresh.
 
@@ -686,12 +736,6 @@ Note the spawn body is sync — no `async` keyword, no promise allocation. The s
 
 You can only call `c.suspend()` with a setup function once per activation. Calling it again throws an error. This prevents ambiguous double-settlement.
 
-### Stale activation safety
-
-Every call to `c.suspend()` captures the current activation timestamp. When the promise resolves, anod checks whether the node has been re-run or disposed since the suspend was issued. If it has, the resolution is silently discarded. This guarantees that stale async results never pollute the current activation, even across complex chains of awaits.
-
-This applies to both resolve and reject: if a promise rejects after the node was invalidated, the error is also discarded. You are never notified about errors from stale activations.
-
 ### Deferred dependencies with `c.defer()`
 
 `c.defer()` reads a signal's value without subscribing during the sync body. Instead, the dependency is registered at settle time after the async work completes. This is useful when you need a value for async work but don't want changes to that value to cancel your in-flight operation.
@@ -775,6 +819,14 @@ root((c) => {
 	todoList.set(["deploy", "celebrate"]);
 });
 ```
+
+### Stale activation safety
+
+Every call to `c.suspend()` captures the current activation timestamp. When the promise resolves, anod checks whether the node has been re-run or disposed since the suspend was issued. If it has, the resolution is silently discarded. This guarantees that stale async results never pollute the current activation, even across complex chains of awaits.
+
+This applies to both resolve and reject: if a promise rejects after the node was invalidated, the error is also discarded. You are never notified about errors from stale activations.
+
+Instead, you must rely on the builtin lifecycle helpers. If you await a promise, and create some state that needs cleaning up, use c.cleanup(). If you must run the async function to completion, run c.lock(). The idea about anod's async correctness guarantee is that we do not want promises firing all over the place, writing state in an unpredictable way. The sync reactive graph is always consistent. When you write a value, every reader is guaranteed to see a consistent state of that signal. This idea extends to async, but with a different guarantee: every async primitive is guaranteed a consistent snapshot in time, but there is no guarantee exactly which time that is.
 
 ## Reactive arrays
 
