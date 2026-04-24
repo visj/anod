@@ -192,15 +192,13 @@ var RECEIVERS = [];
 
 var RECEIVER_COUNT = 0;
 
-// All five node types declared together. Fields only — methods are installed
-// on the prototypes further down, after the prototype-method implementations
-// they reference are in scope.
-
 /**
  * @constructor
  * @implements {Owner}
  */
 function Root() {
+  /** @type {number} */
+  this._flag = 0;
   /** @type {(function(): void) | Array<(function(): void)> | null} */
   this._cleanup = null;
   /** @type {Array<Receiver> | null} */
@@ -614,7 +612,6 @@ function root(fn) {
   /** @const */
   let EffectProto = Effect.prototype;
 
-  RootProto._flag = 0;
   RootProto._owner = null;
   RootProto._level = -1;
 
