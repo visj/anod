@@ -443,8 +443,8 @@ import { root, signal, OPT_DEFER } from 'anod';
 root(c => {
 	const eventbus = signal('');
 	const socketUrl = signal("ws://localhost:8080");
-	c.effect(c => {
-		const socket = new WebSocket(socketUrl);
+	c.effect(socketUrl, (url, c) => {
+		const socket = new WebSocket(url);
 		/**
 		 * We register the cleanup to close the old socket if they
 		 * change which url we are posting to
