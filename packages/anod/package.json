@@ -1,6 +1,6 @@
 {
   "name": "anod",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -30,8 +30,8 @@
     "url": "https://github.com/visj/anod/issues"
   },
   "dependencies": {
-    "anod-core": "^0.5.0",
-    "anod-list": "^0.5.0"
+    "anod-core": "^0.6.0",
+    "anod-list": "^0.6.0"
   },
   "devDependencies": {
     "rolldown": "^1.0.0-rc.9",

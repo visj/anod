@@ -1,14 +1,12 @@
 # anod
 
-anod is a reactive library to manage state. It has built-in support for both sync, async and array methods. It's similar to the concept of signals, but its architecture differs in several meaningful ways:
+anod is a reactive state management library. It has built-in support for both sync and async graphs, and extends signals to shim all builtin methods on Array.prototype. It's similar to many other signal libraries, but its architecture differs in several meaningful ways:
 
-- No global/automatic dependency tracking, provides a context object to every callback
-- Uses a hybrid push/pull model, where nodes can both eagerly and lazily send updates
-- Async is built into the core, and is a first-hand member
+* No global/automatic dependency tracking, provides a context object to every callback
+* Uses a hybrid push/pull model, where nodes can both eagerly and lazily send updates
+* Async is built into the core, and is a first-hand member
 
 ## Quick example
-
-Below demonstrates a crash course of most of the reactive primitives that anod offers.
 
 ```ts
 import { root, signal, list, batch } from "anod";
@@ -51,22 +49,20 @@ setTimeout(() => app.dispose(), 100);
 
 ## Basic usage
 
-Below is a quick introduction to each reactive primitive that exists in anod. They are heavily inspired by several existing established libraries within the reactive ecosystem.
-
 ### Overview
 
 The following primitives exist in anod:
 
-- Root, which owns inner primitives and dispose them on request
-- Context, a callback parameter that provides the current reactive context
-- Signal, holds a value and notifies when it changes
-- Relay, a signal that always notifies on every update
-- Compute, a derived signal, updates and notifies when it's derived value changes
-- Effect, a sink, that listens to signals and computes and performs actions
-- Task, an async compute, for awaiting promises
-- Spawn, an async effect, for doing async work
-- List, a signal that mirrors native array methods, such as push, pop
-- Collection, the readonly array methods like map, filter, for chaining .map().filter()
+* Root, which owns inner primitives and dispose them on request
+* Context, a callback parameter that provides the current reactive context
+* Signal, holds a value and notifies when it changes
+* Relay, a signal that always notifies on every update
+* Compute, a derived signal, updates and notifies when it's derived value changes
+* Effect, a sink, that listens to signals and computes and performs actions
+* Task, an async compute, for awaiting promises
+* Spawn, an async effect, for doing async work
+* List, a signal that mirrors native array methods, such as push, pop
+* Collection, the readonly array methods like map, filter, for chaining .map().filter()
 
 #### Root
 
@@ -87,7 +83,7 @@ app.dispose();
 A signal stores a value and notifies subscribers when changed. You can read it to get its current value, and write to it to update anyone who depends on it.
 
 ```ts
-import { signal, root } from "anod";
+import { root, signal, relay } from "anod";
 
 root((c) => {
 	const name = signal("Vilhelm");
@@ -116,12 +112,13 @@ root((c) => {
 
 	/**
 	 * A relay is useful for mutable dispatch.
-	 * If we change its values to the same object, 
-		* it notifies the effect
+	 * We can mutate the object in place and then call
+	 * `notify()` to let subscribers know we've changed.
+	 * Directly calling .set() always notifies, regardless
+	 * whether value changed or not.
 	 */
-	const currentShape = shape.get();
-	currentShape.job = 'self-employed';
-	shape.set(currentShape); // Notifies effect
+	shape.get().job =  "self-employed";
+	shape.notify(); // Notifies effect
 });
 ```
 
@@ -130,7 +127,7 @@ root((c) => {
 A compute is a derived signal. It can subscribe to signals or other computes, and updates whenever any of them change.
 
 ```ts
-import { signal, root } from "anod";
+import { root, signal, OPT_DEFER } from "anod";
 root((c) => {
 	const temp = signal(10);
 	/**
@@ -143,6 +140,9 @@ root((c) => {
 		return c.val(temp) < 0; // Warm weather today
 	});
 
+	// Create a compute node, but defer its initial run with the OPT_DEFER.
+	const shiver = c.compute(c => c.val(feelsCold) ? 'Brr' : '', '', OPT_DEFER);
+
 	temp.set(15); // feelsCold has no subscribers, nothing prints to the console
 
 	c.effect((c) => {
@@ -152,14 +152,14 @@ root((c) => {
 		 * The console prints 'Evaluating weather' before
 		 * assessing whether it's cold today.
 		 */
-		console.log(c.val(feelsCold) ? "Feels cold" : "Not too bad");
+		console.log(c.val(feelsCold) ? "Feels cold" : "Not too bad", c.val(shiver));
 	});
 	temp.set(5); // Evaluating, but it's still warm, effect is not notified
 	temp.set(-10); // Now we went from warm to cold, effect prints 'Feels cold'
 });
 ```
 
-All reactive receivers also accept a single dependency signature, `compute(dep: Sender<T>, (val: T, c: Context) => T)`. For single dependency, this is the preferred way of creating receivers, as it both greatly improves performance and simplifies callback logic.
+All reactive receivers also accept a single dependency signature, `compute(dep: Sender<T>, (val: T, c: Context) => T)` . For single dependency, this is the preferred way of creating receivers, as it both greatly improves performance and simplifies callback logic.
 
 ```ts
 import { root, signal } from "anod";
@@ -182,7 +182,7 @@ root((c) => {
 		console.log(`Val is ${val}`);
 	});
 	/**
-	 * Signals drain synchronously.
+	 * Signals flush synchronously.
 	 * This will print 10 times to console,
 	 * once for each counter.
 	 */
@@ -218,7 +218,7 @@ root((c) => {
 
 ### Async reactivity
 
-anod aims to bridge the gap between sync and async signal reactivity. `compute` and `effect` have become the standard primitives within the signal community; here, we suggest that they are complemented by `task` and `spawn` for their async counterparts. Async reactive graphs are still experimental. anod has not yet reached 1.0, and there may still be bugs and edge cases that are not covered yet.
+anod aims to bridge the gap between sync and async signal reactivity. `compute` and `effect` have become the standard primitives within the signal community; in anod, their async counterparts are `task` and `spawn` . Async reactive graphs are still experimental. anod has not yet reached 1.0, and there may still be bugs and edge cases that are not covered yet.
 
 ### Task
 
@@ -269,7 +269,7 @@ root((c) => {
 	const url = signal("/api/data");
 	c.spawn(async (c) => {
 		const endpoint = c.val(url);
-		c.cleanup(() => console.log("previous run cleaned up"));
+		c.cleanup(() => { console.log("previous run cleaned up"); });
 		const res = await c.suspend(fetch(endpoint));
 		const data = await c.suspend(res.json());
 		console.log(data);
@@ -286,36 +286,62 @@ root((c) => {
 
 ### `c.suspend()`
 
-The suspend method is a critical part of anod's async infrastructure. It acts as a guard to prevent stale async callbacks on invalidation. Consider this example
+The suspend method is a critical part of anod's async infrastructure. It acts as a guard to prevent stale async callbacks on invalidation. It's strongly recommended to not await raw promises within the reactive graph. By using `c.suspend()` , it handles staleness guarantee, ensuring that disposed callbacks never yield back to do unexpected side effects.
 
 ```ts
-import { root, signal } from "anod";
+import { root, signal } from 'anod';
+
+function sideEffect(source, data) {
+	console.log(`Side effect from ${source} with data ${data}`);
+}
+
+let time = 0;
+
+function load(url) {
+	// Simulate network call
+	return new Promise(resolve => setTimeout(() => resolve(time++), 200));
+}
+
 root((c) => {
-	const url = signal("/api/data");
+	const url = signal('vilhelm.se');
 	c.spawn(async (c) => {
-		const endpoint = c.val(url);
-		c.cleanup(() => console.log("previous run cleaned up"));
-		const res = await c.suspend(fetch(endpoint));
-		const data = await c.suspend(res.json());
-		console.log(data);
+		// Here we load a raw promise
+		const data = await load(c.val(url));
+		/**
+		 * This is going to log twice, first upon creation,
+		 * and then again after the value updates. There is nothing
+		 * blocking re-entry after the promise resolves.
+		 */
+		sideEffect('raw promise', data);
 	});
+
+	c.spawn(async c => {
+		/**
+		 * Here, by guarding the load inside a suspend,
+		 * when setting the url value the first spawn is disposed and never yields.
+		 * This only runs the sideEffect once.
+		 */
+		const data = await c.suspend(load(c.val(url)));
+		sideEffect('suspended promise', data);
+	});
+
 	/**
-	 * The first spawn is mid-flight, waiting for fetch.
-	 * Setting url causes the spawn to re-run. The old
-	 * fetch promise is abandoned: c.suspend() detects that
-	 * the activation is stale and silently drops the continuation.
+	 * This will invalidate the spawn and trigger it to re-run
+	 * But we cannot stop the existing promise that is still mid-flight
+	 * This causes a leak, where both promises resolve, despite the first one 
+	 * being disposed.
 	 */
-	url.set("/api/other");
+	url.set('github.com');
 });
 ```
 
 #### Error handling
 
-All errors in anod are `{ error, type }` objects with three type constants: `REFUSE`, `PANIC`, and `FATAL`. This lets you cleanly separate expected errors from unexpected crashes.
+All errors in anod are `{ error, type }` objects with three type constants: `REFUSE` , `PANIC` , and `FATAL` . This lets you cleanly separate expected errors from unexpected crashes.
 
-- **`c.refuse(val)`** — non-throwing expected error for computes. Usage: `return c.refuse("invalid")`.
-- **`c.panic(val)`** — throwing expected error for computes and effects. Aborts the current run.
-- **`FATAL`** — any unexpected throw is automatically wrapped as `{ error: thrownValue, type: FATAL }`.
+* **`c.refuse(val)`** — non-throwing expected error for computes. Usage: `return c.refuse("invalid")`.
+* **`c.panic(val)`** — throwing expected error for computes and effects. Aborts the current run.
+* **`FATAL`** — any unexpected throw is automatically wrapped as `{ error: thrownValue, type: FATAL }`.
 
 Effects and spawns support `c.recover()` to intercept errors. The handler receives the `{ error, type }` object and can branch on the type. Return `true` to swallow, `false` to propagate.
 
@@ -345,6 +371,44 @@ root((c) => {
 	});
 });
 ```
+
+#### Finalize
+
+Effects and spawns support `c.finalize()` for guaranteed cleanup at the end of the current activation, regardless of whether it succeeded or threw. `cleanup` runs at the start of the *next* run. `recover` handles errors, and `finalize` runs at the end of *this* run. Together, `recover` and `finalize` behave just like a `try/catch/finally` clause.
+
+The primary use case is async effects that acquire resources mid-activation and need guaranteed release. Without `finalize` , you'd have to duplicate cleanup logic in both the normal path and `recover` .
+
+```ts
+import { root, signal, FATAL } from "anod";
+root((c) => {
+	const record = signal({ id: 1, name: "Ada" });
+	c.spawn(async (c) => {
+		const db = await c.suspend(indexedDB.open("mydb"));
+		const tx = db.transaction("store", "readwrite");
+		const store = tx.objectStore("store");
+		/**
+		 * try:     insert the record (may throw on duplicate key)
+		 * catch:   recover aborts the transaction, keeps the effect alive
+		 * finally: finalize always closes the database handle
+		 */
+		c.finalize(() => db.close());
+		c.recover((err) => {
+			tx.abort();
+			console.warn("Write failed, rolled back:", err.error);
+			return true;
+		});
+		await c.suspend(store.put(c.val(record)));
+		tx.commit();
+	});
+});
+```
+
+A few things to note:
+* Multiple `finalize` calls accumulate and run forward in registration order
+* Errors inside finalizers are swallowed, matching JS `finally` semantics
+* `finalize` does not bubble to parent effects, it's scoped to the activation it was registered in
+* On re-run, any leftover finalize from the previous activation is cleared before the new run starts
+* This differs from `cleanup`, which runs in reverse order (stack unwinding). Finalize is sequential post-completion work, not resource teardown
 
 #### Batching
 
@@ -381,7 +445,7 @@ console.log(counter.get()); // still 0 — flush hasn't run
 // after microtask: counter is 3
 ```
 
-Both `.set()` and `.post()` accept an updater function `(prev) => next`. For `.set()`, the updater is called immediately when idle, or deferred to drain time when inside a flush cycle. For `.post()`, the updater is always deferred to flush time, so it sees the latest value at that point.
+Both `.set()` and `.post()` accept an updater function `(prev) => next` . For `.set()` , the updater is called immediately when idle, or deferred to drain time when inside a flush cycle. For `.post()` , the updater is always deferred to flush time, so it sees the latest value at that point.
 
 ## The reactive graph in depth
 
@@ -389,112 +453,162 @@ This section covers the internal evaluation model and the context helper methods
 
 ### Eager creation, lazy pull
 
-When a compute or task is created, it runs immediately to establish its initial value and subscribe to its dependencies. After that first run, it becomes lazy: it only re-evaluates when something reads it. This means a compute with no subscribers accumulates staleness markers but does no actual work until someone calls `.get()` or reads it through `c.val()`.
+When a compute or task is created, it runs immediately to establish its initial value and subscribe to its dependencies. After that first run, it becomes lazy: it only re-evaluates when something reads it. This means a compute with no subscribers accumulates staleness markers but does no actual work until someone calls `.get()` or reads it through `c.val()` .
 
 Effects and spawns are different: they are always push-based. When their dependencies change, they are enqueued into the flush loop and re-run automatically, without anyone needing to pull them.
 
-This hybrid model avoids unnecessary computation (computes that nobody reads are skipped) while guaranteeing side effects always run (effects never go stale silently).
-
 ### Dependency tracking
 
-Dependencies are tracked dynamically at runtime. When your callback calls `c.val(sender)`, a bidirectional link is created between the sender and the receiver. On re-run, anod reconciles the dependency list: new deps are added, stale deps are removed, reused deps are kept in place. This all happens in a single pass.
+Dependencies are tracked dynamically at runtime. When your callback calls `c.val(sender)` , a bidirectional link is created between the sender and the receiver. On re-run, anod reconciles the dependency list: new deps are added, stale deps are removed, reused deps are kept in place. This all happens in a single pass.
 
 The bound signature `compute(dep, fn)` skips dependency tracking entirely. The single dependency is fixed at creation time. This is significantly faster for the common single-dep case and avoids all reconciliation overhead.
 
-### Evaluation helpers
+Anod's interal dependency reconciliation algorithm is designed to avoid allocation pressure in the update path. For nodes that read the same dependencies every run, they are re-used, and no additional objects are allocated.
 
-#### `c.stable()`
-
-Marks the current node as stable: after this call, any further `c.val()` reads do not register new dependencies. Useful when you want to read a value without subscribing to it for future updates.
-
-```ts
-import { root, signal } from "anod";
-root((c) => {
-	const config = signal("dark");
-	const data = signal([1, 2, 3]);
-	let runs = 0;
-	const formatted = c.compute((c) => {
-		runs++;
-		const d = c.val(data); // subscribes to data
-		c.stable();
-		const cfg = c.val(config); // reads config but does NOT subscribe
-		return `${cfg}: ${d.join(",")}`;
-	});
-	console.log(formatted.get()); // "dark: 1,2,3"
-
-	config.set("light");
-	console.log(formatted.get()); // still "dark: 1,2,3" — config is not a dep
-	console.log(runs); // 1 — did not re-evaluate
-
-	data.set([4, 5]);
-	console.log(formatted.get()); // "light: 4,5" — picks up config on re-run
-	console.log(runs); // 2
-});
-```
+### Contextual helpers
 
 #### `c.equal()`
 
 Lets you control whether downstream subscribers are notified after a compute re-runs. By default, anod uses `!==` — if the new value is a different reference, subscribers are notified. `c.equal()` gives you full control: you perform the comparison yourself and tell anod the result.
 
-- `c.equal()` or `c.equal(true)` — "my result is equal to the previous one, don't notify subscribers"
-- `c.equal(false)` — "my result changed, always notify subscribers" (even if `===` would say otherwise)
+* `c.equal()` or `c.equal(true)` — "my result is equal to the previous one, don't notify subscribers"
+* `c.equal(false)` — "my result changed, always notify subscribers" (even if `===` would say otherwise)
 
-This is powerful because you can do any kind of equality — deep comparison, structural diffing, threshold checks — anywhere in the function body, without adding extra fields to the node.
+```ts
+import { root, signal } from "anod";
+import { deepEqual } from "some-util";
+
+root((c) => {
+	const userId = signal(1);
+	const profile = c.compute((c, prev) => {
+		const data = fetchProfileSync(c.val(userId));
+		c.equal(deepEqual(data, prev));
+		return data;
+	}, null);
+});
+```
+
+#### `c.cleanup()`
+
+Runs a cleanup method every time the node updates, and finally when it disposes. Multiple cleanups run in reverse registration order, mirroring how destructors and `defer` statements unwind a stack — resources acquired later are released first. To get an 'on disposed' callback, register the cleanup in the scope above.
+
+```ts
+import { root, signal, OPT_DEFER } from 'anod';
+root(c => {
+	const eventbus = signal('');
+	const socketUrl = signal("ws://localhost:8080");
+	c.effect(socketUrl, (url, c) => {
+		const socket = new WebSocket(url);
+		/**
+		 * We register the cleanup to close the old socket if they
+		 * change which url we are posting to
+		 */
+		c.cleanup(() => socket.close());
+		c.suspend((resolve, reject) => {
+			socket.addEventListener("open", (event) => {
+				socket.send("Hello Server!");
+				/**
+				 * Websocket is open, register an effect
+				 * that susbcribes to a signal and sends to socket.
+				 * We set OPT_DEFER to not run initially, but instead
+				 * wait for the first signal change to trigger.
+				 * Unlike other libraries, in anod, you can freely create 
+				 * owned scopes throughout the async execution lifecycle.
+				 * Since anod doesn' rely on global state, the context 
+				 * allows you to treat every async boundary as if it was 
+				 * called from the initial sync path.
+				 */
+				c.effect(eventbus, (message, c) => {
+					socket.send(message);
+				}, OPT_DEFER);
+				resolve();
+			});
+		});
+	});
+});
+setTimeout(() => {
+	eventbus.set('Hello');
+	eventbus.set('World');
+}, 100);
+```
+
+#### `c.recover()` , `c.refuse()` , `c.panic()`
+
+See dedicated error lifecycle section.
+
+### Evaluation helpers
+
+Anod allows you to modify the behaviour of nodes in different ways. These methods can be called on the context itself, but typically, it makes more sense to set it outside, once, upon creation.
+
+#### `stable()`
+
+Marks the current node as stable, and freezes the dependencies in place. This is useful if you have a compute/effect that subscribe to a long array of signals, but the signals never change. By marking the node stable(), you can skip the overhead of the reconcile machinery that handles dynamic cases.
 
 ```ts
 import { root, signal } from "anod";
 root((c) => {
-	const x = signal(5);
-	let runs = 0;
-	const clamped = c.compute(
-		x,
-		(val, c, prev) => {
-			let result = Math.min(val, 10);
-			c.equal(result === prev); // user performs the comparison
-			return result;
-		},
-		5
-	);
-	c.effect(clamped, () => {
-		runs++;
+	const signals = [];
+	for (let i = 0; i < 100; i++) {
+		signals[i] = signal(i);
+	}
+	const formatted = c.compute((c) => {
+		return signals.map(i => `Item: ${c.val(i)}`);
 	});
-	console.log(runs); // 1 — initial run
+	/**
+	 * We know this node only reads the same dependencies
+	 * It always reads the same 100 signals every time 
+	 * mark it stable and avoid subscription overhead
+	 */
+	formatted.stable(); 
 
-	x.set(15); // clamped=10, different from 5 → effect runs
-	console.log(runs); // 2
+	const first = signal(false);
+	const second = signal(2);
+	const wrong = c.compute(c => {
+		if (c.val(first)) {
+			return c.val(second);
+		}
+	});
+	wrong.stable();
 
-	x.set(20); // clamped=10, same as before → suppressed
-	console.log(runs); // 2 — effect did NOT re-run
-
-	x.set(3); // clamped=3, different → effect runs
-	console.log(runs); // 3
+	/**
+	 * Since we marked the node stable,
+	 * it doesn't automatically track any new 
+	 * dependencies on update. Even though we 
+	 * read through c.val(), because we marked the 
+	 * node stable, it doesn't listen to changes from second.
+	 */
+	first.set(true);
 });
 ```
 
-#### `c.weak()`
+#### `weak()`
 
-A weak compute releases its cached value when it loses all subscribers. The next read triggers a fresh recompute. This is useful for expensive computations that should not retain memory when nobody is listening.
+A weak compute releases its cached value and runs its cleanups when it loses all subscribers. The next read triggers a fresh recompute. This is useful for derived data that retains significant memory — parsed documents, decoded images, materialized query results — that can be safely dropped and recomputed on demand.
 
 ```ts
-import { root, signal, OPT_WEAK } from "anod";
+import { root, signal } from "anod";
 root((c) => {
-	const raw = signal(100);
-	let runs = 0;
-	const processed = c.compute((c) => {
-		runs++;
-		c.weak();
-		return c.val(raw) * 2;
+	const path = signal("/data/large-dataset.csv");
+	const parsed = c.compute((c) => {
+		const raw = readFileSync(c.val(path));
+		const rows = parseCSV(raw); // large allocation
+		c.cleanup(() => { console.log("released parsed data"); });
+		return rows;
 	});
-	const e = c.effect(processed, (val) => {});
-	console.log(runs); // 1 — computed once
+	parsed.weak();
 
-	e.dispose();
-	console.log(processed.get()); // 200 — recomputed fresh
-	console.log(runs); // 2 — value was released, had to recompute
+	const view = c.effect(parsed, (rows) => render(rows));
+	// parsed holds the full row array in memory
+
+	view.dispose();
+	// "released parsed data" — weak compute drops its value and runs cleanup
+	// parsed is now dormant, no memory retained
+
+	parsed.get(); // re-parses the file on demand
 });
 ```
 
-#### `c.eager()`
+#### `eager()`
 
 Converts a compute from pull-based to push-based. An eager compute re-evaluates immediately when notified, rather than waiting to be pulled. Use sparingly: this removes the laziness optimization but guarantees the value is always fresh.
 
@@ -505,18 +619,18 @@ anod provides a structured error model where every error is a `{ error, type }` 
 | Constant | Value | Meaning                      | How it's created       |
 | -------- | ----- | ---------------------------- | ---------------------- |
 | `REFUSE` | 1     | Expected error, non-throwing | `return c.refuse(val)` |
-| `PANIC`  | 2     | Expected error, throwing     | `c.panic(val)`         |
-| `FATAL`  | 3     | Unexpected crash             | Any uncaught `throw`   |
+| `PANIC` | 2     | Expected error, throwing     | `c.panic(val)` |
+| `FATAL` | 3     | Unexpected crash             | Any uncaught `throw` |
 
 **`c.refuse(val)`** is available on computes only. It sets the compute into an error state without throwing — the caller returns the error value. This is useful for validation: the compute can't produce a valid result, but it's not a crash.
 
 **`c.panic(val)`** is available on computes and effects. It throws, aborting the current run, but anod marks it as an expected error so recover handlers can distinguish it from crashes.
 
-**`FATAL`** is what you get when something throws unexpectedly — a null dereference, a network error, a bug. anod wraps the thrown value as `{ error: thrownValue, type: FATAL }`.
+**`FATAL`** is what you get when something throws unexpectedly — a null dereference, a network error, a bug. anod wraps the thrown value as `{ error: thrownValue, type: FATAL }` .
 
 #### Recovery
 
-`c.recover()` intercepts errors before they dispose the node. The handler receives the `{ error, type }` object and returns `true` to swallow or `false` to propagate. Recovery follows the ownership chain — if a child doesn't handle it, it bubbles to the parent. A root's `recover()` is the last line of defense.
+`c.recover()` intercepts errors before they dispose the node. The handler receives the `{ error, type }` object and returns `true` to swallow or `false` to propagate. When multiple handlers are registered, they run forward in registration order — the first handler that returns `true` wins. Recovery follows the ownership chain — if a child doesn't handle it, it bubbles to the parent. A root's `recover()` is the last line of defense.
 
 This lets you build layered error handling: effects handle their own expected errors, and the root catches anything truly unexpected.
 
@@ -596,7 +710,7 @@ root((c) => {
 
 `c.suspend()` is the primary async delivery mechanism. It accepts a promise, a task, or an array of tasks.
 
-**Promise path**: wraps the promise so that if the node is disposed or re-run before it resolves, the continuation is silently dropped.
+**Promise**: wraps the promise so that if the node is disposed or re-run before it resolves, the continuation is silently dropped.
 
 ```ts
 import { root, signal } from "anod";
@@ -614,7 +728,7 @@ root((c) => {
 });
 ```
 
-**Task path**: if the task is already settled, returns the value synchronously. If the task is loading, creates a two-way channel binding: the spawn suspends until the task settles, then resumes with the value.
+**Task**: if the task is already settled, returns the value synchronously. If the task is loading, creates a two-way channel binding: the spawn suspends until the task settles, then resumes with the value.
 
 ```ts
 import { root, signal } from "anod";
@@ -633,7 +747,7 @@ root((c) => {
 });
 ```
 
-**Array path**: awaits multiple tasks concurrently. Returns when all tasks have settled.
+**Array of tasks**: awaits multiple tasks concurrently. Returns when all tasks have settled.
 
 ```ts
 import { root } from "anod";
@@ -650,7 +764,7 @@ root((c) => {
 });
 ```
 
-#### 3. Setup function path
+**Callback**: old-school callbacks.
 
 `c.suspend(setupFn)` accepts a setup function that receives `resolve` and `reject` callbacks. This avoids promise allocation entirely and enables natural integration with callback-based APIs like WebSockets, event emitters, and timers. The node enters a loading state and settles when `resolve` or `reject` is called.
 
@@ -682,12 +796,6 @@ Note the spawn body is sync — no `async` keyword, no promise allocation. The s
 
 You can only call `c.suspend()` with a setup function once per activation. Calling it again throws an error. This prevents ambiguous double-settlement.
 
-### Stale activation safety
-
-Every call to `c.suspend()` captures the current activation timestamp. When the promise resolves, anod checks whether the node has been re-run or disposed since the suspend was issued. If it has, the resolution is silently discarded. This guarantees that stale async results never pollute the current activation, even across complex chains of awaits.
-
-This applies to both resolve and reject: if a promise rejects after the node was invalidated, the error is also discarded. You are never notified about errors from stale activations.
-
 ### Deferred dependencies with `c.defer()`
 
 `c.defer()` reads a signal's value without subscribing during the sync body. Instead, the dependency is registered at settle time after the async work completes. This is useful when you need a value for async work but don't want changes to that value to cancel your in-flight operation.
@@ -718,20 +826,23 @@ root((c) => {
 `c.controller()` returns an `AbortController` that is automatically aborted when the node re-runs or is disposed. Useful for cancelling fetch requests or other abortable operations.
 
 ```ts
-import { root, signal } from "anod";
+import { root, signal, FATAL } from "anod";
 root((c) => {
 	const url = signal("/api/data");
 	c.spawn(async (c) => {
 		const endpoint = c.val(url);
 		const ctrl = c.controller();
-		try {
-			const res = await c.suspend(fetch(endpoint, { signal: ctrl.signal }));
-			console.log(await c.suspend(res.json()));
-		} catch (e) {
-			if (e.name === "AbortError") {
-				console.log("Request aborted");
+		// If the spawn re-runs, c.controller() aborts the old fetch
+		// and c.suspend() silently drops the stale activation.
+		// Use recover for errors in the current activation.
+		c.recover((err) => {
+			if (err.type === FATAL) {
+				console.error("Fetch failed:", err.error);
 			}
-		}
+			return true;
+		});
+		const res = await c.suspend(fetch(endpoint, { signal: ctrl.signal }));
+		console.log(await c.suspend(res.json()));
 	});
 	// Changing url re-runs the spawn, which aborts the old fetch
 	url.set("/api/other");
@@ -772,6 +883,14 @@ root((c) => {
 });
 ```
 
+### Stale activation safety
+
+Every call to `c.suspend()` captures the current activation timestamp. When the promise resolves, anod checks whether the node has been re-run or disposed since the suspend was issued. If it has, the resolution is silently discarded. This guarantees that stale async results never pollute the current activation, even across complex chains of awaits.
+
+This applies to both resolve and reject: if a promise rejects after the node was invalidated, the error is also discarded. You are never notified about errors from stale activations.
+
+Instead, you must rely on the builtin lifecycle helpers. If you await a promise, and create some state that needs cleaning up, use c.cleanup(). If you must run the async function to completion, run c.lock(). The idea about anod's async correctness guarantee is that we do not want promises firing all over the place, writing state in an unpredictable way. The sync reactive graph is always consistent. When you write a value, every reader is guaranteed to see a consistent state of that signal. This idea extends to async, but with a different guarantee: every async primitive is guaranteed a consistent snapshot in time, but there is no guarantee exactly which time that is.
+
 ## Reactive arrays
 
 anod provides reactive array support through the `list` package. A list is a signal that holds an array and exposes native array methods on its prototype. Import `list` from `anod` alongside the side-effect import that patches the array methods.
@@ -805,7 +924,7 @@ Collections chain naturally. Each step creates a new reactive compute that re-ev
 
 ### Array method callbacks
 
-Every callback-based array method receives the reactive context as the last argument. This gives you access to `c.cleanup()`, `c.peek()`, `c.stable()`, and other context helpers inside array callbacks.
+Every callback-based array method receives the reactive context as the last argument. This gives you access to `c.cleanup()` , `c.peek()` , `c.stable()` , and other context helpers inside array callbacks.
 
 ```ts
 import { list } from "anod";
@@ -823,7 +942,7 @@ console.log(rendered.get()); // ["<li>1</li>", ..., "<li>4</li>"]
 
 ### Batching array mutations
 
-Mutation methods like `push`, `pop`, `splice`, `sort` notify subscribers immediately by default. To group multiple mutations into a single update, use `batch()`.
+Mutation methods like `push` , `pop` , `splice` , `sort` notify subscribers immediately by default. To group multiple mutations into a single update, use `batch()` .
 
 ```ts
 import { list, batch } from "anod";
@@ -840,11 +959,11 @@ Inside a batch, each mutation sees the array in its updated state from the previ
 
 ### Mutation tracking
 
-When a list is mutated through methods like `push`, `splice`, or `sort`, anod encodes the type of mutation (add, delete, sort) along with the position and length into the signal's internal flag bits. Downstream computes can read this mutation descriptor to shortcircuit unnecessary work.
+When a list is mutated through methods like `push` , `splice` , or `sort` , anod encodes the type of mutation (add, delete, sort) along with the position and length into the signal's internal flag bits. Downstream computes can read this mutation descriptor to shortcircuit unnecessary work.
 
 For example, when you `push` a new element onto a list, a downstream `includes` check that previously returned `true` knows the matching element is still there. It doesn't need to re-scan the array. A downstream `find` can check only the newly added region instead of the full array.
 
-This optimization is automatic for the built-in array methods. The mutation descriptor propagates through the reactive graph and is consumed by any compute that knows how to interpret it. Methods that can't be optimized (like `sort`) fall back to full recomputation.
+This optimization is automatic for the built-in array methods. The mutation descriptor propagates through the reactive graph and is consumed by any compute that knows how to interpret it. Methods that can't be optimized (like `sort` ) fall back to full recomputation.
 
 ```ts
 import { list } from "anod";
