@@ -128,6 +128,7 @@ export interface RootContext extends Factory {
 /** Bound effect callback context. */
 export interface EffectContext extends RootContext, Context {
   panic(val: unknown): never;
+  finalize(fn: () => void): void;
 }
 
 /** Unbound effect callback context. */

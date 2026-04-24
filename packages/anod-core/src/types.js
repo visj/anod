@@ -42,7 +42,7 @@ Sender.prototype._sub1;
 /** @package @type {Array<Receiver> | null} */
 Sender.prototype._subs;
 /** @package @type {number} */
-Sender.prototype._disposedCount;
+Sender.prototype._tombstones;
 /** @package @type {number} */
 Sender.prototype._mod;
 /** @package @type {number} */

@@ -230,7 +230,7 @@ function Signal(value) {
   /** @type {Array<Receiver> | null} */
   this._subs = null;
   /** @type {number} */
-  this._disposedCount = 0;
+  this._tombstones = 0;
 }
 
 /**
@@ -255,7 +255,7 @@ function Compute(opts, fn, dep1, seed, args) {
   /** @type {Array<Receiver> | null} */
   this._subs = null;
   /** @type {number} */
-  this._disposedCount = 0;
+  this._tombstones = 0;
   /** @type {(function(T): T) | (function(T, U): T) | (function(T,U,V): T) | null} */
   this._fn = fn;
   /** @type {Sender<U>} */
@@ -268,6 +268,8 @@ function Compute(opts, fn, dep1, seed, args) {
   this._ctime = 0;
   /** @type {Function | Array<Function> | null} */
   this._cleanup = null;
+  /** @type {Channel | null} */
+  this._chan = null;
   /** @type {W | undefined} */
   this._args = args;
 }
@@ -305,22 +307,27 @@ function Effect(opts, fn, dep1, owner, args) {
   this._owner = owner;
   /** @type {(function(*): boolean) | Array<(function(*): boolean)> | null} */
   this._recover = null;
+  /** @type {(function(): void) | Array<(function(): void)> | null} */
+  this._finalize = null;
+  /** @type {Channel | null} */
+  this._chan = null;
   /** @type {W | undefined} */
   this._args = args;
 }
 
 /**
  * Unified async context for task/spawn nodes. Created lazily on first
- * async utility call (controller(), defer(), suspend(task)). Merges
- * the old Fiber + Channel into a single object to reduce allocations
- * and pointer chasing. Holds the original _args so the node's _args
- * slot can point here directly.
+ * async utility call (controller(), defer(), suspend(task)). Stored
+ * in the node's dedicated _channel field.
  * @constructor
- * @param {*} args - the node's original _args value
  */
-function Channel(args) {
-  /** @type {*} Original user-supplied args for the node. */
-  this._args = args;
+function Channel() {
+  /** @type {Compute | null} First responder we're waiting on. */
+  this._res1 = null;
+  /** @type {Array<Compute> | null} Additional responders. */
+  this._responds = null;
+  /** @type {Array | null} 3-stride: [awaiter, resolve, reject]. */
+  this._waiters = null;
   /** @type {AbortController | null} */
   this._controller = null;
   /** @type {Sender | null} First deferred dep (inline fast path). */
@@ -329,14 +336,6 @@ function Channel(args) {
   this._defer1val = undefined;
   /** @type {Array<Sender | *> | null} Paired [sender, value] entries for 2+ defers. */
   this._defers = null;
-  /** @type {Compute | null} First responder we're waiting on. */
-  this._res1 = null;
-  /** @type {number} Our slot in _res1's _waiters (index into 4-stride). */
-  this._res1slot = 0;
-  /** @type {Array<Compute | number> | null} Additional [responder, slot] pairs. */
-  this._responds = null;
-  /** @type {Array | null} 4-stride: [awaiter, awaiterResSlot, resolve, reject]. */
-  this._waiters = null;
 }
 
 // Top-level named functions so they aren't anonymous closures and can be
@@ -653,9 +652,9 @@ function root(fn) {
       return;
     }
     this._flag |= FLAG_STALE;
-		this._value = null;
-		if (this._cleanup !== null) {
-			clearCleanup(this._cleanup);
+    this._value = null;
+    if (this._cleanup !== null) {
+      clearCleanup(this._cleanup);
     }
   };
 
@@ -666,17 +665,17 @@ function root(fn) {
    */
   SignalProto._purge = ComputeProto._purge = function () {
     let subs = this._subs;
-    let disposed = this._disposedCount;
+    let disposed = this._tombstones;
     this._flag &= ~FLAG_PURGE;
     if (subs === null) {
       return;
     }
     if (disposed >= subs.length) {
       this._subs = null;
-      this._disposedCount = 0;
+      this._tombstones = 0;
       return;
     }
-    this._disposedCount = 0;
+    this._tombstones = 0;
     if (disposed > (subs.length >> 2)) {
       let write = 0;
       for (let read = 0; read < subs.length; read++) {
@@ -717,14 +716,14 @@ function root(fn) {
   ComputeProto._readAsync = EffectProto._readAsync = _readAsync;
   ComputeProto.peek = EffectProto.peek = peek;
 
-	let disposed = { get() { return (this._flag & FLAG_DISPOSED) !== 0; } };
+  let disposed = { get() { return (this._flag & FLAG_DISPOSED) !== 0; } };
 
- 	let _disposed = { disposed };
+  let _disposed = { disposed };
   Object.defineProperties(SignalProto, _disposed);
   Object.defineProperties(RootProto, _disposed);
   // IAwaitable — Compute + Effect (getters)
-	let states = {
-		disposed,
+  let states = {
+    disposed,
     error: { get() { return (this._flag & FLAG_ERROR) ? this._value : null; } },
     loading: { get() { return (this._flag & FLAG_LOADING) !== 0; } }
   };
@@ -802,6 +801,24 @@ function root(fn) {
   /** IOwner: cleanup/recover exposed on Root + Effect prototypes */
   RootProto.cleanup = EffectProto.cleanup = ComputeProto.cleanup = cleanup;
   RootProto.recover = EffectProto.recover = recover;
+
+  /**
+   * Registers a finalize callback that runs immediately when this
+   * activation completes, regardless of error. Effect-level `finally`.
+   * @this {!Effect}
+   * @param {function(): void} fn
+   */
+  EffectProto.finalize = function (fn) {
+    let finalize = this._finalize;
+    if (finalize === null) {
+      this._finalize = fn;
+    } else if (typeof finalize === "function") {
+      this._finalize = [finalize, fn];
+    } else {
+      finalize.push(fn);
+    }
+  };
+
   ComputeProto.equal = EffectProto.equal = equal;
   ComputeProto.stable = EffectProto.stable = stable;
 
@@ -1132,10 +1149,10 @@ function root(fn) {
    */
   function _channel() {
     if (this._flag & FLAG_CHANNEL) {
-      return this._args;
+      return this._chan;
     }
-    let channel = new Channel(this._args);
-    this._args = channel;
+    let channel = new Channel();
+    this._chan = channel;
     this._flag |= FLAG_CHANNEL;
     return channel;
   }
@@ -1207,8 +1224,8 @@ function root(fn) {
   function pending(tasks) {
     let loading = false;
     if (tasks._flag !== undefined) {
-			/** Single task. */
-			// this.val(tasks); @Claude why not like this? you wrote the line below.
+      /** Single task. */
+      // this.val(tasks); @Claude why not like this? you wrote the line below.
       val.call(this, tasks);
       if (tasks._flag & FLAG_LOADING) {
         loading = true;
@@ -1434,7 +1451,7 @@ function root(fn) {
       let stale = false;
       if (this._flag & FLAG_ASYNC) {
         let hasDefers =
-          this._flag & FLAG_CHANNEL && (this._args._defer1 !== null || this._args._defers !== null);
+          this._flag & FLAG_CHANNEL && (this._chan._defer1 !== null || this._chan._defers !== null);
         if (this._deps !== null || hasDefers) {
           stale = settleDeps(this);
         }
@@ -1442,7 +1459,7 @@ function root(fn) {
 
       let waiters = null;
       if (this._flag & FLAG_CHANNEL) {
-        let ch = this._args;
+        let ch = this._chan;
         if (ch !== null && ch._waiters !== null) {
           waiters = ch._waiters;
           let waiterCount = waiters.length;
@@ -1470,7 +1487,7 @@ function root(fn) {
     if (
       this._flag & FLAG_WEAK &&
       this._sub1 === null &&
-      (this._subs === null || this._disposedCount >= this._subs.length)
+      (this._subs === null || this._tombstones >= this._subs.length)
     ) {
       this._drop();
     }
@@ -1497,7 +1514,7 @@ function root(fn) {
     clearSubs(this);
     clearDeps(this);
     if (flag & FLAG_CHANNEL) {
-      let ch = this._args;
+      let ch = this._chan;
       if (ch._controller !== null) {
         ch._controller.abort();
       }
@@ -1507,13 +1524,13 @@ function root(fn) {
       }
       /** Remove ourselves from any responders we were awaiting. */
       if (ch._res1 !== null) {
-        clearChannel(ch);
+        clearChannel(ch, this);
       }
     }
     if (this._cleanup !== null) {
       clearCleanup(this);
     }
-    this._fn = this._value = this._args = null;
+    this._fn = this._value = this._args = this._chan = null;
   };
 
   /**
@@ -1549,7 +1566,7 @@ function root(fn) {
     }
 
     let value;
-    let args = flag & FLAG_CHANNEL ? this._args._args : this._args;
+    let args = this._args;
 
     if ((flag & (FLAG_STABLE | FLAG_SETUP)) === FLAG_STABLE) {
       run: try {
@@ -1676,13 +1693,13 @@ function root(fn) {
         if (kind === ASYNC_PROMISE) {
           resolvePromise(
             this,
-            /** @type {IThenable} */ (value),
+            /** @type {IThenable} */(value),
             time
           );
         } else {
           resolveIterator(
             this,
-            /** @type {AsyncIterator | AsyncIterable} */ (value),
+            /** @type {AsyncIterator | AsyncIterable} */(value),
             time
           );
         }
@@ -1778,6 +1795,9 @@ function root(fn) {
         clearOwned(this);
       }
       this._recover = null;
+      if (this._finalize !== null) {
+        clearFinalize(this);
+      }
     }
 
     /** Async prep: clear loading/suspend from previous activation.
@@ -1788,7 +1808,7 @@ function root(fn) {
 
     /** @type {(function(): void) | null | undefined} */
     let value;
-    let args = flag & FLAG_CHANNEL ? this._args._args : this._args;
+    let args = this._args;
 
     if ((flag & (FLAG_STABLE | FLAG_SETUP)) === FLAG_STABLE) {
       try {
@@ -1893,6 +1913,9 @@ function root(fn) {
     }
 
     this._flag &= ~FLAG_INIT;
+    if (this._finalize !== null) {
+      clearFinalize(this);
+    }
   };
 
   /**
@@ -1916,6 +1939,9 @@ function root(fn) {
 
     if (flag & FLAG_ERROR) {
       this._flag &= ~FLAG_ERROR;
+      if (this._finalize !== null) {
+        clearFinalize(this);
+      }
       let result = tryRecover(this, err);
       if (result !== RECOVER_SELF) {
         this._dispose();
@@ -1923,8 +1949,12 @@ function root(fn) {
       return;
     }
 
+    if (this._finalize !== null) {
+      clearFinalize(this);
+    }
+
     let stale = false;
-    if (this._flag & FLAG_CHANNEL && (this._args._defer1 !== null || this._args._defers !== null)) {
+    if (this._flag & FLAG_CHANNEL && (this._chan._defer1 !== null || this._chan._defers !== null)) {
       stale = settleDeps(this);
     }
     if (stale || (flag & FLAG_LOCK && (this._flag & FLAG_STALE || (this._flag & FLAG_PENDING && needsUpdate(this, TIME))))) {
@@ -1956,6 +1986,9 @@ function root(fn) {
     }
     let flag = this._flag;
     this._flag = FLAG_DISPOSED;
+    if (this._finalize !== null) {
+      clearFinalize(this);
+    }
     clearDeps(this);
     if (this._cleanup !== null) {
       clearCleanup(this);
@@ -1964,15 +1997,15 @@ function root(fn) {
       clearOwned(this);
     }
     if (flag & FLAG_CHANNEL) {
-      let ch = this._args;
+      let ch = this._chan;
       if (ch._controller !== null) {
         ch._controller.abort();
       }
       if (ch._res1 !== null) {
-        clearChannel(ch);
+        clearChannel(ch, this);
       }
     }
-    this._fn = this._args = this._owned = this._owner = this._recover = null;
+    this._fn = this._args = this._chan = this._owned = this._owner = this._recover = this._finalize = null;
   };
 
   /**
@@ -2108,7 +2141,7 @@ function root(fn) {
   RootProto.task = EffectProto.task = _task;
   RootProto.effect = EffectProto.effect = _effect;
   RootProto.spawn = EffectProto.spawn = _spawn;
-	RootProto.root = EffectProto.root = root;
+  RootProto.root = EffectProto.root = root;
 }
 
 /**
@@ -2148,7 +2181,7 @@ function connect(send, receiver) {
 /**
  * Marks receiver as removed from sender's subscriber list.
  * For _sub1, clears immediately. For _subs array entries,
- * defers compaction via _disposedCount and purge heuristic.
+ * defers compaction via _tombstones and purge heuristic.
  * @param {Sender} send
  * @param {Receiver} receiver
  * @returns {void}
@@ -2157,13 +2190,13 @@ function clearReceiver(send, receiver) {
   if (send._sub1 === receiver) {
     send._sub1 = null;
   } else {
-    let disposed = ++send._disposedCount;
+    let disposed = ++send._tombstones;
     let subs = send._subs;
     if (subs !== null) {
       if (disposed >= subs.length) {
         /** All subs are dead — release the array immediately. */
         send._subs = null;
-        send._disposedCount = 0;
+        send._tombstones = 0;
       } else if (!(send._flag & FLAG_PURGE) && disposed >= (subs.length >> 2)) {
         send._flag |= FLAG_PURGE;
         PURGES[PURGE_COUNT++] = send;
@@ -2173,7 +2206,7 @@ function clearReceiver(send, receiver) {
   if (
     send._flag & FLAG_WEAK &&
     send._sub1 === null &&
-    (send._subs === null || send._disposedCount >= send._subs.length)
+    (send._subs === null || send._tombstones >= send._subs.length)
   ) {
     send._drop();
   }
@@ -2210,7 +2243,7 @@ function clearDeps(receive) {
 function clearSubs(send) {
   send._sub1 = null;
   send._subs = null;
-  send._disposedCount = 0;
+  send._tombstones = 0;
 }
 
 /**
@@ -2227,6 +2260,26 @@ function clearCleanup(node) {
     let count = /** @type {!Array} */ (cleanup).length;
     while (count-- > 0) {
       /** @type {!Array} */ (cleanup).pop()();
+    }
+  }
+}
+
+/**
+ * Runs all finalize callbacks registered on this effect and
+ * clears the field. Errors inside finalizers are swallowed to
+ * preserve finally semantics (mirroring JS try/finally).
+ * @param {!Effect} node
+ * @returns {void}
+ */
+function clearFinalize(node) {
+  let finalize = node._finalize;
+  node._finalize = null;
+  if (typeof finalize === "function") {
+    try { finalize(); } catch (e) { /* swallow — finally semantics */ }
+  } else {
+    let count = finalize.length;
+    for (let i = 0; i < count; i++) {
+      try { finalize[i](); } catch (e) { /* swallow */ }
     }
   }
 }
@@ -2310,19 +2363,19 @@ const RECOVER_OWNER = 2;
  * @returns {number}
  */
 function tryRecover(node, error) {
-	/** Self-recovery: node stays alive. */
-	if (node._recover !== null && _checkRecover(node, error)) {
-		return RECOVER_SELF;
-	}
-	/** Bubble up the owner chain. Node will be disposed by caller. */
-	let owner = node._owner;
-	while (owner !== null) {
-		if (_checkRecover(owner, error)) {
-			return RECOVER_OWNER;
-		}
-		owner = owner._owner;
-	}
-	return RECOVER_NONE;
+  /** Self-recovery: node stays alive. */
+  if (node._recover !== null && _checkRecover(node, error)) {
+    return RECOVER_SELF;
+  }
+  /** Bubble up the owner chain. Node will be disposed by caller. */
+  let owner = node._owner;
+  while (owner !== null) {
+    if (_checkRecover(owner, error)) {
+      return RECOVER_OWNER;
+    }
+    owner = owner._owner;
+  }
+  return RECOVER_NONE;
 }
 
 /**
@@ -2785,7 +2838,7 @@ function asyncKind(value) {
  * @param {number} time
  * @returns {void}
  */
-	function resolvePromise(node, promise, time) {
+function resolvePromise(node, promise, time) {
   promise.then(
     (val) => {
       if (node._time !== time || (node._flag & FLAG_DISPOSED && !(node._flag & FLAG_LOCK))) {
@@ -2921,13 +2974,12 @@ function settleNotify(node, value, isError, waiters, waiterCount) {
   }
 
   /** Pass 2: resolve waiters, skip subscribe if already a sync sub. */
-  for (let i = 0; i < waiterCount; i += 4) {
+  for (let i = 0; i < waiterCount; i += 3) {
     let awaiter = waiters[i];
-    let resSlot = waiters[i + 1];
     if (isError) {
-      waiters[i + 3](value);
-    } else {
       waiters[i + 2](value);
+    } else {
+      waiters[i + 1](value);
     }
     if (!(awaiter._flag & FLAG_BLOCKED)) {
       if (awaiter._version !== version - 1) {
@@ -2935,13 +2987,7 @@ function settleNotify(node, value, isError, waiters, waiterCount) {
       }
     }
     awaiter._version = version;
-    /** Clear the awaiter's back-reference to this responder. */
-    let awaiterCh = awaiter._args;
-    if (resSlot === -1) {
-      awaiterCh._res1 = null;
-    } else {
-      awaiterCh._responds[resSlot] = null;
-    }
+    clearRespond(awaiter, node);
   }
 
   /** Pass 3: inline notify — skip subs that were resolved as waiters. */
@@ -2986,15 +3032,15 @@ function settleDeps(node) {
   let defers = null;
   let deferLen = 0;
   if (node._flag & FLAG_CHANNEL) {
-    defer1 = node._args._defer1;
+    defer1 = node._chan._defer1;
     if (defer1 !== null) {
-      defer1val = node._args._defer1val;
-      node._args._defer1 = null;
+      defer1val = node._chan._defer1val;
+      node._chan._defer1 = null;
     }
-    defers = node._args._defers;
+    defers = node._chan._defers;
     if (defers !== null) {
       deferLen = defers.length;
-      node._args._defers = null;
+      node._chan._defers = null;
     }
   }
 
@@ -3083,7 +3129,7 @@ function settleDeps(node) {
  * @returns {void}
  */
 function resetChannel(node) {
-  let ch = node._args;
+  let ch = node._chan;
   if (ch._controller !== null) {
     ch._controller.abort();
     ch._controller = null;
@@ -3091,36 +3137,31 @@ function resetChannel(node) {
   ch._defer1 = null;
   ch._defers = null;
   if (ch._res1 !== null || ch._responds !== null) {
-    clearChannel(ch);
+    clearChannel(ch, node);
   }
 }
 
 /**
- * Adds a waiter entry to a responder's _waiters array (4-stride).
+ * Adds a waiter entry to a responder's _waiters array (3-stride).
  * @param {!Channel} responderCh
  * @param {!Receiver} awaiter
- * @param {number} awaiterResSlot
  * @param {function} resolve
  * @param {function} reject
- * @returns {number} slot in _waiters
+ * @returns {void}
  */
-function addWaiter(responderCh, awaiter, awaiterResSlot, resolve, reject) {
+function addWaiter(responderCh, awaiter, resolve, reject) {
   let waiters = responderCh._waiters;
-  let slot;
   if (waiters === null) {
-    responderCh._waiters = [awaiter, awaiterResSlot, resolve, reject];
-    slot = 0;
+    responderCh._waiters = [awaiter, resolve, reject];
   } else {
-    slot = waiters.length;
-    waiters.push(awaiter, awaiterResSlot, resolve, reject);
+    waiters.push(awaiter, resolve, reject);
   }
-  return slot;
 }
 
 /**
  * Creates a two-way channel binding between an awaiter and a task.
- * Calculates the awaiter's respond slot, calls addWaiter, and stores
- * the back-reference from the awaiter's channel to the task.
+ * Stores the task in the awaiter's responds list and the awaiter
+ * in the task's waiters list.
  * @param {!Compute | !Effect} awaiter
  * @param {!Compute} task
  * @param {function(*)} resolve
@@ -3133,54 +3174,43 @@ function send(awaiter, task, resolve, reject) {
   let awaiterCh = awaiter._channel();
   let responderCh = task._channel();
 
-  let resSlot;
-  if (awaiterCh._res1 === null) {
-    resSlot = -1;
-  } else if (awaiterCh._responds === null) {
-    resSlot = 0;
-  } else {
-    resSlot = awaiterCh._responds.length;
-  }
-
-  let waiterSlot = addWaiter(responderCh, awaiter, resSlot, resolve, reject);
+  addWaiter(responderCh, awaiter, resolve, reject);
   task._flag |= FLAG_WAITER;
 
-  if (resSlot === -1) {
+  if (awaiterCh._res1 === null) {
     awaiterCh._res1 = task;
-    awaiterCh._res1slot = waiterSlot;
   } else if (awaiterCh._responds === null) {
-    awaiterCh._responds = [task, waiterSlot];
+    awaiterCh._responds = [task];
   } else {
-    awaiterCh._responds.push(task, waiterSlot);
+    awaiterCh._responds.push(task);
   }
 }
 
 /**
- * Removes a single waiter entry (4-stride swap-with-last).
- * Updates the swapped awaiter's back-reference.
+ * Removes a single awaiter from a responder's _waiters array.
+ * Linear scan for identity match, then 3-stride swap-with-last.
  * Clears FLAG_WAITER on the responder when the last waiter is removed.
  * @param {!Compute} responder
  * @param {!Channel} responderCh
- * @param {number} slot
+ * @param {!Receiver} awaiter
  * @returns {void}
  */
-function removeWaiter(responder, responderCh, slot) {
+function removeWaiter(responder, responderCh, awaiter) {
   let waiters = responderCh._waiters;
-  let lastReject = waiters.pop();
-  let lastResolve = waiters.pop();
-  let lastResSlot = waiters.pop();
-  let lastAwaiter = waiters.pop();
-  if (slot !== waiters.length) {
-    waiters[slot] = lastAwaiter;
-    waiters[slot + 1] = lastResSlot;
-    waiters[slot + 2] = lastResolve;
-    waiters[slot + 3] = lastReject;
-    let ch = lastAwaiter._args;
-    if (lastResSlot === -1) {
-      ch._res1slot = slot;
-    } else {
-      ch._responds[lastResSlot + 1] = slot;
+  let count = waiters.length;
+  for (let i = 0; i < count; i += 3) {
+    if (waiters[i] !== awaiter) {
+      continue;
     }
+    let lastReject = waiters.pop();
+    let lastResolve = waiters.pop();
+    let lastAwaiter = waiters.pop();
+    if (i < waiters.length) {
+      waiters[i] = lastAwaiter;
+      waiters[i + 1] = lastResolve;
+      waiters[i + 2] = lastReject;
+    }
+    break;
   }
   if (waiters.length === 0) {
     responderCh._waiters = null;
@@ -3191,25 +3221,48 @@ function removeWaiter(responder, responderCh, slot) {
 /**
  * Removes this awaiter from all responders it's waiting on.
  * @param {!Channel} channel
+ * @param {!Receiver} awaiter
  * @returns {void}
  */
-function clearChannel(channel) {
+function clearChannel(channel, awaiter) {
   let res = channel._res1;
   if (res !== null) {
-    removeWaiter(res, res._args, channel._res1slot);
+    removeWaiter(res, res._chan, awaiter);
     channel._res1 = null;
   }
   let responds = channel._responds;
   if (responds !== null) {
-    for (let i = 0; i < responds.length; i += 2) {
+    for (let i = 0; i < responds.length; i++) {
       let responder = responds[i];
       if (responder === null) {
         continue;
       }
-      let slot = responds[i + 1];
-      removeWaiter(responder, responder._args, slot);
+      removeWaiter(responder, responder._chan, awaiter);
     }
     channel._responds = null;
+  }
+}
+
+/**
+ * Clears an awaiter's back-reference to a responder.
+ * Scans _res1 and _responds for identity match.
+ * @param {!Receiver} awaiter
+ * @param {!Compute} responder
+ */
+function clearRespond(awaiter, responder) {
+  let awaiterCh = awaiter._chan;
+  if (awaiterCh._res1 === responder) {
+    awaiterCh._res1 = null;
+    return;
+  }
+  let responds = awaiterCh._responds;
+  if (responds !== null) {
+    for (let i = 0; i < responds.length; i++) {
+      if (responds[i] === responder) {
+        responds[i] = null;
+        return;
+      }
+    }
   }
 }
 
@@ -3228,24 +3281,17 @@ function clearChannel(channel) {
 function resolveWaiters(responder, responderCh, value, isError, panic) {
   let waiters = responderCh._waiters;
   let count = waiters.length;
-  for (let i = 0; i < count; i += 4) {
+  for (let i = 0; i < count; i += 3) {
     let awaiter = waiters[i];
-    let resSlot = waiters[i + 1];
     if (isError) {
-      waiters[i + 3](value);
-    } else {
       waiters[i + 2](value);
+    } else {
+      waiters[i + 1](value);
     }
     if (!panic && !(awaiter._flag & FLAG_BLOCKED)) {
       subscribe(awaiter, responder);
     }
-    /** Clear the awaiter's back-reference to this responder. */
-    let awaiterCh = awaiter._args;
-    if (resSlot === -1) {
-      awaiterCh._res1 = null;
-    } else {
-      awaiterCh._responds[resSlot] = null;
-    }
+    clearRespond(awaiter, responder);
   }
   responderCh._waiters = null;
   responder._flag &= ~FLAG_WAITER;
@@ -3304,6 +3350,9 @@ function startEffect(node) {
         flush();
       }
     } catch (err) {
+      if (node._finalize !== null) {
+        clearFinalize(node);
+      }
       let error = node._flag & FLAG_PANIC ? err : { error: err, type: FATAL };
       node._flag &= ~FLAG_PANIC;
       let result = tryRecover(node, error);
@@ -3320,6 +3369,9 @@ function startEffect(node) {
     try {
       node._update(TIME);
     } catch (err) {
+      if (node._finalize !== null) {
+        clearFinalize(node);
+      }
       let error = node._flag & FLAG_PANIC ? err : { error: err, type: FATAL };
       node._flag &= ~FLAG_PANIC;
       let result = tryRecover(node, error);
@@ -3396,6 +3448,9 @@ function flush() {
                 TRANSACTION = SEED;
                 node._update(time);
               } catch (err) {
+                if (node._finalize !== null) {
+                  clearFinalize(node);
+                }
                 let e = node._flag & FLAG_PANIC ? err : { error: err, type: FATAL };
                 node._flag &= ~FLAG_PANIC;
                 let result = tryRecover(node, e);
@@ -3429,6 +3484,9 @@ function flush() {
             try {
               node._update(time);
             } catch (err) {
+              if (node._finalize !== null) {
+                clearFinalize(node);
+              }
               let e = node._flag & FLAG_PANIC ? err : { error: err, type: FATAL };
               node._flag &= ~FLAG_PANIC;
               let result = tryRecover(node, e);
@@ -3581,7 +3639,7 @@ function spawn(depOrFn, fnOrOpts, optsOrArgs, args) {
  */
 function microflush() {
   POSTING = false;
-    flush();
+  flush();
 }
 
 /**
