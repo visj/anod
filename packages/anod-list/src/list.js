@@ -208,7 +208,7 @@ function read(source) {
 function computeArray(source, fn, args, opts) {
     let flag = FLAG_BOUND | OPT_STABLE | OPT_SETUP | (0 | opts);
     let node = new Compute(flag, fn, source, void 0, args);
-    node._dep1slot = connect(source, node, -1);
+    connect(source, node);
     if (!(flag & OPT_DEFER)) {
         startCompute(node);
     }
@@ -819,7 +819,7 @@ function forEach(source, _node, cb) {
 SignalProto.forEach = ComputeProto.forEach = function (cb, opts) {
     let flag = FLAG_BOUND | OPT_STABLE | (0 | opts);
     let node = new Effect(flag, forEach, this, null, cb);
-    node._dep1slot = connect(this, node, -1);
+    connect(this, node);
     startEffect(node);
     return node;
 };

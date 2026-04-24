@@ -24,18 +24,18 @@ const FLAG_SINGLE = 1 << 22;
 function collectDeps(node) {
     const deps = [];
     if (node._dep1 !== null) {
-        deps.push([node._dep1, node._dep1slot]);
+        deps.push(node._dep1);
     }
     if (node._deps !== null) {
-        for (let i = 0; i < node._deps.length; i += 2) {
-            deps.push([node._deps[i], node._deps[i + 1]]);
+        for (let i = 0; i < node._deps.length; i++) {
+            deps.push(node._deps[i]);
         }
     }
     return deps;
 }
 
 function depSet(node) {
-    return new Set(collectDeps(node).map(([d]) => d));
+    return new Set(collectDeps(node));
 }
 
 function verifyDepSet(node, expected) {
@@ -46,30 +46,21 @@ function verifyDepSet(node, expected) {
 function verifyIntegrity(node) {
     const deps = collectDeps(node);
 
-    // Every dep has the node listed exactly once in its sub registry.
-    for (const [dep] of deps) {
+    // Every dep has the node listed exactly once in its sub registry
+    // (ignoring disposed entries pending purge).
+    for (const dep of deps) {
         let count = 0;
         if (dep._sub1 === node) {
             count++;
         }
         if (dep._subs !== null) {
-            for (let i = 0; i < dep._subs.length; i += 2) {
+            for (let i = 0; i < dep._subs.length; i++) {
                 if (dep._subs[i] === node) {
                     count++;
                 }
             }
         }
         expect(count).toBe(1);
-    }
-
-    // And the subslot we stored points to a sub registry entry that
-    // actually holds `node`.
-    for (const [dep, subslot] of deps) {
-        if (subslot === -1) {
-            expect(dep._sub1).toBe(node);
-        } else {
-            expect(dep._subs[subslot]).toBe(node);
-        }
     }
 
     // FLAG_SINGLE iff exactly one dep.
@@ -86,8 +77,10 @@ function verifyDropped(node, droppedSenders) {
     for (const sender of droppedSenders) {
         expect(sender._sub1).not.toBe(node);
         if (sender._subs !== null) {
-            for (let i = 0; i < sender._subs.length; i += 2) {
-                expect(sender._subs[i]).not.toBe(node);
+            for (let i = 0; i < sender._subs.length; i++) {
+                if (!(sender._subs[i]._flag & 8)) {
+                    expect(sender._subs[i]).not.toBe(node);
+                }
             }
         }
     }

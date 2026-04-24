@@ -39,10 +39,10 @@ Sender.prototype._value;
 Sender.prototype._version;
 /** @package @type {Receiver | null} */
 Sender.prototype._sub1;
-/** @package @type {number} */
-Sender.prototype._sub1slot;
-/** @package @type {Array<Receiver | number> | null} */
+/** @package @type {Array<Receiver> | null} */
 Sender.prototype._subs;
+/** @package @type {number} */
+Sender.prototype._disposedCount;
 /** @package @type {number} */
 Sender.prototype._mod;
 /** @package @type {number} */
@@ -55,9 +55,7 @@ Sender.prototype._ctime;
 function Receiver() { }
 /** @package @type {Sender | null} */
 Receiver.prototype._dep1;
-/** @package @type {number} */
-Receiver.prototype._dep1slot;
-/** @package @type {Array<Sender | number> | null} */
+/** @package @type {Array<Sender> | null} */
 Receiver.prototype._deps;
 /** @package @type {number} */
 Receiver.prototype._time;
