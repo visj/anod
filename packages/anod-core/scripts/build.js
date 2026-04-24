@@ -31,7 +31,7 @@ async function build() {
         format: 'esm',
         sourcemap: true,
         entryFileNames: '[name].js',
-        chunkFileNames: 'anod.js'
+        chunkFileNames: 'core.js'
     });
 
     console.log('2. Minifying and mangling properties with Terser...');

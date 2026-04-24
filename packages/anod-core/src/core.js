@@ -113,7 +113,7 @@ var CTOP = 0;
  * During FLAG_SETUP _update, deps are written here as flat [sender, ...]
  * entries. After the fn returns, _deps is created via slice() with
  * exact capacity — avoiding V8's push-based over-allocation.
- * This allows the growth factor problem that arises when going from 
+ * This allows the growth factor problem that arises when going from
  * dep2 -> dep3.
  * @see {connect}
  * @type {Array<Sender>}
@@ -158,7 +158,7 @@ var SEED = 1;
 var VERSION = 0;
 
 /**
- * The fence is needed, because an outer Effect might have tagged 
+ * The fence is needed, because an outer Effect might have tagged
  * a Compute node with its own running version marker. When an inner
  * compute Compute is marked stale, it will refresh itself before returning
  * its value. If the outer Effect first reads SignalA, tags a version, and then
@@ -212,7 +212,7 @@ var RECEIVERS = [];
 
 var RECEIVER_COUNT = 0;
 
-/** 
+/**
  * @const
  * @type {Array<Sender>}
  */
