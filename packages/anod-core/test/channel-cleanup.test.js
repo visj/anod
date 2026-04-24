@@ -59,6 +59,65 @@ describe("channel cleanup", () => {
     await settle();
   });
 
+  test("compute dispose clears responds when res1 was already settled", async () => {
+    /**
+     * A task awaits two other tasks. TaskA settles first, clearing
+     * _res1 via clearRespond. Then the awaiting task is disposed.
+     * _dispose must still clear _responds (taskB's waiter entry).
+     */
+    let resolveA, resolveB;
+    const taskA = c.task((cx) => cx.suspend(new Promise((r) => { resolveA = r; })));
+    const taskB = c.task((cx) => cx.suspend(new Promise((r) => { resolveB = r; })));
+    await settle();
+
+    const awaiter = c.task(async (cx) => {
+      let [a, b] = await cx.suspend([taskA, taskB]);
+      return a + b;
+    });
+    await settle();
+
+    /** Settle taskA — clears _res1 on the awaiter's channel. */
+    resolveA(10);
+    await settle();
+
+    /** Dispose the awaiter. _res1 is null but _responds has taskB. */
+    awaiter.dispose();
+
+    /** TaskB settles — should not crash or deliver to dead node. */
+    resolveB(20);
+    await settle();
+  });
+
+  test("effect dispose clears responds when res1 was already settled", async () => {
+    /**
+     * A spawn awaits two tasks. TaskA settles first, clearing
+     * _res1. Then the parent root is disposed. Effect._dispose
+     * must still clear _responds (taskB's waiter entry).
+     */
+    let resolveA, resolveB;
+    const taskA = c.task((cx) => cx.suspend(new Promise((r) => { resolveA = r; })));
+    const taskB = c.task((cx) => cx.suspend(new Promise((r) => { resolveB = r; })));
+    await settle();
+
+    const r = root((r) => {
+      r.spawn(async (cx) => {
+        let [a, b] = await cx.suspend([taskA, taskB]);
+      });
+    });
+    await settle();
+
+    /** Settle taskA — clears _res1 on the spawn's channel. */
+    resolveA(10);
+    await settle();
+
+    /** Dispose the root — spawn's _res1 is null but _responds has taskB. */
+    r.dispose();
+
+    /** TaskB settles — should not crash. */
+    resolveB(20);
+    await settle();
+  });
+
   test("chained suspend(task): invalidation before settlement cleans up correctly", async () => {
     /**
      * A spawn awaits taskA, then taskB sequentially. A dep changes

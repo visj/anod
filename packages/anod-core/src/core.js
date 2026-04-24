@@ -405,7 +405,7 @@ function val(sender) {
  * Reads a sender's current value without subscribing. Refreshes
  * stale/pending senders so the value is always current, but does
  * not create a dependency link.
- * @this {Compute | !Effect}
+ * @this {Receiver}
  * @param {Sender} sender
  * @returns {*}
  */
@@ -427,7 +427,7 @@ function peek(sender) {
  * resolves updater functions, writes via _assign, notifies and
  * flushes. When not IDLE, schedules for drain. Updater functions
  * are resolved at drain time by assign() to see the latest value.
- * @this {Signal | !Compute}
+ * @this {Signal | Compute}
  * @param {*} value
  */
 function set(value) {
@@ -454,7 +454,7 @@ function set(value) {
  * only writes + notifies if the value actually changed. Delegates
  * the actual write to node._assign() which handles type-specific
  * fields (_ctime, FLAG_INIT for Compute; plain _value for Signal).
- * @param {Signal | !Compute} node
+ * @param {Signal | Compute} node
  * @param {*} value
  * @param {number} time
  */
@@ -476,7 +476,7 @@ function assign(node, value, time) {
 /**
  * Batch-drain handler for notify(). No value write — just clears
  * FLAG_SCHEDULED and notifies subscribers.
- * @param {Signal | !Compute} node
+ * @param {Signal | Compute} node
  * @param {*} _
  * @param {number} time
  */
@@ -493,7 +493,7 @@ function poke(node, _, time) {
  * mutations like push, pop, splice without branching in the drain loop.
  * @param {Sender} node
  * @param {*} payload
- * @param {function(!Sender, *)} fn
+ * @param {function(Sender, *)} fn
  */
 function schedule(node, payload, fn) {
   node._flag |= FLAG_SCHEDULED;
@@ -590,7 +590,7 @@ function relay(value) {
 }
 
 /**
- * @param {function(!Root): ((function(): void) | void)} fn
+ * @param {function(Root): ((function(): void) | void)} fn
  * @returns {Root}
  */
 function root(fn) {
@@ -661,7 +661,7 @@ function root(fn) {
   /**
    * Compacts _subs by removing FLAG_DISPOSED entries.
    * Pop-from-back for low churn, forward scan for high churn.
-   * @this {Signal | !Compute}
+   * @this {Signal | Compute}
    */
   SignalProto._purge = ComputeProto._purge = function () {
     let subs = this._subs;
@@ -733,7 +733,7 @@ function root(fn) {
   /**
    * Registers a cleanup fn on this owner. Stored compactly: _cleanup holds
    * a single fn for count=1, graduating to an array on the second.
-   * @this {Root | !Effect}
+   * @this {Owner}
    * @param {function(): void} fn
    * @returns {void}
    */
@@ -750,7 +750,7 @@ function root(fn) {
 
   /**
    * Registers a recover handler on this owner.
-   * @this {Root | !Effect}
+   * @this {Owner}
    * @param {function(*): boolean} fn
    * @returns {void}
    */
@@ -768,7 +768,7 @@ function root(fn) {
   /**
    * Marks the node's output semantically equal (or not) to its previous
    * value. Shared by Compute and Effect — all carry a _flag.
-   * @this {Compute | !Effect}
+   * @this {Receiver}
    * @param {boolean=} eq
    * @returns {void}
    */
@@ -787,7 +787,7 @@ function root(fn) {
    * nodes, SETUP is left in place — the natural cleanup at the end of
    * _update clears it, and during setup, deps must still be tracked via
    * the DSTACK mechanism.
-   * @this {Compute | !Effect}
+   * @this {Receiver}
    * @returns {void}
    */
   function stable() {
@@ -842,7 +842,7 @@ function root(fn) {
    * FLAG_PANIC and throws a { error, type: PANIC } POJO. The
    * catch block checks FLAG_PANIC to distinguish this from
    * unexpected throws (which are wrapped as FATAL).
-   * @this {Compute | !Effect}
+   * @this {Receiver}
    * @param {*} val
    * @returns {void}
    */
@@ -871,8 +871,8 @@ function root(fn) {
    * If stale or disposed, resolves to REGRET — a thenable whose
    * `.then()` is a no-op, so `await` never resumes and the closure
    * becomes eligible for GC.
-   * @this {Compute | !Effect}
-   * @param {Promise | !Compute} promiseOrTask
+   * @this {Receiver}
+   * @param {Promise | Compute} promiseOrTask
    * @returns {*}
    */
   function suspend(promiseOrTask) {
@@ -923,11 +923,11 @@ function root(fn) {
     this._flag |= FLAG_SUSPEND;
     /** Branch: array of tasks → concurrent await. */
     if (Array.isArray(promiseOrTask)) {
-      return _suspendArray.call(this, promiseOrTask);
+      return _suspendArray(this, promiseOrTask);
     }
     /** Branch: Compute node with FLAG_ASYNC → task-await path. */
     if (promiseOrTask._flag !== undefined && promiseOrTask._flag & FLAG_ASYNC) {
-      return _suspendTask.call(this, promiseOrTask);
+      return _suspendTask(this, promiseOrTask);
     }
     /** Promise path — wrap with staleness guard. */
     let node = this;
@@ -942,12 +942,12 @@ function root(fn) {
         }
         return REGRET;
       },
-      function (err) {
+      function (error) {
         if (
           node._time === time &&
           (!(node._flag & FLAG_DISPOSED) || node._flag & FLAG_LOCK)
         ) {
-          throw err;
+          throw error;
         }
         return REGRET;
       }
@@ -965,11 +965,11 @@ function root(fn) {
    * that resolves when the task settles. At settle time, the task also
    * subscribes the awaiter as a dep for future reactive updates.
    *
-   * @this {Compute | !Effect}
+   * @this {Receiver}
    * @param {Compute} taskNode
    * @returns {*}
    */
-  function _suspendTask(taskNode) {
+  function _suspendTask(node, taskNode) {
     if (taskNode._flag & FLAG_DISPOSED) {
       throw new Error(ASSERT_DISPOSED);
     }
@@ -982,14 +982,14 @@ function root(fn) {
      *  patchDeps handles lifecycle; in async scope use subscribe()
      *  and let settleDeps deduplicate. */
     if (!(taskNode._flag & FLAG_LOADING)) {
-      if (this._flag & FLAG_LOADING) {
-        subscribe(this, taskNode);
+      if (node._flag & FLAG_LOADING) {
+        subscribe(node, taskNode);
       } else {
         let version = VERSION;
         let stamp = taskNode._version;
         taskNode._version = version;
         if (stamp !== version - 1) {
-          this._read(taskNode, stamp);
+          node._read(taskNode, stamp);
         } else {
           REUSED++;
         }
@@ -1003,9 +1003,8 @@ function root(fn) {
     /** Task is loading — create channel binding and return a Promise.
      *  Staleness is handled by resetChannel: if the node re-runs,
      *  the old waiter is removed and this Promise never resolves. */
-    let self = this;
     return new Promise(function (resolve, reject) {
-      send(self, taskNode, resolve, reject);
+      send(node, taskNode, resolve, reject);
     });
   }
 
@@ -1020,15 +1019,15 @@ function root(fn) {
    * awaiter during the walk. After all slots are filled, we
    * subscribe to every task in one pass and resolve the Promise.
    *
-   * @this {Compute | !Effect}
-   * @param {Array<!Compute>} tasks
+   * @this {Receiver}
+   * @param {Array<Compute>} tasks
    * @returns {Array | !Promise<!Array>}
    */
-  function _suspendArray(tasks) {
-    this._flag |= FLAG_BLOCKED;
+  function _suspendArray(node, tasks) {
+    node._flag |= FLAG_BLOCKED;
     let count = tasks.length;
     if (count === 0) {
-      this._flag &= ~FLAG_BLOCKED;
+      node._flag &= ~FLAG_BLOCKED;
       return [];
     }
     let results = new Array(count);
@@ -1051,9 +1050,9 @@ function root(fn) {
     }
 
     if (allSettled) {
-      this._flag &= ~FLAG_BLOCKED;
+      node._flag &= ~FLAG_BLOCKED;
       for (let i = 0; i < count; i++) {
-        subscribe(this, tasks[i]);
+        subscribe(node, tasks[i]);
       }
       return results;
     }
@@ -1061,9 +1060,8 @@ function root(fn) {
     /** At least one is loading — allocate one Promise.
      *  _stepArray re-scans from scratch on each wake-up,
      *  guaranteeing a consistent snapshot when it resolves. */
-    let self = this;
     return new Promise(function (resolve, reject) {
-      _stepArray(self, tasks, results, resolve, reject);
+      _stepArray(node, tasks, results, resolve, reject);
     });
   }
 
@@ -1073,8 +1071,8 @@ function root(fn) {
    * scratch when it settles. Only resolves when a full scan finds
    * zero loading tasks, guaranteeing a consistent snapshot (all
    * values from the same moment). Mirrors c.pending() semantics.
-   * @param {Compute | !Effect} node
-   * @param {Array<!Compute>} tasks
+   * @param {Receiver} node
+   * @param {Array<Compute>} tasks
    * @param {Array} results
    * @param {function(!Array)} resolve
    * @param {function(*)} reject
@@ -1110,9 +1108,9 @@ function root(fn) {
 
     /** Peek remaining tasks so they're current. */
     for (let j = blocked + 1; j < count; j++) {
-      let t = tasks[j];
-      if (t._flag & (FLAG_STALE | FLAG_PENDING)) {
-        t._refresh();
+      let task = tasks[j];
+      if (task._flag & (FLAG_STALE | FLAG_PENDING)) {
+        task._refresh();
       }
     }
 
@@ -1130,12 +1128,12 @@ function root(fn) {
 
   ComputeProto.suspend = EffectProto.suspend = suspend;
 
-  /** @this {Compute | !Effect} */
+  /** @this {Receiver} */
   ComputeProto.lock = EffectProto.lock = function () {
     this._flag |= FLAG_LOCK;
   };
 
-  /** @this {Compute | !Effect} */
+  /** @this {Receiver} */
   ComputeProto.unlock = EffectProto.unlock = function () {
     this._flag &= ~FLAG_LOCK;
   };
@@ -1144,7 +1142,7 @@ function root(fn) {
    * Lazily allocates the Channel for this node. Lifts _args into
    * the Channel so the original args are preserved but the node's
    * _args slot points directly to the Channel.
-   * @this {Compute | !Effect}
+   * @this {Receiver}
    * @returns {Channel}
    */
   function _channel() {
@@ -1162,7 +1160,7 @@ function root(fn) {
   /**
    * Creates a fresh AbortController for this async activation.
    * The controller is automatically aborted on re-run or dispose.
-   * @this {Compute | !Effect}
+   * @this {Receiver}
    * @returns {AbortController}
    */
   function controller() {
@@ -1178,13 +1176,13 @@ function root(fn) {
    * Reads a sender's current value without subscribing immediately.
    * The subscription is deferred until settle time. For sync nodes
    * (FLAG_ASYNC not set), falls back to val().
-   * @this {Compute | !Effect}
+   * @this {Receiver}
    * @param {Sender} sender
    * @returns {*}
    */
   function defer(sender) {
     if (!(this._flag & FLAG_ASYNC)) {
-      return val.call(this, sender);
+      return this.val(sender);
     }
     if (sender._flag & (FLAG_STALE | FLAG_PENDING)) {
       sender._refresh();
@@ -1217,16 +1215,15 @@ function root(fn) {
    *
    * Usage: `if (c.pending([taskA, taskB])) return;`
    *
-   * @this {Compute | !Effect}
-   * @param {Compute | !Array<!Compute>} tasks
+   * @this {Receiver}
+   * @param {Compute | !Array<Compute>} tasks
    * @returns {boolean} true if any task has FLAG_LOADING set
    */
   function pending(tasks) {
     let loading = false;
     if (tasks._flag !== undefined) {
       /** Single task. */
-      // this.val(tasks); @Claude why not like this? you wrote the line below.
-      val.call(this, tasks);
+      this.val(tasks);
       if (tasks._flag & FLAG_LOADING) {
         loading = true;
       }
@@ -1234,9 +1231,9 @@ function root(fn) {
       /** Array of tasks. */
       let count = tasks.length;
       for (let i = 0; i < count; i++) {
-        let t = tasks[i];
-        val.call(this, t);
-        if (t._flag & FLAG_LOADING) {
+        let task = tasks[i];
+        this.val(task);
+        if (task._flag & FLAG_LOADING) {
           loading = true;
         }
       }
@@ -1276,7 +1273,7 @@ function root(fn) {
   /**
    * Notifies subscribers without changing the value. Useful after
    * mutating an object held by the signal in place.
-   * @this {Signal | !Compute}
+   * @this {Signal | Compute}
    */
   function signal_notify() {
     if (this._flag & FLAG_DISPOSED) {
@@ -1323,7 +1320,7 @@ function root(fn) {
   /**
    * Returns true if the sender's current value differs from `value`.
    * Used by deferred dep settlement to detect changes.
-   * @this {Signal<T> | !Compute<T>}
+   * @this {Signal<T> | Compute<T>}
    * @param {T} value
    * @returns {boolean}
    */
@@ -1523,7 +1520,7 @@ function root(fn) {
         resolveWaiters(this, ch, new Error("Awaited task was disposed"), true, true);
       }
       /** Remove ourselves from any responders we were awaiting. */
-      if (ch._res1 !== null) {
+      if (ch._res1 !== null || ch._responds !== null) {
         clearChannel(ch, this);
       }
     }
@@ -1584,12 +1581,12 @@ function root(fn) {
         } else {
           value = this._fn(this, this._value, args);
         }
-      } catch (err) {
+      } catch (error) {
         if (this._flag & FLAG_PANIC) {
-          value = err;
+          value = error;
           this._flag &= ~FLAG_PANIC;
         } else {
-          value = { error: err, type: FATAL };
+          value = { error, type: FATAL };
         }
         this._flag |= FLAG_ERROR;
       }
@@ -1632,12 +1629,12 @@ function root(fn) {
         } else {
           value = this._fn(this, this._value, args);
         }
-      } catch (err) {
+      } catch (error) {
         if (this._flag & FLAG_PANIC) {
-          value = err;
+          value = error;
           this._flag &= ~FLAG_PANIC;
         } else {
-          value = { error: err, type: FATAL };
+          value = { error, type: FATAL };
         }
         this._flag |= FLAG_ERROR;
       }
@@ -1997,15 +1994,21 @@ function root(fn) {
       clearOwned(this);
     }
     if (flag & FLAG_CHANNEL) {
-      let ch = this._chan;
-      if (ch._controller !== null) {
-        ch._controller.abort();
+      let chan = this._chan;
+      if (chan._controller !== null) {
+        chan._controller.abort();
       }
-      if (ch._res1 !== null) {
-        clearChannel(ch, this);
+      if (chan._res1 !== null || chan._responds !== null) {
+        clearChannel(chan, this);
       }
     }
-    this._fn = this._args = this._chan = this._owned = this._owner = this._recover = this._finalize = null;
+    this._fn =
+      this._args =
+      this._chan =
+      this._owned =
+      this._owner =
+      this._recover =
+      this._finalize = null;
   };
 
   /**
@@ -2033,7 +2036,7 @@ function root(fn) {
     }
   };
 
-  /** @this {Root | !Effect} */
+  /** @this {Owner} */
   function _compute(depOrFn, fnOrSeed, optsOrSeed, argsOrOpts, args) {
     if (this._flag & FLAG_DISPOSED) {
       throw new Error(ASSERT_DISPOSED);
@@ -2054,7 +2057,7 @@ function root(fn) {
     return node;
   }
 
-  /** @this {Root | !Effect} */
+  /** @this {Owner} */
   function _task(depOrFn, fnOrSeed, optsOrSeed, argsOrOpts, args) {
     if (this._flag & FLAG_DISPOSED) {
       throw new Error(ASSERT_DISPOSED);
@@ -2080,7 +2083,7 @@ function root(fn) {
     return node;
   }
 
-  /** @this {Root | !Effect} */
+  /** @this {Owner} */
   function _effect(depOrFn, fnOrOpts, optsOrArgs, args) {
     if (this._flag & FLAG_DISPOSED) {
       throw new Error(ASSERT_DISPOSED);
@@ -2105,7 +2108,7 @@ function root(fn) {
     return node;
   }
 
-  /** @this {Root | !Effect} */
+  /** @this {Owner} */
   function _spawn(depOrFn, fnOrOpts, optsOrArgs, args) {
     if (this._flag & FLAG_DISPOSED) {
       throw new Error(ASSERT_DISPOSED);
@@ -2275,11 +2278,11 @@ function clearFinalize(node) {
   let finalize = node._finalize;
   node._finalize = null;
   if (typeof finalize === "function") {
-    try { finalize(); } catch (err) { /* swallow — finally semantics */ }
+    try { finalize(); } catch (error) { /* swallow — finally semantics */ }
   } else {
     let count = finalize.length;
     for (let i = 0; i < count; i++) {
-      try { finalize[i](); } catch (err) { /* swallow */ }
+      try { finalize[i](); } catch (error) { /* swallow */ }
     }
   }
 }
@@ -2290,7 +2293,7 @@ function clearFinalize(node) {
  * node, so `_owned` is populated even when the factory runs the node's fn
  * inside its startup path.
  * @param {Owner} owner
- * @param {Receiver | !Root} child
+ * @param {Receiver | Root} child
  * @returns {void}
  */
 function addOwned(owner, child) {
@@ -2598,7 +2601,7 @@ function needsUpdate(node, time) {
   if (deps !== null) {
     let len = deps.length;
     for (let i = 0; i < len; i++) {
-			dep = deps[i];
+      dep = deps[i];
       let flag = dep._flag;
       if (flag & FLAG_STALE) {
         TRANSACTION = SEED;
@@ -3154,7 +3157,7 @@ function addWaiter(responderCh, awaiter, resolve, reject) {
  * Creates a two-way channel binding between an awaiter and a task.
  * Stores the task in the awaiter's responds list and the awaiter
  * in the task's waiters list.
- * @param {Compute | !Effect} awaiter
+ * @param {Receiver} awaiter
  * @param {Compute} task
  * @param {function(*)} resolve
  * @param {function(*)} reject
@@ -3294,7 +3297,7 @@ function resolveWaiters(responder, responderCh, value, isError, panic) {
  * Runs `fn` with the root node itself as the argument. Prototype methods
  * on Root (compute/effect/derive/etc.) use `this` (the root) as the owner.
  * @param {Root} root
- * @param {function(!Root): ((function(): void) | void)} fn
+ * @param {function(Root): ((function(): void) | void)} fn
  * @returns {void}
  */
 function startRoot(root, fn) {
@@ -3341,18 +3344,18 @@ function startEffect(node) {
       if (SENDER_COUNT > 0 || DISPOSER_COUNT > 0) {
         flush();
       }
-    } catch (err) {
+    } catch (error) {
       if (node._finalize !== null) {
         clearFinalize(node);
       }
-      let error = node._flag & FLAG_PANIC ? err : { error: err, type: FATAL };
+      let err = node._flag & FLAG_PANIC ? error : { error, type: FATAL };
       node._flag &= ~FLAG_PANIC;
-      let result = tryRecover(node, error);
+      let result = tryRecover(node, err);
       if (result !== RECOVER_SELF) {
         node._dispose();
       }
       if (result === RECOVER_NONE) {
-        throw error;
+        throw err;
       }
     } finally {
       IDLE = true;
@@ -3360,18 +3363,18 @@ function startEffect(node) {
   } else {
     try {
       node._update(TIME);
-    } catch (err) {
+    } catch (error) {
       if (node._finalize !== null) {
         clearFinalize(node);
       }
-      let error = node._flag & FLAG_PANIC ? err : { error: err, type: FATAL };
+      let err = node._flag & FLAG_PANIC ? error : { error, type: FATAL };
       node._flag &= ~FLAG_PANIC;
-      let result = tryRecover(node, error);
+      let result = tryRecover(node, err);
       if (result !== RECOVER_SELF) {
         node._dispose();
       }
       if (result === RECOVER_NONE) {
-        throw error;
+        throw err;
       }
     }
   }
@@ -3432,6 +3435,7 @@ function flush() {
           let effects = SCOPES[i];
           for (let j = 0; j < count; j++) {
             let node = effects[j];
+            effects[j] = null;
             if (
               node._flag & FLAG_STALE ||
               (node._flag & FLAG_PENDING && needsUpdate(node, time))
@@ -3439,25 +3443,24 @@ function flush() {
               try {
                 TRANSACTION = SEED;
                 node._update(time);
-              } catch (err) {
+              } catch (error) {
                 if (node._finalize !== null) {
                   clearFinalize(node);
                 }
-                let e = node._flag & FLAG_PANIC ? err : { error: err, type: FATAL };
+                let err = node._flag & FLAG_PANIC ? error : { error, type: FATAL };
                 node._flag &= ~FLAG_PANIC;
-                let result = tryRecover(node, e);
+                let result = tryRecover(node, err);
                 if (result !== RECOVER_SELF) {
                   node._dispose();
                 }
                 if (!thrown && result === RECOVER_NONE) {
-                  error = e;
+                  error = err;
                   thrown = true;
                 }
               }
             } else {
               node._flag &= ~(FLAG_STALE | FLAG_PENDING);
             }
-            effects[j] = null;
           }
           LEVELS[i] = 0;
         }
@@ -3475,18 +3478,18 @@ function flush() {
             TRANSACTION = SEED;
             try {
               node._update(time);
-            } catch (err) {
+            } catch (error) {
               if (node._finalize !== null) {
                 clearFinalize(node);
               }
-              let e = node._flag & FLAG_PANIC ? err : { error: err, type: FATAL };
+              let err = node._flag & FLAG_PANIC ? error : { error, type: FATAL };
               node._flag &= ~FLAG_PANIC;
-              let result = tryRecover(node, e);
+              let result = tryRecover(node, err);
               if (result !== RECOVER_SELF) {
                 node._dispose();
               }
               if (!thrown && result === RECOVER_NONE) {
-                error = e;
+                error = err;
                 thrown = true;
               }
             }
@@ -3670,7 +3673,6 @@ export {
   FLAG_ASYNC,
   FLAG_BOUND,
   FLAG_CHANNEL,
-
   FLAG_EAGER,
   FLAG_BLOCKED,
   FLAG_LOCK,

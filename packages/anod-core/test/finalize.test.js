@@ -127,6 +127,33 @@ describe("finalize", () => {
         expect(log).toEqual(["child-finalize", "parent-finalize"]);
     });
 
+    test("runs when async effect throws after await", async () => {
+        const log = [];
+        root((r) => {
+            r.spawn(async (cx) => {
+                cx.finalize(() => log.push("finalize"));
+                cx.recover(() => { log.push("recover"); return true; });
+                await cx.suspend(Promise.resolve(1));
+                throw new Error("post-await-boom");
+            });
+        });
+        await settle();
+        expect(log).toEqual(["finalize", "recover"]);
+    });
+
+    test("runs when async effect rejects without explicit suspend", async () => {
+        const log = [];
+        root((r) => {
+            r.spawn(async (cx) => {
+                cx.finalize(() => log.push("finalize"));
+                cx.recover(() => { log.push("recover"); return true; });
+                await cx.suspend(Promise.reject(new Error("reject")));
+            });
+        });
+        await settle();
+        expect(log).toEqual(["finalize", "recover"]);
+    });
+
     test("runs on dispose mid-async activation", async () => {
         const log = [];
         let resolve;
