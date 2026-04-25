@@ -7,18 +7,14 @@ export type Resolve<T> =
         ? U
         : T;
 
-// ─── Error type constants ────────────────────────────────────────────
-
 export declare const REFUSE: 1;
 export declare const PANIC: 2;
 export declare const FATAL: 3;
 
 export interface Err<T = unknown> {
-  error: T;
   type: typeof REFUSE | typeof PANIC | typeof FATAL;
+  error: T;
 }
-
-// ─── Option constants ──────────��──────────────────────────────────────
 
 export declare const OPT_DEFER: number;
 export declare const OPT_STABLE: number;
@@ -26,27 +22,27 @@ export declare const OPT_SETUP: number;
 export declare const OPT_WEAK: number;
 export declare const OPT_EAGER: number;
 
-// ─── Node interfaces ────────────���───────────────────────────��─────────
-
-export interface Signal<T = any> {
-  readonly disposed: boolean;
+export interface ReadonlySignal<T = any> {
+	readonly disposed: boolean;
   get(): T;
-  set(value: T | ((prev: T) => T)): void;
-  post(value: T | ((prev: T) => T)): void;
   notify(): void;
   dispose(): void;
 }
 
-export interface Compute<T = any> extends Signal<T> {
+export interface Signal<T = any> extends ReadonlySignal<T> {
+  set(value: T | ((prev: T) => T)): boolean;
+  post(value: T | ((prev: T) => T)): boolean;
+}
+
+export interface Compute<T = any> extends ReadonlySignal<T> {
   readonly error: Err | null;
-  readonly disposed: boolean;
   weak(): void;
   eager(): void;
   stable(): void;
   cleanup(fn: () => void): void;
 }
 
-export interface Task<T = any> extends Signal<T> {
+export interface Task<T = any> extends ReadonlySignal<T> {
   readonly loading: boolean;
 }
 
@@ -71,13 +67,13 @@ export interface Spawn {
 
 export type Sender<T = any> = Signal<T> | Compute<T> | Task<T>;
 
-// ─── Context interfaces (passed to callbacks) ───────────────────────
-
 /** Base context shared by all sync callback types. */
 export interface Context {
   stable(): void;
   cleanup(fn: () => void): void;
   peek<T>(signal: Sender<T>): T;
+  set<T>(sender: Sender<T>, value: T | ((prev: T) => T)): void;
+  post<T>(sender: Sender<T>, value: T | ((prev: T) => T)): void;
 }
 
 /** Dependency tracking — adds val() for reading and subscribing. */
@@ -145,8 +141,6 @@ export interface SpawnContext extends EffectContext, AsyncContext {}
 
 /** Unbound spawn callback context. */
 export interface SpawnReader extends SpawnContext, Reader {}
-
-// ─── Factory interface ────────────────────────────────────────────────
 
 export interface Factory {
   // Unbound compute
@@ -234,8 +228,6 @@ export interface Factory {
   ): Spawn;
 
 }
-
-// ─── Top-level API ────────────────────────────────────────────────────
 
 export declare function signal<T>(value: T): Signal<T>;
 export declare function relay<T>(value: T): Signal<T>;

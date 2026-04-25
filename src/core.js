@@ -32,11 +32,12 @@ const FLAG_BOUND = 1 << 15;
 const FLAG_WAITER = 1 << 16;
 const FLAG_CHANNEL = 1 << 17;
 const FLAG_BLOCKED = 1 << 18;
-const FLAG_LOCK = 1 << 19;
+const FLAG_LOCKED = 1 << 19;
 const FLAG_SUSPEND = 1 << 20;
 const FLAG_PANIC = 1 << 21;
 const FLAG_SINGLE = 1 << 22;
 const FLAG_EAGER = 1 << 23;
+const FLAG_PAUSED = 1 << 25;
 const FLAG_PURGE = 1 << 24;
 
 /** Error type constants for { error, type } POJOs. */
@@ -68,9 +69,6 @@ const ASYNC_SYNC = 3;
  * @const
  */
 const REGRET = { then: function () { } };
-
-/** @const */
-const NOOP = function () { };
 
 /**
  * Thrown (synchronously) when an async node's fn returns a non-sync
@@ -452,7 +450,7 @@ function peek(sender) {
  * @template T
  * @this {Sender<T>}
  * @param {T | (function(T): T)} value
- * @returns {void}
+ * @returns {boolean}
  */
 function set(value) {
   if (this._flag & FLAG_DISPOSED) {
@@ -471,10 +469,15 @@ function set(value) {
       this._assign(_value, TIME + 1);
       notify(this, FLAG_STALE);
       flush();
+      return true;
     }
-  } else if (callback || this._flag & FLAG_RELAY || this._value !== value) {
-    schedule(this, value, assign);
+    return false;
   }
+	if (callback || this._flag & FLAG_RELAY || this._value !== value) {
+		schedule(this, value, assign);
+		return true;
+  }
+	return false;
 }
 
 /**
@@ -749,7 +752,6 @@ function root(fn) {
   ComputeProto._read = EffectProto._read = _read;
 
   ComputeProto._readAsync = EffectProto._readAsync = _readAsync;
-  ComputeProto.peek = EffectProto.peek = peek;
 
   let disposed = { get() { return (this._flag & FLAG_DISPOSED) !== 0; } };
 
@@ -923,10 +925,10 @@ function root(fn) {
       let time = this._time;
       promiseOrTask(
         function (val) {
-          if (node._time !== time || (node._flag & FLAG_DISPOSED && !(node._flag & FLAG_LOCK))) {
+          if (node._time !== time || (node._flag & FLAG_DISPOSED && !(node._flag & FLAG_LOCKED))) {
             return;
           }
-          if (!(node._flag & FLAG_LOCK)) {
+          if (!(node._flag & FLAG_LOCKED)) {
             if (node._flag & FLAG_STALE) {
               return;
             }
@@ -938,10 +940,10 @@ function root(fn) {
           node._settle(val);
         },
         function (err) {
-          if (node._time !== time || (node._flag & FLAG_DISPOSED && !(node._flag & FLAG_LOCK))) {
+          if (node._time !== time || (node._flag & FLAG_DISPOSED && !(node._flag & FLAG_LOCKED))) {
             return;
           }
-          if (!(node._flag & FLAG_LOCK)) {
+          if (!(node._flag & FLAG_LOCKED)) {
             if (node._flag & FLAG_STALE) {
               return;
             }
@@ -971,7 +973,7 @@ function root(fn) {
       function (val) {
         if (
           node._time === time &&
-          (!(node._flag & FLAG_DISPOSED) || node._flag & FLAG_LOCK)
+          (!(node._flag & FLAG_DISPOSED) || node._flag & FLAG_LOCKED)
         ) {
           return val;
         }
@@ -980,7 +982,7 @@ function root(fn) {
       function (error) {
         if (
           node._time === time &&
-          (!(node._flag & FLAG_DISPOSED) || node._flag & FLAG_LOCK)
+          (!(node._flag & FLAG_DISPOSED) || node._flag & FLAG_LOCKED)
         ) {
           throw error;
         }
@@ -1165,13 +1167,14 @@ function root(fn) {
 
   /** @this {Receiver} */
   ComputeProto.lock = EffectProto.lock = function () {
-    this._flag |= FLAG_LOCK;
+    this._flag |= FLAG_LOCKED;
   };
 
   /** @this {Receiver} */
   ComputeProto.unlock = EffectProto.unlock = function () {
-    this._flag &= ~FLAG_LOCK;
+    this._flag &= ~FLAG_LOCKED;
   };
+
 
   /**
    * Lazily allocates the Channel for this node. Lifts _args into
@@ -1336,20 +1339,21 @@ function root(fn) {
    * (non-function), nothing to do.
    * @this {Signal<T>}
    * @param {T | function(T): T} value
-   * @returns {void}
+   * @returns {boolean}
    */
   SignalProto.post = function (value) {
     if (this._flag & FLAG_DISPOSED) {
       throw new Error(ASSERT_NOT_DISPOSED);
     }
     if (!POSTING && !(this._flag & FLAG_RELAY) && typeof value !== "function" && this._value === value) {
-      return;
+			return false;
     }
     schedule(this, value, assign);
     if (!POSTING) {
       POSTING = true;
       queueMicrotask(microflush);
-    }
+		}
+		return true;
   };
 
   /**
@@ -1426,25 +1430,75 @@ function root(fn) {
    * @param {Sender} sender
    * @returns {*}
    */
+  ComputeProto.peek = EffectProto.peek = peek;
   ComputeProto.val = val;
 
   /**
-   * Writable-compute entry point. Mirrors `SignalProto.set` so a Compute
-   * can be overwritten in place — useful for derived-from-prop state that
-   * the user should still be able to pin (form inputs defaulted from
-   * server data, local optimistic state, etc.). The manual value lasts
-   * until a tracked dep changes and fires the compute's fn again.
-   *
-   * `_ctime = TIME + 1` anticipates the `++TIME` at the top of the next
-   * `flush()` cycle, so downstream `_ctime > lastRun` sees this change
-   * on the very next read — matches what `settle()` does on async
-   * resolution.
-   * @public
-   * @this {Compute<T,U,V,W>}
-   * @param {T} value
+   * Drain handler for contextual set. Wraps assign() with FLAG_PAUSED
+   * on the receiver so that notifications propagating from this write
+   * are ignored by the receiver that initiated the write.
+   * @param {Sender} node
+   * @param {{ _recv: Receiver, _value: * }} payload
+   * @param {number} time
+   */
+  function guardedAssign(node, payload, time) {
+    let receiver = payload._recv;
+    receiver._flag |= FLAG_PAUSED;
+    assign(node, payload._value, time);
+    receiver._flag &= ~(FLAG_PAUSED | FLAG_STALE | FLAG_PENDING);
+  }
+
+  /**
+   * Contextual set — writes to a sender while pausing this receiver
+   * so it ignores any notifications that propagate from the write.
+   * When IDLE (e.g. inside an async continuation after await), mirrors
+   * the immediate set() path. When mid-flush, schedules a guarded
+   * assign for drain time.
+   * @this {Compute|Effect}
+   * @param {Sender} sender
+   * @param {* | function(*): *} value
    * @returns {void}
    */
-  ComputeProto.set = set;
+  function contextSet(sender, value) {
+    if (IDLE) {
+      let _value;
+      if (typeof value === "function") {
+        _value = value(sender._value);
+      } else {
+        _value = value;
+      }
+      if (sender._flag & FLAG_RELAY || sender._value !== _value) {
+        sender._assign(_value, TIME + 1);
+        this._flag |= FLAG_PAUSED;
+        notify(sender, FLAG_STALE);
+        this._flag &= ~(FLAG_PAUSED | FLAG_STALE | FLAG_PENDING);
+        flush();
+      }
+    } else {
+      schedule(sender, { _recv: this, _value: value }, guardedAssign);
+    }
+  }
+
+  /**
+   * Contextual post — deferred version of contextSet. Schedules a
+   * guarded write that will pause this receiver at drain time. Triggers
+   * a microtask flush if not already posting, same as Signal.post().
+   * @this {Compute|Effect}
+   * @param {Sender} sender
+   * @param {* | function(*): *} value
+   * @returns {void}
+   */
+  function contextPost(sender, value) {
+    schedule(sender, { _recv: this, _value: value }, guardedAssign);
+    if (!POSTING) {
+      POSTING = true;
+      queueMicrotask(microflush);
+    }
+  }
+
+
+  ComputeProto.set = contextSet;
+  ComputeProto.post = contextPost;
 
 
   /**
@@ -1476,10 +1530,10 @@ function root(fn) {
   ComputeProto._settle = function (value) {
     let flag = this._flag;
     let isError = flag & FLAG_ERROR;
-    this._flag &= ~(FLAG_LOADING | FLAG_INIT | FLAG_LOCK);
+    this._flag &= ~(FLAG_LOADING | FLAG_INIT | FLAG_LOCKED);
 
     /** Deferred dispose: owner disposed while we were locked.
-     *  FLAG_LOCK was cleared above, so _dispose runs full cleanup. */
+     *  FLAG_LOCKED was cleared above, so _dispose runs full cleanup. */
     if (flag & FLAG_DISPOSED) {
       this._dispose();
       return;
@@ -1516,11 +1570,11 @@ function root(fn) {
 
       flush();
 
-      if (stale || (flag & FLAG_LOCK && (this._flag & FLAG_STALE || (this._flag & FLAG_PENDING && needsUpdate(this, TIME))))) {
+      if (stale || (flag & FLAG_LOCKED && (this._flag & FLAG_STALE || (this._flag & FLAG_PENDING && needsUpdate(this, TIME))))) {
         this._flag |= FLAG_STALE;
         this._update(TIME);
       }
-    } else if (flag & FLAG_LOCK && (this._flag & FLAG_STALE || (this._flag & FLAG_PENDING && needsUpdate(this, TIME)))) {
+    } else if (flag & FLAG_LOCKED && (this._flag & FLAG_STALE || (this._flag & FLAG_PENDING && needsUpdate(this, TIME)))) {
       this._flag |= FLAG_STALE;
       this._update(TIME);
     }
@@ -1547,7 +1601,7 @@ function root(fn) {
   };
 
   ComputeProto._dispose = function () {
-    if (this._flag & FLAG_LOCK) {
+    if (this._flag & FLAG_LOCKED) {
       this._flag |= FLAG_DISPOSED;
       return;
     }
@@ -1576,20 +1630,12 @@ function root(fn) {
   };
 
   /**
-   * Unified update for compute nodes. Two branches:
-   * 1. Stable — no dep tracking, fn receives (val, this, prev, args) or (this, prev, args)
-   * 2. Setup/dynamic — version-tracked dep reconciliation
-   *
-   * Async nodes share the same path. During fn execution FLAG_ASYNC is
-   * temporarily cleared so val() uses the normal VERSION tracking. After
-   * fn returns, FLAG_ASYNC is restored and the result is routed to either
-   * the sync value-comparison path or the async promise/iterator path.
-   * @this {Compute<T,U,V,W>}
+   * @this {Compute}
    * @param {number} time
    */
   ComputeProto._update = function (time) {
     let flag = this._flag;
-    if (flag & FLAG_LOCK) {
+    if (flag & FLAG_LOCKED) {
       return;
     }
     this._time = time;
@@ -1775,9 +1821,9 @@ function root(fn) {
    */
   ComputeProto._receive = function () {
     let flag = this._flag;
-    if (!(flag & (FLAG_EAGER | FLAG_WAITER | FLAG_LOADING | FLAG_LOCK | FLAG_DISPOSED))) {
+    if (!(flag & (FLAG_EAGER | FLAG_WAITER | FLAG_LOADING | FLAG_LOCKED | FLAG_PAUSED | FLAG_DISPOSED))) {
       notify(this, FLAG_PENDING);
-    } else if (flag & (FLAG_LOCK | FLAG_DISPOSED)) {
+    } else if (flag & (FLAG_LOCKED | FLAG_PAUSED | FLAG_DISPOSED)) {
       return;
     } else {
       /** Abort in-flight async work. The stale/pending flag check
@@ -1806,24 +1852,16 @@ function root(fn) {
    * @returns {*}
    */
   EffectProto.val = val;
+  EffectProto.set = contextSet;
+  EffectProto.post = contextPost;
 
   /**
-   * Sync update for effect nodes. Two branches:
-   * 1. Stable (no SETUP) — no dep tracking, fn receives (this, args)
-   * 2. Setup/dynamic — version bump, dep tracking, fn receives (this, args)
-   * Pre-execution cleanup and scope save happen before branching.
-   * Async nodes delegate to _updateAsync.
-   * @this {Effect<U,V,W>}
-   * @param {number} time
-   */
-  /**
-   * Unified update for effect nodes. Handles both sync and async.
-   * @this {Effect<U,V,W>}
+   * @this {Effect}
    * @param {number} time
    */
   EffectProto._update = function (time) {
     let flag = this._flag;
-    if (flag & FLAG_LOCK) {
+    if (flag & FLAG_LOCKED) {
       return;
     }
 
@@ -1963,10 +2001,10 @@ function root(fn) {
    */
   EffectProto._settle = function (err) {
     let flag = this._flag;
-    this._flag &= ~(FLAG_LOADING | FLAG_SUSPEND | FLAG_LOCK);
+    this._flag &= ~(FLAG_LOADING | FLAG_SUSPEND | FLAG_LOCKED);
 
     /** Deferred dispose: owner disposed while we were locked.
-     *  FLAG_LOCK was cleared above, so _dispose runs full cleanup. */
+     *  FLAG_LOCKED was cleared above, so _dispose runs full cleanup. */
     if (flag & FLAG_DISPOSED) {
       this._dispose();
       return;
@@ -1992,7 +2030,7 @@ function root(fn) {
     if (this._flag & FLAG_CHANNEL && (this._chan._defer1 !== null || this._chan._defers !== null)) {
       stale = settleDeps(this);
     }
-    if (stale || (flag & FLAG_LOCK && (this._flag & FLAG_STALE || (this._flag & FLAG_PENDING && needsUpdate(this, TIME))))) {
+    if (stale || (flag & FLAG_LOCKED && (this._flag & FLAG_STALE || (this._flag & FLAG_PENDING && needsUpdate(this, TIME))))) {
       this._flag |= FLAG_STALE;
       this._receive();
       flush();
@@ -2015,7 +2053,7 @@ function root(fn) {
    * @returns {void}
    */
   EffectProto._dispose = function () {
-    if (this._flag & FLAG_LOCK) {
+    if (this._flag & FLAG_LOCKED) {
       this._flag |= FLAG_DISPOSED;
       return;
     }
@@ -2055,7 +2093,7 @@ function root(fn) {
    */
   EffectProto._receive = function () {
     let flag = this._flag;
-    if (flag & (FLAG_LOCK | FLAG_DISPOSED)) {
+    if (flag & (FLAG_LOCKED | FLAG_PAUSED | FLAG_DISPOSED)) {
       return;
     }
     /** Abort in-flight async work eagerly so stale fetches/promises
@@ -2613,7 +2651,7 @@ function notify(node, flag) {
   if (sub !== null) {
     let flags = sub._flag;
     sub._flag |= flag;
-    if (!(flags & (FLAG_PENDING | FLAG_STALE | FLAG_DISPOSED | FLAG_LOCK))) {
+    if (!(flags & (FLAG_PENDING | FLAG_STALE | FLAG_DISPOSED | FLAG_LOCKED))) {
       sub._receive();
     }
   }
@@ -2624,7 +2662,7 @@ function notify(node, flag) {
       sub = subs[i];
       let flags = sub._flag;
       sub._flag |= flag;
-      if (!(flags & (FLAG_PENDING | FLAG_STALE | FLAG_DISPOSED | FLAG_LOCK))) {
+      if (!(flags & (FLAG_PENDING | FLAG_STALE | FLAG_DISPOSED | FLAG_LOCKED))) {
         sub._receive();
       }
     }
@@ -2897,10 +2935,10 @@ function asyncKind(value) {
 function resolvePromise(node, promise, time) {
   promise.then(
     (val) => {
-      if (node._time !== time || (node._flag & FLAG_DISPOSED && !(node._flag & FLAG_LOCK))) {
+      if (node._time !== time || (node._flag & FLAG_DISPOSED && !(node._flag & FLAG_LOCKED))) {
         return;
       }
-      if (!(node._flag & FLAG_LOCK)) {
+      if (!(node._flag & FLAG_LOCKED)) {
         if (node._flag & FLAG_STALE) {
           return;
         }
@@ -2912,10 +2950,10 @@ function resolvePromise(node, promise, time) {
       node._settle(val);
     },
     (err) => {
-      if (node._time !== time || (node._flag & FLAG_DISPOSED && !(node._flag & FLAG_LOCK))) {
+      if (node._time !== time || (node._flag & FLAG_DISPOSED && !(node._flag & FLAG_LOCKED))) {
         return;
       }
-      if (!(node._flag & FLAG_LOCK)) {
+      if (!(node._flag & FLAG_LOCKED)) {
         if (node._flag & FLAG_STALE) {
           return;
         }
@@ -2945,13 +2983,13 @@ function resolveIterator(node, iterable, time) {
 
   /** @param {IteratorResult<T>} result */
   let onNext = (result) => {
-    if (node._time !== time || (node._flag & FLAG_DISPOSED && !(node._flag & FLAG_LOCK))) {
+    if (node._time !== time || (node._flag & FLAG_DISPOSED && !(node._flag & FLAG_LOCKED))) {
       if (typeof iterator.return === "function") {
         iterator.return();
       }
       return;
     }
-    if (!(node._flag & FLAG_LOCK)) {
+    if (!(node._flag & FLAG_LOCKED)) {
       if (node._flag & FLAG_STALE) {
         if (typeof iterator.return === "function") {
           iterator.return();
@@ -2978,10 +3016,10 @@ function resolveIterator(node, iterable, time) {
 
   /** @param {*} err */
   let onError = (err) => {
-    if (node._time !== time || (node._flag & FLAG_DISPOSED && !(node._flag & FLAG_LOCK))) {
+    if (node._time !== time || (node._flag & FLAG_DISPOSED && !(node._flag & FLAG_LOCKED))) {
       return;
     }
-    if (!(node._flag & FLAG_LOCK)) {
+    if (!(node._flag & FLAG_LOCKED)) {
       if (node._flag & FLAG_STALE) {
         return;
       }
@@ -3225,8 +3263,8 @@ function addWaiter(responderCh, awaiter, resolve, reject) {
  * @returns {void}
  */
 function send(awaiter, task, resolve, reject) {
-  resolve = resolve || NOOP;
-  reject = reject || NOOP;
+  resolve = resolve;
+  reject = reject;
   let awaiterCh = awaiter._channel();
   let responderCh = task._channel();
 
@@ -3771,7 +3809,7 @@ export {
   FLAG_CHANNEL,
   FLAG_EAGER,
   FLAG_BLOCKED,
-  FLAG_LOCK,
+  FLAG_LOCKED,
   FLAG_SUSPEND,
   REFUSE,
   PANIC,

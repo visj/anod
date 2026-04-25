@@ -49,5 +49,8 @@
       "node": "./test/env/node.js",
       "default": "./test/env/node.js"
     }
+  },
+  "dependencies": {
+    "@mitata/counters": "^0.0.8"
   }
 }

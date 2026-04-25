@@ -1,6 +1,6 @@
 import { bench, run } from 'mitata';
 import { EXPECTED } from './expected.js';
-import { signal, compute, effect, batch } from '../../dist/internal.js';
+import { signal, compute, effect, batch } from '../../dist/core.js';
 import { saveRun } from './save-run.js';
 
 let sink = 0;
