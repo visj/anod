@@ -10,7 +10,7 @@ describe("root", () => {
 
             r.effect(c => {
                 c.val(s1);
-                c.root(r2 => {
+                root(r2 => {
                     r2.effect(c2 => {
                         c2.val(s2);
                         count++;

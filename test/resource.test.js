@@ -475,4 +475,159 @@ describe("resource", () => {
             expect(seen).toEqual([0, 3]);
         });
     });
+
+    describe("c.suspend(resource) from spawn/task", () => {
+        test("spawn awaits a loading resource and receives value on settle", async () => {
+            await new Promise((done) => {
+                root((c) => {
+                    const r = resource(0);
+                    c.spawn(async (c) => {
+                        let val = await c.suspend(r);
+                        expect(val).toBe(42);
+                        done();
+                    });
+                    r.set(42, async (c, optimistic) => {
+                        return await c.suspend(Promise.resolve(optimistic));
+                    });
+                });
+            });
+        });
+
+        test("spawn awaits a settled resource and gets value immediately", async () => {
+            await new Promise((done) => {
+                root((c) => {
+                    const r = resource(99);
+                    c.spawn(async (c) => {
+                        let val = await c.suspend(r);
+                        expect(val).toBe(99);
+                        done();
+                    });
+                });
+            });
+        });
+
+        test("spawn awaits resource, resource re-settles, spawn gets latest", async () => {
+            await new Promise((done) => {
+                root((c) => {
+                    const r = resource("initial");
+                    let seen = [];
+                    c.spawn(async (c) => {
+                        let val = await c.suspend(r);
+                        seen.push(val);
+                        if (val === "final") {
+                            expect(seen).toEqual(["initial", "final"]);
+                            done();
+                        }
+                    });
+                    settle().then(() => {
+                        r.set("final", async (c, optimistic) => {
+                            return await c.suspend(Promise.resolve(optimistic));
+                        });
+                    });
+                });
+            });
+        });
+
+        test("spawn awaits loading resource that settles later", async () => {
+            await new Promise((done) => {
+                root((c) => {
+                    let resolveResource;
+                    const r = resource("old");
+                    r.set("pending", async (c, optimistic) => {
+                        return await c.suspend(
+                            new Promise((resolve) => { resolveResource = resolve; })
+                        );
+                    });
+
+                    c.spawn(async (c) => {
+                        let val = await c.suspend(r);
+                        expect(val).toBe("settled");
+                        done();
+                    });
+
+                    setTimeout(() => {
+                        resolveResource("settled");
+                    }, 20);
+                });
+            });
+        });
+
+        test("c.pending(resource) returns loading state from effect", async () => {
+            root((c) => {
+                const r = resource(0);
+                r.set(1, async (c, prev) => {
+                    return await c.suspend(
+                        new Promise((resolve) => setTimeout(() => resolve(prev), 50))
+                    );
+                });
+                let isLoading = false;
+                c.effect((c) => {
+                    isLoading = c.pending(r);
+                    c.val(r);
+                });
+                expect(isLoading).toBe(true);
+            });
+        });
+
+        test("resource with equals=false (mutable) notifies on same-value settle", async () => {
+            let notifyCount = 0;
+            const r = resource({ count: 0 }, false);
+            root((c) => {
+                c.effect(r, () => { notifyCount++; });
+                notifyCount = 0;
+                r.set({ count: 0 }, async (c, optimistic) => {
+                    return await c.suspend(Promise.resolve(optimistic));
+                });
+            });
+            expect(notifyCount).toBe(1);
+            await settle();
+            /** Relay: settles with same-shaped object, still notifies. */
+            expect(notifyCount).toBe(2);
+        });
+
+        test("resource with custom equality skips notification when equal", async () => {
+            let notifyCount = 0;
+            const r = resource(
+                { id: 1, name: "alice" },
+                (a, b) => a.id === b.id && a.name === b.name
+            );
+            root((c) => {
+                c.effect(r, () => { notifyCount++; });
+                notifyCount = 0;
+                r.set({ id: 1, name: "alice" }, async (c, optimistic) => {
+                    /** Server returns identical object (different reference). */
+                    return await c.suspend(Promise.resolve({ id: 1, name: "alice" }));
+                });
+            });
+            /** Optimistic write: same value per custom equal, no notify. */
+            expect(notifyCount).toBe(0);
+            await settle();
+            /** Settle always notifies (loading state changed). */
+            expect(notifyCount).toBe(1);
+        });
+
+        test("task awaits a loading resource", async () => {
+            await new Promise((done) => {
+                root((c) => {
+                    const r = resource(0);
+                    r.set(42, async (c, optimistic) => {
+                        return await c.suspend(
+                            new Promise((resolve) => setTimeout(() => resolve(optimistic), 10))
+                        );
+                    });
+
+                    const derived = c.task(async (c) => {
+                        let val = await c.suspend(r);
+                        return val * 2;
+                    });
+
+                    c.spawn(async (c) => {
+                        let val = await c.suspend(derived);
+                        expect(val).toBe(84);
+                        done();
+                    });
+                });
+            });
+        });
+    });
 });

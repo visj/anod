@@ -1,5 +1,5 @@
 import { describe, test, expect } from "#test-runner";
-import { signal, relay, root, batch } from "#anod";
+import { signal, mutable, root, batch } from "#anod";
 
 let c; root((_c) => { c = _c; });
 
@@ -65,25 +65,25 @@ describe("signal.set() return value", () => {
     });
 });
 
-describe("relay.set() return value", () => {
+describe("mutable.set() return value", () => {
     test("returns true when value changes", () => {
-        const r = relay(1);
+        const r = mutable(1);
         expect(r.set(2)).toBe(true);
     });
 
     test("returns true even when value is the same", () => {
-        const r = relay(5);
+        const r = mutable(5);
         expect(r.set(5)).toBe(true);
     });
 
     test("returns true with same reference (object)", () => {
         const obj = { a: 1 };
-        const r = relay(obj);
+        const r = mutable(obj);
         expect(r.set(obj)).toBe(true);
     });
 
     test("returns true for same value inside batch", () => {
-        const r = relay(5);
+        const r = mutable(5);
         let result;
         batch(() => {
             result = r.set(5);
@@ -120,14 +120,14 @@ describe("signal.post() return value", () => {
     });
 });
 
-describe("relay.post() return value", () => {
+describe("mutable.post() return value", () => {
     test("returns true when value changes", () => {
-        const r = relay(1);
+        const r = mutable(1);
         expect(r.post(2)).toBe(true);
     });
 
     test("returns true even when value is the same", () => {
-        const r = relay(5);
+        const r = mutable(5);
         expect(r.post(5)).toBe(true);
     });
 });

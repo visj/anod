@@ -296,6 +296,8 @@ function Cell(value, flag, equal) {
 	this._time = 0;
 	/** @type {(function(T,T): boolean) | null} */
 	this._equal = equal;
+	/** @type {{ _waiters: Array | null } | null} */
+	this._chan = null;
 }
 Cell.prototype = Object.create(Signal.prototype);
 
@@ -747,21 +749,26 @@ function _readAsync(sender, safe) {
  * @returns {Signal<T>}
  */
 function signal(value, equal) {
-	if (equal !== undefined) {
+	if (equal === false) {
+		let node = new Signal(value);
+		node._flag = FLAG_RELAY;
+		return node;
+	}
+	if (typeof equal === "function") {
 		return new Cell(value, 0, equal);
 	}
 	return new Signal(value);
 }
 
 /**
- * Creates a relay signal — a signal that always propagates on
- * set(), bypassing the equality check. Useful for mutable
- * objects where reference equality doesn't reflect changes.
+ * Creates a mutable signal that always propagates on set(),
+ * bypassing the equality check. Useful for mutable objects
+ * where reference equality doesn't reflect changes.
  * @template T
  * @param {T} value
  * @returns {Signal<T>}
  */
-function relay(value) {
+function mutable(value) {
 	let node = new Signal(value);
 	node._flag = FLAG_RELAY;
 	return node;
@@ -772,11 +779,14 @@ function relay(value) {
  * with background async work via `set(value, asyncFn)`.
  * @template T
  * @param {T} value
- * @param {boolean=} relay
+ * @param {(boolean | (function(T,T): boolean))=} equals
  * @returns {Signal<T>}
  */
-function resource(value, relay) {
-	return new Cell(value, FLAG_ASYNC | (relay ? FLAG_RELAY : 0), null);
+function resource(value, equals) {
+	if (equals === false) {
+		return new Cell(value, FLAG_ASYNC | FLAG_RELAY, null);
+	}
+	return new Cell(value, FLAG_ASYNC, typeof equals === "function" ? equals : null);
 }
 
 /**
@@ -890,30 +900,6 @@ function root(fn) {
 		}
 	};
 
-	let _loading = {
-		get: function () {
-			return (this._flag & FLAG_LOADING) !== 0;
-		},
-		set: function (val) {
-			if (val) {
-				this._flag |= FLAG_LOADING;
-			} else {
-				this._flag &= ~FLAG_LOADING;
-			}
-		}
-	};
-	let _error = {
-		get: function () {
-			return (this._flag & FLAG_ERROR) !== 0;
-		},
-		set: function (val) {
-			if (val) {
-				this._flag |= FLAG_ERROR;
-			} else {
-				this._flag &= ~FLAG_ERROR;
-			}
-		}
-	};
 	let _readonlyLoading = {
 		get: function () {
 			return (this._flag & FLAG_LOADING) !== 0;
@@ -926,10 +912,10 @@ function root(fn) {
 	};
 
 	Object.defineProperties(RootProto, { disposed });
-	Object.defineProperties(SignalProto, {
-		disposed,
-		loading: _loading,
-		error: _error
+	Object.defineProperties(SignalProto, { disposed });
+	Object.defineProperties(Cell.prototype, {
+		loading: _readonlyLoading,
+		error: _readonlyError
 	});
 	Object.defineProperties(ComputeProto, {
 		disposed,
@@ -999,11 +985,7 @@ function root(fn) {
 	 * @returns {void}
 	 */
 	function stable() {
-		if (this._flag & FLAG_ASYNC) {
-			this._flag = (this._flag | FLAG_STABLE) & ~FLAG_SETUP;
-		} else {
-			this._flag |= FLAG_STABLE;
-		}
+		this._flag |= FLAG_STABLE;
 	}
 
 	/** IOwner: cleanup/recover exposed on Root + Effect prototypes */
@@ -1513,6 +1495,22 @@ function root(fn) {
 	ComputeProto.version = EffectProto.version = function () { return this._time; };
 
 	/**
+	 * Lazily allocates a mini-channel on Cell nodes for waiter support.
+	 * Only contains _waiters — no controller, defers, or responds.
+	 * @this {Cell}
+	 * @returns {{ _waiters: Array | null }}
+	 */
+	Cell.prototype._channel = function () {
+		if (this._flag & FLAG_CHANNEL) {
+			return this._chan;
+		}
+		let channel = { _waiters: null };
+		this._chan = channel;
+		this._flag |= FLAG_CHANNEL;
+		return channel;
+	};
+
+	/**
 	 * Resource-specific suspend. Only supports raw promises and the
 	 * callback pattern. Resources are senders, not receivers — they
 	 * cannot await tasks or other resources.
@@ -1577,6 +1575,16 @@ function root(fn) {
 			return;
 		}
 		this._value = value;
+
+		if (this._flag & FLAG_WAITER) {
+			let ch = this._chan;
+			let waiters = ch._waiters;
+			let waiterCount = waiters.length;
+			settleNotify(this, value, !!(this._flag & FLAG_ERROR), waiters, waiterCount);
+			ch._waiters = null;
+			this._flag &= ~FLAG_WAITER;
+		}
+
 		notify(this, FLAG_STALE);
 		flush();
 	};
@@ -1716,6 +1724,12 @@ function root(fn) {
 	 * @returns {void}
 	 */
 	SignalProto._dispose = function () {
+		if (this._flag & FLAG_WAITER) {
+			let ch = this._chan;
+			if (ch._waiters !== null) {
+				resolveWaiters(this, ch, new Error("Awaited resource was disposed"), true, true);
+			}
+		}
 		this._flag = FLAG_DISPOSED;
 		clearSubs(this);
 		this._value = null;
@@ -2543,7 +2557,7 @@ function root(fn) {
 	 * @param {*} [args]
 	 * @returns {Compute}
 	 */
-	function _compute(depOrFn, fnOrSeed, optsOrSeed, argsOrOpts, args) {
+	function compute(depOrFn, fnOrSeed, optsOrSeed, argsOrOpts, args) {
 		if (this._flag & FLAG_DISPOSED) {
 			throw new Error(ASSERT_NOT_DISPOSED);
 		}
@@ -2576,7 +2590,7 @@ function root(fn) {
 	 * @param {*} [args]
 	 * @returns {Compute}
 	 */
-	function _task(depOrFn, fnOrSeed, optsOrSeed, argsOrOpts, args) {
+	function task(depOrFn, fnOrSeed, optsOrSeed, argsOrOpts, args) {
 		if (this._flag & FLAG_DISPOSED) {
 			throw new Error(ASSERT_NOT_DISPOSED);
 		}
@@ -2612,7 +2626,7 @@ function root(fn) {
 	 * @param {*} [args]
 	 * @returns {Effect}
 	 */
-	function _effect(depOrFn, fnOrOpts, optsOrArgs, args) {
+	function effect(depOrFn, fnOrOpts, optsOrArgs, args) {
 		if (this._flag & FLAG_DISPOSED) {
 			throw new Error(ASSERT_NOT_DISPOSED);
 		}
@@ -2648,7 +2662,7 @@ function root(fn) {
 	 * @param {*} [args]
 	 * @returns {Effect}
 	 */
-	function _spawn(depOrFn, fnOrOpts, optsOrArgs, args) {
+	function spawn(depOrFn, fnOrOpts, optsOrArgs, args) {
 		if (this._flag & FLAG_DISPOSED) {
 			throw new Error(ASSERT_NOT_DISPOSED);
 		}
@@ -2679,13 +2693,10 @@ function root(fn) {
 
 	/** Install factory methods on Root, Effect, and Clock prototypes */
 	var ClockProto = Clock.prototype;
-	RootProto.signal = EffectProto.signal = ClockProto.signal = signal;
-	RootProto.compute = EffectProto.compute = ClockProto.compute = _compute;
-	RootProto.task = EffectProto.task = ClockProto.task = _task;
-	RootProto.effect = EffectProto.effect = ClockProto.effect = _effect;
-	RootProto.spawn = EffectProto.spawn = ClockProto.spawn = _spawn;
-	RootProto.root = EffectProto.root = ClockProto.root = root;
-	RootProto.resource = EffectProto.resource = ClockProto.resource = resource;
+	RootProto.compute = EffectProto.compute = ClockProto.compute = compute;
+	RootProto.task = EffectProto.task = ClockProto.task = task;
+	RootProto.effect = EffectProto.effect = ClockProto.effect = effect;
+	RootProto.spawn = EffectProto.spawn = ClockProto.spawn = spawn;
 }
 
 /**
@@ -4183,7 +4194,7 @@ export {
 	startEffect,
 	startCompute,
 	signal,
-	relay,
+	mutable,
 	resource,
 	root,
 	c,

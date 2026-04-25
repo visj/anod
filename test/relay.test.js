@@ -1,11 +1,11 @@
 import { describe, test, expect } from "#test-runner";
-import { signal, relay, root } from "#anod";
+import { signal, mutable, root } from "#anod";
 
 let c; root((_c) => { c = _c; });
 
-describe("relay", () => {
+describe("mutable", () => {
   test("always notifies on set even when value is the same", () => {
-    const r = relay(1);
+    const r = mutable(1);
     let runs = 0;
     c.effect(r, () => { runs++; });
     expect(runs).toBe(1);
@@ -27,8 +27,8 @@ describe("relay", () => {
     expect(runs).toBe(1);
   });
 
-  test("relay notifies with mutable object", () => {
-    const items = relay([]);
+  test("mutable notifies with mutable object", () => {
+    const items = mutable([]);
     let observed = [];
     c.effect(items, (val) => {
       observed.push(val.length);
@@ -45,8 +45,8 @@ describe("relay", () => {
     expect(observed).toEqual([0, 1, 2]);
   });
 
-  test("relay works with updater function", () => {
-    const r = relay(0);
+  test("mutable works with updater function", () => {
+    const r = mutable(0);
     let runs = 0;
     c.effect(r, () => { runs++; });
     expect(runs).toBe(1);
@@ -55,8 +55,8 @@ describe("relay", () => {
     expect(runs).toBe(2);
   });
 
-  test("relay works with post()", async () => {
-    const r = relay(1);
+  test("mutable works with post()", async () => {
+    const r = mutable(1);
     let runs = 0;
     c.effect(r, () => { runs++; });
     expect(runs).toBe(1);
@@ -66,42 +66,38 @@ describe("relay", () => {
     expect(runs).toBe(2);
   });
 
-  test("relay inside batch always schedules", () => {
-    const r = relay(5);
+  test("mutable inside batch always schedules", () => {
+    const r = mutable(5);
     let observed = [];
     c.effect(r, (v) => { observed.push(v); });
     expect(observed).toEqual([5]);
 
-    /** Normal signal would not schedule when value is the same.
-     *  Relay should still schedule and notify. */
     const s = signal(0);
     c.effect(s, () => {
       r.set(5);
     });
 
     s.set(1);
-    /** Relay effect re-ran with same value. */
     expect(observed.length).toBeGreaterThan(1);
     expect(observed[observed.length - 1]).toBe(5);
   });
 
-  test("relay propagates through compute chain", () => {
-    const r = relay(1);
+  test("mutable propagates through compute chain", () => {
+    const r = mutable(1);
     const c1 = c.compute(r, (val) => val * 10);
     expect(c1.get()).toBe(10);
 
-    /** Same value but relay always notifies — compute re-runs. */
     r.set(1);
     expect(c1.get()).toBe(10);
   });
 
-  test("relay get() returns the value", () => {
-    const r = relay({ x: 1 });
+  test("mutable get() returns the value", () => {
+    const r = mutable({ x: 1 });
     expect(r.get().x).toBe(1);
   });
 
-  test("relay dispose works", () => {
-    const r = relay(1);
+  test("mutable dispose works", () => {
+    const r = mutable(1);
     r.dispose();
     expect(r.disposed).toBe(true);
     expect(() => r.set(2)).toThrow();

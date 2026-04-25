@@ -553,28 +553,38 @@ describe("async", () => {
     test("c.stable() on spawn()", async () => {
       const s1 = signal(1);
       const s2 = signal(100);
+      const s3 = signal(1000);
       let runs = 0;
       let observed;
-      c.spawn(async (c) => {
+      /** stable() is called on the node, not inside the body.
+       *  First run collects all deps (s1, s2). From run 2 on,
+       *  deps are frozen — s3 is read but not tracked. */
+      const sp = c.spawn(async (c) => {
         runs++;
         const v1 = c.val(s1);
-        c.stable();
         const v2 = c.val(s2);
+        if (v1 > 1) c.val(s3); // only read on run 2+
         await c.suspend(tick());
         observed = v1 + v2;
       });
+      sp.stable();
       await settle();
       expect(observed).toBe(101);
       expect(runs).toBe(1);
 
-      s2.set(200); // not tracked
-      await tick();
-      expect(runs).toBe(1);
+      s2.set(200); // tracked from run 1
+      await settle();
+      expect(observed).toBe(201);
+      expect(runs).toBe(2);
 
-      s1.set(2); // tracked
+      s3.set(9999); // read on run 2 but NOT tracked (stable)
+      await settle();
+      expect(runs).toBe(2);
+
+      s1.set(2); // tracked from run 1
       await settle();
       expect(observed).toBe(202);
-      expect(runs).toBe(2);
+      expect(runs).toBe(3);
     });
 
     test("c.stable() before any reads: node goes dormant", async () => {

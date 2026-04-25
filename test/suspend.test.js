@@ -601,7 +601,7 @@ describe("ownership: async nodes and disposal", () => {
 				await cx.suspend(tick());
 			});
 
-			const inner = r.root((r2) => {
+			const inner = root((r2) => {
 				r2.spawn(async (cx) => {
 					innerRuns++;
 					cx.val(s1);

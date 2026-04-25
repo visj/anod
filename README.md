@@ -12,7 +12,7 @@ anod is a reactive state management library. It has built-in support for both sy
 - [Basic usage](#basic-usage)
 	- [Root](#root)
 	- [Global `c` context](#global-c-context)
-	- [Signal & Relay](#signal--relay)
+	- [Signal & Mutable](#signal--mutable)
 	- [Compute](#compute)
 	- [Effect](#effect)
 - [Async reactivity](#async-reactivity)
@@ -85,8 +85,7 @@ const app = root((c) => {
 
 The following primitives exist in anod:
 
-- Signal, holds a value and notifies when it changes
-- Relay, a signal that always notifies on every update
+- Signal, holds a value and notifies when it changes. `mutable()` creates a signal that always notifies.
 - Compute, a derived signal, updates and notifies when its derived value changes
 - Effect, a sink that listens to signals and computes and performs actions
 - Resource, an async signal for optimistic updates with server confirmation
@@ -114,18 +113,18 @@ app.dispose();
 
 For simple use cases where you don't need ownership or disposal, anod exports a global `c` that creates unowned nodes: `import { c } from "anod"`. Nodes created through `c` live until GC collects them.
 
-#### Signal & Relay
+#### Signal & Mutable
 
 A signal stores a value and notifies subscribers when changed. You can read it to get its current value, and write to it to update anyone who depends on it.
 
-Signals accept an optional equality function to customize when subscribers are notified: `signal(value, (prev, next) => boolean)`. When provided, the function is called on every write — return `true` to skip notification.
+Signals accept an optional equality function to customize when subscribers are notified: `signal(value, (prev, next) => boolean)`. When provided, the function is called on every write — return `true` to skip notification. Mutable signals are useful for objects that you want to change in place and notify about changes. They notify always, without checking equality.
 
 ```ts
-import { root, signal, relay } from "anod";
+import { root, signal, mutable } from "anod";
 
 root((c) => {
 	const name = signal("Vilhelm");
-	const shape = relay({ job: "dev", hobby: "fidology" });
+	const shape = mutable({ job: "dev", hobby: "fidology" });
 	/**
 	 * The .get() method only returns the current value.
 	 * Unlike other libraries, this method by itself does
@@ -149,7 +148,7 @@ root((c) => {
 	name.set("Leif");
 
 	/**
-	 * A relay is convenient when you work with mutable
+	 * A mutable signal is convenient when you work with mutable
 	 * data structures. It takes a callback where you can make
 	 * modifications, and just return the same value.
 	 */

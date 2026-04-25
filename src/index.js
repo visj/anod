@@ -7,7 +7,7 @@ export {
     PANIC,
     FATAL,
     signal,
-    relay,
+    mutable,
     resource,
     root,
     batch,
