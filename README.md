@@ -1087,7 +1087,7 @@ Running fair benchmarks against other frameworks is no easy task. Therefore, I w
 
 Compared using the unbound API (`c.compute(fn)`, `c.effect(fn)`) which is the equivalent of alien-signals' `computed(fn)`, `effect(fn)`. Both use dynamic dependency tracking with full reconciliation — no bound-dep fast paths.
 
-| Benchmark | alien | anod | Δ time | alien | anod | Δ heap ⚠️ see comment |
+| Benchmark | alien | anod | Δ time | alien | anod | Δ heap ⚠️ |
 | :-- | --: | --: | --: | --: | --: | --: |
 | | **Time** | **Time** | | **Heap** | **Heap** | |
 | **Kairo** | | | | | | |
