@@ -11,4 +11,6 @@ export {
     root,
     batch,
     flush,
+    c,
+    Clock,
 } from "./core.js";

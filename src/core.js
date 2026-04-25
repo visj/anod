@@ -38,6 +38,7 @@ const FLAG_PANIC = 1 << 21;
 const FLAG_SINGLE = 1 << 22;
 const FLAG_EAGER = 1 << 23;
 const FLAG_PAUSED = 1 << 25;
+const FLAG_OWNER = 1 << 26;
 const FLAG_PURGE = 1 << 24;
 
 /** Error type constants for { error, type } POJOs. */
@@ -139,6 +140,9 @@ var IDLE = true;
 /** Whether a microtask flush is already scheduled. */
 var POSTING = false;
 
+/** Global unowned context for top-level node creation. */
+var c = new Clock();
+
 /**
  * We use a 2-phase version system to handle dependency reuse.
  * On every update, we bump VERSION = SEED + 2. Then, we sweep
@@ -218,12 +222,24 @@ var PURGES = [];
 var PURGE_COUNT = 0;
 
 /**
+ * Minimal factory-only context with no ownership. Nodes created
+ * through Clock are unowned — they live until GC or manual dispose.
+ * Extensible via Clock.prototype for user-defined context methods.
+ * @constructor
+ */
+function Clock() {}
+Clock.prototype._flag = 0;
+Clock.prototype._level = 0;
+Clock.prototype._owner = null;
+Clock.prototype._recover = null;
+
+/**
  * @constructor
  * @implements {Owner}
  */
 function Root() {
   /** @type {number} */
-  this._flag = 0;
+  this._flag = FLAG_OWNER;
   /** @type {(function(): void) | Array<(function(): void)> | null} */
   this._cleanup = null;
   /** @type {Array<Receiver> | null} */
@@ -306,7 +322,7 @@ function Compute(opts, fn, dep1, seed, args) {
  */
 function Effect(opts, fn, dep1, owner, args) {
   /** @type {number} */
-  this._flag = FLAG_INIT | (0 | opts);
+  this._flag = FLAG_INIT | FLAG_OWNER | (0 | opts);
   /** @type {(function(W): (function(): void | void)) | (function(U,W): (function(): void | void)) | (function(U,V,W): (function(): void | void)) | null} */
   this._fn = fn;
   /** @type {Sender<U> | null} */
@@ -2115,7 +2131,18 @@ function root(fn) {
     }
   };
 
-  /** @this {Owner} */
+  /**
+   * Creates a sync compute node.
+   * Unbound: compute(fn, seed?, opts?, args?)
+   * Bound:   compute(dep, fn, seed?, opts?, args?)
+   * @this {Owner|Clock}
+   * @param {Sender | Function} depOrFn
+   * @param {Function | *} fnOrSeed
+   * @param {number | *} optsOrSeed
+   * @param {number | *} argsOrOpts
+   * @param {*} [args]
+   * @returns {Compute}
+   */
   function _compute(depOrFn, fnOrSeed, optsOrSeed, argsOrOpts, args) {
     if (this._flag & FLAG_DISPOSED) {
       throw new Error(ASSERT_NOT_DISPOSED);
@@ -2136,7 +2163,18 @@ function root(fn) {
     return node;
   }
 
-  /** @this {Owner} */
+  /**
+   * Creates an async compute node (task).
+   * Unbound: task(fn, seed?, opts?, args?)
+   * Bound:   task(dep, fn, seed?, opts?, args?)
+   * @this {Owner|Clock}
+   * @param {Sender | Function} depOrFn
+   * @param {Function | *} fnOrSeed
+   * @param {number | *} optsOrSeed
+   * @param {number | *} argsOrOpts
+   * @param {*} [args]
+   * @returns {Compute}
+   */
   function _task(depOrFn, fnOrSeed, optsOrSeed, argsOrOpts, args) {
     if (this._flag & FLAG_DISPOSED) {
       throw new Error(ASSERT_NOT_DISPOSED);
@@ -2162,7 +2200,17 @@ function root(fn) {
     return node;
   }
 
-  /** @this {Owner} */
+  /**
+   * Creates a sync effect node.
+   * Unbound: effect(fn, opts?, args?)
+   * Bound:   effect(dep, fn, opts?, args?)
+   * @this {Owner|Clock}
+   * @param {Sender | Function} depOrFn
+   * @param {Function | number} fnOrOpts
+   * @param {number | *} optsOrArgs
+   * @param {*} [args]
+   * @returns {Effect}
+   */
   function _effect(depOrFn, fnOrOpts, optsOrArgs, args) {
     if (this._flag & FLAG_DISPOSED) {
       throw new Error(ASSERT_NOT_DISPOSED);
@@ -2187,7 +2235,17 @@ function root(fn) {
     return node;
   }
 
-  /** @this {Owner} */
+  /**
+   * Creates an async effect node (spawn).
+   * Unbound: spawn(fn, opts?, args?)
+   * Bound:   spawn(dep, fn, opts?, args?)
+   * @this {Owner|Clock}
+   * @param {Sender | Function} depOrFn
+   * @param {Function | number} fnOrOpts
+   * @param {number | *} optsOrArgs
+   * @param {*} [args]
+   * @returns {Effect}
+   */
   function _spawn(depOrFn, fnOrOpts, optsOrArgs, args) {
     if (this._flag & FLAG_DISPOSED) {
       throw new Error(ASSERT_NOT_DISPOSED);
@@ -2217,13 +2275,14 @@ function root(fn) {
     return node;
   }
 
-  /** Install factory methods on Root and Effect prototypes */
-  RootProto.signal = EffectProto.signal = signal;
-  RootProto.compute = EffectProto.compute = _compute;
-  RootProto.task = EffectProto.task = _task;
-  RootProto.effect = EffectProto.effect = _effect;
-  RootProto.spawn = EffectProto.spawn = _spawn;
-  RootProto.root = EffectProto.root = root;
+  /** Install factory methods on Root, Effect, and Clock prototypes */
+  var ClockProto = Clock.prototype;
+  RootProto.signal = EffectProto.signal = ClockProto.signal = signal;
+  RootProto.compute = EffectProto.compute = ClockProto.compute = _compute;
+  RootProto.task = EffectProto.task = ClockProto.task = _task;
+  RootProto.effect = EffectProto.effect = ClockProto.effect = _effect;
+  RootProto.spawn = EffectProto.spawn = ClockProto.spawn = _spawn;
+  RootProto.root = EffectProto.root = ClockProto.root = root;
 }
 
 /**
@@ -2392,6 +2451,9 @@ function clearFinalize(node) {
  * @returns {void}
  */
 function addOwned(owner, child) {
+  if (!(owner._flag & FLAG_OWNER)) {
+    return;
+  }
   if (owner._owned === null) {
     owner._owned = [child];
   } else {
@@ -3666,110 +3728,6 @@ function microflush() {
 }
 
 /**
- * Creates a sync compute node.
- * Unbound: compute(fn, seed?, opts?, args?)
- * Bound:   compute(dep, fn, seed?, opts?, args?)
- * @param {Sender | Function} depOrFn
- * @param {Function | *} fnOrSeed
- * @param {number | *} optsOrSeed
- * @param {number | *} argsOrOpts
- * @param {*} [args]
- * @returns {Compute}
- */
-function compute(depOrFn, fnOrSeed, optsOrSeed, argsOrOpts, args) {
-  let flag, node;
-  if (typeof depOrFn === "function") {
-    flag = FLAG_SETUP | ((0 | optsOrSeed) & OPTIONS);
-    node = new Compute(flag, depOrFn, null, fnOrSeed, argsOrOpts);
-  } else {
-    flag = FLAG_STABLE | FLAG_BOUND | FLAG_SINGLE | ((0 | argsOrOpts) & OPTIONS);
-    node = new Compute(flag, fnOrSeed, depOrFn, optsOrSeed, args);
-    connect(depOrFn, node);
-  }
-  if (!(flag & FLAG_DEFER)) {
-    startCompute(node);
-  }
-  return node;
-}
-
-/**
- * Creates an async compute node (task).
- * Unbound: task(fn, seed?, opts?, args?)
- * Bound:   task(dep, fn, seed?, opts?, args?)
- * @param {Sender | Function} depOrFn
- * @param {Function | *} fnOrSeed
- * @param {number | *} optsOrSeed
- * @param {number | *} argsOrOpts
- * @param {*} [args]
- * @returns {Compute}
- */
-function task(depOrFn, fnOrSeed, optsOrSeed, argsOrOpts, args) {
-  let flag, node;
-  if (typeof depOrFn === "function") {
-    flag = FLAG_ASYNC | FLAG_SETUP | ((0 | optsOrSeed) & OPTIONS);
-    node = new Compute(flag, depOrFn, null, fnOrSeed, argsOrOpts);
-  } else {
-    flag =
-      FLAG_ASYNC | FLAG_STABLE | FLAG_BOUND | FLAG_SINGLE | ((0 | argsOrOpts) & OPTIONS);
-    node = new Compute(flag, fnOrSeed, depOrFn, optsOrSeed, args);
-    connect(depOrFn, node);
-  }
-  if (!(flag & FLAG_DEFER)) {
-    startCompute(node);
-  }
-  return node;
-}
-
-/**
- * Creates a sync effect node.
- * Unbound: effect(fn, opts?, args?)
- * Bound:   effect(dep, fn, opts?, args?)
- * @param {Sender | Function} depOrFn
- * @param {Function | number} fnOrOpts
- * @param {number | *} optsOrArgs
- * @param {*} [args]
- * @returns {Effect}
- */
-function effect(depOrFn, fnOrOpts, optsOrArgs, args) {
-  let flag, node;
-  if (typeof depOrFn === "function") {
-    flag = FLAG_SETUP | ((0 | fnOrOpts) & OPTIONS);
-    node = new Effect(flag, depOrFn, null, null, optsOrArgs);
-  } else {
-    flag = FLAG_STABLE | FLAG_BOUND | FLAG_SINGLE | ((0 | optsOrArgs) & OPTIONS);
-    node = new Effect(flag, fnOrOpts, depOrFn, null, args);
-    connect(depOrFn, node);
-  }
-  startEffect(node);
-  return node;
-}
-
-/**
- * Creates an async effect node (spawn).
- * Unbound: spawn(fn, opts?, args?)
- * Bound:   spawn(dep, fn, opts?, args?)
- * @param {Sender | Function} depOrFn
- * @param {Function | number} fnOrOpts
- * @param {number | *} optsOrArgs
- * @param {*} [args]
- * @returns {Effect}
- */
-function spawn(depOrFn, fnOrOpts, optsOrArgs, args) {
-  let flag, node;
-  if (typeof depOrFn === "function") {
-    flag = FLAG_ASYNC | FLAG_SETUP | ((0 | fnOrOpts) & OPTIONS);
-    node = new Effect(flag, depOrFn, null, null, optsOrArgs);
-  } else {
-    flag =
-      FLAG_ASYNC | FLAG_STABLE | FLAG_BOUND | FLAG_SINGLE | ((0 | optsOrArgs) & OPTIONS);
-    node = new Effect(flag, fnOrOpts, depOrFn, null, args);
-    connect(depOrFn, node);
-  }
-  startEffect(node);
-  return node;
-}
-
-/**
  * @param {function(): void} fn
  * @returns {void}
  */
@@ -3831,9 +3789,7 @@ export {
   startCompute,
   signal,
   relay,
-  compute,
-  task,
-  effect,
-  spawn,
-  root
+  root,
+  c,
+  Clock
 };
