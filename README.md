@@ -1153,7 +1153,7 @@ Earlier, anod and solid borrowed their core implementation idea from [S.js](http
 | Update: deep | 140 µs | 134 µs | -4% | 40.1 kB | 39.9 kB | 0% |
 | Update: very dynamic | 88.6 µs | 53.3 µs | -40% | 20.1 kB | 4.4 kB | -78% |
 
-anod wins all 22 benchmarks. The gap is most dramatic on large update workloads (large web app -94%, wide dense -88%), where preact's recursive `_notify()` traverses the entire subscriber tree on every signal write, regardless of how many nodes actually need updating.
+preact-signals perform well on tight graphs, and decent on deep graphs, but struggle on wide graphs.
 
 ### Chromium (browser)
 
