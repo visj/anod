@@ -54,9 +54,9 @@ The following primitives exist in anod:
 - Context, a callback parameter that provides the current reactive context
 - Signal, holds a value and notifies when it changes
 - Relay, a signal that always notifies on every update
-- Resource, an async signal that can optimistically update while letting server confirm changes
 - Compute, a derived signal, updates and notifies when it's derived value changes
 - Effect, a sink, that listens to signals and computes and performs actions
+- Resource, an async signal that can optimistically update while letting server confirm changes
 - Task, an async compute, for awaiting promises
 - Spawn, an async effect, for doing async work
 
@@ -218,8 +218,13 @@ root((c) => {
 
 ### Async reactivity
 
-anod aims to bridge the gap between sync and async signal reactivity. `compute` and `effect` have become the standard primitives within the signal community; in anod, their async counterparts are `task` and `spawn` . Async reactive graphs are still experimental. anod has not yet reached 1.0, and there may still be bugs and edge cases that are not covered yet.
+anod aims to bridge the gap between sync and async signal reactivity. Each sync primitive has an async counterpart:
 
+| Sync | Async | Role |
+| --- | --- | --- |
+| Signal | Resource | Writable value |
+| Compute | Task | Derived value |
+| Effect | Spawn | Side effect |
 
 ### Resource
 

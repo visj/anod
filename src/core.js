@@ -481,7 +481,7 @@ function set(value, asyncFn) {
       _value = value;
     }
     if (this._flag & FLAG_RELAY || this._value !== _value) {
-      this._assign(_value, TIME + 1);
+      this._value = _value;
       notify(this, FLAG_STALE);
       flush();
     } else if (asyncFn === undefined) {
@@ -533,7 +533,7 @@ function _runAsync(node, asyncFn, prev) {
     resolveIterator(node, result, time);
   } else if (result !== undefined && (result !== node._value || node._flag & FLAG_RELAY)) {
     /** ASYNC_SYNC: write the value immediately if changed. */
-    node._assign(result, TIME + 1);
+    node._value = result;
     notify(node, FLAG_STALE);
     flush();
   }
@@ -543,7 +543,7 @@ function _runAsync(node, asyncFn, prev) {
  * Batch-drain handler for both Signal and Compute. Resolves updater
  * functions against the current value at drain time, compares, and
  * only writes + notifies if the value actually changed. Delegates
- * the actual write to node._assign() which handles type-specific
+ * the actual write to node._value which stores the resolved value
  * fields (_ctime, FLAG_INIT for Compute; plain _value for Signal).
  * @template T
  * @param {Sender<T>} node
@@ -559,7 +559,7 @@ function assign(node, value, time) {
     _value = value;
   }
   if (node._value !== _value || (node._flag & FLAG_RELAY)) {
-    node._assign(_value, time);
+    node._value = _value;
     if (node._flag & FLAG_SCHEDULED) {
       node._flag &= ~FLAG_SCHEDULED;
       notify(node, FLAG_STALE);
@@ -586,7 +586,7 @@ function asyncAssign(node, payload, time) {
     _value = value;
   }
   if (node._value !== _value || (node._flag & FLAG_RELAY)) {
-    node._assign(_value, time);
+    node._value = _value;
     if (node._flag & FLAG_SCHEDULED) {
       node._flag &= ~FLAG_SCHEDULED;
       notify(node, FLAG_STALE);
@@ -747,29 +747,6 @@ function root(fn) {
   RootProto._level = -1;
 
   SignalProto._ctime = 0;
-
-  /**
-   * Signal._assign: just writes the value.
-   * @this {Signal}
-   * @param {*} value
-   * @param {number} time
-   */
-  SignalProto._assign = function (value, time) {
-    this._value = value;
-  };
-
-  /**
-   * Compute._assign: writes value and stamps _ctime. Does NOT
-   * clear FLAG_STALE — if a dep also changed this cycle, the
-   * dep update re-runs fn on the next read and takes precedence.
-   * @this {Compute}
-   * @param {*} value
-   * @param {number} time
-   */
-  ComputeProto._assign = function (value, time) {
-    this._value = value;
-    this._ctime = time;
-  };
 
   /** Signal._drop: NOOP — signals don't drop values. */
   SignalProto._drop = function () { };
@@ -1719,7 +1696,7 @@ function root(fn) {
         _value = value;
       }
       if (sender._flag & FLAG_RELAY || sender._value !== _value) {
-        sender._assign(_value, TIME + 1);
+        sender._value = _value;
         this._flag |= FLAG_PAUSED;
         notify(sender, FLAG_STALE);
         this._flag &= ~(FLAG_PAUSED | FLAG_STALE | FLAG_PENDING);
@@ -3788,42 +3765,6 @@ function startEffect(node) {
       }
     }
   }
-}
-
-/**
- * Runs a single effect node: checks staleness, updates, handles
- * errors with finalize/recover/dispose. Returns the error POJO
- * if unrecoverable, null otherwise.
- * @param {!Effect} node
- * @param {number} time
- * @returns {*}
- */
-function runEffect(node, time) {
-  if (
-    node._flag & FLAG_STALE ||
-    (node._flag & FLAG_PENDING && needsUpdate(node, time))
-  ) {
-    FENCE = SEED;
-    try {
-      node._update(time);
-    } catch (error) {
-      if (node._finalize !== null) {
-        clearFinalize(node);
-      }
-      let err = node._flag & FLAG_PANIC ? error : { error, type: FATAL };
-      node._flag &= ~FLAG_PANIC;
-      let result = tryRecover(node, err);
-      if (result !== RECOVER_SELF) {
-        node._dispose();
-      }
-      if (result === RECOVER_NONE) {
-        return err;
-      }
-    }
-  } else {
-    node._flag &= ~(FLAG_STALE | FLAG_PENDING);
-  }
-  return null;
 }
 
 /**
