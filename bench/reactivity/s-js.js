@@ -1,5 +1,6 @@
 import { bench, run } from 'mitata';
 import S from 's-js';
+import { EXPECTED_EAGER } from './expected.js';
 import { saveRun } from './save-run.js';
 
 let sink = 0;
@@ -20,13 +21,15 @@ function setupDeep() {
         let current = head;
         for (let i = 0; i < len; i++) {
             const prev = current;
-            current = S(() => prev() + 1);
+            current = S(() => {
+                counter++;
+                return prev() + 1;
+            });
         }
         const tail = current;
         S(() => {
-            const v = tail();
-            counter += v;
-            sink += counter;
+            counter++;
+            sink += tail();
         });
         let i = 0;
         return () => {
@@ -39,12 +42,17 @@ function setupBroad() {
     return S.root(() => {
         const head = S.data(0);
         for (let i = 0; i < 50; i++) {
-            const current = S(() => head() + i);
-            const current2 = S(() => current() + 1);
+            const current = S(() => {
+                counter++;
+                return head() + i;
+            });
+            const current2 = S(() => {
+                counter++;
+                return current() + 1;
+            });
             S(() => {
-                const v = current2();
-                counter += v;
-                sink += counter;
+                counter++;
+                sink += current2();
             });
         }
         let i = 0;
@@ -60,13 +68,18 @@ function setupDiamond() {
         const head = S.data(0);
         const branches = [];
         for (let i = 0; i < width; i++) {
-            branches.push(S(() => head() + 1));
+            branches.push(S(() => {
+                counter++;
+                return head() + 1;
+            }));
         }
-        const sum = S(() => branches.reduce((a, b) => a + b(), 0));
+        const sum = S(() => {
+            counter++;
+            return branches.reduce((a, b) => a + b(), 0);
+        });
         S(() => {
-            const v = sum();
-            counter += v;
-            sink += counter;
+            counter++;
+            sink += sum();
         });
         let i = 0;
         return () => {
@@ -81,16 +94,22 @@ function setupTriangle() {
         const head = S.data(0);
         let current = head;
         const list = [];
-        for (let i = 0; i < width; i++) {
+        for (let i = 0; i < width - 1; i++) {
             const prev = current;
             list.push(current);
-            current = S(() => prev() + 1);
+            current = S(() => {
+                counter++;
+                return prev() + 1;
+            });
         }
-        const sum = S(() => list.reduce((a, b) => a + b(), 0));
+        list.push(current);
+        const sum = S(() => {
+            counter++;
+            return list.reduce((a, b) => a + b(), 0);
+        });
         S(() => {
-            const v = sum();
-            counter += v;
-            sink += counter;
+            counter++;
+            sink += sum();
         });
         let i = 0;
         return () => {
@@ -102,15 +121,23 @@ function setupTriangle() {
 function setupMux() {
     return S.root(() => {
         const heads = new Array(100).fill(null).map(() => S.data(0));
-        const mux = S(() => heads.map(h => h()));
+        const mux = S(() => {
+            counter++;
+            return heads.map(h => h());
+        });
         const split = heads
-            .map((_, index) => S(() => mux()[index]))
-            .map(x => S(() => x() + 1));
+            .map((_, index) => S(() => {
+                counter++;
+                return mux()[index];
+            }))
+            .map(x => S(() => {
+                counter++;
+                return x() + 1;
+            }));
         for (const x of split) {
             S(() => {
-                const v = x();
-                counter += v;
-                sink += counter;
+                counter++;
+                sink += x();
             });
         }
         let i = 0;
@@ -124,9 +151,16 @@ function setupMux() {
 function setupUnstable() {
     return S.root(() => {
         const head = S.data(0);
-        const double = S(() => head() * 2);
-        const inverse = S(() => -head());
+        const double = S(() => {
+            counter++;
+            return head() * 2;
+        });
+        const inverse = S(() => {
+            counter++;
+            return -head();
+        });
         const current = S(() => {
+            counter++;
             let result = 0;
             for (let i = 0; i < 20; i++) {
                 result += head() % 2 ? double() : inverse();
@@ -134,9 +168,8 @@ function setupUnstable() {
             return result;
         });
         S(() => {
-            const v = current();
-            counter += v;
-            sink += counter;
+            counter++;
+            sink += current();
         });
         let i = 0;
         return () => {
@@ -148,15 +181,14 @@ function setupUnstable() {
 function setupAvoidable() {
     return S.root(() => {
         const head = S.data(0);
-        const computed1 = S(() => head());
-        const computed2 = S(() => { computed1(); return 0; });
-        const computed3 = S(() => computed2() + 1);
-        const computed4 = S(() => computed3() + 2);
-        const computed5 = S(() => computed4() + 3);
+        const computed1 = S(() => { counter++; return head(); });
+        const computed2 = S(() => { counter++; computed1(); return 0; });
+        const computed3 = S(() => { counter++; return computed2() + 1; });
+        const computed4 = S(() => { counter++; return computed3() + 2; });
+        const computed5 = S(() => { counter++; return computed4() + 3; });
         S(() => {
-            const v = computed5();
-            counter += v;
-            sink += counter;
+            counter++;
+            sink += computed5();
         });
         let i = 0;
         return () => {
@@ -170,6 +202,7 @@ function setupRepeatedObservers() {
         const size = 30;
         const head = S.data(0);
         const current = S(() => {
+            counter++;
             let result = 0;
             for (let i = 0; i < size; i++) {
                 result += head();
@@ -177,9 +210,8 @@ function setupRepeatedObservers() {
             return result;
         });
         S(() => {
-            const v = current();
-            counter += v;
-            sink += counter;
+            counter++;
+            sink += current();
         });
         let i = 0;
         return () => {
@@ -202,19 +234,19 @@ function setupCellx(layers) {
         for (let i = layers; i > 0; i--) {
             const m = layer;
             const s = {
-                prop1: S(() => m.prop2()),
-                prop2: S(() => m.prop1() - m.prop3()),
-                prop3: S(() => m.prop2() + m.prop4()),
-                prop4: S(() => m.prop3()),
+                prop1: S(() => { counter++; return m.prop2(); }),
+                prop2: S(() => { counter++; return m.prop1() - m.prop3(); }),
+                prop3: S(() => { counter++; return m.prop2() + m.prop4(); }),
+                prop4: S(() => { counter++; return m.prop3(); }),
             };
-            S(() => { const v = s.prop1(); counter += v; sink += counter; });
-            S(() => { const v = s.prop2(); counter += v; sink += counter; });
-            S(() => { const v = s.prop3(); counter += v; sink += counter; });
-            S(() => { const v = s.prop4(); counter += v; sink += counter; });
-            S(() => { const v = s.prop1(); counter += v; sink += counter; });
-            S(() => { const v = s.prop2(); counter += v; sink += counter; });
-            S(() => { const v = s.prop3(); counter += v; sink += counter; });
-            S(() => { const v = s.prop4(); counter += v; sink += counter; });
+            S(() => { counter++; sink += s.prop1(); });
+            S(() => { counter++; sink += s.prop2(); });
+            S(() => { counter++; sink += s.prop3(); });
+            S(() => { counter++; sink += s.prop4(); });
+            S(() => { counter++; sink += s.prop1(); });
+            S(() => { counter++; sink += s.prop2(); });
+            S(() => { counter++; sink += s.prop3(); });
+            S(() => { counter++; sink += s.prop4(); });
             layer = s;
         }
         const end = layer;
@@ -242,14 +274,14 @@ function setupMolWire() {
         const numbers = Array.from({ length: 5 }, (_, i) => i);
         const A = S.data(0);
         const B = S.data(0);
-        const C = S(() => (A() % 2) + (B() % 2));
-        const D = S(() => numbers.map(i => ({ x: i + (A() % 2) - (B() % 2) })));
-        const E = S(() => hard(C() + A() + D()[0].x, 'E'));
-        const F = S(() => hard(D()[2].x || B(), 'F'));
-        const G = S(() => C() + (C() || E() % 2) + D()[4].x + F());
-        S(() => { const v = hard(G(), 'H'); counter += v; sink += counter; });
-        S(() => { const v = G(); counter += v; sink += counter; });
-        S(() => { const v = hard(F(), 'J'); counter += v; sink += counter; });
+        const C = S(() => { counter++; return (A() % 2) + (B() % 2); });
+        const D = S(() => { counter++; return numbers.map(i => ({ x: i + (A() % 2) - (B() % 2) })); });
+        const E = S(() => { counter++; return hard(C() + A() + D()[0].x, 'E'); });
+        const F = S(() => { counter++; return hard(D()[2].x || B(), 'F'); });
+        const G = S(() => { counter++; return C() + (C() || E() % 2) + D()[4].x + F(); });
+        S(() => { counter++; sink += hard(G(), 'H'); });
+        S(() => { counter++; sink += G(); });
+        S(() => { counter++; sink += hard(F(), 'J'); });
         let i = 0;
         return () => {
             i++;
@@ -284,12 +316,8 @@ function benchCreateComputations(count) {
         S.root(() => {
             const src = S.data(0);
             for (let i = 0; i < count; i++) {
-                const comp = S(() => src());
-                S(() => {
-                    const v = comp();
-                    counter += v;
-                    sink += counter;
-                });
+                const comp = S(() => { counter++; return src(); });
+                S(() => { counter++; sink += comp(); });
             }
         });
     };
@@ -345,14 +373,6 @@ function removeElems(src, rmCount, rand) {
     return copy;
 }
 
-/**
- * Build a rectangular reactive dependency graph using native S.js API.
- * Must be called inside an S.root() context.
- * @param {number} width
- * @param {number} totalLayers
- * @param {number} staticFraction
- * @param {number} nSources
- */
 function makeDynGraph(width, totalLayers, staticFraction, nSources) {
     const sources = new Array(width);
     for (let i = 0; i < width; i++) {
@@ -370,6 +390,7 @@ function makeDynGraph(width, totalLayers, staticFraction, nSources) {
             }
             if (random() < staticFraction) {
                 row[myDex] = S(() => {
+                    counter++;
                     let sum = 0;
                     for (let s = 0; s < mySources.length; s++) {
                         sum += mySources[s]();
@@ -380,6 +401,7 @@ function makeDynGraph(width, totalLayers, staticFraction, nSources) {
                 const first = mySources[0];
                 const tail = mySources.slice(1);
                 row[myDex] = S(() => {
+                    counter++;
                     let sum = first();
                     const shouldDrop = sum & 0x1;
                     const dropDex = sum % tail.length;
@@ -399,14 +421,6 @@ function makeDynGraph(width, totalLayers, staticFraction, nSources) {
     return { sources, layers };
 }
 
-/**
- * Build a fresh graph inside S.root() and return a function that reads all
- * leaves to force materialization. Measures graph construction + initial evaluation cost.
- * @param {number} width
- * @param {number} totalLayers
- * @param {number} staticFraction
- * @param {number} nSources
- */
 function setupDynBuild(width, totalLayers, staticFraction, nSources) {
     return () => {
         S.root(() => {
@@ -420,20 +434,10 @@ function setupDynBuild(width, totalLayers, staticFraction, nSources) {
     };
 }
 
-/**
- * Build the graph once inside S.root(), force-read all leaves to materialize,
- * then return a function that writes one source and reads selected leaves per call.
- * @param {number} width
- * @param {number} totalLayers
- * @param {number} staticFraction
- * @param {number} nSources
- * @param {number} readFraction
- */
 function setupDynUpdate(width, totalLayers, staticFraction, nSources, readFraction) {
     return S.root(() => {
         const { sources, layers } = makeDynGraph(width, totalLayers, staticFraction, nSources);
         const leaves = layers[layers.length - 1];
-        /** Force-read all leaves so lazy frameworks fully materialize the graph. */
         for (let r = 0; r < leaves.length; r++) {
             sink += leaves[r]();
         }
@@ -442,7 +446,6 @@ function setupDynUpdate(width, totalLayers, staticFraction, nSources, readFracti
         const readLeaves = removeElems(leaves, skipCount, rand);
         const readLen = readLeaves.length;
         const srcLen = sources.length;
-        /** Persistent counter across mitata calls so each write triggers propagation. */
         let iter = 0;
         return () => {
             iter++;
@@ -454,6 +457,39 @@ function setupDynUpdate(width, totalLayers, staticFraction, nSources, readFracti
         };
     });
 }
+
+/* === Validation === */
+
+function validate(name, setupFn) {
+    const expected = EXPECTED_EAGER[name];
+    const run = setupFn();
+    counter = 0;
+    run();
+    if (counter !== expected) {
+        throw new Error(`"${name}": expected counter=${expected}, got ${counter}`);
+    }
+    counter = 0;
+}
+
+validate('deep', setupDeep);
+validate('broad', setupBroad);
+validate('diamond', setupDiamond);
+validate('triangle', setupTriangle);
+validate('mux', setupMux);
+validate('unstable', setupUnstable);
+validate('avoidable', setupAvoidable);
+validate('repeatedObservers', setupRepeatedObservers);
+validate('cellx10', () => setupCellx(10));
+validate('molWire', setupMolWire);
+validate('createComputations1k', () => benchCreateComputations(1000));
+validate('dynBuildSimple', () => setupDynBuild(10, 5, 1, 2));
+validate('dynBuildLargeWebApp', () => setupDynBuild(1000, 12, 0.95, 4));
+validate('dynUpdateSimple', () => setupDynUpdate(10, 5, 1, 2, 0.2));
+validate('dynUpdateDynamic', () => setupDynUpdate(10, 10, 0.75, 6, 0.2));
+validate('dynUpdateLargeWebApp', () => setupDynUpdate(1000, 12, 0.95, 4, 1));
+validate('dynUpdateWideDense', () => setupDynUpdate(1000, 5, 1, 25, 1));
+validate('dynUpdateDeep', () => setupDynUpdate(5, 500, 1, 3, 1));
+validate('dynUpdateVeryDynamic', () => setupDynUpdate(100, 15, 0.5, 6, 1));
 
 /* === Run === */
 

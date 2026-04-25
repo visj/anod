@@ -1,14 +1,17 @@
 /**
- * Solid 2.0 (@solidjs/signals) benchmark. Uses deferred writes via
- * setSignal() + flush(), matching Solid's native scheduling model.
+ * Anod eager-compute benchmark. Same as anod-post but all compute
+ * nodes are marked .eager() — push-based like Solid 2.0's memos.
+ * This measures the cost of anod when every memo re-evaluates
+ * immediately on notification instead of waiting to be pulled.
  */
 import { bench, run } from 'mitata';
-import { EXPECTED_SOLID } from './expected.js';
-import { createSignal, createMemo, createRoot, createEffect, flush } from '@solidjs/signals';
+import { EXPECTED_EAGER } from './expected.js';
+import { signal, root, batch, flush, c } from '../../dist/index.js';
 import { saveRun } from './save-run.js';
 
 let sink = 0;
 let counter = 0;
+
 
 const fib = (n) => {
     if (n < 2) return 1;
@@ -20,151 +23,161 @@ const hard = (n, _log) => n + fib(16);
 
 function setupDeep() {
     let run;
-    createRoot(() => {
+    root((r) => {
         const len = 50;
-        const [head, setHead] = createSignal(0);
+        const head = signal(0);
         let current = head;
         for (let i = 0; i < len; i++) {
             const prev = current;
-            current = createMemo(() => { counter++; return prev() + 1; });
+            current = r.compute(cx => { counter++; return cx.val(prev) + 1; });
+            current.eager();
         }
         const tail = current;
-        createEffect(() => tail(), (val) => { counter++; sink += val; });
-        flush();
+        r.effect(cx => { counter++; sink += cx.val(tail); });
         let i = 0;
-        run = () => { setHead(++i); flush(); };
+        run = () => { head.post(++i); flush(); };
     });
     return run;
 }
 
 function setupBroad() {
     let run;
-    createRoot(() => {
-        const [head, setHead] = createSignal(0);
+    root((r) => {
+        const head = signal(0);
         for (let i = 0; i < 50; i++) {
-            const current = createMemo(() => { counter++; return head() + i; });
-            const current2 = createMemo(() => { counter++; return current() + 1; });
-            createEffect(() => current2(), (val) => { counter++; sink += val; });
+            const current = r.compute(cx => { counter++; return cx.val(head) + i; });
+            current.eager();
+            const current2 = r.compute(cx => { counter++; return cx.val(current) + 1; });
+            current2.eager();
+            r.effect(cx => { counter++; sink += cx.val(current2); });
         }
-        flush();
         let i = 0;
-        run = () => { setHead(++i); flush(); };
+        run = () => { head.post(++i); flush(); };
     });
     return run;
 }
 
 function setupDiamond() {
     let run;
-    createRoot(() => {
+    root((r) => {
         const width = 5;
-        const [head, setHead] = createSignal(0);
+        const head = signal(0);
         const branches = [];
         for (let i = 0; i < width; i++) {
-            branches.push(createMemo(() => { counter++; return head() + 1; }));
+            const b = r.compute(cx => { counter++; return cx.val(head) + 1; });
+            b.eager();
+            branches.push(b);
         }
-        const sum = createMemo(() => { counter++; return branches.reduce((a, b) => a + b(), 0); });
-        createEffect(() => sum(), (val) => { counter++; sink += val; });
-        flush();
+        const sum = r.compute(cx => { counter++; return branches.reduce((a, b) => a + cx.val(b), 0); });
+        sum.eager();
+        r.effect(cx => { counter++; sink += cx.val(sum); });
         let i = 0;
-        run = () => { setHead(++i); flush(); };
+        run = () => { head.post(++i); flush(); };
     });
     return run;
 }
 
 function setupTriangle() {
     let run;
-    createRoot(() => {
+    root((r) => {
         const width = 10;
-        const [head, setHead] = createSignal(0);
+        const head = signal(0);
         let current = head;
         const list = [];
         for (let i = 0; i < width - 1; i++) {
             const prev = current;
             list.push(current);
-            current = createMemo(() => { counter++; return prev() + 1; });
+            current = r.compute(cx => { counter++; return cx.val(prev) + 1; });
+            current.eager();
         }
         list.push(current);
-        const sum = createMemo(() => { counter++; return list.reduce((a, b) => a + b(), 0); });
-        createEffect(() => sum(), (val) => { counter++; sink += val; });
-        flush();
+        const sum = r.compute(cx => { counter++; return list.reduce((a, b) => a + cx.val(b), 0); });
+        sum.eager();
+        r.effect(cx => { counter++; sink += cx.val(sum); });
         let i = 0;
-        run = () => { setHead(++i); flush(); };
+        run = () => { head.post(++i); flush(); };
     });
     return run;
 }
 
 function setupMux() {
     let run;
-    createRoot(() => {
-        const heads = new Array(100).fill(null).map(() => createSignal(0));
-        const mux = createMemo(() => { counter++; return heads.map(([h]) => h()); });
+    root((r) => {
+        const heads = new Array(100).fill(null).map(() => signal(0));
+        const mux = r.compute(cx => { counter++; return heads.map(h => cx.val(h)); });
+        mux.eager();
         const split = heads
-            .map((_, index) => createMemo(() => { counter++; return mux()[index]; }))
-            .map(x => createMemo(() => { counter++; return x() + 1; }));
+            .map((_, index) => { const n = r.compute(cx => { counter++; return cx.val(mux)[index]; }); n.eager(); return n; })
+            .map(x => { const n = r.compute(cx => { counter++; return cx.val(x) + 1; }); n.eager(); return n; });
         for (const x of split) {
-            createEffect(() => x(), (val) => { counter++; sink += val; });
+            r.effect(cx => { counter++; sink += cx.val(x); });
         }
-        flush();
         let i = 0;
-        run = () => { const idx = i % heads.length; heads[idx][1](++i); flush(); };
+        run = () => { const idx = i % heads.length; heads[idx].post(++i); flush(); };
     });
     return run;
 }
 
 function setupUnstable() {
     let run;
-    createRoot(() => {
-        const [head, setHead] = createSignal(0);
-        const double = createMemo(() => { counter++; return head() * 2; });
-        const inverse = createMemo(() => { counter++; return -head(); });
-        const current = createMemo(() => {
+    root((r) => {
+        const head = signal(0);
+        const double = r.compute(cx => { counter++; return cx.val(head) * 2; });
+        double.eager();
+        const inverse = r.compute(cx => { counter++; return -cx.val(head); });
+        inverse.eager();
+        const current = r.compute(cx => {
             counter++;
             let result = 0;
             for (let i = 0; i < 20; i++) {
-                result += head() % 2 ? double() : inverse();
+                result += cx.val(head) % 2 ? cx.val(double) : cx.val(inverse);
             }
             return result;
         });
-        createEffect(() => current(), (val) => { counter++; sink += val; });
-        flush();
+        current.eager();
+        r.effect(cx => { counter++; sink += cx.val(current); });
         let i = 0;
-        run = () => { setHead(++i); flush(); };
+        run = () => { head.post(++i); flush(); };
     });
     return run;
 }
 
 function setupAvoidable() {
     let run;
-    createRoot(() => {
-        const [head, setHead] = createSignal(0);
-        const computed1 = createMemo(() => { counter++; return head(); });
-        const computed2 = createMemo(() => { counter++; computed1(); return 0; });
-        const computed3 = createMemo(() => { counter++; return computed2() + 1; });
-        const computed4 = createMemo(() => { counter++; return computed3() + 2; });
-        const computed5 = createMemo(() => { counter++; return computed4() + 3; });
-        createEffect(() => computed5(), (val) => { counter++; sink += val; });
-        flush();
+    root((r) => {
+        const head = signal(0);
+        const computed1 = r.compute(cx => { counter++; return cx.val(head); });
+        computed1.eager();
+        const computed2 = r.compute(cx => { counter++; cx.val(computed1); return 0; });
+        computed2.eager();
+        const computed3 = r.compute(cx => { counter++; return cx.val(computed2) + 1; });
+        computed3.eager();
+        const computed4 = r.compute(cx => { counter++; return cx.val(computed3) + 2; });
+        computed4.eager();
+        const computed5 = r.compute(cx => { counter++; return cx.val(computed4) + 3; });
+        computed5.eager();
+        r.effect(cx => { counter++; sink += cx.val(computed5); });
         let i = 0;
-        run = () => { setHead(++i); flush(); };
+        run = () => { head.post(++i); flush(); };
     });
     return run;
 }
 
 function setupRepeatedObservers() {
     let run;
-    createRoot(() => {
+    root((r) => {
         const size = 30;
-        const [head, setHead] = createSignal(0);
-        const current = createMemo(() => {
+        const head = signal(0);
+        const current = r.compute(cx => {
             counter++;
             let result = 0;
-            for (let i = 0; i < size; i++) result += head();
+            for (let i = 0; i < size; i++) result += cx.val(head);
             return result;
         });
-        createEffect(() => current(), (val) => { counter++; sink += val; });
-        flush();
+        current.eager();
+        r.effect(cx => { counter++; sink += cx.val(current); });
         let i = 0;
-        run = () => { setHead(++i); flush(); };
+        run = () => { head.post(++i); flush(); };
     });
     return run;
 }
@@ -173,47 +186,44 @@ function setupRepeatedObservers() {
 
 function setupCellx(layers) {
     let run;
-    createRoot(() => {
+    root((r) => {
         const start = {
-            prop1: createSignal(1),
-            prop2: createSignal(2),
-            prop3: createSignal(3),
-            prop4: createSignal(4),
+            prop1: signal(1),
+            prop2: signal(2),
+            prop3: signal(3),
+            prop4: signal(4),
         };
         let layer = start;
         for (let i = layers; i > 0; i--) {
             const m = layer;
-            const r = (x) => typeof x === 'function' ? x() : x[0]();
-            const s = {
-                prop1: createMemo(() => { counter++; return r(m.prop2); }),
-                prop2: createMemo(() => { counter++; return r(m.prop1) - r(m.prop3); }),
-                prop3: createMemo(() => { counter++; return r(m.prop2) + r(m.prop4); }),
-                prop4: createMemo(() => { counter++; return r(m.prop3); }),
-            };
-            createEffect(() => s.prop1(), (val) => { counter++; sink += val; });
-            createEffect(() => s.prop2(), (val) => { counter++; sink += val; });
-            createEffect(() => s.prop3(), (val) => { counter++; sink += val; });
-            createEffect(() => s.prop4(), (val) => { counter++; sink += val; });
-            createEffect(() => s.prop1(), (val) => { counter++; sink += val; });
-            createEffect(() => s.prop2(), (val) => { counter++; sink += val; });
-            createEffect(() => s.prop3(), (val) => { counter++; sink += val; });
-            createEffect(() => s.prop4(), (val) => { counter++; sink += val; });
+            const p1 = r.compute(cx => { counter++; return cx.val(m.prop2); }); p1.eager();
+            const p2 = r.compute(cx => { counter++; return cx.val(m.prop1) - cx.val(m.prop3); }); p2.eager();
+            const p3 = r.compute(cx => { counter++; return cx.val(m.prop2) + cx.val(m.prop4); }); p3.eager();
+            const p4 = r.compute(cx => { counter++; return cx.val(m.prop3); }); p4.eager();
+            const s = { prop1: p1, prop2: p2, prop3: p3, prop4: p4 };
+            r.effect(cx => { counter++; sink += cx.val(s.prop1); });
+            r.effect(cx => { counter++; sink += cx.val(s.prop2); });
+            r.effect(cx => { counter++; sink += cx.val(s.prop3); });
+            r.effect(cx => { counter++; sink += cx.val(s.prop4); });
+            r.effect(cx => { counter++; sink += cx.val(s.prop1); });
+            r.effect(cx => { counter++; sink += cx.val(s.prop2); });
+            r.effect(cx => { counter++; sink += cx.val(s.prop3); });
+            r.effect(cx => { counter++; sink += cx.val(s.prop4); });
             layer = s;
         }
         const end = layer;
-        flush();
         let toggle = false;
         run = () => {
             toggle = !toggle;
-            start.prop1[1](toggle ? 4 : 1);
-            start.prop2[1](toggle ? 3 : 2);
-            start.prop3[1](toggle ? 2 : 3);
-            start.prop4[1](toggle ? 1 : 4);
+            start.prop1.post(toggle ? 4 : 1);
+            start.prop2.post(toggle ? 3 : 2);
+            start.prop3.post(toggle ? 2 : 3);
+            start.prop4.post(toggle ? 1 : 4);
             flush();
-            end.prop1();
-            end.prop2();
-            end.prop3();
-            end.prop4();
+            end.prop1.get();
+            end.prop2.get();
+            end.prop3.get();
+            end.prop4.get();
         };
     });
     return run;
@@ -223,24 +233,23 @@ function setupCellx(layers) {
 
 function setupMolWire() {
     let run;
-    createRoot(() => {
+    root((r) => {
         const numbers = Array.from({ length: 5 }, (_, i) => i);
-        const [A, setA] = createSignal(0);
-        const [B, setB] = createSignal(0);
-        const C = createMemo(() => { counter++; return (A() % 2) + (B() % 2); });
-        const D = createMemo(() => { counter++; return numbers.map(i => ({ x: i + (A() % 2) - (B() % 2) })); });
-        const E = createMemo(() => { counter++; return hard(C() + A() + D()[0].x, 'E'); });
-        const F = createMemo(() => { counter++; return hard(D()[2].x || B(), 'F'); });
-        const G = createMemo(() => { counter++; return C() + (C() || E() % 2) + D()[4].x + F(); });
-        createEffect(() => G(), (val) => { counter++; sink += hard(val, 'H'); });
-        createEffect(() => G(), (val) => { counter++; sink += val; });
-        createEffect(() => F(), (val) => { counter++; sink += hard(val, 'J'); });
-        flush();
+        const A = signal(0);
+        const B = signal(0);
+        const C = r.compute(cx => { counter++; return (cx.val(A) % 2) + (cx.val(B) % 2); }); C.eager();
+        const D = r.compute(cx => { counter++; return numbers.map(i => ({ x: i + (cx.val(A) % 2) - (cx.val(B) % 2) })); }); D.eager();
+        const E = r.compute(cx => { counter++; return hard(cx.val(C) + cx.val(A) + cx.val(D)[0].x, 'E'); }); E.eager();
+        const F = r.compute(cx => { counter++; return hard(cx.val(D)[2].x || cx.val(B), 'F'); }); F.eager();
+        const G = r.compute(cx => { counter++; return cx.val(C) + (cx.val(C) || cx.val(E) % 2) + cx.val(D)[4].x + cx.val(F); }); G.eager();
+        r.effect(cx => { counter++; sink += hard(cx.val(G), 'H'); });
+        r.effect(cx => { counter++; sink += cx.val(G); });
+        r.effect(cx => { counter++; sink += hard(cx.val(F), 'J'); });
         let i = 0;
         run = () => {
             i++;
-            setB(1); setA(1 + i * 2); flush();
-            setA(2 + i * 2); setB(2); flush();
+            B.post(1); A.post(1 + i * 2); flush();
+            A.post(2 + i * 2); B.post(2); flush();
         };
     });
     return run;
@@ -252,7 +261,7 @@ function benchCreateSignals(count) {
     return () => {
         let signals = [];
         for (let i = 0; i < count; i++) {
-            signals[i] = createSignal(i);
+            signals[i] = signal(i);
         }
         return signals;
     };
@@ -260,14 +269,14 @@ function benchCreateSignals(count) {
 
 function benchCreateComputations(count) {
     let run;
-    createRoot(() => {
+    root((r) => {
         run = () => {
-            const [src, setSrc] = createSignal(0);
+            const src = signal(0);
             for (let i = 0; i < count; i++) {
-                const comp = createMemo(() => { counter++; return src(); });
-                createEffect(() => comp(), (val) => { counter++; sink += val; });
+                const comp = r.compute(cx => { counter++; return cx.val(src); });
+                comp.eager();
+                r.effect(cx => { counter++; sink += cx.val(comp); });
             }
-            flush();
         };
     });
     return run;
@@ -293,16 +302,16 @@ function pseudoRandom(seed) {
         h ^= h >>> 16;
         return h >>> 0;
     }
-    let a = nextHash(), b = nextHash(), c = nextHash(), d = nextHash();
+    let a = nextHash(), b = nextHash(), cc = nextHash(), d = nextHash();
     return function () {
-        a >>>= 0; b >>>= 0; c >>>= 0; d >>>= 0;
+        a >>>= 0; b >>>= 0; cc >>>= 0; d >>>= 0;
         let t = (a + b) | 0;
         a = b ^ (b >>> 9);
-        b = (c + (c << 3)) | 0;
-        c = (c << 21) | (c >>> 11);
+        b = (cc + (cc << 3)) | 0;
+        cc = (cc << 21) | (cc >>> 11);
         d = (d + 1) | 0;
         t = (t + d) | 0;
-        c = (c + t) | 0;
+        cc = (cc + t) | 0;
         return (t >>> 0) / 4294967296;
     };
 }
@@ -316,10 +325,10 @@ function removeElems(src, rmCount, rand) {
     return copy;
 }
 
-function makeDynGraph(width, totalLayers, staticFraction, nSources) {
+function makeDynGraph(r, width, totalLayers, staticFraction, nSources) {
     const sources = new Array(width);
     for (let i = 0; i < width; i++) {
-        sources[i] = createSignal(i);
+        sources[i] = signal(i);
     }
     const random = pseudoRandom('seed');
     let prevRow = sources;
@@ -331,30 +340,33 @@ function makeDynGraph(width, totalLayers, staticFraction, nSources) {
             for (let s = 0; s < nSources; s++) {
                 mySources[s] = prevRow[(myDex + s) % width];
             }
-            const r = (x) => typeof x === 'function' ? x() : x[0]();
             if (random() < staticFraction) {
-                row[myDex] = createMemo(() => {
+                const node = r.compute(cx => {
                     counter++;
                     let sum = 0;
                     for (let s = 0; s < mySources.length; s++) {
-                        sum += r(mySources[s]);
+                        sum += cx.val(mySources[s]);
                     }
                     return sum;
                 });
+                node.eager();
+                row[myDex] = node;
             } else {
                 const first = mySources[0];
                 const tail = mySources.slice(1);
-                row[myDex] = createMemo(() => {
+                const node = r.compute(cx => {
                     counter++;
-                    let sum = r(first);
+                    let sum = cx.val(first);
                     const shouldDrop = sum & 0x1;
                     const dropDex = sum % tail.length;
                     for (let i = 0; i < tail.length; i++) {
                         if (shouldDrop && i === dropDex) continue;
-                        sum += r(tail[i]);
+                        sum += cx.val(tail[i]);
                     }
                     return sum;
                 });
+                node.eager();
+                row[myDex] = node;
             }
         }
         layers.push(row);
@@ -365,13 +377,14 @@ function makeDynGraph(width, totalLayers, staticFraction, nSources) {
 
 function setupDynBuild(width, totalLayers, staticFraction, nSources) {
     let run;
-    createRoot(() => {
+    root((r) => {
         run = () => {
-            const { layers } = makeDynGraph(width, totalLayers, staticFraction, nSources);
+            const { layers } = makeDynGraph(r, width, totalLayers, staticFraction, nSources);
             const leaves = layers[layers.length - 1];
-            for (let r = 0; r < leaves.length; r++) {
-                sink += leaves[r]();
+            for (let i = 0; i < leaves.length; i++) {
+                sink += leaves[i].get();
             }
+            return layers;
         };
     });
     return run;
@@ -379,11 +392,11 @@ function setupDynBuild(width, totalLayers, staticFraction, nSources) {
 
 function setupDynUpdate(width, totalLayers, staticFraction, nSources, readFraction) {
     let run;
-    createRoot(() => {
-        const { sources, layers } = makeDynGraph(width, totalLayers, staticFraction, nSources);
+    root((r) => {
+        const { sources, layers } = makeDynGraph(r, width, totalLayers, staticFraction, nSources);
         const leaves = layers[layers.length - 1];
-        for (let r = 0; r < leaves.length; r++) {
-            sink += leaves[r]();
+        for (let i = 0; i < leaves.length; i++) {
+            sink += leaves[i].get();
         }
         const rand = pseudoRandom('seed');
         const skipCount = Math.round(leaves.length * (1 - readFraction));
@@ -394,10 +407,10 @@ function setupDynUpdate(width, totalLayers, staticFraction, nSources, readFracti
         run = () => {
             iter++;
             const sourceDex = iter % srcLen;
-            sources[sourceDex][1](iter + sourceDex);
+            sources[sourceDex].post(iter + sourceDex);
             flush();
-            for (let r = 0; r < readLen; r++) {
-                sink += readLeaves[r]();
+            for (let i = 0; i < readLen; i++) {
+                sink += readLeaves[i].get();
             }
         };
     });
@@ -407,7 +420,7 @@ function setupDynUpdate(width, totalLayers, staticFraction, nSources, readFracti
 /* === Validation === */
 
 function validate(name, setupFn) {
-    const expected = EXPECTED_SOLID[name];
+    const expected = EXPECTED_EAGER[name];
     const run = setupFn();
     counter = 0;
     run();
@@ -464,4 +477,4 @@ bench('Dynamic update: very dynamic', setupDynUpdate(100, 15, 0.5, 6, 1));
 
 const results = await run();
 
-saveRun('solid', results);
+saveRun('anod-eager', results);

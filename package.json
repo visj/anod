@@ -1,6 +1,6 @@
 {
   "name": "anod",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -20,10 +20,10 @@
     "make": "bun scripts/build.js",
     "test": "bun test"
   },
-  "keywords": ["reactive", "signals", "state", "compute", "effect"],
+  "keywords": ["signals", "reactive", "async", "state", "compute", "effect"],
   "author": "Vilhelm Sjölund",
   "license": "MIT",
-  "description": "Fast reactive signal library with built-in async support",
+  "description": "Fast signal library with built-in async support",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/visj/anod.git"

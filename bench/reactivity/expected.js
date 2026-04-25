@@ -30,6 +30,33 @@ export const EXPECTED = {
     dynUpdateVeryDynamic: 539,
 };
 
+/**
+ * S.js is pure push — all computes re-evaluate eagerly on notification.
+ * No pull-based dirty checking, so diamond-shaped graphs (mux) and
+ * constant-collapsing chains (avoidable) can't skip unnecessary work.
+ */
+export const EXPECTED_EAGER = {
+    deep: 51,
+    broad: 150,
+    diamond: 7,
+    triangle: 11,
+    mux: 301,
+    unstable: 4,
+    avoidable: 6,
+    repeatedObservers: 2,
+    cellx10: 120,
+    molWire: 16,
+    createSignals1k: 0,
+    createComputations1k: 2000,
+    dynBuildSimple: 40,
+    dynBuildLargeWebApp: 11000,
+    dynUpdateSimple: 14,
+    dynUpdateDynamic: 86,
+    dynUpdateLargeWebApp: 209,
+    dynUpdateWideDense: 244,
+    dynUpdateDeep: 2493,
+    dynUpdateVeryDynamic: 539,
+};
 
 /**
  * usignal does not skip propagation when a compute returns a value equal to
@@ -42,4 +69,33 @@ export const OVERRIDES_USIGNAL = {
     mux: 301,
     avoidable: 6,
     molWire: 15,
+};
+
+/**
+ * Solid 2.0 eagerly evaluates all dirty memos during flush(), even when
+ * no downstream subscriber reads them. This inflates counters on sparse-read
+ * dynamic graphs (dynUpdate*). Also has an extra evaluation on unstable and
+ * molWire due to dynamic dep handling differences.
+ */
+export const EXPECTED_SOLID = {
+    deep: 51,
+    broad: 150,
+    diamond: 7,
+    triangle: 11,
+    mux: 103,
+    unstable: 4,
+    avoidable: 2,
+    repeatedObservers: 2,
+    cellx10: 120,
+    molWire: 14,
+    createSignals1k: 0,
+    createComputations1k: 2000,
+    dynBuildSimple: 40,
+    dynBuildLargeWebApp: 11000,
+    dynUpdateSimple: 14,
+    dynUpdateDynamic: 86,
+    dynUpdateLargeWebApp: 209,
+    dynUpdateWideDense: 244,
+    dynUpdateDeep: 2493,
+    dynUpdateVeryDynamic: 539,
 };
