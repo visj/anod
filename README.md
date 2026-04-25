@@ -19,6 +19,9 @@ const app = root((c) => {
 	// Add a todo: appears instantly with saved: false, settles when server confirms
 	function addTodo(text) {
 		todos.set([...todos.get(), { text, saved: false }], async (c, optimistic) => {
+			// suspend() guards the await: if a newer set() fires while this
+			// request is still in flight, this callback silently stops here -
+			// the stale response is discarded, only the latest write settles.
 			await c.suspend(saveBatch(optimistic));
 			return optimistic.map((t) => ({ ...t, saved: true }));
 		});
@@ -51,6 +54,7 @@ The following primitives exist in anod:
 - Context, a callback parameter that provides the current reactive context
 - Signal, holds a value and notifies when it changes
 - Relay, a signal that always notifies on every update
+- Resource, an async signal that can optimistically update while letting server confirm changes
 - Compute, a derived signal, updates and notifies when it's derived value changes
 - Effect, a sink, that listens to signals and computes and performs actions
 - Task, an async compute, for awaiting promises
@@ -215,6 +219,43 @@ root((c) => {
 ### Async reactivity
 
 anod aims to bridge the gap between sync and async signal reactivity. `compute` and `effect` have become the standard primitives within the signal community; in anod, their async counterparts are `task` and `spawn` . Async reactive graphs are still experimental. anod has not yet reached 1.0, and there may still be bugs and edge cases that are not covered yet.
+
+
+### Resource
+
+A resource is an async Signal. It supports writing changes through async functions, that later resolve to update it. There are three ways to write to a resource:
+
+```ts
+import { root, resource } from "anod";
+
+const save = (val) => new Promise((r) => setTimeout(() => r(val), 50));
+
+root((c) => {
+	const name = resource("alice");
+
+	// Plain set - identical to signal, no async work
+	name.set("bob");
+
+	// Optimistic set - write immediately, confirm in background
+	name.set("charlie", async (c, optimistic) => {
+		await c.suspend(save(optimistic));
+		return optimistic; // server confirmed
+	});
+
+	// Refresh - keep current value visible, replace when done
+	name.set(async (c, current) => {
+		return await c.suspend(save(current));
+	});
+
+	c.effect(name, (val) => {
+		console.log(val, name.loading ? "(loading)" : "");
+	});
+});
+```
+
+The async callback receives the resource as `c` (with `suspend` for staleness protection) and the current/optimistic value. If the callback returns a sync value, it settles immediately with no loading state. If it returns a promise, `.loading` becomes true until it resolves.
+
+When a new `set()` fires while a previous async callback is still in flight, the old promise still resolves normally, but `suspend()` detects that the resource has moved on and simply doesn't yield back into the callback. The continuation after `await` never runs, so the stale result never reaches the `return`. Only the latest activation's callback gets to settle the resource.
 
 ### Task
 
