@@ -33,10 +33,17 @@
     "url": "https://github.com/visj/anod/issues"
   },
   "devDependencies": {
+    "@mitata/counters": "^0.0.8",
+    "@preact/signals-core": "^1.14.1",
+    "@reactively/core": "^0.0.8",
+    "@zeix/cause-effect": "^1.2.1",
     "alien-signals": "^3.1.2",
     "mitata": "^1.0.34",
     "rolldown": "^1.0.0-rc.9",
-    "terser": "^5.0.0"
+    "s-js": "^0.4.9",
+    "terser": "^5.0.0",
+    "usignal": "^0.10.0",
+    "@solidjs/signals": "^2.0.0-beta.8"
   },
   "imports": {
     "#anod": {
@@ -49,8 +56,5 @@
       "node": "./test/env/node.js",
       "default": "./test/env/node.js"
     }
-  },
-  "dependencies": {
-    "@mitata/counters": "^0.0.8"
   }
 }

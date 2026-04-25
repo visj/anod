@@ -229,7 +229,7 @@ var PURGE_COUNT = 0;
  */
 function Clock() {}
 Clock.prototype._flag = 0;
-Clock.prototype._level = 0;
+Clock.prototype._level = -1;
 Clock.prototype._owner = null;
 Clock.prototype._recover = null;
 
@@ -267,9 +267,38 @@ function Signal(value) {
   this._subs = null;
   /** @type {number} */
   this._tombstones = 0;
+}
+
+/**
+ * Full-featured signal with equality function and async support.
+ * Used by resource() and signal(value, equal). Extends Signal
+ * with _time (for LWW stale activation tracking) and _equal
+ * (custom equality to skip notifications).
+ * @template T
+ * @constructor
+ * @param {T} value
+ * @param {number} flag
+ * @param {(function(T,T): boolean) | null} equal
+ */
+function Cell(value, flag, equal) {
+  /** @type {number} */
+  this._flag = flag;
+  /** @type {T} */
+  this._value = value;
+  /** @type {number} */
+  this._version = -1;
+  /** @type {Receiver} */
+  this._sub1 = null;
+  /** @type {Array<Receiver> | null} */
+  this._subs = null;
+  /** @type {number} */
+  this._tombstones = 0;
   /** @type {number} */
   this._time = 0;
+  /** @type {(function(T,T): boolean) | null} */
+  this._equal = equal;
 }
+Cell.prototype = Object.create(Signal.prototype);
 
 
 /**
@@ -480,7 +509,7 @@ function set(value, asyncFn) {
     } else {
       _value = value;
     }
-    if (this._flag & FLAG_RELAY || this._value !== _value) {
+    if (this._flag & FLAG_RELAY || (this._equal !== null ? !this._equal(this._value, _value) : this._value !== _value)) {
       this._value = _value;
       notify(this, FLAG_STALE);
       flush();
@@ -496,7 +525,7 @@ function set(value, asyncFn) {
     schedule(this, { _value: value, _fn: asyncFn }, asyncAssign);
     return true;
   }
-  if (callback || this._flag & FLAG_RELAY || this._value !== value) {
+  if (callback || this._flag & FLAG_RELAY || (this._equal !== null ? !this._equal(this._value, value) : this._value !== value)) {
     schedule(this, value, assign);
     return true;
   }
@@ -531,7 +560,7 @@ function _runAsync(node, asyncFn, prev) {
   } else if (kind === ASYNC_ITERATOR) {
     node._flag |= FLAG_LOADING;
     resolveIterator(node, result, time);
-  } else if (result !== undefined && (result !== node._value || node._flag & FLAG_RELAY)) {
+  } else if (result !== undefined && (node._flag & FLAG_RELAY || (node._equal !== null ? !node._equal(node._value, result) : node._value !== result))) {
     /** ASYNC_SYNC: write the value immediately if changed. */
     node._value = result;
     notify(node, FLAG_STALE);
@@ -558,7 +587,7 @@ function assign(node, value, time) {
   } else {
     _value = value;
   }
-  if (node._value !== _value || (node._flag & FLAG_RELAY)) {
+  if (node._flag & FLAG_RELAY || (node._equal !== null ? !node._equal(node._value, _value) : node._value !== _value)) {
     node._value = _value;
     if (node._flag & FLAG_SCHEDULED) {
       node._flag &= ~FLAG_SCHEDULED;
@@ -585,7 +614,7 @@ function asyncAssign(node, payload, time) {
   } else {
     _value = value;
   }
-  if (node._value !== _value || (node._flag & FLAG_RELAY)) {
+  if (node._flag & FLAG_RELAY || (node._equal !== null ? !node._equal(node._value, _value) : node._value !== _value)) {
     node._value = _value;
     if (node._flag & FLAG_SCHEDULED) {
       node._flag &= ~FLAG_SCHEDULED;
@@ -687,11 +716,17 @@ function _readAsync(sender, safe) {
 }
 
 /**
+ * Creates a signal. When equal is provided, uses Cell (extended
+ * signal with custom equality function).
  * @template T
  * @param {T} value
+ * @param {(function(T,T): boolean)=} equal
  * @returns {Signal<T>}
  */
-function signal(value) {
+function signal(value, equal) {
+  if (equal !== undefined) {
+    return new Cell(value, 0, equal);
+  }
   return new Signal(value);
 }
 
@@ -715,12 +750,10 @@ function relay(value) {
  * @template T
  * @param {T} value
  * @param {boolean=} relay
- * @returns {Resource<T>}
+ * @returns {Signal<T>}
  */
 function resource(value, relay) {
-  let node = new Signal(value);
-  node._flag = FLAG_ASYNC | (relay ? FLAG_RELAY : 0);
-  return node;
+  return new Cell(value, FLAG_ASYNC | (relay ? FLAG_RELAY : 0), null);
 }
 
 /**
@@ -747,6 +780,7 @@ function root(fn) {
   RootProto._level = -1;
 
   SignalProto._ctime = 0;
+  SignalProto._equal = null;
 
   /** Signal._drop: NOOP — signals don't drop values. */
   SignalProto._drop = function () { };
@@ -1560,7 +1594,7 @@ function root(fn) {
     if (asyncFn !== undefined && this._flag & FLAG_ASYNC) {
       schedule(this, { _value: value, _fn: asyncFn }, asyncAssign);
     } else {
-      if (!POSTING && !(this._flag & FLAG_RELAY) && typeof value !== "function" && this._value === value) {
+      if (!POSTING && !(this._flag & FLAG_RELAY) && typeof value !== "function" && (this._equal !== null ? this._equal(this._value, value) : this._value === value)) {
         return false;
       }
       schedule(this, value, assign);
@@ -1695,7 +1729,7 @@ function root(fn) {
       } else {
         _value = value;
       }
-      if (sender._flag & FLAG_RELAY || sender._value !== _value) {
+      if (sender._flag & FLAG_RELAY || (sender._equal !== null ? !sender._equal(sender._value, _value) : sender._value !== _value)) {
         sender._value = _value;
         this._flag |= FLAG_PAUSED;
         notify(sender, FLAG_STALE);
@@ -3936,7 +3970,7 @@ function batch(fn) {
 }
 
 export {
-  Root, Signal, Compute, Effect,
+  Root, Signal, Cell, Compute, Effect,
   FLAG_STALE,
   FLAG_PENDING,
   FLAG_SCHEDULED,

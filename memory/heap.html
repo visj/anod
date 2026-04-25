@@ -16,7 +16,7 @@ const FLAG_STALE = 1 << 0;
 
 function Signal(value) {
   this._flag = 0; this._value = value; this._version = -1;
-  this._sub1 = null; this._subs = null; this._tombstones = 0;
+  this._sub1 = null; this._subs = null; this._tombstones = 0, this._time = 0;
 }
 function Compute(opts, fn, dep1, seed, args) {
   this._flag = FLAG_INIT | FLAG_STALE | opts; this._value = seed;
@@ -44,14 +44,14 @@ function run() {
 
   const nodes = new Array(N);
   for (let i = 0; i < N; i++) {
-    const node = new Compute(0, null, null, undefined, undefined);
-    node._deps = [SENDER];
+    const node = new Signal(0, null, null, undefined, undefined);
+    // node._subs = [RECEIVER];
     nodes[i] = node;
   }
-  // push in second pass
-  for (let i = 0; i < N; i++) {
-    for (let j = 1; j < DEP_COUNT; j++) nodes[i]._deps.push(SENDER);
-  }
+  // // push in second pass
+  // for (let i = 0; i < N; i++) {
+  //   for (let j = 1; j < DEP_COUNT; j++) nodes[i]._deps.push(SENDER);
+  // }
 
   window._alloc = nodes;
   log('Done. Take snapshot now.');
