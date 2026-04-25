@@ -6,6 +6,18 @@ anod is a reactive state management library. It has built-in support for both sy
 - Uses a hybrid push/pull model, where nodes can both eagerly and lazily send updates
 - Async is built into the core, and is a first-hand member
 
+## Table of contents
+
+- [Quick example](#quick-example)
+- [Basic usage](#basic-usage) — [Signal & Relay](#signal--relay) · [Compute](#compute) · [Effect](#effect)
+- [Async reactivity](#async-reactivity) — [Resource](#resource) · [Task](#task) · [Spawn](#spawn)
+- [c.suspend()](#csuspend) · [Error handling](#error-handling) · [Finalize](#finalize) · [Batching](#batching)
+- [The reactive graph in depth](#the-reactive-graph-in-depth) — [Dependency tracking](#dependency-tracking) · [Contextual helpers](#contextual-helpers) · [Evaluation helpers](#evaluation-helpers)
+- [Contextual writes](#contextual-writes-cset--cpost) · [Async state checks](#async-state-checks-cpending--crejected)
+- [Error recovery in depth](#error-recovery-in-depth)
+- [Async reactivity in depth](#async-reactivity-in-depth) — [c.suspend()](#2-await-with-csuspend) · [c.defer()](#deferred-dependencies-with-cdefer) · [c.controller()](#abort-controller-with-ccontroller) · [c.lock()](#async-transactions-with-clock--cunlock)
+- [Benchmarks](#benchmarks)
+
 ## Quick example
 
 ```ts
@@ -50,15 +62,15 @@ const app = root((c) => {
 
 The following primitives exist in anod:
 
-- Root, which owns inner primitives and dispose them on request
-- Context, a callback parameter that provides the current reactive context
 - Signal, holds a value and notifies when it changes
 - Relay, a signal that always notifies on every update
-- Compute, a derived signal, updates and notifies when it's derived value changes
-- Effect, a sink, that listens to signals and computes and performs actions
-- Resource, an async signal that can optimistically update while letting server confirm changes
-- Task, an async compute, for awaiting promises
-- Spawn, an async effect, for doing async work
+- Compute, a derived signal, updates and notifies when its derived value changes
+- Effect, a sink that listens to signals and computes and performs actions
+- Resource, an async signal for optimistic updates with server confirmation
+- Task, an async compute for awaiting promises
+- Spawn, an async effect for doing async work
+- Root, which owns inner primitives and disposes them on request
+- Context, a callback parameter that provides the current reactive context
 
 #### Root
 
@@ -76,7 +88,13 @@ app.dispose();
 
 #### Signal & Relay
 
+For simple use cases where you don't need ownership or disposal, anod exports a global `c` context that creates unowned nodes: `import { c } from "anod"`. Nodes created through `c` live until GC collects them.
+
+#### Signal & Relay
+
 A signal stores a value and notifies subscribers when changed. You can read it to get its current value, and write to it to update anyone who depends on it.
+
+Signals accept an optional equality function to customize when subscribers are notified: `signal(value, (prev, next) => boolean)`. When provided, the function is called on every write — return `true` to skip notification.
 
 ```ts
 import { root, signal, relay } from "anod";
@@ -88,7 +106,7 @@ root((c) => {
 	 * The .get() method only returns the current value.
 	 * Unlike other libraries, this method by itself does
 	 * not have any reactive capabilities. Instead, reactivity
-	 * is controller through the context
+	 * is controlled through the context
 	 */
 	console.log(name.get());
 	c.effect((c) => {
@@ -509,7 +527,7 @@ Dependencies are tracked dynamically at runtime. When your callback calls `c.val
 
 The bound signature `compute(dep, fn)` skips dependency tracking entirely. The single dependency is fixed at creation time. This is significantly faster for the common single-dep case and avoids all reconciliation overhead.
 
-Anod's interal dependency reconciliation algorithm is designed to avoid allocation pressure in the update path. For nodes that read the same dependencies every run, they are re-used, and no additional objects are allocated.
+Anod's internal dependency reconciliation algorithm is designed to avoid allocation pressure in the update path. For nodes that read the same dependencies every run, they are re-used, and no additional objects are allocated.
 
 ### Contextual helpers
 
@@ -540,8 +558,10 @@ Runs a cleanup method every time the node updates, and finally when it disposes.
 
 ```ts
 import { root, signal, OPT_DEFER } from "anod";
+
+const eventbus = signal("");
+
 root((c) => {
-	const eventbus = signal("");
 	const socketUrl = signal("ws://localhost:8080");
 	c.effect(socketUrl, (url, c) => {
 		const socket = new WebSocket(url);
@@ -555,12 +575,12 @@ root((c) => {
 				socket.send("Hello Server!");
 				/**
 				 * Websocket is open, register an effect
-				 * that susbcribes to a signal and sends to socket.
+				 * that subscribes to a signal and sends to socket.
 				 * We set OPT_DEFER to not run initially, but instead
 				 * wait for the first signal change to trigger.
 				 * Unlike other libraries, in anod, you can freely create
 				 * owned scopes throughout the async execution lifecycle.
-				 * Since anod doesn' rely on global state, the context
+				 * Since anod doesn't rely on global state, the context
 				 * allows you to treat every async boundary as if it was
 				 * called from the initial sync path.
 				 */
@@ -576,6 +596,7 @@ root((c) => {
 		});
 	});
 });
+
 setTimeout(() => {
 	eventbus.set("Hello");
 	eventbus.set("World");
@@ -585,6 +606,47 @@ setTimeout(() => {
 #### `c.recover()` , `c.refuse()` , `c.panic()`
 
 See dedicated error lifecycle section.
+
+### Contextual writes: `c.set()` / `c.post()`
+
+Inside a compute or effect callback, `c.set(signal, value)` writes to a signal while preventing the current node from re-triggering itself. This enables the interceptor pattern — a node that reads a signal and writes back to the same signal without causing an infinite loop.
+
+```ts
+import { root, signal } from "anod";
+root((c) => {
+	const count = signal(0);
+	c.effect(count, (val, c) => {
+		// Write back to count without re-triggering this effect
+		c.set(count, val + 1);
+	});
+	// Effect ran once, count is now 1
+	count.set(10); // Effect runs again, count becomes 11
+});
+```
+
+`c.post(signal, value)` is the deferred variant — schedules the write for the next microtask flush, with the same self-notification guard.
+
+Both `c.set()` and `c.post()` also support writing to resources with an async callback: `c.set(resource, value, asyncFn)`.
+
+### Async state checks: `c.pending()` / `c.rejected()`
+
+`c.pending(sender)` subscribes to a sender and returns `true` if it has `FLAG_LOADING` set. Works with tasks, resources, or any sender. Accepts an array of senders — returns `true` if any is loading.
+
+`c.rejected(sender)` subscribes to a sender and safely returns its error value if `FLAG_ERROR` is set, or `null` otherwise. Unlike `c.val()`, it does not throw on error — this is the safe way to check error state reactively.
+
+```ts
+root((c) => {
+	const data = c.task(async (c) => {
+		return await c.suspend(fetch("/api/data").then((r) => r.json()));
+	});
+	c.effect((c) => {
+		if (c.pending(data)) return console.log("Loading...");
+		const err = c.rejected(data);
+		if (err) return console.log("Error:", err.error);
+		console.log("Data:", c.val(data));
+	});
+});
+```
 
 ### Evaluation helpers
 
@@ -1058,6 +1120,8 @@ Earlier, anod and solid borrowed their core implementation idea from [S.js](http
 | Update: wide dense | 426 µs | 50.7 µs | -88% | 16.6 kB | 2.5 kB | -85% |
 | Update: deep | 140 µs | 134 µs | -4% | 40.1 kB | 39.9 kB | 0% |
 | Update: very dynamic | 88.6 µs | 53.3 µs | -40% | 20.1 kB | 4.4 kB | -78% |
+
+anod wins all 22 benchmarks. The gap is most dramatic on large update workloads (large web app -94%, wide dense -88%), where preact's recursive `_notify()` traverses the entire subscriber tree on every signal write, regardless of how many nodes actually need updating.
 
 ### Chromium (browser)
 
