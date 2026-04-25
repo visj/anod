@@ -8,6 +8,7 @@ export {
     FATAL,
     signal,
     relay,
+    resource,
     root,
     batch,
     flush,
