@@ -40,7 +40,6 @@ const FLAG_EAGER = 1 << 23;
 const FLAG_PURGE = 1 << 24;
 const FLAG_PAUSED = 1 << 25;
 const FLAG_OWNER = 1 << 26;
-const FLAG_RECEIVER = 1 << 27;
 
 /** Error type constants for { error, type } POJOs. */
 const REFUSE = 1;
@@ -268,36 +267,10 @@ function Signal(value) {
   this._subs = null;
   /** @type {number} */
   this._tombstones = 0;
-}
-
-/**
- * Async-capable signal. Extends Signal with `_time` for stale
- * activation tracking and `_chan` for suspend/controller/defer.
- * Created via `resource(value)`.
- * @template T
- * @constructor
- * @param {T} value
- */
-function Resource(value) {
-  /** @type {number} */
-  this._flag = FLAG_ASYNC;
-  /** @type {T} */
-  this._value = value;
-  /** @type {number} */
-  this._version = -1;
-  /** @type {Receiver} */
-  this._sub1 = null;
-  /** @type {Array<Receiver> | null} */
-  this._subs = null;
-  /** @type {number} */
-  this._tombstones = 0;
   /** @type {number} */
   this._time = 0;
-  /** @type {Channel | null} */
-  this._chan = null;
 }
 
-Resource.prototype = Object.create(Signal.prototype);
 
 /**
  * @constructor
@@ -311,7 +284,7 @@ Resource.prototype = Object.create(Signal.prototype);
  */
 function Compute(opts, fn, dep1, seed, args) {
   /** @type {number} */
-  this._flag = FLAG_INIT | FLAG_STALE | FLAG_RECEIVER | opts;
+  this._flag = FLAG_INIT | FLAG_STALE | opts;
   /** @type {T} */
   this._value = seed;
   /** @type {number} */
@@ -352,7 +325,7 @@ function Compute(opts, fn, dep1, seed, args) {
  */
 function Effect(opts, fn, dep1, owner, args) {
   /** @type {number} */
-  this._flag = FLAG_INIT | FLAG_OWNER | FLAG_RECEIVER | (0 | opts);
+  this._flag = FLAG_INIT | FLAG_OWNER | (0 | opts);
   /** @type {(function(W): (function(): void | void)) | (function(U,W): (function(): void | void)) | (function(U,V,W): (function(): void | void)) | null} */
   this._fn = fn;
   /** @type {Sender<U> | null} */
@@ -522,17 +495,13 @@ function set(value, asyncFn) {
 }
 
 /**
- * Starts async work for a resource. Resets channel if active,
- * increments _time for LWW, runs asyncFn, dispatches based
- * on return type (promise, iterator, or sync).
- * @param {Resource} node
- * @param {function(Resource, *): (* | Promise<*>)} asyncFn
+ * Starts async work for a resource signal. Increments _time for
+ * LWW, runs asyncFn, dispatches based on return type.
+ * @param {Signal} node
+ * @param {function(Signal, *): (* | Promise<*>)} asyncFn
  * @param {*} prev
  */
 function _runAsync(node, asyncFn, prev) {
-  if (node._flag & FLAG_CHANNEL) {
-    resetChannel(node);
-  }
   node._flag &= ~(FLAG_ERROR | FLAG_SUSPEND | FLAG_LOADING);
   let time = ++node._time;
   let result;
@@ -736,10 +705,8 @@ function relay(value) {
  * @returns {Resource<T>}
  */
 function resource(value, relay) {
-  let node = new Resource(value);
-  if (relay) {
-    node._flag |= FLAG_RELAY;
-  }
+  let node = new Signal(value);
+  node._flag = FLAG_ASYNC | (relay ? FLAG_RELAY : 0);
   return node;
 }
 
@@ -1145,7 +1112,7 @@ function root(fn) {
      *  patchDeps handles lifecycle; in async scope use subscribe()
      *  and let settleDeps deduplicate. */
     if (!(taskNode._flag & FLAG_LOADING)) {
-      if (node._flag & FLAG_LOADING && node._flag & FLAG_RECEIVER) {
+      if (node._flag & FLAG_LOADING) {
         subscribe(node, taskNode);
       } else if (!(node._flag & FLAG_LOADING)) {
         let version = VERSION;
@@ -1214,10 +1181,8 @@ function root(fn) {
 
     if (allSettled) {
       node._flag &= ~FLAG_BLOCKED;
-      if (node._flag & FLAG_RECEIVER) {
-        for (let i = 0; i < count; i++) {
-          subscribe(node, tasks[i]);
-        }
+      for (let i = 0; i < count; i++) {
+        subscribe(node, tasks[i]);
       }
       return results;
     }
@@ -1264,10 +1229,8 @@ function root(fn) {
     /** All settled — subscribe and resolve with consistent snapshot. */
     if (blocked === -1) {
       node._flag &= ~FLAG_BLOCKED;
-      if (node._flag & FLAG_RECEIVER) {
-        for (let i = 0; i < count; i++) {
-          subscribe(node, tasks[i]);
-        }
+      for (let i = 0; i < count; i++) {
+        subscribe(node, tasks[i]);
       }
       resolve(results);
       return;
@@ -1453,26 +1416,64 @@ function root(fn) {
   ComputeProto.pending = EffectProto.pending = pending;
   ComputeProto.rejected = EffectProto.rejected = rejected;
 
-  /** Resource prototype — async-capable signal methods. */
-  let ResourceProto = Resource.prototype;
-
-  ResourceProto._channel = _channel;
-  ResourceProto.suspend = suspend;
-  ResourceProto.controller = controller;
-  ResourceProto.defer = defer;
-  ResourceProto.lock = function () { this._flag |= FLAG_LOCKED; };
-  ResourceProto.unlock = function () { this._flag &= ~FLAG_LOCKED; };
-  ResourceProto.pending = pending;
-  ResourceProto.rejected = rejected;
+  /**
+   * Resource-specific suspend. Only supports raw promises and the
+   * callback pattern. Resources are senders, not receivers — they
+   * cannot await tasks or other resources.
+   * @this {Signal}
+   * @param {Promise | function} promiseOrFn
+   * @returns {*}
+   */
+  SignalProto.suspend = function (promiseOrFn) {
+    if (typeof promiseOrFn === "function") {
+      if (this._flag & FLAG_SUSPEND) {
+        throw new Error("Cannot call suspend() with callbacks after a previous suspend()");
+      }
+      this._flag |= FLAG_SUSPEND | FLAG_LOADING;
+      let node = this;
+      let time = this._time;
+      promiseOrFn(
+        function (val) {
+          if (node._time !== time || node._flag & FLAG_DISPOSED) {
+            return;
+          }
+          node._settle(val);
+        },
+        function (err) {
+          if (node._time !== time || node._flag & FLAG_DISPOSED) {
+            return;
+          }
+          node._error(err);
+        }
+      );
+      return;
+    }
+    /** Promise path — wrap with staleness guard. */
+    let node = this;
+    let time = this._time;
+    return promiseOrFn.then(
+      function (val) {
+        if (node._time === time && !(node._flag & FLAG_DISPOSED)) {
+          return val;
+        }
+        return REGRET;
+      },
+      function (error) {
+        if (node._time === time && !(node._flag & FLAG_DISPOSED)) {
+          throw error;
+        }
+        return REGRET;
+      }
+    );
+  };
 
   /**
    * Settles an async resource. Clears FLAG_LOADING, writes value
-   * if changed, notifies subscribers, handles waiters for
-   * downstream c.suspend(resource) consumers.
-   * @this {Resource}
+   * if changed, notifies subscribers, flushes.
+   * @this {Signal}
    * @param {*} value
    */
-  ResourceProto._settle = function (value) {
+  SignalProto._settle = function (value) {
     let flag = this._flag;
     this._flag &= ~FLAG_LOADING;
 
@@ -1482,20 +1483,6 @@ function root(fn) {
 
     if (value !== this._value || flag & FLAG_ERROR) {
       this._value = value;
-
-      if (flag & FLAG_CHANNEL) {
-        let ch = this._chan;
-        if (ch !== null && ch._waiters !== null) {
-          let waiters = ch._waiters;
-          let waiterCount = waiters.length;
-          settleNotify(this, value, !!(flag & FLAG_ERROR), waiters, waiterCount);
-          ch._waiters = null;
-          this._flag &= ~FLAG_WAITER;
-          flush();
-          return;
-        }
-      }
-
       notify(this, FLAG_STALE);
       flush();
     }
@@ -1504,10 +1491,10 @@ function root(fn) {
   /**
    * Settles an async resource with an error. Wraps as FATAL,
    * sets FLAG_ERROR, and delegates to _settle.
-   * @this {Resource}
+   * @this {Signal}
    * @param {*} err
    */
-  ResourceProto._error = function (err) {
+  SignalProto._error = function (err) {
     this._flag |= FLAG_ERROR;
     this._settle({ error: err, type: FATAL });
   };
@@ -1673,6 +1660,10 @@ function root(fn) {
    * @param {{ _recv: Receiver, _value: * }} payload
    * @param {number} time
    */
+  /**
+   * Drain handler for guarded writes. Pauses the receiver around
+   * the assign so it ignores its own notification.
+   */
   function guardedAssign(node, payload, time) {
     let receiver = payload._recv;
     receiver._flag |= FLAG_PAUSED;
@@ -1681,17 +1672,44 @@ function root(fn) {
   }
 
   /**
+   * Drain handler for guarded async writes. Pauses the receiver,
+   * writes the optimistic value, then kicks off async work.
+   */
+  function guardedAsyncAssign(node, payload, time) {
+    let receiver = payload._recv;
+    receiver._flag |= FLAG_PAUSED;
+    let value = payload._value;
+    let _value;
+    if (typeof value === "function") {
+      _value = value(node._value);
+    } else {
+      _value = value;
+    }
+    if (node._value !== _value || (node._flag & FLAG_RELAY)) {
+      node._assign(_value, time);
+      if (node._flag & FLAG_SCHEDULED) {
+        node._flag &= ~FLAG_SCHEDULED;
+        notify(node, FLAG_STALE);
+      }
+    } else {
+      node._flag &= ~FLAG_SCHEDULED;
+    }
+    receiver._flag &= ~(FLAG_PAUSED | FLAG_STALE | FLAG_PENDING);
+    _runAsync(node, payload._fn, _value);
+  }
+
+  /**
    * Contextual set — writes to a sender while pausing this receiver
    * so it ignores any notifications that propagate from the write.
    * When IDLE (e.g. inside an async continuation after await), mirrors
-   * the immediate set() path. When mid-flush, schedules a guarded
-   * assign for drain time.
+   * the immediate set() path. Supports asyncFn for resource senders.
    * @this {Compute|Effect}
    * @param {Sender} sender
    * @param {* | function(*): *} value
+   * @param {function=} asyncFn
    * @returns {void}
    */
-  function contextSet(sender, value) {
+  function contextSet(sender, value, asyncFn) {
     if (IDLE) {
       let _value;
       if (typeof value === "function") {
@@ -1706,22 +1724,35 @@ function root(fn) {
         this._flag &= ~(FLAG_PAUSED | FLAG_STALE | FLAG_PENDING);
         flush();
       }
+      if (asyncFn !== undefined && sender._flag & FLAG_ASYNC) {
+        _runAsync(sender, asyncFn, _value);
+      }
     } else {
-      schedule(sender, { _recv: this, _value: value }, guardedAssign);
+      if (asyncFn !== undefined && sender._flag & FLAG_ASYNC) {
+        schedule(sender, { _recv: this, _value: value, _fn: asyncFn }, guardedAsyncAssign);
+      } else {
+        schedule(sender, { _recv: this, _value: value }, guardedAssign);
+      }
     }
   }
 
   /**
    * Contextual post — deferred version of contextSet. Schedules a
    * guarded write that will pause this receiver at drain time. Triggers
-   * a microtask flush if not already posting, same as Signal.post().
+   * a microtask flush if not already posting. Supports asyncFn for
+   * resource senders.
    * @this {Compute|Effect}
    * @param {Sender} sender
    * @param {* | function(*): *} value
+   * @param {function=} asyncFn
    * @returns {void}
    */
-  function contextPost(sender, value) {
-    schedule(sender, { _recv: this, _value: value }, guardedAssign);
+  function contextPost(sender, value, asyncFn) {
+    if (asyncFn !== undefined && sender._flag & FLAG_ASYNC) {
+      schedule(sender, { _recv: this, _value: value, _fn: asyncFn }, guardedAsyncAssign);
+    } else {
+      schedule(sender, { _recv: this, _value: value }, guardedAssign);
+    }
     if (!POSTING) {
       POSTING = true;
       queueMicrotask(microflush);
@@ -3354,7 +3385,7 @@ function settleNotify(node, value, isError, waiters, waiterCount) {
     } else {
       waiters[i + 1](value);
     }
-    if (!(awaiter._flag & FLAG_BLOCKED) && awaiter._flag & FLAG_RECEIVER) {
+    if (!(awaiter._flag & FLAG_BLOCKED)) {
       if (awaiter._version !== version - 1) {
         subscribe(awaiter, node);
       }
@@ -4007,7 +4038,6 @@ export {
   signal,
   relay,
   resource,
-  Resource,
   root,
   c,
   Clock
