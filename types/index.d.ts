@@ -33,9 +33,16 @@ export interface Signal<T = any> extends ReadonlySignal<T> {
   loading: boolean;
   error: boolean;
   set(value: T | ((prev: T) => T)): boolean;
-  set(value: T | ((prev: T) => T), fn: (c: ResourceContext, prev: T) => T | Promise<T>): boolean;
   post(value: T | ((prev: T) => T)): boolean;
-  post(value: T | ((prev: T) => T), fn: (c: ResourceContext, prev: T) => T | Promise<T>): boolean;
+}
+
+export interface Resource<T = any> extends Signal<T> {
+  set(value: T): boolean;
+  set(fn: (c: ResourceContext, current: T) => T | Promise<T>): boolean;
+  set(value: T | ((c: ResourceContext, current: T) => T), fn: (c: ResourceContext, optimistic: T) => T | Promise<T>): boolean;
+  post(value: T): boolean;
+  post(fn: (c: ResourceContext, current: T) => T | Promise<T>): boolean;
+  post(value: T | ((c: ResourceContext, current: T) => T), fn: (c: ResourceContext, optimistic: T) => T | Promise<T>): boolean;
 }
 
 export interface Compute<T = any> extends ReadonlySignal<T> {
@@ -64,13 +71,12 @@ export interface Effect extends Root {
 export interface Spawn extends Effect {}
 
 /** Context available inside resource asyncFn callbacks. */
-/** Context available inside resource asyncFn callbacks. */
 export interface ResourceContext {
   suspend<T>(promise: Promise<T>): Promise<T>;
   suspend(fn: (resolve: (value?: any) => void, reject: (error?: any) => void) => void): void;
 }
 
-export type Sender<T = any> = Signal<T> | Compute<T> | Task<T>;
+export type Sender<T = any> = Signal<T> | Resource<T> | Compute<T> | Task<T>;
 
 /**
  * Base context available on all receiver callbacks.
@@ -81,9 +87,9 @@ export interface Context {
   stable(): void;
   cleanup(fn: () => void): void;
   set<T>(sender: Sender<T>, value: T | ((prev: T) => T)): void;
-  set<T>(sender: Sender<T>, value: T | ((prev: T) => T), fn: (c: ResourceContext, prev: T) => T | Promise<T>): void;
+  set<T>(sender: Resource<T>, value: T | ((prev: T) => T), fn: (c: ResourceContext, optimistic: T) => T | Promise<T>): void;
   post<T>(sender: Sender<T>, value: T | ((prev: T) => T)): void;
-  post<T>(sender: Sender<T>, value: T | ((prev: T) => T), fn: (c: ResourceContext, prev: T) => T | Promise<T>): void;
+  post<T>(sender: Resource<T>, value: T | ((prev: T) => T), fn: (c: ResourceContext, optimistic: T) => T | Promise<T>): void;
   pending(senders: Sender | Sender[]): boolean;
   rejected<T>(sender: Sender<T>): T | null;
   controller(): AbortController;
@@ -258,13 +264,13 @@ export interface Clock {
     opts?: number
   ): Spawn;
 
-  resource<T>(value: T, relay?: boolean): Signal<T>;
+  resource<T>(value: T, relay?: boolean): Resource<T>;
 }
 
 export declare const c: Clock;
 export declare function signal<T>(value: T): Signal<T>;
 export declare function relay<T>(value: T): Signal<T>;
-export declare function resource<T>(value: T, relay?: boolean): Signal<T>;
+export declare function resource<T>(value: T, relay?: boolean): Resource<T>;
 export declare function root(fn: (c: RootContext) => void): Root;
 export declare function batch(fn: () => void): void;
 export declare function flush(): void;

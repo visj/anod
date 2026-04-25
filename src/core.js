@@ -463,6 +463,15 @@ function set(value, asyncFn) {
     throw new Error(ASSERT_NOT_DISPOSED);
   }
   let callback = typeof value === "function";
+  /** Resource: single function arg → run as (c, current), dispatch on result. */
+  if (callback && asyncFn === undefined && this._flag & FLAG_ASYNC) {
+    if (IDLE) {
+      _runAsync(this, value, this._value);
+    } else {
+      schedule(this, { _value: this._value, _fn: value }, asyncAssign);
+    }
+    return true;
+  }
   if (IDLE) {
     /** @type {T} */
     let _value;
@@ -522,8 +531,12 @@ function _runAsync(node, asyncFn, prev) {
   } else if (kind === ASYNC_ITERATOR) {
     node._flag |= FLAG_LOADING;
     resolveIterator(node, result, time);
+  } else if (result !== undefined && (result !== node._value || node._flag & FLAG_RELAY)) {
+    /** ASYNC_SYNC: write the value immediately if changed. */
+    node._assign(result, TIME + 1);
+    notify(node, FLAG_STALE);
+    flush();
   }
-  /** ASYNC_SYNC: no loading, already settled inline. */
 }
 
 /**
@@ -1563,6 +1576,15 @@ function root(fn) {
     if (this._flag & FLAG_DISPOSED) {
       throw new Error(ASSERT_NOT_DISPOSED);
     }
+    /** Resource: single function arg = asyncFn with no optimistic update. */
+    if (typeof value === "function" && asyncFn === undefined && this._flag & FLAG_ASYNC) {
+      schedule(this, { _value: this._value, _fn: value }, asyncAssign);
+      if (!POSTING) {
+        POSTING = true;
+        queueMicrotask(microflush);
+      }
+      return true;
+    }
     if (asyncFn !== undefined && this._flag & FLAG_ASYNC) {
       schedule(this, { _value: value, _fn: asyncFn }, asyncAssign);
     } else {
@@ -1672,30 +1694,14 @@ function root(fn) {
   }
 
   /**
-   * Drain handler for guarded async writes. Pauses the receiver,
-   * writes the optimistic value, then kicks off async work.
+   * Drain handler for guarded async writes. Pauses the receiver
+   * around asyncAssign so it ignores its own notification.
    */
   function guardedAsyncAssign(node, payload, time) {
     let receiver = payload._recv;
     receiver._flag |= FLAG_PAUSED;
-    let value = payload._value;
-    let _value;
-    if (typeof value === "function") {
-      _value = value(node._value);
-    } else {
-      _value = value;
-    }
-    if (node._value !== _value || (node._flag & FLAG_RELAY)) {
-      node._assign(_value, time);
-      if (node._flag & FLAG_SCHEDULED) {
-        node._flag &= ~FLAG_SCHEDULED;
-        notify(node, FLAG_STALE);
-      }
-    } else {
-      node._flag &= ~FLAG_SCHEDULED;
-    }
+    asyncAssign(node, payload, time);
     receiver._flag &= ~(FLAG_PAUSED | FLAG_STALE | FLAG_PENDING);
-    _runAsync(node, payload._fn, _value);
   }
 
   /**

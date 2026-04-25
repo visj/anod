@@ -17,9 +17,9 @@ describe("resource", () => {
             expect(r.get()).toBe(2);
         });
 
-        test("sync set with updater", () => {
+        test("sync set with function returning sync value", () => {
             const r = resource(10);
-            r.set((prev) => prev + 5);
+            r.set((c, current) => current + 5);
             expect(r.get()).toBe(15);
         });
 
@@ -242,6 +242,83 @@ describe("resource", () => {
             await new Promise((resolve) => setTimeout(resolve, 50));
             expect(r.loading).toBe(false);
             expect(r.get()).toBe(100);
+        });
+    });
+
+    describe("refresh (single asyncFn, no optimistic)", () => {
+        test("set(asyncFn) keeps current value, enters loading", async () => {
+            const r = resource("stale");
+            r.set(async (c, current) => {
+                return await c.suspend(Promise.resolve("fresh"));
+            });
+            expect(r.get()).toBe("stale");
+            expect(r.loading).toBe(true);
+            await settle();
+            expect(r.get()).toBe("fresh");
+            expect(r.loading).toBe(false);
+        });
+
+        test("set(asyncFn) receives current value as second arg", async () => {
+            let received = null;
+            const r = resource(42);
+            r.set(async (c, current) => {
+                received = current;
+                return await c.suspend(Promise.resolve(current));
+            });
+            expect(received).toBe(42);
+        });
+
+        test("set(asyncFn) in batch defers to drain", async () => {
+            const r = resource(0);
+            let asyncRan = false;
+            batch(() => {
+                r.set(async (c, current) => {
+                    asyncRan = true;
+                    return await c.suspend(Promise.resolve(99));
+                });
+                expect(asyncRan).toBe(false);
+            });
+            expect(asyncRan).toBe(true);
+            await settle();
+            expect(r.get()).toBe(99);
+        });
+
+        test("set(asyncFn) LWW with optimistic set", async () => {
+            const r = resource("initial");
+            r.set(async (c, current) => {
+                return await c.suspend(
+                    new Promise((resolve) => setTimeout(() => resolve("refreshed"), 20))
+                );
+            });
+            expect(r.get()).toBe("initial");
+            expect(r.loading).toBe(true);
+
+            /** Optimistic write cancels the refresh. */
+            r.set("optimistic", async (c, optimistic) => {
+                return await c.suspend(Promise.resolve(optimistic));
+            });
+            expect(r.get()).toBe("optimistic");
+
+            await new Promise((resolve) => setTimeout(resolve, 50));
+            expect(r.get()).toBe("optimistic");
+        });
+
+        test("post(asyncFn) defers everything to microtask", async () => {
+            const r = resource("old");
+            let asyncRan = false;
+            r.post(async (c, current) => {
+                asyncRan = true;
+                return await c.suspend(Promise.resolve("new"));
+            });
+            expect(r.get()).toBe("old");
+            expect(asyncRan).toBe(false);
+
+            await Promise.resolve();
+            expect(asyncRan).toBe(true);
+            expect(r.loading).toBe(true);
+
+            await settle();
+            expect(r.get()).toBe("new");
         });
     });
 
