@@ -1161,7 +1161,7 @@ Both use deferred writes: anod uses `.post()` + `flush()`, Solid uses `setSignal
 
 Negative Δ = anod is faster / uses less. Benchmarks ran on Intel i7-14700, Node v25.9.0, Linux 6.19.13.
 
-Earlier, anod and solid borrowed their core implementation idea from [S.js](https://github.com/adamhaile/S). The libraries have since diverged, where solid has adopted the linked list approach from alien-signals, but anod has refined the array-based approach from S.
+Earlier, I think (?) solid was largely built upon [S.js](https://github.com/adamhaile/S), like anod. The libraries have since diverged, where solid has adopted the linked list approach used by alien-signals. anod has instead refined the array-based approach from S.
 
 ### anod vs [@preact/signals-core](https://github.com/preactjs/signals)
 
@@ -1301,7 +1301,7 @@ The benchmarks above use the unbound API for fair comparison. But anod also supp
 | Update: deep | 115 µs | 135 µs | +17% | 159 kB | 39.9 kB | -75% |
 | Update: very dynamic | 57.7 µs | 53.0 µs | -8% | 40.1 kB | 4.4 kB | -89% |
 
-The bound path wins on every Kairo propagation benchmark, often by 30-50%. The difference is most dramatic on repeated observers (-78%) where bound computes avoid all dep-tracking overhead. Dynamic graphs here still use the unbounded version.
+The single dep is pretty much useless in contexts where you cannot control the input. You'd have to build a dedicated layer on top of anod that exposes that overload to the end user. But, consider a typical web app. Almost every reactive binding with signals is sender -> dom.
 
 ## Acknowledgements
 I got the idea to build anod once I stumbled upon [S.js by Adam Haile](github.com/adamhaile/S). It has been around for a long time, and I think it has been heavily influential to the modern reactive signals space. For years I wanted to extend it, but it took almost 7 years until I finally took the time to fully implement my idea.
