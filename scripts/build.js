@@ -4,21 +4,24 @@ import { rolldown } from 'rolldown';
 import { minify } from 'terser';
 
 const outputDir = './dist';
-/** Load core's stable property map so underscore-prefixed properties mangle identically */
-const signalManglePath = path.resolve('../anod-core/dist/mangle.json');
 const nameCachePath = path.resolve(outputDir, 'mangle.json');
+const typeFiles = ['./types/index.d.ts'];
 
 async function build() {
     console.log('1. Bundling with Rolldown...');
 
     const bundle = await rolldown({
         input: {
-            index: './src/list.js',
+            index: './src/index.js',
         },
-        external: [
-            'anod-core',
-            'anod-core/internal',
-        ],
+        treeshake: {
+            moduleSideEffects: (id) => {
+                if (id.includes('types.js')) {
+                    return false;
+                }
+                return true;
+            }
+        }
     });
 
     const { output } = await bundle.generate({
@@ -26,18 +29,14 @@ async function build() {
         format: 'esm',
         sourcemap: true,
         entryFileNames: '[name].js',
+        chunkFileNames: 'core.js'
     });
 
     console.log('2. Minifying and mangling properties with Terser...');
 
-    /**
-     * Load signal's mangle.json as the starting nameCache.
-     * This ensures all _-prefixed properties (e.g. _value, _flag, _state)
-     * get the exact same mangled names as the signal package.
-     */
     let nameCache = {};
-    if (fs.existsSync(signalManglePath)) {
-        nameCache = JSON.parse(fs.readFileSync(signalManglePath, 'utf8'));
+    if (fs.existsSync(nameCachePath)) {
+        nameCache = JSON.parse(fs.readFileSync(nameCachePath, 'utf8'));
     }
 
     if (!fs.existsSync(outputDir)) {
@@ -56,6 +55,13 @@ async function build() {
                     passes: 2,
                     unsafe: true,
                     dead_code: true,
+                    /**
+                     * Prevent Terser from inlining single-use functions
+                     * as IIFEs. V8 allocates a new JSFunction for each
+                     * IIFE call in the interpreter, causing heap churn
+                     * and cache misses on hot paths.
+                     */
+                    reduce_funcs: false,
                 },
                 mangle: {
                     properties: {
@@ -70,13 +76,13 @@ async function build() {
         }
     }
 
-    /** Save the combined property map (signal's entries + any new list-specific ones) */
     fs.writeFileSync(nameCachePath, JSON.stringify(nameCache, null, 2));
+    for (const typeFile of typeFiles) {
+        const basename = path.basename(typeFile);
+        fs.copyFileSync(typeFile, path.resolve(outputDir, basename));
+    }
 
-    /** Copy type declarations to dist */
-    fs.copyFileSync('./types/list.d.ts', path.resolve(outputDir, 'index.d.ts'));
-
-    console.log('Success! Output written to dist/');
+    console.log('Success! Outputs written to dist/ and stable map saved to mangle.json.');
 }
 
 build().catch(console.error);

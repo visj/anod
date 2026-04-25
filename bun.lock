@@ -4,40 +4,11 @@
   "workspaces": {
     "": {
       "name": "anod",
-    },
-    "packages/anod": {
-      "name": "anod",
-      "version": "0.5.0",
-      "dependencies": {
-        "anod-core": "^0.5.0",
-        "anod-list": "^0.5.0",
-      },
-      "devDependencies": {
-        "anod-core": "workspace:*",
-        "anod-list": "workspace:*",
-        "rolldown": "^1.0.0-rc.9",
-      },
-    },
-    "packages/anod-core": {
-      "name": "anod-core",
-      "version": "0.5.0",
       "devDependencies": {
         "alien-signals": "^3.1.2",
         "mitata": "^1.0.34",
         "rolldown": "^1.0.0-rc.9",
         "terser": "^5.0.0",
-      },
-    },
-    "packages/anod-list": {
-      "name": "anod-list",
-      "version": "0.5.0",
-      "devDependencies": {
-        "anod-core": "workspace:*",
-        "rolldown": "^1.0.0-rc.9",
-        "terser": "^5.0.0",
-      },
-      "peerDependencies": {
-        "anod-core": "^0.5.0",
       },
     },
   },
@@ -100,12 +71,6 @@
 
     "alien-signals": ["alien-signals@3.1.2", "", {}, "sha512-d9dYqZTS90WLiU0I5c6DHj/HcKkF8ZyGN3G5x8wSbslulz70KOxaqCT0hQCo9KOyhVqzqGojvNdJXoTumZOtcw=="],
 
-    "anod": ["anod@workspace:packages/anod"],
-
-    "anod-core": ["anod-core@workspace:packages/anod-core"],
-
-    "anod-list": ["anod-list@workspace:packages/anod-list"],
-
     "buffer-from": ["buffer-from@1.1.2", "", {}, "sha512-E+XQCRwSbaaiChtv6k6Dwgc+bx+Bs6vuKJHHl5kox/BaKbhiXzqQOwK4cO22yElGp2OCmjwVhT3HmxgyPGnJfQ=="],
 
     "commander": ["commander@2.20.3", "", {}, "sha512-GpVkmM8vF2vQUkj2LvZmD35JxeJOLCwJ9cUkugyk2nuhbv3+mJvpLYYt+0+USMxE+oj+ey/lJEnhZw75x/OMcQ=="],
@@ -118,7 +83,7 @@
 
     "source-map-support": ["source-map-support@0.5.21", "", { "dependencies": { "buffer-from": "^1.0.0", "source-map": "^0.6.0" } }, "sha512-uBHU3L3czsIyYXKX88fdrGovxdSCoTGDRZ6SYXtSRxLZUzHg5P/66Ht6uoUlHu9EZod+inXhKo3qQgwXUT/y1w=="],
 
-    "terser": ["terser@5.46.1", "", { "dependencies": { "@jridgewell/source-map": "^0.3.3", "acorn": "^8.15.0", "commander": "^2.20.0", "source-map-support": "~0.5.20" }, "bin": { "terser": "bin/terser" } }, "sha512-vzCjQO/rgUuK9sf8VJZvjqiqiHFaZLnOiimmUuOKODxWL8mm/xua7viT7aqX7dgPY60otQjUotzFMmCB4VdmqQ=="],
+    "terser": ["terser@5.46.2", "", { "dependencies": { "@jridgewell/source-map": "^0.3.3", "acorn": "^8.15.0", "commander": "^2.20.0", "source-map-support": "~0.5.20" }, "bin": { "terser": "bin/terser" } }, "sha512-uxfo9fPcSgLDYob/w1FuL0c99MWiJDnv+5qXSQc5+Ki5NjVNsYi66INnMFBjf6uFz6OnX12piJQPF4IpjJTNTw=="],
 
     "tslib": ["tslib@2.8.1", "", {}, "sha512-oJFu94HQb+KVduSUQL7wnpmqnfmLsOA/nAh6b6EH0wCEoK0/mPeXU6c3wKDV83MkOuHPRHtSXKKU99IBazS/2w=="],
   }

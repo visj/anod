@@ -1,15 +1,16 @@
 {
-	"compilerOptions": {
-		"composite": true,
-		"noEmit": true,
-		"declaration": true,
-		"declarationMap": true,
-		"module": "NodeNext",
-		"moduleResolution": "NodeNext"
-	},
-	"references": [
-		{ "path": "./packages/anod" },
-		{ "path": "./packages/anod-core" },
-		{ "path": "./packages/anod-list" }
-	]
+  "compilerOptions": {
+    /* Target ES2015 to support Map and Typed Arrays */
+    "target": "ES2020",
+    "lib": ["ES2020", "DOM"],
+    "composite": true,
+    "strict": true,
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext"
+  },
+  "include": [
+    "src/**.js",
+    "tests/*.js",
+    "types/*.d.ts"
+  ]
 }

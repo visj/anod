@@ -1,23 +1,53 @@
 {
   "name": "anod",
-  "private": "true",
-  "workspaces": [
-    "packages/anod-core",
-    "packages/anod-list",
-    "packages/anod"
+  "version": "0.7.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "src": "./src/index.js",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist/index.js",
+    "dist/index.d.ts",
+    "src"
   ],
-  "version": "0.5.0",
-  "description": "",
+  "scripts": {
+    "make": "bun scripts/build.js",
+    "test": "bun test"
+  },
+  "keywords": ["reactive", "signals", "state", "compute", "effect"],
+  "author": "Vilhelm Sjölund",
+  "license": "MIT",
+  "description": "Fast reactive signal library with built-in async support",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/visj/anod.git"
   },
-  "keywords": [],
-  "author": "Vilhelm Sjölund",
-  "license": "MIT",
-  "type": "module",
+  "homepage": "https://github.com/visj/anod#readme",
   "bugs": {
     "url": "https://github.com/visj/anod/issues"
   },
-  "homepage": "https://github.com/visj/anod#readme"
+  "devDependencies": {
+    "alien-signals": "^3.1.2",
+    "mitata": "^1.0.34",
+    "rolldown": "^1.0.0-rc.9",
+    "terser": "^5.0.0"
+  },
+  "imports": {
+    "#anod": {
+      "src": "./src/index.js",
+      "default": "./dist/index.js"
+    },
+    "#anod-src": "./src/index.js",
+    "#test-runner": {
+      "bun": "./test/env/bun.js",
+      "node": "./test/env/node.js",
+      "default": "./test/env/node.js"
+    }
+  }
 }
