@@ -83,31 +83,20 @@ describe("dispose", () => {
             // Make bad error
             s1.set(2);
             // Pulling bound should propagate the error from bad
-            let threw = false;
-            try {
-                bound.get();
-            } catch (e) {
-                threw = true;
-            }
-            expect(threw).toBe(true);
-            expect(bound.error).not.toBeNull();
+            bound.get();
+            expect(bound.error).toBe(true);
         });
 
-        test("bound compute throws when dep1 is disposed", () => {
+        test("bound compute errors when dep1 is disposed", () => {
             const s1 = signal(1);
             const dep = c.compute((cx) => cx.val(s1));
             const bound = c.compute(dep, (val) => val * 2);
             expect(bound.get()).toBe(2);
 
             dep.dispose();
-            // Reading bound should throw because dep1 is disposed
-            let threw = false;
-            try {
-                bound.get();
-            } catch (e) {
-                threw = true;
-            }
-            expect(threw).toBe(true);
+            // Reading bound returns error POJO because dep1 is disposed
+            bound.get();
+            expect(bound.error).toBe(true);
         });
     });
 
@@ -160,7 +149,7 @@ describe("dispose", () => {
             await settle();
 
             // taskA should now be in error state
-            expect(taskA.error).not.toBeNull();
+            expect(taskA.error).toBe(true);
             expect(taskA.loading).toBe(false);
         });
 

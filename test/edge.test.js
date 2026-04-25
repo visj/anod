@@ -301,15 +301,10 @@ describe("edge cases", () => {
             await tick();
             await tick();
 
-            expect(t.error).not.toBeNull();
-            expect(t.error.type).toBe(3);
-            expect(t.error.error).toBeInstanceOf(Error);
-            try {
-                t.get();
-                expect(true).toBe(false);
-            } catch (e) {
-                expect(e.error.message).toBe("fail");
-            }
+            expect(t.error).toBe(true);
+            expect(t.get().type).toBe(3);
+            expect(t.get().error).toBeInstanceOf(Error);
+            expect(t.get().error.message).toBe("fail");
         });
 
         test("re-evaluates when dep changes", async () => {
@@ -842,18 +837,14 @@ describe("edge cases", () => {
 
         test("compute.error() returns true after throw", () => {
             const c1 = c.compute(() => { throw new Error("fail"); });
-            expect(c1.error).not.toBeNull();
+            expect(c1.error).toBe(true);
         });
 
-        test("compute.get() rethrows stored error", () => {
+        test("compute.get() returns error POJO", () => {
             const c1 = c.compute(() => { throw new Error("rethrow me"); });
-            try {
-                c1.get();
-                expect(true).toBe(false);
-            } catch (e) {
-                expect(e.type).toBe(3);
-                expect(e.error.message).toBe("rethrow me");
-            }
+            expect(c1.error).toBe(true);
+            expect(c1.get().type).toBe(3);
+            expect(c1.get().error.message).toBe("rethrow me");
         });
     });
 

@@ -332,7 +332,7 @@ describe("lock", () => {
       /** A compute reading a disposed sender absorbs the error.
        *  Pulling its value rethrows. */
       const c1 = c.compute((cx) => cx.val(t1));
-      expect(c1.error).not.toBeNull();
+      expect(c1.error).toBe(true);
 
       /** Settle to clean up. */
       resolve(undefined);

@@ -58,7 +58,7 @@ describe("async", () => {
 
       expect(c1.get()).toBe(42);
       expect(c1.loading).toBe(false);
-      expect(c1.error).toBeNull();
+      expect(c1.error).toBe(false);
     });
 
     test("sets error flag on rejection", async () => {
@@ -68,24 +68,20 @@ describe("async", () => {
 
       await settle();
 
-      expect(c1.error).not.toBeNull();
+      expect(c1.error).toBe(true);
       expect(c1.loading).toBe(false);
     });
 
-    test("rethrows the error when read after rejection", async () => {
+    test("get() returns error POJO after rejection", async () => {
       const c1 = c.task((c) => {
         return c.suspend(Promise.reject(new Error("async error")));
       });
 
       await settle();
 
-      try {
-        c1.get();
-        expect(true).toBe(false);
-      } catch (e) {
-        expect(e.type).toBe(3);
-        expect(e.error.message).toBe("async error");
-      }
+      expect(c1.error).toBe(true);
+      expect(c1.get().type).toBe(3);
+      expect(c1.get().error.message).toBe("async error");
     });
 
     test("clears error on subsequent successful resolution", async () => {
@@ -97,13 +93,13 @@ describe("async", () => {
       });
 
       await settle();
-      expect(c1.error).not.toBeNull();
+      expect(c1.error).toBe(true);
 
       s1.set(false);
       c1.get(); // Pull to trigger re-evaluation
       await settle();
 
-      expect(c1.error).toBeNull();
+      expect(c1.error).toBe(false);
       expect(c1.get()).toBe(42);
     });
 
@@ -259,14 +255,9 @@ describe("async", () => {
 
       await tick();
 
-      expect(c1.error).not.toBeNull();
-      expect(c1.error.type).toBe(3);
-      try {
-        c1.get();
-        expect(true).toBe(false);
-      } catch (e) {
-        expect(e.error.message).toBe("iterator error");
-      }
+      expect(c1.error).toBe(true);
+      expect(c1.get().type).toBe(3);
+      expect(c1.get().error.message).toBe("iterator error");
     });
 
     test("calls return() on the stale iterator when it next yields", async () => {
@@ -681,14 +672,9 @@ describe("async", () => {
       });
       await settle();
 
-      expect(c1.error).not.toBeNull();
-      expect(c1.error.type).toBe(3);
-      try {
-        c1.get();
-        expect(true).toBe(false);
-      } catch (e) {
-        expect(e.error.message).toBe("boom");
-      }
+      expect(c1.error).toBe(true);
+      expect(c1.get().type).toBe(3);
+      expect(c1.get().error.message).toBe("boom");
     });
 
     test("suspend works with bound task", async () => {
@@ -1083,8 +1069,7 @@ describe("async", () => {
         return c.suspend(Promise.reject(new Error("fail")));
       });
       await settle();
-      expect(taskA.error).not.toBeNull();
-      expect(taskA.error.type).toBe(3);
+      expect(taskA.error).toBe(true);
 
       let caught = null;
       c.spawn(async (c) => {

@@ -23,28 +23,29 @@ export declare const OPT_WEAK: number;
 export declare const OPT_EAGER: number;
 
 export interface ReadonlySignal<T = any> {
-	readonly disposed: boolean;
+  readonly disposed: boolean;
   get(): T;
   notify(): void;
   dispose(): void;
 }
 
 export interface Signal<T = any> extends ReadonlySignal<T> {
+  loading: boolean;
+  error: boolean;
   set(value: T | ((prev: T) => T)): boolean;
   post(value: T | ((prev: T) => T)): boolean;
 }
 
 export interface Compute<T = any> extends ReadonlySignal<T> {
-  readonly error: Err | null;
+  readonly loading: boolean;
+  readonly error: boolean;
   weak(): void;
   eager(): void;
   stable(): void;
   cleanup(fn: () => void): void;
 }
 
-export interface Task<T = any> extends ReadonlySignal<T> {
-  readonly loading: boolean;
-}
+export interface Task<T = any> extends Compute<T> {}
 
 export interface Root {
   readonly disposed: boolean;
@@ -54,26 +55,30 @@ export interface Root {
 }
 
 export interface Effect extends Root {
-  readonly error: Err | null;
+  readonly loading: boolean;
   stable(): void;
 }
 
-export interface Spawn {
-  dispose(): void;
-  readonly disposed: boolean;
-  readonly error: Err | null;
-  readonly loading: boolean;
-}
+export interface Spawn extends Effect {}
 
 export type Sender<T = any> = Signal<T> | Compute<T> | Task<T>;
 
-/** Base context shared by all sync callback types. */
+/**
+ * Base context available on all receiver callbacks.
+ * Includes callback-based suspend, controller, defer, lock/unlock,
+ * pending/rejected checks, and contextual set/post.
+ */
 export interface Context {
   stable(): void;
   cleanup(fn: () => void): void;
-  peek<T>(signal: Sender<T>): T;
   set<T>(sender: Sender<T>, value: T | ((prev: T) => T)): void;
   post<T>(sender: Sender<T>, value: T | ((prev: T) => T)): void;
+  pending(senders: Sender | Sender[]): boolean;
+  rejected<T>(sender: Sender<T>): T | null;
+  controller(): AbortController;
+  defer<R>(signal: Sender<R>): R;
+  lock(): void;
+  unlock(): void;
 }
 
 /** Dependency tracking — adds val() for reading and subscribing. */
@@ -81,8 +86,35 @@ export interface Reader {
   val<T>(signal: Sender<T>): T;
 }
 
-/** Async context methods, available in task/spawn callbacks. */
-export interface AsyncContext {
+/** Bound compute callback context. */
+export interface ComputeContext extends Context {
+  equal(equal?: boolean): void;
+  refuse<E>(val: E): Err<E>;
+  panic(val: unknown): never;
+  suspend(fn: (resolve: (value?: any) => void, reject: (error?: any) => void) => void): void;
+}
+
+/** Unbound compute callback context. */
+export interface ComputeReader extends ComputeContext, Reader {}
+
+/** Root callback context — owned factories + lifecycle. */
+export interface RootContext extends Clock {
+  cleanup(fn: () => void): void;
+  recover(fn: (error: Err) => boolean): void;
+}
+
+/** Bound effect callback context. */
+export interface EffectContext extends RootContext, Context {
+  panic(val: unknown): never;
+  finalize(fn: () => void): void;
+  suspend(fn: (resolve: (value?: any) => void, reject: (error?: any) => void) => void): void;
+}
+
+/** Unbound effect callback context. */
+export interface EffectReader extends EffectContext, Reader {}
+
+/** Bound task callback context. */
+export interface TaskContext extends ComputeContext {
   suspend<T>(promise: Promise<T>): Promise<T>;
   suspend<T>(task: Task<T>): T | Promise<T>;
   suspend<T>(
@@ -98,51 +130,37 @@ export interface AsyncContext {
     onResolve: (values: { [K in keyof T]: T[K] extends Task<infer U> ? U : never }) => void,
     onReject?: (error: any) => void
   ): void;
-  controller(): AbortController;
-  pending(tasks: Task<any> | Task<any>[]): boolean;
-  defer<R>(signal: Sender<R>): R;
-  lock(): void;
-  unlock(): void;
+  suspend(fn: (resolve: (value?: any) => void, reject: (error?: any) => void) => void): void;
 }
-
-/** Bound compute callback context. */
-export interface ComputeContext extends Context {
-  equal(equal?: boolean): void;
-  refuse<E>(val: E): Err<E>;
-  panic(val: unknown): never;
-}
-
-/** Unbound compute callback context. */
-export interface ComputeReader extends ComputeContext, Reader {}
-
-/** Root callback context — factories + ownership. */
-export interface RootContext extends Factory {
-  cleanup(fn: () => void): void;
-  recover(fn: (error: Err) => boolean): void;
-}
-
-/** Bound effect callback context. */
-export interface EffectContext extends RootContext, Context {
-  panic(val: unknown): never;
-  finalize(fn: () => void): void;
-}
-
-/** Unbound effect callback context. */
-export interface EffectReader extends EffectContext, Reader {}
-
-/** Bound task callback context. */
-export interface TaskContext extends ComputeContext, AsyncContext {}
 
 /** Unbound task callback context. */
 export interface TaskReader extends TaskContext, Reader {}
 
 /** Bound spawn callback context. */
-export interface SpawnContext extends EffectContext, AsyncContext {}
+export interface SpawnContext extends EffectContext {
+  suspend<T>(promise: Promise<T>): Promise<T>;
+  suspend<T>(task: Task<T>): T | Promise<T>;
+  suspend<T>(
+    task: Task<T>,
+    onResolve: (value: T) => void,
+    onReject?: (error: any) => void
+  ): void;
+  suspend<T extends readonly Task<any>[]>(
+    tasks: [...T]
+  ): Promise<{ [K in keyof T]: T[K] extends Task<infer U> ? U : never }>;
+  suspend<T extends readonly Task<any>[]>(
+    tasks: [...T],
+    onResolve: (values: { [K in keyof T]: T[K] extends Task<infer U> ? U : never }) => void,
+    onReject?: (error: any) => void
+  ): void;
+  suspend(fn: (resolve: (value?: any) => void, reject: (error?: any) => void) => void): void;
+}
 
 /** Unbound spawn callback context. */
 export interface SpawnReader extends SpawnContext, Reader {}
 
-export interface Factory {
+/** Base factory — unowned node creation. Root and Effect extend this. */
+export interface Clock {
   // Unbound compute
   compute<U>(fn: (c: ComputeReader) => U): Compute<Resolve<U>>;
   compute<U>(
@@ -226,9 +244,9 @@ export interface Factory {
     fn: (val: T, c: SpawnContext) => Promise<void>,
     opts?: number
   ): Spawn;
-
 }
 
+export declare const c: Clock;
 export declare function signal<T>(value: T): Signal<T>;
 export declare function relay<T>(value: T): Signal<T>;
 export declare function root(fn: (c: RootContext) => void): Root;

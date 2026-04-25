@@ -26,7 +26,7 @@ describe("error types", () => {
         return v;
       });
       expect(c1.get()).toBe(1);
-      expect(c1.error).toBeNull();
+      expect(c1.error).toBe(false);
 
       s1.set(20);
       /** Compute is lazy — must pull to trigger re-run. */
@@ -36,23 +36,18 @@ describe("error types", () => {
       } catch (e) {
         caught = e;
       }
-      expect(c1.error).not.toBeNull();
-      expect(c1.error.type).toBe(REFUSE);
-      expect(c1.error.error).toBe("too large");
+      expect(c1.error).toBe(true);
+      expect(c1.get().type).toBe(REFUSE);
+      expect(c1.get().error).toBe("too large");
     });
 
-    test("refuse rethrows when read via get()", () => {
+    test("get() returns error POJO when refused", () => {
       const c1 = c.compute((cx) => {
         return cx.refuse("nope");
       });
-      let caught;
-      try {
-        c1.get();
-      } catch (e) {
-        caught = e;
-      }
-      expect(caught.type).toBe(REFUSE);
-      expect(caught.error).toBe("nope");
+      expect(c1.error).toBe(true);
+      expect(c1.get().type).toBe(REFUSE);
+      expect(c1.get().error).toBe("nope");
     });
 
     test("refuse propagates through bound compute", () => {
@@ -75,8 +70,8 @@ describe("error types", () => {
       } catch (e) {
         caught = e;
       }
-      expect(c2.error).not.toBeNull();
-      expect(c2.error.type).toBe(REFUSE);
+      expect(c2.error).toBe(true);
+      expect(c2.get().type).toBe(REFUSE);
     });
 
     test("refuse recovers and compute re-runs on next change", () => {
@@ -92,28 +87,23 @@ describe("error types", () => {
 
       s1.set(20);
       try { c1.get(); } catch (e) { }
-      expect(c1.error).not.toBeNull();
+      expect(c1.error).toBe(true);
 
       /** Fix the input — error clears, value updates. */
       s1.set(5);
       expect(c1.get()).toBe(5);
-      expect(c1.error).toBeNull();
+      expect(c1.error).toBe(false);
     });
   });
 
   describe("c.panic()", () => {
-    test("throws with type PANIC", () => {
+    test("get() returns error POJO when panicked", () => {
       const c1 = c.compute((cx) => {
         cx.panic("critical");
       });
-      let caught;
-      try {
-        c1.get();
-      } catch (e) {
-        caught = e;
-      }
-      expect(caught.type).toBe(PANIC);
-      expect(caught.error).toBe("critical");
+      expect(c1.error).toBe(true);
+      expect(c1.get().type).toBe(PANIC);
+      expect(c1.get().error).toBe("critical");
     });
 
     test("panic in effect is caught by recover with correct type", () => {
@@ -166,9 +156,9 @@ describe("error types", () => {
       const c1 = c.compute((cx) => {
         cx.panic("sync panic");
       });
-      expect(c1.error).not.toBeNull();
-      expect(c1.error.type).toBe(PANIC);
-      expect(c1.error.error).toBe("sync panic");
+      expect(c1.error).toBe(true);
+      expect(c1.get().type).toBe(PANIC);
+      expect(c1.get().error).toBe("sync panic");
     });
   });
 
@@ -177,16 +167,16 @@ describe("error types", () => {
       const c1 = c.compute(() => {
         throw new Error("oops");
       });
-      expect(c1.error.type).toBe(FATAL);
-      expect(c1.error.error.message).toBe("oops");
+      expect(c1.get().type).toBe(FATAL);
+      expect(c1.get().error.message).toBe("oops");
     });
 
     test("throwing non-Error produces FATAL wrapping the value", () => {
       const c1 = c.compute(() => {
         throw "string error";
       });
-      expect(c1.error.type).toBe(FATAL);
-      expect(c1.error.error).toBe("string error");
+      expect(c1.get().type).toBe(FATAL);
+      expect(c1.get().error).toBe("string error");
     });
 
     test("FATAL in effect goes to recover", () => {

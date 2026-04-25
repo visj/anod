@@ -408,7 +408,7 @@ function val(sender) {
     throw new Error(ASSERT_NOT_DISPOSED);
   }
   if (flag & FLAG_LOADING) {
-    return this._readAsync(sender);
+    return this._readAsync(sender, false);
   }
   /** Sync path: version-tagged dep tracking with VSTACK restore. */
   let version = VERSION;
@@ -437,26 +437,7 @@ function val(sender) {
   return sender._value;
 }
 
-/**
- * Reads a sender's current value without subscribing. Refreshes
- * stale/pending senders so the value is always current, but does
- * not create a dependency link.
- * @this {Receiver}
- * @param {Sender} sender
- * @returns {*}
- */
-function peek(sender) {
-  if (sender._flag & FLAG_DISPOSED) {
-    throw new Error(ASSERT_NOT_DISPOSED);
-  }
-  if (sender._flag & (FLAG_STALE | FLAG_PENDING)) {
-    sender._refresh();
-  }
-  if (sender._flag & FLAG_ERROR) {
-    throw sender._value;
-  }
-  return sender._value;
-}
+
 
 /**
  * Shared set implementation for Signal and Compute. When IDLE,
@@ -595,20 +576,21 @@ function _read(sender, stamp) {
 /**
  * @this {Receiver}
  * @param {Sender} sender
- * @returns {void}
+ * @param {boolean} safe - if true, return error value instead of throwing
+ * @returns {*}
  */
-function _readAsync(sender) {
+function _readAsync(sender, safe) {
   if (sender._flag & (FLAG_STALE | FLAG_PENDING)) {
     sender._refresh();
   }
   if ((this._flag & (FLAG_STABLE | FLAG_SETUP)) === FLAG_STABLE) {
-    if (sender._flag & FLAG_ERROR) {
+    if (!safe && sender._flag & FLAG_ERROR) {
       throw sender._value;
     }
     return sender._value;
   }
   subscribe(this, sender);
-  if (sender._flag & FLAG_ERROR) {
+  if (!safe && sender._flag & FLAG_ERROR) {
     throw sender._value;
   }
   return sender._value;
@@ -771,17 +753,27 @@ function root(fn) {
 
   let disposed = { get() { return (this._flag & FLAG_DISPOSED) !== 0; } };
 
-  let _disposed = { disposed };
-  Object.defineProperties(SignalProto, _disposed);
-  Object.defineProperties(RootProto, _disposed);
-  // IAwaitable — Compute + Effect (getters)
-  let states = {
-    disposed,
-    error: { get() { return (this._flag & FLAG_ERROR) ? this._value : null; } },
-    loading: { get() { return (this._flag & FLAG_LOADING) !== 0; } }
+  let loadingRW = {
+    get() { return (this._flag & FLAG_LOADING) !== 0; },
+    set(val) {
+      if (val) { this._flag |= FLAG_LOADING; }
+      else { this._flag &= ~FLAG_LOADING; }
+    }
   };
-  Object.defineProperties(ComputeProto, states);
-  Object.defineProperties(EffectProto, states);
+  let errorRW = {
+    get() { return (this._flag & FLAG_ERROR) !== 0; },
+    set(val) {
+      if (val) { this._flag |= FLAG_ERROR; }
+      else { this._flag &= ~FLAG_ERROR; }
+    }
+  };
+  let loadingRO = { get() { return (this._flag & FLAG_LOADING) !== 0; } };
+  let errorRO = { get() { return (this._flag & FLAG_ERROR) !== 0; } };
+
+  Object.defineProperties(SignalProto, { disposed, loading: loadingRW, error: errorRW });
+  Object.defineProperties(RootProto, { disposed });
+  Object.defineProperties(ComputeProto, { disposed, loading: loadingRO, error: errorRO });
+  Object.defineProperties(EffectProto, { disposed, loading: loadingRO });
 
   /**
    * Registers a cleanup fn on this owner. Stored compactly: _cleanup holds
@@ -1295,7 +1287,49 @@ function root(fn) {
     return loading;
   }
 
+  /**
+   * Subscribes to a sender and returns its error value if FLAG_ERROR
+   * is set, or null otherwise. Unlike val(), does not throw on error —
+   * this is the safe way to check and consume errors reactively.
+   *
+   * Usage: `let err = c.rejected(task); if (err) handleError(err);`
+   *
+   * @this {Receiver}
+   * @param {Sender} sender
+   * @returns {* | null}
+   */
+  function rejected(sender) {
+    if (sender._flag & FLAG_DISPOSED) {
+      throw new Error(ASSERT_NOT_DISPOSED);
+    }
+    let flag = this._flag;
+    if (flag & FLAG_LOADING) {
+      this._readAsync(sender, true);
+    } else {
+      let version = VERSION;
+      if (sender._flag & (FLAG_STALE | FLAG_PENDING)) {
+        sender._refresh();
+      }
+      if ((flag & (FLAG_STABLE | FLAG_SETUP)) !== FLAG_STABLE) {
+        if (sender._version !== version) {
+          let stamp = sender._version;
+          sender._version = version;
+          if (stamp === version - 1) {
+            REUSED++;
+          } else {
+            this._read(sender, stamp);
+          }
+        }
+      }
+    }
+    if (sender._flag & FLAG_ERROR) {
+      return sender._value;
+    }
+    return null;
+  }
+
   ComputeProto.pending = EffectProto.pending = pending;
+  ComputeProto.rejected = EffectProto.rejected = rejected;
 
   /**
    * @this {Root}
@@ -1433,9 +1467,6 @@ function root(fn) {
       this._flag |= FLAG_ERROR;
       this._value = { error: ASSERT_NOT_DISPOSED, type: FATAL };
     }
-    if (this._flag & FLAG_ERROR) {
-      throw this._value;
-    }
     return this._value;
   };
 
@@ -1446,7 +1477,7 @@ function root(fn) {
    * @param {Sender} sender
    * @returns {*}
    */
-  ComputeProto.peek = EffectProto.peek = peek;
+
   ComputeProto.val = val;
 
   /**
