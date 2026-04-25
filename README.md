@@ -34,7 +34,9 @@ anod is a reactive state management library. It has built-in support for both sy
 	- [c.defer()](#deferred-dependencies-with-cdefer)
 	- [c.controller()](#abort-controller-with-ccontroller)
 	- [c.lock()](#async-transactions-with-clock--cunlock)
+-	[Limitations](#limitations)
 - [Benchmarks](#benchmarks)
+- [Acknowledgements](#acknowledgements)
 
 ## Quick example
 
@@ -1026,6 +1028,13 @@ This applies to both resolve and reject: if a promise rejects after the node was
 
 Instead, you must rely on the builtin lifecycle helpers. If you await a promise, and create some state that needs cleaning up, use c.cleanup(). If you must run the async function to completion, run c.lock(). The idea about anod's async correctness guarantee is that we do not want promises firing all over the place, writing state in an unpredictable way. The sync reactive graph is always consistent. When you write a value, every reader is guaranteed to see a consistent state of that signal. This idea extends to async, but with a different guarantee: every async primitive is guaranteed a consistent snapshot in time, but there is no guarantee exactly which time that is. This means: if you await and suspend 10 tasks, we will block until all 10 tasks have settled at some point in time, and all produce a valid value.
 
+## Limitations
+I have gone back and forth between global listeners, and a dedicated context object. After some turns, I finally settled on context over globals. The reason is that there is no way to truly support the async reactive graph without persisting the context beyond async boundaries. The awkward trade-off is that the `c` variable has to be passed as an argument through the system, and that it's a real footgun if you use the wrong context. Likely, this can be alleviated by an ESLint rule, or in the future, some stronger compile-time guarantee that protects you against shooting yourself in the foot.
+
+Alternatively, library authors can extend anod and expose the global listener as the default, sync mode, and only provide it when truly needed in the async callback.
+
+anod has chosen to drop the O(1) two-way slot binding that S.js uses. This rests on an assumption: most graphs dispose consistently. Everything is wrapped inside an Effect or Root node. When it disposes, everything inside disposes. Therefore, anod doesn't unlink the `_subs` array inside a Signal immediately when an Effect disposes. Instead, it implements a *tombstones* garbage collection concept, where it leaves disposed Receivers until some certain threshold where it sweeps and compacts its subs array. The upside of this approach is faster performance and lower overall memory allocation, as the length of the `_subs` and `_deps` arrays are halved. The downside is degradation in the `notify()` path on highly dynamic graphs (where Computes/Effects constantly branch different Senders on every update), and slightly more retained memory during updates. Right now, anod uses a constant factor, but might expose a GC Sweep configuration that the end user can tweak to their needs. 
+
 ## Benchmarks
 The benchmarks used here are copied from [Milo M's](https://github.com/milomg) repository [JS Reactivity Benchmark](https://github.com/milomg/js-reactivity-benchmark), with some inspiration from [Cause Effect](https://github.com/zeixcom/cause-effect) by Zeix, who modified them to use [mitata](https://github.com/evanwashere/mitata).
 
@@ -1215,6 +1224,11 @@ Both use deferred writes (`post()` + `flush()` / `setSignal()` + `flush()`).
 \* High variance
 
 These benchmarks are mostly here to supplement the general findings, which they confirm. alien performs well on deep graphs, anod on wide graphs. This is expected from the internal architecture of both libraries. Solid is an established, feature rich library. anod is a small reactive core. So they are not fully comparable. One of the reasons behind building anod was to offer a fast, feature-complete async native signals implementation that matches what solid has. The position for anod is not to write yet another javascript library to compete with Solid, but to offer a strong reactive core for those who don't need the entire framework.
+
+## Acknowledgements
+I got the idea to build anod once I stumbled upon [S.js by Adam Haile](github.com/adamhaile/S). It has been around for a long time, and I think it has been heavily influential to the modern reactive signals space. For years I wanted to extend it, but it took almost 7 years until I finally took the time to fully implement my idea.
+
+Then, I want to shout out to [ivi](https://github.com/localvoid/ivi), by Boris Kaul. The whole idea of the context object in anod originates from ivi's elegant `component(c => {})` signature, that implements a two-phase state registration.
 
 ## Contributing
 
