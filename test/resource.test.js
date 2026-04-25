@@ -84,7 +84,7 @@ describe("resource", () => {
             expect(r.get()).toBe(50);
         });
 
-        test("settled value same as optimistic — no re-notification", async () => {
+        test("settled value same as optimistic — still notifies (loading changed)", async () => {
             let notifyCount = 0;
             root((c) => {
                 const r = resource(0);
@@ -93,10 +93,13 @@ describe("resource", () => {
                 r.set(42, async (c, prev) => {
                     return await c.suspend(Promise.resolve(42));
                 });
+                /** Optimistic write notifies once. */
                 expect(notifyCount).toBe(1);
             });
             await settle();
-            expect(notifyCount).toBe(1);
+            /** Settle notifies again — loading transitioned to false,
+             *  subscribers checking .loading need to see the change. */
+            expect(notifyCount).toBe(2);
         });
 
         test("asyncFn receives context and optimistic value", async () => {

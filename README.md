@@ -9,46 +9,37 @@ anod is a reactive state management library. It has built-in support for both sy
 ## Quick example
 
 ```ts
-import { root, signal, relay, batch } from "anod";
+import { root, resource } from "anod";
 
-const getData = async (url) => ({ url, items: ["First", "Second", "Third"] });
+// Fake server — saves the batch after 100ms
+const saveBatch = (todos) => new Promise((r) => setTimeout(() => r(todos), 1000));
 
 const app = root((c) => {
-	const query = signal("");
-	const filters = relay(["js", "ts"]);
+	const todos = resource([]);
 
-	// Derived compute re-evaluates when query or filters change
-	const params = c.compute(
-		(c) => `?q=${c.val(query)}&lang=${c.val(filters).join(",")}`
-	);
-
-	// Async task re-fetches whenever params update
-	// Every reactive primitive take a short-hand signature for single dep
-	const results = c.task(params, async (param, c) => {
-		return await c.suspend(getData(`/api/search${param}`));
-	});
-
-	// spawn is an async effect, it awaits the task, suspends while task is loading.
-	// When the task updates, it notifies the spawn
-	c.spawn(async (c) => {
-		c.cleanup(() => console.log("cleaning up"));
-		const data = await c.suspend(results);
-		console.log(data.url);
-		for (const item of data.items) {
-			console.log(`Received: ${item}`);
-		}
-	});
-
-	batch(() => {
-		query.set("anod");
-		filters.set((array) => {
-			array.push("rust");
-			return array;
+	// Add a todo: appears instantly with saved: false, settles when server confirms
+	function addTodo(text) {
+		todos.set([...todos.get(), { text, saved: false }], async (c, optimistic) => {
+			await c.suspend(saveBatch(optimistic));
+			return optimistic.map((t) => ({ ...t, saved: true }));
 		});
+	}
+
+	// Derived: count of items still saving
+	const pending = c.compute(todos, (list) => list.filter((t) => !t.saved).length);
+
+	// Render on every change
+	c.effect((c) => {
+		const list = c.val(todos);
+		const n = c.val(pending);
+		const items = list.map((t) => `${t.saved ? "✓" : "⏳"} ${t.text}`).join("  ");
+		console.log(items || "(empty)", n > 0 ? `| ${n} saving...` : list.length ? "| all saved" : "");
 	});
+
+	// Simulate clicking on addTodo button twice with some delay in between
+	addTodo("Build anod");
+	setTimeout(() => addTodo("Ship it"), 500);
 });
-// Clean up and dispose everything inside
-setTimeout(() => app.dispose(), 100);
 ```
 
 ## Basic usage

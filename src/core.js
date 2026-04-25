@@ -1487,18 +1487,13 @@ function root(fn) {
    * @param {*} value
    */
   SignalProto._settle = function (value) {
-    let flag = this._flag;
     this._flag &= ~FLAG_LOADING;
-
-    if (flag & FLAG_DISPOSED) {
+    if (this._flag & FLAG_DISPOSED) {
       return;
     }
-
-    if (value !== this._value || flag & FLAG_ERROR) {
-      this._value = value;
-      notify(this, FLAG_STALE);
-      flush();
-    }
+    this._value = value;
+    notify(this, FLAG_STALE);
+    flush();
   };
 
   /**
