@@ -144,7 +144,7 @@ var c = new Clock();
 
 /**
  * We use a 2-phase version system to handle dependency reuse.
- * On every update, we bump VERSION = SEED + 2. Then, we sweep
+ * On every update, we bump STAMP = SEED + 2. Then, we sweep
  * all existing deps and mark them with version - 1. When we run
  * the fn again, we mark any reused dep with version. If they have
  * some other version than version - 1, it means a new node.
@@ -156,7 +156,7 @@ var SEED = 1;
 /**
  * @type {number}
  */
-var VERSION = 0;
+var STAMP = 0;
 
 /**
  * The fence is needed, because an outer Effect might have tagged
@@ -259,7 +259,7 @@ function Signal(value) {
 	/** @type {T} */
 	this._value = value;
 	/** @type {number} */
-	this._version = -1;
+	this._stamp = -1;
 	/** @type {Receiver} */
 	this._sub1 = null;
 	/** @type {Array<Receiver> | null} */
@@ -285,7 +285,7 @@ function Cell(value, flag, equal) {
 	/** @type {T} */
 	this._value = value;
 	/** @type {number} */
-	this._version = -1;
+	this._stamp = -1;
 	/** @type {Receiver} */
 	this._sub1 = null;
 	/** @type {Array<Receiver> | null} */
@@ -315,7 +315,7 @@ function Compute(opts, fn, dep1, seed, args) {
 	/** @type {T} */
 	this._value = seed;
 	/** @type {number} */
-	this._version = -1;
+	this._stamp = -1;
 	/** @type {Receiver} */
 	this._sub1 = null;
 	/** @type {Array<Receiver> | null} */
@@ -376,7 +376,7 @@ function Effect(opts, fn, dep1, owner, args) {
 	/** @type {Channel | null} */
 	this._chan = null;
 	/** @type {number} */
-	this._version = 0;
+	this._stamp = 0;
 	/** @type {W | undefined} */
 	this._args = args;
 }
@@ -441,8 +441,8 @@ function val(sender) {
 		return this._readAsync(sender, false);
 	}
 	/** Sync path: version-tagged dep tracking with VSTACK restore. */
-	let version = VERSION;
-	if (sender._version === version) {
+	let version = STAMP;
+	if (sender._stamp === version) {
 		return sender._value;
 	}
 	if (sender._flag & (FLAG_STALE | FLAG_PENDING)) {
@@ -454,8 +454,8 @@ function val(sender) {
 		}
 		return sender._value;
 	}
-	let stamp = sender._version;
-	sender._version = version;
+	let stamp = sender._stamp;
+	sender._stamp = version;
 	if (stamp === version - 1) {
 		REUSED++;
 	} else {
@@ -846,7 +846,8 @@ function root(fn) {
 		this._tombstones = 0;
 		if (disposed > subs.length >> 2) {
 			let write = 0;
-			for (let read = 0; read < subs.length; read++) {
+			let count = subs.length;
+			for (let read = 0; read < count; read++) {
 				let node = subs[read];
 				if (!(node._flag & FLAG_DISPOSED)) {
 					subs[write++] = node;
@@ -1200,9 +1201,9 @@ function root(fn) {
 			if (node._flag & FLAG_LOADING) {
 				subscribe(node, taskNode);
 			} else if (!(node._flag & FLAG_LOADING)) {
-				let version = VERSION;
-				let stamp = taskNode._version;
-				taskNode._version = version;
+				let version = STAMP;
+				let stamp = taskNode._stamp;
+				taskNode._stamp = version;
 				if (stamp !== version - 1) {
 					node._read(taskNode, stamp);
 				} else {
@@ -1477,14 +1478,14 @@ function root(fn) {
 		if (flag & FLAG_LOADING) {
 			this._readAsync(sender, true);
 		} else {
-			let version = VERSION;
+			let version = STAMP;
 			if (sender._flag & (FLAG_STALE | FLAG_PENDING)) {
 				sender._refresh();
 			}
 			if ((flag & (FLAG_STABLE | FLAG_SETUP)) !== FLAG_STABLE) {
-				if (sender._version !== version) {
-					let stamp = sender._version;
-					sender._version = version;
+				if (sender._stamp !== version) {
+					let stamp = sender._stamp;
+					sender._stamp = version;
 					if (stamp === version - 1) {
 						REUSED++;
 					} else {
@@ -1501,6 +1502,15 @@ function root(fn) {
 
 	ComputeProto.pending = EffectProto.pending = pending;
 	ComputeProto.rejected = EffectProto.rejected = rejected;
+
+	/**
+	 * Returns the current activation's sequence number. Increments
+	 * on each re-run. Useful for attaching to requests for server-side
+	 * ordering, or for manual staleness detection across async boundaries.
+	 * @this {Compute|Effect}
+	 * @returns {number}
+	 */
+	ComputeProto.version = EffectProto.version = function () { return this._time; };
 
 	/**
 	 * Resource-specific suspend. Only supports raw promises and the
@@ -2072,10 +2082,10 @@ function root(fn) {
 				this._flag |= FLAG_ERROR;
 			}
 		} else {
-			/** Setup or dynamic: bump VERSION for dep tracking */
-			let prevRVer = VERSION;
+			/** Setup or dynamic: bump STAMP for dep tracking */
+			let prevRVer = STAMP;
 			let version = (SEED += 2);
-			VERSION = version;
+			STAMP = version;
 			let saveStart = VCOUNT;
 			let depsLen = 0;
 			let depCount = 0;
@@ -2105,7 +2115,7 @@ function root(fn) {
 						this._flag |= FLAG_ERROR;
 						break call;
 					}
-					dep._version = version;
+					dep._stamp = version;
 					value = this._fn(dep._value, this, this._value, args);
 				} else {
 					value = this._fn(this, this._value, args);
@@ -2144,12 +2154,12 @@ function root(fn) {
 				let count = VCOUNT;
 				let stack = VSTACK;
 				for (let i = saveStart; i < count; i += 2) {
-					stack[i]._version = stack[i + 1];
+					stack[i]._stamp = stack[i + 1];
 					stack[i] = null;
 				}
 				VCOUNT = saveStart;
 			}
-			VERSION = prevRVer;
+			STAMP = prevRVer;
 		}
 
 		this._flag &= ~(FLAG_STALE | FLAG_PENDING | FLAG_SETUP);
@@ -2298,10 +2308,10 @@ function root(fn) {
 				this._flag &= ~(FLAG_STALE | FLAG_PENDING);
 			}
 		} else {
-			/** Setup or dynamic: bump VERSION for dep tracking */
-			let current = VERSION;
+			/** Setup or dynamic: bump STAMP for dep tracking */
+			let current = STAMP;
 			let version = (SEED += 2);
-			VERSION = version;
+			STAMP = version;
 			let saveStart = VCOUNT;
 			let depCount = 0;
 			let depsLen = 0;
@@ -2355,12 +2365,12 @@ function root(fn) {
 					let count = VCOUNT;
 					let stack = VSTACK;
 					for (let i = saveStart; i < count; i += 2) {
-						stack[i]._version = stack[i + 1];
+						stack[i]._stamp = stack[i + 1];
 						stack[i] = null;
 					}
 					VCOUNT = saveStart;
 				}
-				VERSION = current;
+				STAMP = current;
 				this._flag &= ~(FLAG_SETUP | FLAG_STALE | FLAG_PENDING);
 			}
 		}
@@ -2959,7 +2969,7 @@ function patchDeps(node, version, depCount, newLen) {
 	 *  question is whether dep1 was reused or dropped. */
 	let dep1 = node._dep1;
 	if (dep1 !== null) {
-		if (dep1._version !== version) {
+		if (dep1._stamp !== version) {
 			clearReceiver(dep1, node);
 			if (newidx < newLen) {
 				let newDep = deps[newidx];
@@ -2989,7 +2999,7 @@ function patchDeps(node, version, depCount, newLen) {
 	let tail = existingLen;
 	while (i < tail) {
 		let dep = deps[i];
-		if (dep._version === version) {
+		if (dep._stamp === version) {
 			i++;
 			continue;
 		}
@@ -3006,7 +3016,7 @@ function patchDeps(node, version, depCount, newLen) {
 			while (tail > i + 1) {
 				tail--;
 				let tDep = deps[tail];
-				if (tDep._version === version) {
+				if (tDep._stamp === version) {
 					deps[i] = tDep;
 					found = 1;
 					break;
@@ -3080,24 +3090,24 @@ function sweepDeps(stamp, dep1, deps) {
 	let vcount = VCOUNT;
 	let transaction = FENCE;
 	if (dep1 !== null) {
-		let depver = dep1._version;
+		let depver = dep1._stamp;
 		if (depver > transaction) {
 			vstack[vcount++] = dep1;
 			vstack[vcount++] = depver;
 		}
-		dep1._version = stamp;
+		dep1._stamp = stamp;
 		depCount = 1;
 	}
 	if (deps !== null) {
 		let count = deps.length;
 		for (let i = 0; i < count; i++) {
 			let dep = deps[i];
-			let depver = dep._version;
+			let depver = dep._stamp;
 			if (depver > transaction) {
 				vstack[vcount++] = dep;
 				vstack[vcount++] = depver;
 			}
-			dep._version = stamp;
+			dep._stamp = stamp;
 		}
 		depCount += count;
 	}
@@ -3534,13 +3544,13 @@ function settleNotify(node, value, isError, waiters, waiterCount) {
 	/** Pass 1: stamp all sync subs with version - 1. */
 	let sub = node._sub1;
 	if (sub !== null) {
-		sub._version = version - 1;
+		sub._stamp = version - 1;
 	}
 	let subs = node._subs;
 	if (subs !== null) {
 		let count = subs.length;
 		for (let i = 0; i < count; i++) {
-			subs[i]._version = version - 1;
+			subs[i]._stamp = version - 1;
 		}
 	}
 
@@ -3553,16 +3563,16 @@ function settleNotify(node, value, isError, waiters, waiterCount) {
 			waiters[i + 1](value);
 		}
 		if (!(awaiter._flag & FLAG_BLOCKED)) {
-			if (awaiter._version !== version - 1) {
+			if (awaiter._stamp !== version - 1) {
 				subscribe(awaiter, node);
 			}
 		}
-		awaiter._version = version;
+		awaiter._stamp = version;
 		clearRespond(awaiter, node);
 	}
 
 	/** Pass 3: inline notify — skip subs that were resolved as waiters. */
-	if (sub !== null && sub._version !== version) {
+	if (sub !== null && sub._stamp !== version) {
 		let flags = sub._flag;
 		sub._flag |= FLAG_STALE;
 		if (!(flags & (FLAG_PENDING | FLAG_STALE | FLAG_BLOCK | FLAG_DISPOSED))) {
@@ -3573,7 +3583,7 @@ function settleNotify(node, value, isError, waiters, waiterCount) {
 		let count = subs.length;
 		for (let i = 0; i < count; i++) {
 			sub = subs[i];
-			if (sub._version !== version) {
+			if (sub._stamp !== version) {
 				let flags = sub._flag;
 				sub._flag |= FLAG_STALE;
 				if (
@@ -3619,7 +3629,7 @@ function settleDeps(node) {
 
 	/** Stamp dep1. */
 	if (dep1 !== null) {
-		dep1._version = stamp;
+		dep1._stamp = stamp;
 	}
 
 	/** Dedup scan of _deps — remove duplicates via swap-with-last. */
@@ -3629,7 +3639,7 @@ function settleDeps(node) {
 		let write = deps.length;
 		while (i >= 0) {
 			let dep = deps[i];
-			if (dep._version === stamp) {
+			if (dep._stamp === stamp) {
 				clearReceiver(dep, node);
 				write--;
 				if (i !== write) {
@@ -3644,7 +3654,7 @@ function settleDeps(node) {
 					deps.pop();
 				}
 			} else {
-				dep._version = stamp;
+				dep._stamp = stamp;
 			}
 			i--;
 		}
@@ -3662,12 +3672,12 @@ function settleDeps(node) {
 
 	/** Check defer1 first. */
 	if (defer1 !== null) {
-		if (defer1._version === stamp) {
+		if (defer1._stamp === stamp) {
 			if (defer1._changed(defer1val)) {
 				changed = true;
 			}
 		} else {
-			defer1._version = stamp;
+			defer1._stamp = stamp;
 			subscribe(node, defer1);
 			if (defer1._changed(defer1val)) {
 				changed = true;
@@ -3679,13 +3689,13 @@ function settleDeps(node) {
 	for (let i = 0; i < deferLen; i += 2) {
 		let sender = defers[i];
 		let snapshot = defers[i + 1];
-		if (sender._version === stamp) {
+		if (sender._stamp === stamp) {
 			if (sender._changed(snapshot)) {
 				changed = true;
 			}
 			continue;
 		}
-		sender._version = stamp;
+		sender._stamp = stamp;
 		subscribe(node, sender);
 		if (sender._changed(snapshot)) {
 			changed = true;

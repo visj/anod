@@ -36,7 +36,7 @@ function Sender() { }
 /** @package @type {T} */
 Sender.prototype._value;
 /** @package @type {number} */
-Sender.prototype._version;
+Sender.prototype._stamp;
 /** @package @type {Receiver | null} */
 Sender.prototype._sub1;
 /** @package @type {Array<Receiver> | null} */

@@ -92,6 +92,7 @@ export interface Context {
   post<T>(sender: Resource<T>, value: T | ((prev: T) => T), fn: (c: ResourceContext, optimistic: T) => T | Promise<T>): void;
   pending(senders: Sender | Sender[]): boolean;
   rejected<T>(sender: Sender<T>): T | null;
+  version(): number;
   controller(): AbortController;
   defer<R>(signal: Sender<R>): R;
   lock(): void;
