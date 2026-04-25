@@ -11,7 +11,6 @@ anod is a reactive state management library. It has built-in support for both sy
 ```ts
 import { root, resource } from "anod";
 
-// Fake server — saves the batch after 100ms
 const saveBatch = (todos) => new Promise((r) => setTimeout(() => r(todos), 1000));
 
 const app = root((c) => {
