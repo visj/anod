@@ -9,13 +9,31 @@ anod is a reactive state management library. It has built-in support for both sy
 ## Table of contents
 
 - [Quick example](#quick-example)
-- [Basic usage](#basic-usage) — [Signal & Relay](#signal--relay) · [Compute](#compute) · [Effect](#effect)
-- [Async reactivity](#async-reactivity) — [Resource](#resource) · [Task](#task) · [Spawn](#spawn)
-- [c.suspend()](#csuspend) · [Error handling](#error-handling) · [Finalize](#finalize) · [Batching](#batching)
-- [The reactive graph in depth](#the-reactive-graph-in-depth) — [Dependency tracking](#dependency-tracking) · [Contextual helpers](#contextual-helpers) · [Evaluation helpers](#evaluation-helpers)
-- [Contextual writes](#contextual-writes-cset--cpost) · [Async state checks](#async-state-checks-cpending--crejected)
+- [Basic usage](#basic-usage)
+	- [Signal & Relay](#signal--relay)
+	- [Compute](#compute)
+	- [Effect](#effect)
+- [Async reactivity](#async-reactivity)
+	- [Resource](#resource)
+	- [Task](#task)
+	- [Spawn](#spawn)
+	- [c.suspend()](#csuspend)
+- [Error handling](#error-handling)
+	- [c.recover(), REFUSE, PANIC, FATAL](#crecover-refuse-panic-fatal)
+	- [c.finalize()](#cfinalize)
+- [Batching](#batching)
+- [The reactive graph in depth](#the-reactive-graph-in-depth)
+	- [Dependency tracking](#dependency-tracking)
+	- [Contextual helpers](#contextual-helpers)
+	- [Evaluation helpers](#evaluation-helpers)
+	- [Contextual writes](#contextual-writes-cset--cpost)
+	- [Async state checks](#async-state-checks-cpending--crejected)
 - [Error recovery in depth](#error-recovery-in-depth)
-- [Async reactivity in depth](#async-reactivity-in-depth) — [c.suspend()](#2-await-with-csuspend) · [c.defer()](#deferred-dependencies-with-cdefer) · [c.controller()](#abort-controller-with-ccontroller) · [c.lock()](#async-transactions-with-clock--cunlock)
+- [Async reactivity in depth](#async-reactivity-in-depth)
+	- [c.suspend()](#2-await-with-csuspend)
+	- [c.defer()](#deferred-dependencies-with-cdefer)
+	- [c.controller()](#abort-controller-with-ccontroller)
+	- [c.lock()](#async-transactions-with-clock--cunlock)
 - [Benchmarks](#benchmarks)
 
 ## Quick example
@@ -70,6 +88,7 @@ The following primitives exist in anod:
 - Task, an async compute for awaiting promises
 - Spawn, an async effect for doing async work
 - Root, which owns inner primitives and disposes them on request
+- Clock, the root clock on which the system operates and tick time
 - Context, a callback parameter that provides the current reactive context
 
 #### Root
@@ -86,9 +105,9 @@ const app = root((c: RootContext) => {
 app.dispose();
 ```
 
-#### Signal & Relay
+#### Clock
 
-For simple use cases where you don't need ownership or disposal, anod exports a global `c` context that creates unowned nodes: `import { c } from "anod"`. Nodes created through `c` live until GC collects them.
+For simple use cases where you don't need ownership or disposal, anod exports a global `c` that creates unowned nodes: `import { c } from "anod"`. Nodes created through `c` live until GC collects them.
 
 #### Signal & Relay
 
@@ -397,7 +416,9 @@ root((c) => {
 });
 ```
 
-#### Error handling
+### Error handling
+
+#### c.recover(), REFUSE, PANIC, FATAL
 
 All errors in anod are `{ error, type }` objects with three type constants: `REFUSE` , `PANIC` , and `FATAL` . This lets you cleanly separate expected errors from unexpected crashes.
 
@@ -434,7 +455,7 @@ root((c) => {
 });
 ```
 
-#### Finalize
+#### c.finalize()
 
 Effects and spawns support `c.finalize()` for guaranteed cleanup at the end of the current activation, regardless of whether it succeeded or threw. `cleanup` runs at the start of the _next_ run. `recover` handles errors, and `finalize` runs at the end of _this_ run. Together, `recover` and `finalize` behave just like a `try/catch/finally` clause.
 
@@ -1194,3 +1215,13 @@ Both use deferred writes (`post()` + `flush()` / `setSignal()` + `flush()`).
 \* High variance
 
 These benchmarks are mostly here to supplement the general findings, which they confirm. alien performs well on deep graphs, anod on wide graphs. This is expected from the internal architecture of both libraries. Solid is an established, feature rich library. anod is a small reactive core. So they are not fully comparable. One of the reasons behind building anod was to offer a fast, feature-complete async native signals implementation that matches what solid has. The position for anod is not to write yet another javascript library to compete with Solid, but to offer a strong reactive core for those who don't need the entire framework.
+
+## Contributing
+
+Pull requests that are not preceded by a discussion will be closed. If you'd like to contribute a feature, bug fix, or improvement, please open a thread in the [Discussions](https://github.com/visj/anod/discussions) tab first. This ensures we align on the design before any implementation work begins.
+
+Bug reports and questions are always welcome via [Issues](https://github.com/visj/anod/issues).
+
+## License
+
+MIT
