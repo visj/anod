@@ -10,6 +10,8 @@ anod is a reactive state management library. It has built-in support for both sy
 
 - [Quick example](#quick-example)
 - [Basic usage](#basic-usage)
+	- [Root](#root)
+	- [Global `c` context](#global-c-context)
 	- [Signal & Relay](#signal--relay)
 	- [Compute](#compute)
 	- [Effect](#effect)
@@ -107,7 +109,7 @@ const app = root((c: RootContext) => {
 app.dispose();
 ```
 
-#### Clock
+#### Global `c` context
 
 For simple use cases where you don't need ownership or disposal, anod exports a global `c` that creates unowned nodes: `import { c } from "anod"`. Nodes created through `c` live until GC collects them.
 
