@@ -1127,8 +1127,8 @@ Compared using the unbound API ( `c.compute(fn)` , `c.effect(fn)` ) which is the
 | **Kairo** | | | | | | |
 | Deep propagation | 991 ns | 923 ns | -7% | 17 B | 18 B | +6% |
 | Broad propagation | 2, 951 ns | 2, 698 ns | -9% | 800 B | 800 B | 0% |
-| Diamond | 169 ns | 184 ns | +9% | 73 B | 113 B | +55% |
-| Triangle | 299 ns | 311 ns | +4% | 393 B | 113 B | -71% |
+| Diamond ⚠️ | 169 ns | 184 ns | +9% | 73 B | 113 B | +55% |
+| Triangle ⚠️ | 299 ns | 311 ns | +4% | 393 B | 113 B | -71% |
 | Mux | 4, 787 ns | 3, 465 ns | -28% | 1.0 kB | 961 B | -4% |
 | Unstable | 390 ns | 195 ns | -50% | 256 B | 17 B | -93% |
 | Avoidable | 66 ns | 60 ns | -9% | 1 B | 1 B | 0% |
@@ -1154,11 +1154,30 @@ Negative Δ = anod is faster / uses less. Benchmarks ran on Intel i7-14700, Node
 
 In general, anod performs better than alien-signals on wide graphs (Signal -> Many Receivers), whereas alien-signals outperforms anod on deep graphs (Signal -> Compute -> Compute .... -> Effect). The key architectural difference is how dependency links are stored. alien-signals uses a doubly-linked list of Link nodes. Every dependency relationship allocates a Link object. anod stores deps and subs in flat arrays, with the first dep/sub inlined directly on the node.
 
-This means anod's `notify()` iterates sequential memory when walking subscribers, which is cache-line friendly and scales well on wide fan-out (mux -27%, repeated observers -42%). alien's propagation walks `link.nextSub` pointers, which is pointer chasing and incurs more cache misses as graphs widen.
+This means anod's `notify()` iterates sequential memory when walking subscribers, which is cache-line friendly and scales well on wide graphs. alien's propagation walks `link.nextSub` pointers, which is pointer chasing and incurs more cache misses as graphs widen.
 
-On deep chains, alien's `checkDirty()` is a stack-based walk that descends through dep links and can skip entire unchanged subtrees with minimal overhead per hop. anod's `needsUpdate()` does similar work but the array-based dep storage involves more index arithmetic per step, which adds up across long chains.
+On deep chains, alien's `checkDirty()` is a stack-based walk that descends through dep links. anod's `needsUpdate()` does similar work but the array-based dep storage involves more index arithmetic per step, which adds up across long chains. alien's `checkDirty` is in general a much more elegant solution; the node is the stack. anod has to actually pop/push to a real stack to maintain the same concept, which inherently is inferior to alien's linked list stack traversal.
 
 ⚠️ The memory benchmarks here must be taken with a grain of salt. The 1k signals, which just creates 1000 signals, adds them to an array and returns, reports ~10kb for alien, 2.6kb for anod. I've experimented with this a lot, and my theory is possibly V8 reuses allocations from existing registry. So even though in theory, since a Signal has 6 fields, making it about 36 byte, the benchmark should show 36kb, but instead shows 2.55 kb. The weird thing is, if I add a 7th field to the Signal class, the memory spikes, from 2.55 to 11kb. My theory is this might have to do something with how V8 allocate structs into capacity categories. Going from field 6 -> 7 bumps the class from one size class to the next, which makes each region of memory allocate more space. I'm not 100% this is how it works, but benchmarks with mitata consistently shows this, so the Signal class is deliberately frozen at 6 fields in anod to maintain this memory profile.
+
+Second, regarding diamond/triangle. The benchmark runs this code for anod:
+
+```js
+const sum = c.compute(c => {
+	counter++;
+	return branches.reduce((a, b) => a + c.val(b), 0);
+});
+```
+
+Compared to this code for alien:
+```js
+const sum = computed(() => {
+	counter++;
+	return branches.reduce((a, b) => a + b(), 0);
+});
+```
+
+This is a limitation in V8 optimization of the contextual approach. When experimenting back and forth between context/global, a clear win was the triangle/diamond benchmark where most of the work is the .reduce(). V8 can likely better inline the function that only operates on the array items themself, than if the function leaks variables from the outer scope. The contextual prototype that only access this.val(sender) generally outperforms the global pattern for the actual access. So some tests, notably these two, performed better with globals. Many other regressed significantly. In the end, context was chosen for its async capabilities, not performance.
 
 ### anod vs [@solidjs/signals](https://github.com/solidjs/solid) (Solid 2.0 beta)
 
