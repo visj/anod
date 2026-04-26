@@ -6,10 +6,9 @@ anod is a reactive state management library. It has built-in support for both sy
 * No global/automatic dependency tracking, provides a context object to every callback
 * Uses a hybrid push/pull model, where nodes can both eagerly and lazily send updates
 * Async is built into the core, and is a first-hand member
-
+<!-- omit in toc -->
 ## Table of contents
 
-- [Table of contents](#table-of-contents)
 - [Quick example](#quick-example)
 - [Basic usage](#basic-usage)
 	- [Overview](#overview)
