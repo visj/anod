@@ -635,18 +635,56 @@ See dedicated error lifecycle section.
 
 ### Contextual writes: `c.set()` / `c.post()`
 
-Inside a compute or effect callback, `c.set(signal, value)` writes to a signal while preventing the current node from re-triggering itself. This enables the interceptor pattern — a node that reads a signal and writes back to the same signal without causing an infinite loop.
+Inside a compute or effect callback, `c.set(signal, value)` writes to a signal while preventing the current node from re-triggering itself. This enables the interceptor pattern: subscribe to a signal, observe other people's writes, do work (sync or async), and write back a correction if needed — all without causing a circular dependency.
+
+The simplest use case is input sanitization:
 
 ```ts
 import { root, signal } from "anod";
 root((c) => {
-	const count = signal(0);
-	c.effect(count, (val, c) => {
-		// Write back to count without re-triggering this effect
-		c.set(count, val + 1);
+	const name = signal("");
+	c.effect(name, (val, c) => {
+		/** Intercept any write and enforce lowercase. */
+		if (val !== val.toLowerCase()) {
+			c.set(name, val.toLowerCase());
+		}
 	});
-	// Effect ran once, count is now 1
-	count.set(10); // Effect runs again, count becomes 11
+	name.set("ALICE"); // effect intercepts, name settles to "alice"
+});
+```
+
+But the real power is async interceptors. Because `c.set()` blocks self-notification, you can build a persistence layer that intercepts optimistic writes, confirms them against the server, and rolls back on failure, without the interceptor re-triggering itself on its own corrections:
+
+```ts
+import { root, signal } from "anod";
+const save = (val) => fetch("/api/name", { method: "POST", body: val });
+
+root((c) => {
+	const name = signal("alice");
+
+	/**
+	 * Persistence interceptor. Any part of the app can
+	 * write to `name` optimistically. This spawn observes
+	 * the write, tries to persist it, and rolls back on failure.
+	 * c.set() writes back without re-triggering the spawn,
+	 * which would otherwise cause an infinite loop.
+	 *
+	 * If multiple writes arrive while a save is in flight,
+	 * c.suspend() drops the stale request and only the
+	 * latest value is persisted (last-write-wins).
+	 */
+	c.spawn(async (c) => {
+		const optimistic = c.val(name);
+		const res = await c.suspend(save(optimistic));
+		if (!res.ok) {
+			c.set(name, (await c.suspend(res.json())).rollback);
+		}
+	});
+
+	c.effect(name, (val) => render(val));
+
+	/** UI code just writes, unaware of persistence. */
+	name.set("bob");
 });
 ```
 
