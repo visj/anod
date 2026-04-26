@@ -11,17 +11,17 @@ anod is a reactive state management library. It has built-in support for both sy
 
 - [Quick example](#quick-example)
 - [Basic usage](#basic-usage)
-	- [Overview](#overview)
+	- [Sync reactivity](#sync-reactivity)
 		- [Root](#root)
 		- [Global `c` context](#global-c-context)
 		- [Signal \& Mutable](#signal--mutable)
 		- [Compute](#compute)
 		- [Effect](#effect)
 	- [Async reactivity](#async-reactivity)
-	- [Resource](#resource)
-	- [Task](#task)
-	- [Spawn](#spawn)
-	- [`c.suspend()`](#csuspend)
+		- [Resource](#resource)
+		- [Task](#task)
+		- [Spawn](#spawn)
+		- [`c.suspend()`](#csuspend)
 	- [Error handling](#error-handling)
 		- [c.recover(), REFUSE, PANIC, FATAL](#crecover-refuse-panic-fatal)
 		- [c.finalize()](#cfinalize)
@@ -45,6 +45,7 @@ anod is a reactive state management library. It has built-in support for both sy
 	- [The three delivery paths](#the-three-delivery-paths)
 		- [1. Sync check with `c.pending()`](#1-sync-check-with-cpending)
 		- [2. Await with `c.suspend()`](#2-await-with-csuspend)
+		- [3. Callback (resolve, reject)](#3-callback-resolve-reject)
 	- [Deferred dependencies with `c.defer()`](#deferred-dependencies-with-cdefer)
 	- [Abort controller with `c.controller()`](#abort-controller-with-ccontroller)
 	- [Async transactions with `c.lock()` / `c.unlock()`](#async-transactions-with-clock--cunlock)
@@ -103,8 +104,6 @@ const app = root((c) => {
 
 ## Basic usage
 
-### Overview
-
 The following primitives exist in anod:
 
 * Signal, holds a value and notifies when it changes. `mutable()` creates a signal that always notifies.
@@ -116,6 +115,8 @@ The following primitives exist in anod:
 * Root, which owns inner primitives and disposes them on request
 * Clock, the root clock on which the system operates and tick time
 * Context, a callback parameter that provides the current reactive context
+
+### Sync reactivity
 
 #### Root
 
@@ -289,7 +290,7 @@ anod aims to bridge the gap between sync and async signal reactivity. Each sync 
 | Compute | Task | Derived value |
 | Effect | Spawn | Side effect |
 
-### Resource
+#### Resource
 
 A resource is an async Signal. It supports writing changes through async functions, that later resolve to update it. There are three ways to write to a resource:
 
@@ -325,7 +326,7 @@ The async callback receives the resource as `c` (with `suspend` for staleness pr
 
 When a new `set()` fires while a previous async callback is still in flight, the old promise still resolves normally, but `suspend()` detects that the resource has moved on and simply doesn't yield back into the callback. The continuation after `await` never runs, so the stale result never reaches the `return` . Only the latest activation's callback gets to settle the resource.
 
-### Task
+#### Task
 
 A Task is an async Compute. Just like compute, it runs eagerly, but after it has produced an initial value, it only re-evaluates when read.
 
@@ -364,7 +365,7 @@ root((c) => {
 });
 ```
 
-### Spawn
+#### Spawn
 
 A Spawn is an async Effect. It runs eagerly, re-runs when dependencies change, and can await promises and tasks. When a spawn re-runs, any in-flight async work from the previous run is silently dropped through the `c.suspend()` mechanism.
 
@@ -391,7 +392,7 @@ root((c) => {
 });
 ```
 
-### `c.suspend()`
+#### `c.suspend()`
 
 `c.suspend()` is the easiest way to handle async staleness in anod. It guards the `await` boundary: if the node has been re-run or disposed since the suspend was issued, the continuation silently stops. This prevents stale async results from writing to state that has moved on.
 
@@ -924,7 +925,7 @@ root((c) => {
 });
 ```
 
-**Callback**: old-school callbacks.
+#### 3. Callback (resolve, reject)
 
 `c.suspend(setupFn)` accepts a setup function that receives `resolve` and `reject` callbacks. This avoids promise allocation entirely and enables natural integration with callback-based APIs like WebSockets, event emitters, and timers. The node enters a loading state and settles when `resolve` or `reject` is called.
 
