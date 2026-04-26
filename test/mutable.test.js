@@ -55,6 +55,56 @@ describe("mutable", () => {
     expect(runs).toBe(2);
   });
 
+  test("mutable updater returning void keeps value and still notifies", () => {
+    const obj = { x: 1, y: 2 };
+    const m = mutable(obj);
+    let runs = 0;
+    let lastVal;
+    c.effect(m, (val) => {
+      runs++;
+      lastVal = val;
+    });
+    expect(runs).toBe(1);
+    expect(lastVal).toBe(obj);
+
+    m.set((o) => {
+      o.x = 42;
+    });
+    expect(runs).toBe(2);
+    expect(lastVal).toBe(obj);
+    expect(lastVal.x).toBe(42);
+    expect(m.get()).toBe(obj);
+  });
+
+  test("mutable void updater works inside batch (scheduled path)", () => {
+    const obj = { a: 1 };
+    const m = mutable(obj);
+    let runs = 0;
+    c.effect(m, () => { runs++; });
+    expect(runs).toBe(1);
+
+    const s = signal(0);
+    /** Effect creation runs the body once, triggering m.set → runs=2. */
+    c.effect(s, () => {
+      m.set((o) => {
+        o.a = 99;
+      });
+    });
+    expect(runs).toBe(2);
+
+    /** s.set triggers the effect again → m.set → runs=3. */
+    s.set(1);
+    expect(runs).toBe(3);
+    expect(m.get()).toBe(obj);
+    expect(m.get().a).toBe(99);
+  });
+
+  test("regular signal updater returning undefined sets value to undefined", () => {
+    const s = signal(1);
+    s.set(() => undefined);
+    expect(s.get()).toBe(undefined);
+  });
+
   test("mutable works with post()", async () => {
     const r = mutable(1);
     let runs = 0;

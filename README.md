@@ -172,12 +172,12 @@ root((c) => {
 
 	/**
 	 * A mutable signal is convenient when you work with mutable
-	 * data structures. It takes a callback where you can make
-	 * modifications, and just return the same value.
+	 * data structures. It takes a callback where you can mutate
+	 * the value in place. Returning void keeps the current value
+	 * and still notifies all subscribers.
 	 */
 	shape.set((s) => {
 		s.job = "self-employed";
-		return s;
 	});
 });
 ```

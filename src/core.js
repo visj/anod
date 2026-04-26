@@ -16,7 +16,7 @@ const FLAG_PENDING = 1 << 1;
 const FLAG_SCHEDULED = 1 << 2;
 const FLAG_DISPOSED = 1 << 3;
 const FLAG_ERROR = 1 << 4;
-const FLAG_RELAY = 1 << 5;
+const FLAG_MUTABLE = 1 << 5;
 const FLAG_WEAK = 1 << 6;
 
 /* Receiver flags (bits 7+) — only valid on Compute/Effect nodes. */
@@ -502,18 +502,25 @@ function set(value, asyncFn) {
 	if (IDLE) {
 		/** @type {T} */
 		let _value;
+		let write = true;
 		if (callback) {
 			_value = value(this._value);
+			/** Mutable updater returning void — keep current value, still notify. */
+			if (_value === undefined && this._flag & FLAG_MUTABLE) {
+				write = false;
+			}
 		} else {
 			_value = value;
 		}
 		if (
-			this._flag & FLAG_RELAY ||
+			this._flag & FLAG_MUTABLE ||
 			(this._equal !== null
 				? !this._equal(this._value, _value)
 				: this._value !== _value)
 		) {
-			this._value = _value;
+			if (write) {
+				this._value = _value;
+			}
 			notify(this, FLAG_STALE);
 			flush();
 		} else if (asyncFn === undefined) {
@@ -530,7 +537,7 @@ function set(value, asyncFn) {
 	}
 	if (
 		callback ||
-		this._flag & FLAG_RELAY ||
+		this._flag & FLAG_MUTABLE ||
 		(this._equal !== null
 			? !this._equal(this._value, value)
 			: this._value !== value)
@@ -571,7 +578,7 @@ function _runAsync(node, asyncFn, prev) {
 		resolveIterator(node, result, time);
 	} else if (
 		result !== undefined &&
-		(node._flag & FLAG_RELAY ||
+		(node._flag & FLAG_MUTABLE ||
 			(node._equal !== null
 				? !node._equal(node._value, result)
 				: node._value !== result))
@@ -597,18 +604,25 @@ function _runAsync(node, asyncFn, prev) {
  */
 function assign(node, value, time) {
 	let _value;
+	let write = true;
 	if (typeof value === "function") {
 		_value = value(node._value);
+		/** Mutable updater returning void — keep current value, still notify. */
+		if (_value === undefined && node._flag & FLAG_MUTABLE) {
+			write = false;
+		}
 	} else {
 		_value = value;
 	}
 	if (
-		node._flag & FLAG_RELAY ||
+		node._flag & FLAG_MUTABLE ||
 		(node._equal !== null
 			? !node._equal(node._value, _value)
 			: node._value !== _value)
 	) {
-		node._value = _value;
+		if (write) {
+			node._value = _value;
+		}
 		if (node._flag & FLAG_SCHEDULED) {
 			node._flag &= ~FLAG_SCHEDULED;
 			notify(node, FLAG_STALE);
@@ -629,18 +643,25 @@ function assign(node, value, time) {
 function asyncAssign(node, payload, time) {
 	let value = payload._value;
 	let _value;
+	let write = true;
 	if (typeof value === "function") {
 		_value = value(node._value);
+		/** Mutable updater returning void — keep current value, still notify. */
+		if (_value === undefined && node._flag & FLAG_MUTABLE) {
+			write = false;
+		}
 	} else {
 		_value = value;
 	}
 	if (
-		node._flag & FLAG_RELAY ||
+		node._flag & FLAG_MUTABLE ||
 		(node._equal !== null
 			? !node._equal(node._value, _value)
 			: node._value !== _value)
 	) {
-		node._value = _value;
+		if (write) {
+			node._value = _value;
+		}
 		if (node._flag & FLAG_SCHEDULED) {
 			node._flag &= ~FLAG_SCHEDULED;
 			notify(node, FLAG_STALE);
@@ -648,7 +669,7 @@ function asyncAssign(node, payload, time) {
 	} else {
 		node._flag &= ~FLAG_SCHEDULED;
 	}
-	_runAsync(node, payload._fn, _value);
+	_runAsync(node, payload._fn, node._value);
 }
 
 /**
@@ -751,7 +772,7 @@ function _readAsync(sender, safe) {
 function signal(value, equal) {
 	if (equal === false) {
 		let node = new Signal(value);
-		node._flag = FLAG_RELAY;
+		node._flag = FLAG_MUTABLE;
 		return node;
 	}
 	if (typeof equal === "function") {
@@ -770,7 +791,7 @@ function signal(value, equal) {
  */
 function mutable(value) {
 	let node = new Signal(value);
-	node._flag = FLAG_RELAY;
+	node._flag = FLAG_MUTABLE;
 	return node;
 }
 
@@ -784,7 +805,7 @@ function mutable(value) {
  */
 function resource(value, equals) {
 	if (equals === false) {
-		return new Cell(value, FLAG_ASYNC | FLAG_RELAY, null);
+		return new Cell(value, FLAG_ASYNC | FLAG_MUTABLE, null);
 	}
 	return new Cell(value, FLAG_ASYNC, typeof equals === "function" ? equals : null);
 }
@@ -1682,7 +1703,7 @@ function root(fn) {
 		} else {
 			if (
 				!POSTING &&
-				!(this._flag & FLAG_RELAY) &&
+				!(this._flag & FLAG_MUTABLE) &&
 				typeof value !== "function" &&
 				(this._equal !== null
 					? this._equal(this._value, value)
@@ -1834,7 +1855,7 @@ function root(fn) {
 				_value = value;
 			}
 			if (
-				sender._flag & FLAG_RELAY ||
+				sender._flag & FLAG_MUTABLE ||
 				(sender._equal !== null
 					? !sender._equal(sender._value, _value)
 					: sender._value !== _value)
@@ -4161,7 +4182,7 @@ export {
 	FLAG_SETUP,
 	FLAG_LOADING,
 	FLAG_ERROR,
-	FLAG_RELAY,
+	FLAG_MUTABLE,
 	FLAG_DEFER,
 	FLAG_STABLE,
 	FLAG_SINGLE,

@@ -34,6 +34,11 @@ export interface Signal<T = any> extends ReadonlySignal<T> {
 	post(value: T | ((prev: T) => T)): boolean;
 }
 
+export interface MutableSignal<T = any> extends ReadonlySignal<T> {
+	set(value: T | ((prev: T) => T | void)): boolean;
+	post(value: T | ((prev: T) => T | void)): boolean;
+}
+
 export interface Resource<T = any> extends Signal<T> {
 	readonly error: boolean;
 	readonly loading: boolean;
@@ -84,7 +89,7 @@ export interface ResourceContext {
 	): void;
 }
 
-export type Sender<T = any> = Signal<T> | Resource<T> | Compute<T> | Task<T>;
+export type Sender<T = any> = Signal<T> | MutableSignal<T> | Resource<T> | Compute<T> | Task<T>;
 export type AsyncSender<T = any> = Resource<T> | Task<T>;
 
 /**
@@ -295,9 +300,13 @@ export declare function root(fn: (c: RootContext) => void): Root;
 export declare function signal<T>(value: T): Signal<T>;
 export declare function signal<T>(
 	value: T,
-	equals?: false | ((prev: T, next: T) => boolean)
+	equals: false
+): MutableSignal<T>;
+export declare function signal<T>(
+	value: T,
+	equals: (prev: T, next: T) => boolean
 ): Signal<T>;
-export declare function mutable<T>(value: T): Signal<T>;
+export declare function mutable<T>(value: T): MutableSignal<T>;
 export declare function resource<T>(value: T): Resource<T>;
 export declare function resource<T>(
 	value: T,
