@@ -1127,8 +1127,8 @@ Compared using the unbound API ( `c.compute(fn)` , `c.effect(fn)` ) which is the
 | **Kairo** | | | | | | |
 | Deep propagation | 991 ns | 923 ns | -7% | 17 B | 18 B | +6% |
 | Broad propagation | 2, 951 ns | 2, 698 ns | -9% | 800 B | 800 B | 0% |
-| Diamond ⚠️ | 169 ns | 184 ns | +9% | 73 B | 113 B | +55% |
-| Triangle ⚠️ | 299 ns | 311 ns | +4% | 393 B | 113 B | -71% |
+| Diamond 💬 | 169 ns | 184 ns | +9% | 73 B | 113 B | +55% |
+| Triangle 💬 | 299 ns | 311 ns | +4% | 393 B | 113 B | -71% |
 | Mux | 4, 787 ns | 3, 465 ns | -28% | 1.0 kB | 961 B | -4% |
 | Unstable | 390 ns | 195 ns | -50% | 256 B | 17 B | -93% |
 | Avoidable | 66 ns | 60 ns | -9% | 1 B | 1 B | 0% |
@@ -1160,7 +1160,7 @@ On deep chains, alien's `checkDirty()` is a stack-based walk that descends throu
 
 ⚠️ The memory benchmarks here must be taken with a grain of salt. The 1k signals, which just creates 1000 signals, adds them to an array and returns, reports ~10kb for alien, 2.6kb for anod. I've experimented with this a lot, and my theory is possibly V8 reuses allocations from existing registry. So even though in theory, since a Signal has 6 fields, making it about 36 byte, the benchmark should show 36kb, but instead shows 2.55 kb. The weird thing is, if I add a 7th field to the Signal class, the memory spikes, from 2.55 to 11kb. My theory is this might have to do something with how V8 allocate structs into capacity categories. Going from field 6 -> 7 bumps the class from one size class to the next, which makes each region of memory allocate more space. I'm not 100% this is how it works, but benchmarks with mitata consistently shows this, so the Signal class is deliberately frozen at 6 fields in anod to maintain this memory profile.
 
-Second, regarding diamond/triangle. The benchmark runs this code for anod:
+💬 Second, regarding diamond/triangle. The benchmark runs this code for anod:
 
 ```js
 const sum = c.compute(c => {
