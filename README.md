@@ -635,25 +635,7 @@ See dedicated error lifecycle section.
 
 ### Contextual writes: `c.set()` / `c.post()`
 
-Inside a compute or effect callback, `c.set(signal, value)` writes to a signal while preventing the current node from re-triggering itself. This enables the interceptor pattern: subscribe to a signal, observe other people's writes, do work (sync or async), and write back a correction if needed — all without causing a circular dependency.
-
-The simplest use case is input sanitization:
-
-```ts
-import { root, signal } from "anod";
-root((c) => {
-	const name = signal("");
-	c.effect(name, (val, c) => {
-		/** Intercept any write and enforce lowercase. */
-		if (val !== val.toLowerCase()) {
-			c.set(name, val.toLowerCase());
-		}
-	});
-	name.set("ALICE"); // effect intercepts, name settles to "alice"
-});
-```
-
-But the real power is async interceptors. Because `c.set()` blocks self-notification, you can build a persistence layer that intercepts optimistic writes, confirms them against the server, and rolls back on failure, without the interceptor re-triggering itself on its own corrections:
+Inside a callback, `c.set(signal, value)` writes to a signal while preventing the current node from re-triggering itself. This enables the interceptor pattern: subscribe to a signal, observe writes from elsewhere in the app, persist or validate them asynchronously, and write back a correction if needed, without causing a circular dependency.
 
 ```ts
 import { root, signal } from "anod";
