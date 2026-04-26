@@ -2,44 +2,67 @@
 
 anod is a reactive state management library. It has built-in support for both sync and async graphs. It's similar to many other signal libraries, but its architecture differs in several meaningful ways:
 
-- No global/automatic dependency tracking, provides a context object to every callback
-- Uses a hybrid push/pull model, where nodes can both eagerly and lazily send updates
-- Async is built into the core, and is a first-hand member
+* No global/automatic dependency tracking, provides a context object to every callback
+* Uses a hybrid push/pull model, where nodes can both eagerly and lazily send updates
+* Async is built into the core, and is a first-hand member
 
 ## Table of contents
 
-- [Quick example](#quick-example)
-- [Basic usage](#basic-usage)
-	- [Root](#root)
-	- [Global `c` context](#global-c-context)
-	- [Signal & Mutable](#signal--mutable)
-	- [Compute](#compute)
-	- [Effect](#effect)
-- [Async reactivity](#async-reactivity)
-	- [Resource](#resource)
-	- [Task](#task)
-	- [Spawn](#spawn)
-	- [c.suspend()](#csuspend)
-- [Error handling](#error-handling)
-	- [c.recover(), REFUSE, PANIC, FATAL](#crecover-refuse-panic-fatal)
-	- [c.finalize()](#cfinalize)
-- [Batching](#batching)
-- [The reactive graph in depth](#the-reactive-graph-in-depth)
-	- [Dependency tracking](#dependency-tracking)
-	- [Contextual helpers](#contextual-helpers)
-	- [Evaluation helpers](#evaluation-helpers)
-	- [Contextual writes](#contextual-writes-cset--cpost)
-	- [Async state checks](#async-state-checks-cpending--crejected)
-- [Error recovery in depth](#error-recovery-in-depth)
-- [Async reactivity in depth](#async-reactivity-in-depth)
-	- [c.suspend()](#2-await-with-csuspend)
-	- [c.defer()](#deferred-dependencies-with-cdefer)
-	- [c.controller()](#abort-controller-with-ccontroller)
-	- [c.lock()](#async-transactions-with-clock--cunlock)
-	- [c.version()](#manual-versioning-with-cversion)
--	[Limitations](#limitations)
-- [Benchmarks](#benchmarks)
-- [Acknowledgements](#acknowledgements)
+- [anod](#anod)
+	- [Table of contents](#table-of-contents)
+	- [Quick example](#quick-example)
+	- [Basic usage](#basic-usage)
+		- [Overview](#overview)
+			- [Root](#root)
+			- [Global `c` context](#global-c-context)
+			- [Signal \& Mutable](#signal--mutable)
+			- [Compute](#compute)
+			- [Effect](#effect)
+		- [Async reactivity](#async-reactivity)
+		- [Resource](#resource)
+		- [Task](#task)
+		- [Spawn](#spawn)
+		- [`c.suspend()`](#csuspend)
+		- [Error handling](#error-handling)
+			- [c.recover(), REFUSE, PANIC, FATAL](#crecover-refuse-panic-fatal)
+			- [c.finalize()](#cfinalize)
+			- [Batching](#batching)
+	- [The reactive graph in depth](#the-reactive-graph-in-depth)
+		- [Eager creation, lazy pull](#eager-creation-lazy-pull)
+		- [Dependency tracking](#dependency-tracking)
+		- [Contextual helpers](#contextual-helpers)
+			- [`c.equal()`](#cequal)
+			- [`c.cleanup()`](#ccleanup)
+			- [`c.recover()` , `c.refuse()` , `c.panic()`](#crecover--crefuse--cpanic)
+		- [Contextual writes: `c.set()` / `c.post()`](#contextual-writes-cset--cpost)
+		- [Async state checks: `c.pending()` / `c.rejected()`](#async-state-checks-cpending--crejected)
+		- [Evaluation helpers](#evaluation-helpers)
+			- [`stable()`](#stable)
+			- [`weak()`](#weak)
+			- [`eager()`](#eager)
+		- [Error recovery in depth](#error-recovery-in-depth)
+			- [Recovery](#recovery)
+	- [Async reactivity in depth](#async-reactivity-in-depth)
+		- [The three delivery paths](#the-three-delivery-paths)
+			- [1. Sync check with `c.pending()`](#1-sync-check-with-cpending)
+			- [2. Await with `c.suspend()`](#2-await-with-csuspend)
+		- [Deferred dependencies with `c.defer()`](#deferred-dependencies-with-cdefer)
+		- [Abort controller with `c.controller()`](#abort-controller-with-ccontroller)
+		- [Async transactions with `c.lock()` / `c.unlock()`](#async-transactions-with-clock--cunlock)
+		- [Stale activation safety](#stale-activation-safety)
+		- [Manual versioning with `c.version()`](#manual-versioning-with-cversion)
+	- [Limitations](#limitations)
+	- [Benchmarks](#benchmarks)
+		- [anod vs alien-signals by Stackblitz (Vue-js internal engine)](#anod-vs-alien-signals-by-stackblitz-vue-js-internal-engine)
+		- [anod vs @solidjs/signals (Solid 2.0 beta)](#anod-vs-solidjssignals-solid-20-beta)
+		- [anod vs @preact/signals-core](#anod-vs-preactsignals-core)
+		- [Chromium (browser)](#chromium-browser)
+			- [anod vs alien-signals (Chromium)](#anod-vs-alien-signals-chromium)
+			- [anod vs solid (Chromium)](#anod-vs-solid-chromium)
+		- [anod with bound-dep optimization vs alien-signals](#anod-with-bound-dep-optimization-vs-alien-signals)
+	- [Acknowledgements](#acknowledgements)
+	- [Contributing](#contributing)
+	- [License](#license)
 
 ## Quick example
 
@@ -85,15 +108,15 @@ const app = root((c) => {
 
 The following primitives exist in anod:
 
-- Signal, holds a value and notifies when it changes. `mutable()` creates a signal that always notifies.
-- Compute, a derived signal, updates and notifies when its derived value changes
-- Effect, a sink that listens to signals and computes and performs actions
-- Resource, an async signal for optimistic updates with server confirmation
-- Task, an async compute for awaiting promises
-- Spawn, an async effect for doing async work
-- Root, which owns inner primitives and disposes them on request
-- Clock, the root clock on which the system operates and tick time
-- Context, a callback parameter that provides the current reactive context
+* Signal, holds a value and notifies when it changes. `mutable()` creates a signal that always notifies.
+* Compute, a derived signal, updates and notifies when its derived value changes
+* Effect, a sink that listens to signals and computes and performs actions
+* Resource, an async signal for optimistic updates with server confirmation
+* Task, an async compute for awaiting promises
+* Spawn, an async effect for doing async work
+* Root, which owns inner primitives and disposes them on request
+* Clock, the root clock on which the system operates and tick time
+* Context, a callback parameter that provides the current reactive context
 
 #### Root
 
@@ -111,13 +134,13 @@ app.dispose();
 
 #### Global `c` context
 
-For simple use cases where you don't need ownership or disposal, anod exports a global `c` that creates unowned nodes: `import { c } from "anod"`. Nodes created through `c` live until GC collects them.
+For simple use cases where you don't need ownership or disposal, anod exports a global `c` that creates unowned nodes: `import { c } from "anod"` . Nodes created through `c` live until GC collects them.
 
 #### Signal & Mutable
 
 A signal stores a value and notifies subscribers when changed. You can read it to get its current value, and write to it to update anyone who depends on it.
 
-Signals accept an optional equality function to customize when subscribers are notified: `signal(value, (prev, next) => boolean)`. When provided, the function is called on every write — return `true` to skip notification. Mutable signals are useful for objects that you want to change in place and notify about changes. They notify always, without checking equality.
+Signals accept an optional equality function to customize when subscribers are notified: `signal(value, (prev, next) => boolean)` . When provided, the function is called on every write — return `true` to skip notification. Mutable signals are useful for objects that you want to change in place and notify about changes. They notify always, without checking equality.
 
 ```ts
 import { root, signal, mutable } from "anod";
@@ -288,9 +311,9 @@ root((c) => {
 		return optimistic; // server confirmed
 	});
 
-	// Refresh - keep current value visible, replace when done
-	name.set(async (c, current) => {
-		return await c.suspend(save(current));
+	// Async set - keep current value visible, replace when done
+	name.set(async (c) => {
+		return await c.suspend(save("bosse"));
 	});
 
 	c.effect(name, (val) => {
@@ -301,11 +324,11 @@ root((c) => {
 
 The async callback receives the resource as `c` (with `suspend` for staleness protection) and the current/optimistic value. If the callback returns a sync value, it settles immediately with no loading state. If it returns a promise, `.loading` becomes true until it resolves.
 
-When a new `set()` fires while a previous async callback is still in flight, the old promise still resolves normally, but `suspend()` detects that the resource has moved on and simply doesn't yield back into the callback. The continuation after `await` never runs, so the stale result never reaches the `return`. Only the latest activation's callback gets to settle the resource.
+When a new `set()` fires while a previous async callback is still in flight, the old promise still resolves normally, but `suspend()` detects that the resource has moved on and simply doesn't yield back into the callback. The continuation after `await` never runs, so the stale result never reaches the `return` . Only the latest activation's callback gets to settle the resource.
 
 ### Task
 
-A Task is an async Compute. Just like compute, it runs eagerly, but after it has produced an initial value, it only updates when read by either other tasks, or spawns.
+A Task is an async Compute. Just like compute, it runs eagerly, but after it has produced an initial value, it only re-evaluates when read.
 
 ```ts
 import { root, signal } from "anod";
@@ -335,8 +358,8 @@ root((c) => {
 	 * Changing userId triggers the task to re-fetch.
 	 * The old promise is discarded if still pending.
 	 * When the new result arrives, the spawn re-runs.
-	 * Nothing happens in the spawn. If the task invalidates while spawn is waiting,
-	 * it just keeps waiting for the task to produce value.
+	 * If the task invalidates while the spawn is waiting,
+	 * the spawn stays suspended until the task settles.
 	 */
 	userId.set(2);
 });
@@ -428,9 +451,9 @@ root((c) => {
 
 All errors in anod are `{ error, type }` objects with three type constants: `REFUSE` , `PANIC` , and `FATAL` . This lets you cleanly separate expected errors from unexpected crashes.
 
-- **`c.refuse(val)`** — non-throwing expected error for computes. Usage: `return c.refuse("invalid")`.
-- **`c.panic(val)`** — throwing expected error for computes and effects. Aborts the current run.
-- **`FATAL`** — any unexpected throw is automatically wrapped as `{ error: thrownValue, type: FATAL }`.
+* **`c.refuse(val)`** — non-throwing expected error for computes. Usage: `return c.refuse("invalid")`.
+* **`c.panic(val)`** — throwing expected error for computes and effects. Aborts the current run.
+* **`FATAL`** — any unexpected throw is automatically wrapped as `{ error: thrownValue, type: FATAL }`.
 
 Effects and spawns support `c.recover()` to intercept errors. The handler receives the `{ error, type }` object and can branch on the type. Return `true` to swallow, `false` to propagate.
 
@@ -495,11 +518,11 @@ root((c) => {
 
 A few things to note:
 
-- Multiple `finalize` calls accumulate and run forward in registration order
-- Errors inside finalizers are swallowed, matching JS `finally` semantics
-- `finalize` does not bubble to parent effects, it's scoped to the activation it was registered in
-- On re-run, any leftover finalize from the previous activation is cleared before the new run starts
-- This differs from `cleanup`, which runs in reverse order (stack unwinding). Finalize is sequential post-completion work, not resource teardown
+* Multiple `finalize` calls accumulate and run forward in registration order
+* Errors inside finalizers are swallowed, matching JS `finally` semantics
+* `finalize` does not bubble to parent effects, it's scoped to the activation it was registered in
+* On re-run, any leftover finalize from the previous activation is cleared before the new run starts
+* This differs from `cleanup`, which runs in reverse order (stack unwinding). Finalize is sequential post-completion work, not resource teardown
 
 #### Batching
 
@@ -562,8 +585,8 @@ Anod's internal dependency reconciliation algorithm is designed to avoid allocat
 
 Lets you control whether downstream subscribers are notified after a compute re-runs. By default, anod uses `!==` — if the new value is a different reference, subscribers are notified. `c.equal()` gives you full control: you perform the comparison yourself and tell anod the result.
 
-- `c.equal()` or `c.equal(true)` — "my result is equal to the previous one, don't notify subscribers"
-- `c.equal(false)` — "my result changed, always notify subscribers" (even if `===` would say otherwise)
+* `c.equal()` or `c.equal(true)` — "my result is equal to the previous one, don't notify subscribers"
+* `c.equal(false)` — "my result changed, always notify subscribers" (even if `===` would say otherwise)
 
 ```ts
 import { root, signal } from "anod";
@@ -584,50 +607,26 @@ root((c) => {
 Runs a cleanup method every time the node updates, and finally when it disposes. Multiple cleanups run in reverse registration order, mirroring how destructors and `defer` statements unwind a stack — resources acquired later are released first. To get an 'on disposed' callback, register the cleanup in the scope above.
 
 ```ts
-import { root, signal, OPT_DEFER } from "anod";
-
-const eventbus = signal("");
-
+import { root, signal } from "anod";
 root((c) => {
-	const socketUrl = signal("ws://localhost:8080");
-	c.effect(socketUrl, (url, c) => {
-		const socket = new WebSocket(url);
+	const url = signal("ws://localhost:8080");
+	c.effect(url, (addr, c) => {
+		const socket = new WebSocket(addr);
 		/**
-		 * We register the cleanup to close the old socket if they
-		 * change which url we are posting to
+		 * Cleanup closes the old socket whenever the effect
+		 * re-runs (url changed) or when the effect is disposed.
 		 */
 		c.cleanup(() => socket.close());
-		c.suspend((resolve, reject) => {
-			socket.addEventListener("open", (event) => {
-				socket.send("Hello Server!");
-				/**
-				 * Websocket is open, register an effect
-				 * that subscribes to a signal and sends to socket.
-				 * We set OPT_DEFER to not run initially, but instead
-				 * wait for the first signal change to trigger.
-				 * Unlike other libraries, in anod, you can freely create
-				 * owned scopes throughout the async execution lifecycle.
-				 * Since anod doesn't rely on global state, the context
-				 * allows you to treat every async boundary as if it was
-				 * called from the initial sync path.
-				 */
-				c.effect(
-					eventbus,
-					(message, c) => {
-						socket.send(message);
-					},
-					OPT_DEFER
-				);
-				resolve();
-			});
+		socket.addEventListener("open", () => {
+			socket.send("Hello from " + addr);
 		});
 	});
+	/**
+	 * The old socket is closed via cleanup,
+	 * a new one opens to the updated url.
+	 */
+	url.set("ws://localhost:9090");
 });
-
-setTimeout(() => {
-	eventbus.set("Hello");
-	eventbus.set("World");
-}, 100);
 ```
 
 #### `c.recover()` , `c.refuse()` , `c.panic()`
@@ -653,15 +652,16 @@ root((c) => {
 
 `c.post(signal, value)` is the deferred variant — schedules the write for the next microtask flush, with the same self-notification guard.
 
-Both `c.set()` and `c.post()` also support writing to resources with an async callback: `c.set(resource, value, asyncFn)`.
+Both `c.set()` and `c.post()` also support writing to resources with an async callback: `c.set(resource, value, asyncFn)` .
 
 ### Async state checks: `c.pending()` / `c.rejected()`
 
 `c.pending(sender)` subscribes to a sender and returns `true` if it has `FLAG_LOADING` set. Works with tasks, resources, or any sender. Accepts an array of senders — returns `true` if any is loading.
 
-`c.rejected(sender)` subscribes to a sender and safely returns its error value if `FLAG_ERROR` is set, or `null` otherwise. Unlike `c.val()`, it does not throw on error — this is the safe way to check error state reactively.
+`c.rejected(sender)` subscribes to a sender and safely returns its error value if `FLAG_ERROR` is set, or `null` otherwise. Unlike `c.val()` , it does not throw on error — this is the safe way to check error state reactively.
 
 ```ts
+import { root } from "anod";
 root((c) => {
 	const data = c.task(async (c) => {
 		return await c.suspend(fetch("/api/data").then((r) => r.json()));
@@ -760,8 +760,8 @@ anod provides a structured error model where every error is a `{ error, type }` 
 | Constant | Value | Meaning                      | How it's created       |
 | -------- | ----- | ---------------------------- | ---------------------- |
 | `REFUSE` | 1     | Expected error, non-throwing | `return c.refuse(val)` |
-| `PANIC`  | 2     | Expected error, throwing     | `c.panic(val)`         |
-| `FATAL`  | 3     | Unexpected crash             | Any uncaught `throw`   |
+| `PANIC` | 2     | Expected error, throwing     | `c.panic(val)` |
+| `FATAL` | 3     | Unexpected crash             | Any uncaught `throw` |
 
 **`c.refuse(val)`** is available on computes only. It sets the compute into an error state without throwing — the caller returns the error value. This is useful for validation: the compute can't produce a valid result, but it's not a crash.
 
@@ -912,10 +912,12 @@ root((c) => {
 The callbacks are guarded with the same staleness protection as promises: if the node is disposed or re-run before `resolve` fires, the call is silently ignored.
 
 ```ts
-import { root, signal } from "anod";
+import { root, signal, OPT_DEFER } from "anod";
 root((c) => {
 	const url = signal("ws://localhost");
-	const messageSignal = signal(null);
+	const outgoing = signal("");
+	const incoming = signal(null);
+
 	c.spawn((c) => {
 		const ws = new WebSocket(c.val(url));
 		c.cleanup(() => ws.close());
@@ -923,17 +925,28 @@ root((c) => {
 		c.suspend((resolve, reject) => {
 			ws.addEventListener("open", () => {
 				ws.addEventListener("message", (e) => {
-					messageSignal.set(JSON.parse(e.data));
+					incoming.set(JSON.parse(e.data));
 				});
+				/**
+				 * Socket is open. Create a child effect that forwards
+				 * outgoing messages. OPT_DEFER skips the initial run,
+				 * so it only fires when outgoing actually changes.
+				 * Because anod passes context explicitly, you can freely
+				 * create owned effects beyond the async boundary.
+				 */
+				c.effect(outgoing, (msg) => ws.send(msg), OPT_DEFER);
 				resolve();
 			});
 			ws.addEventListener("error", reject);
 		});
 	});
+
+	c.effect(incoming, (msg) => console.log("received:", msg));
+	outgoing.set("hello server");
 });
 ```
 
-Note the spawn body is sync — no `async` keyword, no promise allocation. The setup function controls when the node settles. If `url` changes, the spawn re-runs: `cleanup` closes the old websocket, a new one is created, the old `resolve` becomes stale and is silently ignored.
+Note the spawn body is sync — no `async` keyword, no promise allocation. The setup function controls when the node settles. If `url` changes, the spawn re-runs: `cleanup` closes the old websocket, the child effect is disposed, and the old `resolve` becomes stale and is silently ignored.
 
 You can only call `c.suspend()` with a setup function once per activation. Calling it again throws an error. This prevents ambiguous double-settlement.
 
@@ -1072,6 +1085,7 @@ c.spawn(async (c) => {
 This is useful when you need the stale continuation to run (for cleanup, logging, or cancellation) rather than being silently dropped.
 
 ## Limitations
+
 I have gone back and forth between global listeners, and a dedicated context object. After some turns, I finally settled on context over globals. The reason is that there is no way to truly support the async reactive graph without persisting the context beyond async boundaries. The awkward trade-off is that the `c` variable has to be passed as an argument through the system, and that it's a real footgun if you use the wrong context. Likely, this can be alleviated by an ESLint rule, or in the future, some stronger compile-time guarantee that protects you against shooting yourself in the foot.
 
 Alternatively, library authors can extend anod and expose the global listener as the default, sync mode, and only provide it when truly needed in the async callback.
@@ -1079,36 +1093,37 @@ Alternatively, library authors can extend anod and expose the global listener as
 anod has chosen to drop the O(1) two-way slot binding that S.js uses. This rests on an assumption: most graphs dispose consistently. Everything is wrapped inside an Effect or Root node. When it disposes, everything inside disposes. Therefore, anod doesn't unlink the `_subs` array inside a Signal immediately when an Effect disposes, or when its dropped as a dep from a dynamic receiver. Instead, it implements a *tombstones* garbage collection concept, where it leaves disposed receivers until some certain threshold where it sweeps and compacts its subs array. The upside of this approach is faster performance and lower overall memory allocation, as the length of the `_subs` and `_deps` arrays are halved. The downside is degradation in the `notify()` path on highly dynamic graphs (where Computes/Effects constantly branch different Senders on every update), and slightly more retained memory during updates. Right now, anod uses a constant factor, but might expose a GC Sweep configuration that the end user can tweak to their needs. 
 
 ## Benchmarks
+
 The benchmarks used here are copied from [Milo M's](https://github.com/milomg) repository [JS Reactivity Benchmark](https://github.com/milomg/js-reactivity-benchmark), with some inspiration from [Cause Effect](https://github.com/zeixcom/cause-effect) by Zeix, who modified them to use [mitata](https://github.com/evanwashere/mitata).
 
 Running fair benchmarks against other frameworks is no easy task. Therefore, I want to preface these benchmarks with a disclaimer: performance of a UI library will be completely different depending on which runtime environment it runs in. I have ran these benchmarks both on Node, Bun, and in different browser environments (Chrome, Safari, Firefox, Linux, Mac, Windows). Each environment has its own quirks, and frameworks perform differently depending on which environment they run in. The JS Reactivity Benchmark run all frameworks at the same time. This can introduce noise and garbage collection, where one framework affects another. anod took the tedious and maybe not so clean approach to just copy every benchmark file, and spend some evenings going through them together with AI to make sure there are no inconsistencies in any way that would favour one framework over the other.
 
 ### anod vs [alien-signals](https://github.com/stackblitz/alien-signals) by Stackblitz (Vue-js internal engine)
 
-Compared using the unbound API (`c.compute(fn)`, `c.effect(fn)`) which is the equivalent of alien-signals' `computed(fn)`, `effect(fn)`. Both use dynamic dependency tracking with full reconciliation — no bound-dep fast paths.
+Compared using the unbound API ( `c.compute(fn)` , `c.effect(fn)` ) which is the equivalent of alien-signals' `computed(fn)` , `effect(fn)` . Both use dynamic dependency tracking with full reconciliation — no bound-dep fast paths.
 
 | Benchmark | alien | anod | Δ time | alien | anod | Δ heap ⚠️ |
 | :-- | --: | --: | --: | --: | --: | --: |
 | | **Time** | **Time** | | **Heap** | **Heap** | |
 | **Kairo** | | | | | | |
 | Deep propagation | 991 ns | 923 ns | -7% | 17 B | 18 B | +6% |
-| Broad propagation | 2,951 ns | 2,698 ns | -9% | 800 B | 800 B | 0% |
+| Broad propagation | 2, 951 ns | 2, 698 ns | -9% | 800 B | 800 B | 0% |
 | Diamond | 169 ns | 184 ns | +9% | 73 B | 113 B | +55% |
 | Triangle | 299 ns | 311 ns | +4% | 393 B | 113 B | -71% |
-| Mux | 4,787 ns | 3,465 ns | -28% | 1.0 kB | 961 B | -4% |
+| Mux | 4, 787 ns | 3, 465 ns | -28% | 1.0 kB | 961 B | -4% |
 | Unstable | 390 ns | 195 ns | -50% | 256 B | 17 B | -93% |
 | Avoidable | 66 ns | 60 ns | -9% | 1 B | 1 B | 0% |
 | Repeated observers | 196 ns | 115 ns | -41% | 17 B | 17 B | 0% |
 | **CellX** | | | | | | |
-| 10 layers | 2,983 ns | 3,347 ns | +12% | 3.0 kB | 1.3 kB | -56% |
+| 10 layers | 2, 983 ns | 3, 347 ns | +12% | 3.0 kB | 1.3 kB | -56% |
 | **$mol_wire** | 30.9 µs | 31.5 µs | +2% | 1.7 kB | 869 B | -49% |
 | **Creation** | | | | | | |
 | 1k signals | 10.9 µs | 8.6 µs | -21% | 10.2 kB | 2.6 kB | -75% |
 | 1k computations | 43.5 µs | 53.6 µs | +23% | 529 kB | 472 kB | -11% |
 | **Dynamic graph** | | | | | | |
 | Build: simple | 2.4 µs | 2.6 µs | +8% | 4.7 kB | 2.8 kB | -40% |
-| Build: large web app | 996 µs | 1,166 µs | +17% | 7.4 MB | 7.2 MB | -3% |
-| Build: wide dense | 1,442 µs | 1,380 µs | -4% | 10.2 MB | 5.5 MB | -46% |
+| Build: large web app | 996 µs | 1, 166 µs | +17% | 7.4 MB | 7.2 MB | -3% |
+| Build: wide dense | 1, 442 µs | 1, 380 µs | -4% | 10.2 MB | 5.5 MB | -46% |
 | Update: simple | 230 ns | 218 ns | -5% | 329 B | 33 B | -90% |
 | Update: dynamic | 6.2 µs | 6.3 µs | +2% | 4.1 kB | 733 B | -82% |
 | Update: large web app | 23.0 µs | 17.4 µs | -24% | 8.7 kB | 1.3 kB | -85% |
@@ -1128,32 +1143,32 @@ On deep chains, alien's `checkDirty()` is a stack-based walk that descends throu
 
 ### anod vs [@solidjs/signals](https://github.com/solidjs/solid) (Solid 2.0 beta)
 
-Both use deferred writes: anod uses `.post()` + `flush()`, Solid uses `setSignal()` + `flush()`. Both run inside owned roots. Solid's unstable and molWire counters differ slightly (4 vs 3 and 14 vs 13) due to dynamic dep handling differences.
+Both use deferred writes: anod uses `.post()` + `flush()` , Solid uses `setSignal()` + `flush()` . Both run inside owned roots. Solid's unstable and molWire counters differ slightly (4 vs 3 and 14 vs 13) due to dynamic dep handling differences.
 
 | Benchmark | solid | anod | Δ time | solid | anod | Δ heap |
 | :-- | --: | --: | --: | --: | --: | --: |
 | | **Time** | **Time** | | **Heap** | **Heap** | |
 | **Kairo** | | | | | | |
-| Deep propagation | 6,016 ns | 936 ns | -84% | 7.7 kB | 21 B | -100% |
-| Broad propagation | 18.7 µs | 2,717 ns | -85% | 10.3 kB | 800 B | -92% |
-| Diamond | 1,258 ns | 201 ns | -84% | 1.3 kB | 113 B | -91% |
-| Triangle | 1,790 ns | 345 ns | -81% | 1.8 kB | 114 B | -94% |
-| Mux | 13.5 µs | 3,485 ns | -74% | 8.2 kB | 961 B | -88% |
-| Unstable | 1,698 ns | 212 ns | -88% | 1.1 kB | 18 B | -98% |
+| Deep propagation | 6, 016 ns | 936 ns | -84% | 7.7 kB | 21 B | -100% |
+| Broad propagation | 18.7 µs | 2, 717 ns | -85% | 10.3 kB | 800 B | -92% |
+| Diamond | 1, 258 ns | 201 ns | -84% | 1.3 kB | 113 B | -91% |
+| Triangle | 1, 790 ns | 345 ns | -81% | 1.8 kB | 114 B | -94% |
+| Mux | 13.5 µs | 3, 485 ns | -74% | 8.2 kB | 961 B | -88% |
+| Unstable | 1, 698 ns | 212 ns | -88% | 1.1 kB | 18 B | -98% |
 | Avoidable | 449 ns | 69 ns | -85% | 425 B | 1 B | -100% |
-| Repeated observers | 1,029 ns | 124 ns | -88% | 672 B | 17 B | -97% |
+| Repeated observers | 1, 029 ns | 124 ns | -88% | 672 B | 17 B | -97% |
 | **CellX** | | | | | | |
-| 10 layers | 18.4 µs | 3,349 ns | -82% | 6.8 kB | 1.3 kB | -81% |
+| 10 layers | 18.4 µs | 3, 349 ns | -82% | 6.8 kB | 1.3 kB | -81% |
 | **$mol_wire** | 40.1 µs | 31.4 µs | -22% | 3.9 kB | 756 B | -81% |
 | **Creation** | | | | | | |
-| 1k signals | 46.8 µs | 8,151 ns | -83% | 90.4 kB | 2.6 kB | -97% |
+| 1k signals | 46.8 µs | 8, 151 ns | -83% | 90.4 kB | 2.6 kB | -97% |
 | 1k computations | 776 µs | 282 µs | -64% | 2.1 MB | 542 kB | -74% |
 | **Dynamic graph** | | | | | | |
 | Build: simple | 17.3 µs | 10.5 µs | -39% | 27.3 kB | 18.0 kB | -34% |
-| Build: large web app | 5,888 µs | 4,235 µs | -28% | 12.9 MB | 6.9 MB | -47% |
-| Build: wide dense | 5,490 µs | 3,594 µs | -35% | 10.9 MB | 5.4 MB | -50% |
-| Update: simple | 2,470 ns | 262 ns | -89% | 1.9 kB | 33 B | -98% |
-| Update: dynamic | 23.9 µs | 6,586 ns | -72% | 13.4 kB | 719 B | -95% |
+| Build: large web app | 5, 888 µs | 4, 235 µs | -28% | 12.9 MB | 6.9 MB | -47% |
+| Build: wide dense | 5, 490 µs | 3, 594 µs | -35% | 10.9 MB | 5.4 MB | -50% |
+| Update: simple | 2, 470 ns | 262 ns | -89% | 1.9 kB | 33 B | -98% |
+| Update: dynamic | 23.9 µs | 6, 586 ns | -72% | 13.4 kB | 719 B | -95% |
 | Update: large web app | 64.7 µs | 19.7 µs | -70% | 13.9 kB | 1.7 kB | -88% |
 | Update: wide dense | 184 µs | 52.9 µs | -71% | 53.7 kB | 1.9 kB | -96% |
 | Update: deep | 490 µs | 146 µs | -70% | 407 kB | 39.9 kB | -90% |
@@ -1169,24 +1184,24 @@ Earlier, I think (?) solid was largely built upon [S.js](https://github.com/adam
 | :-- | --: | --: | --: | --: | --: | --: |
 | | **Time** | **Time** | | **Heap** | **Heap** | |
 | **Kairo** | | | | | | |
-| Deep propagation | 1,439 ns | 923 ns | -36% | 148 B | 18 B | -88% |
-| Broad propagation | 3,844 ns | 2,698 ns | -30% | 928 B | 800 B | -14% |
+| Deep propagation | 1, 439 ns | 923 ns | -36% | 148 B | 18 B | -88% |
+| Broad propagation | 3, 844 ns | 2, 698 ns | -30% | 928 B | 800 B | -14% |
 | Diamond | 232 ns | 184 ns | -21% | 201 B | 113 B | -44% |
 | Triangle | 430 ns | 311 ns | -28% | 202 B | 113 B | -44% |
-| Mux | 4,355 ns | 3,465 ns | -20% | 1.0 kB | 961 B | -4% |
+| Mux | 4, 355 ns | 3, 465 ns | -20% | 1.0 kB | 961 B | -4% |
 | Unstable | 300 ns | 195 ns | -35% | 234 B | 17 B | -93% |
 | Avoidable | 78 ns | 60 ns | -23% | 128 B | 1 B | -99% |
 | Repeated observers | 128 ns | 115 ns | -10% | 144 B | 17 B | -88% |
 | **CellX** | | | | | | |
-| 10 layers | 4,182 ns | 3,347 ns | -20% | 1.9 kB | 1.3 kB | -29% |
+| 10 layers | 4, 182 ns | 3, 347 ns | -20% | 1.9 kB | 1.3 kB | -29% |
 | **$mol_wire** | 31.0 µs | 31.5 µs | +2% | 1.5 kB | 869 B | -42% |
 | **Creation** | | | | | | |
 | 1k signals | 10.1 µs | 8.6 µs | -15% | 2.2 kB | 2.6 kB | +18% |
 | 1k computations | 78.0 µs | 53.6 µs | -31% | 602 kB | 472 kB | -22% |
 | **Dynamic graph** | | | | | | |
 | Build: simple | 2.9 µs | 2.6 µs | -10% | 4.9 kB | 2.8 kB | -43% |
-| Build: large web app | 1,199 µs | 1,166 µs | -3% | 7.7 MB | 7.2 MB | -6% |
-| Build: wide dense | 1,502 µs | 1,380 µs | -8% | 10.9 MB | 5.5 MB | -50% |
+| Build: large web app | 1, 199 µs | 1, 166 µs | -3% | 7.7 MB | 7.2 MB | -6% |
+| Build: wide dense | 1, 502 µs | 1, 380 µs | -8% | 10.9 MB | 5.5 MB | -50% |
 | Update: simple | 375 ns | 218 ns | -42% | 161 B | 33 B | -80% |
 | Update: dynamic | 8.4 µs | 6.3 µs | -25% | 813 B | 733 B | -10% |
 | Update: large web app | 298 µs | 17.4 µs | -94% | 18.4 kB | 1.3 kB | -93% |
@@ -1198,33 +1213,33 @@ preact-signals perform well on tight graphs, and decent on deep graphs, but stru
 
 ### Chromium (browser)
 
-Same benchmarks run in Chromium with `--disable-hang-monitor`. No memory counters available in the browser. Some creation/deep benchmarks show high variance.
+Same benchmarks run in Chromium with `--disable-hang-monitor` . No memory counters available in the browser. Some creation/deep benchmarks show high variance.
 
 #### anod vs alien-signals (Chromium)
 
 | Benchmark | alien | anod | Δ |
 | :-- | --: | --: | --: |
 | **Kairo** | | | |
-| Deep propagation | 1,015 ns | 974 ns | -4% |
-| Broad propagation | 2,936 ns | 2,899 ns | -1% |
+| Deep propagation | 1, 015 ns | 974 ns | -4% |
+| Broad propagation | 2, 936 ns | 2, 899 ns | -1% |
 | Diamond | 174 ns | 205 ns | +18% |
 | Triangle | 296 ns | 341 ns | +15% |
-| Mux | 3,657 ns | 3,525 ns | -4% |
+| Mux | 3, 657 ns | 3, 525 ns | -4% |
 | Unstable | 381 ns | 197 ns | -48% |
 | Avoidable | 89 ns | 67 ns | -25% |
 | Repeated observers | 205 ns | 117 ns | -43% |
 | **CellX** | | | |
-| 10 layers | 2,984 ns | 3,452 ns | +16% |
+| 10 layers | 2, 984 ns | 3, 452 ns | +16% |
 | **$mol_wire** | 28.7 µs | 28.8 µs | 0% |
 | **Creation** | | | |
-| 1k signals | 5,972 ns | 4,185 ns | -30% |
+| 1k signals | 5, 972 ns | 4, 185 ns | -30% |
 | 1k computations* | 135 µs | 43 µs | -68% |
 | **Dynamic graph** | | | |
 | Build: simple | 6.2 µs | 2.5 µs | -60% |
-| Build: large web app* | 2,336 µs | 1,148 µs | -51% |
-| Build: wide dense* | 2,885 µs | 1,492 µs | -48% |
+| Build: large web app* | 2, 336 µs | 1, 148 µs | -51% |
+| Build: wide dense* | 2, 885 µs | 1, 492 µs | -48% |
 | Update: simple | 235 ns | 224 ns | -5% |
-| Update: dynamic | 6,130 ns | 6,288 ns | +3% |
+| Update: dynamic | 6, 130 ns | 6, 288 ns | +3% |
 | Update: large web app | 22.6 µs | 18.7 µs | -17% |
 | Update: wide dense | 72.4 µs | 51.1 µs | -29% |
 | Update: deep* | 110 µs | 135 µs | +23% |
@@ -1234,30 +1249,30 @@ Same benchmarks run in Chromium with `--disable-hang-monitor`. No memory counter
 
 #### anod vs solid (Chromium)
 
-Both use deferred writes (`post()` + `flush()` / `setSignal()` + `flush()`).
+Both use deferred writes ( `post()` + `flush()` / `setSignal()` + `flush()` ).
 
 | Benchmark | solid | anod | Δ |
 | :-- | --: | --: | --: |
 | **Kairo** | | | |
-| Deep propagation* | 6,393 ns | 948 ns | -85% |
-| Broad propagation | 19.0 µs | 2,799 ns | -85% |
-| Diamond | 1,623 ns | 211 ns | -87% |
-| Triangle | 2,113 ns | 333 ns | -84% |
-| Mux* | 13.1 µs | 3,473 ns | -74% |
-| Unstable | 1,805 ns | 212 ns | -88% |
+| Deep propagation* | 6, 393 ns | 948 ns | -85% |
+| Broad propagation | 19.0 µs | 2, 799 ns | -85% |
+| Diamond | 1, 623 ns | 211 ns | -87% |
+| Triangle | 2, 113 ns | 333 ns | -84% |
+| Mux* | 13.1 µs | 3, 473 ns | -74% |
+| Unstable | 1, 805 ns | 212 ns | -88% |
 | Avoidable | 738 ns | 75 ns | -90% |
-| Repeated observers | 1,283 ns | 121 ns | -91% |
+| Repeated observers | 1, 283 ns | 121 ns | -91% |
 | **CellX** | | | |
-| 10 layers | 17.9 µs | 3,390 ns | -81% |
+| 10 layers | 17.9 µs | 3, 390 ns | -81% |
 | **$mol_wire** | 37.5 µs | 28.2 µs | -25% |
 | **Creation** | | | |
-| 1k signals | 23.5 µs | 4,057 ns | -83% |
+| 1k signals | 23.5 µs | 4, 057 ns | -83% |
 | 1k computations* | 496 µs | 198 µs | -60% |
 | **Dynamic graph** | | | |
 | Build: simple | 13.5 µs | 7.9 µs | -41% |
-| Build: large web app* | 4,634 µs | 3,946 µs | -15% |
-| Build: wide dense* | 4,594 µs | 3,984 µs | -13% |
-| Update: simple | 2,676 ns | 314 ns | -88% |
+| Build: large web app* | 4, 634 µs | 3, 946 µs | -15% |
+| Build: wide dense* | 4, 594 µs | 3, 984 µs | -13% |
+| Update: simple | 2, 676 ns | 314 ns | -88% |
 | Update: dynamic | 23.4 µs | 8.7 µs | -63% |
 | Update: large web app | 58.4 µs | 25.5 µs | -56% |
 | Update: wide dense* | 170 µs | 58.4 µs | -66% |
@@ -1277,23 +1292,23 @@ The benchmarks above use the unbound API for fair comparison. But anod also supp
 | | **Time** | **Time** | | **Heap** | **Heap** | |
 | **Kairo** | | | | | | |
 | Deep propagation | 991 ns | 624 ns | -37% | 17 B | 18 B | +6% |
-| Broad propagation | 2,951 ns | 1,813 ns | -39% | 800 B | 800 B | 0% |
+| Broad propagation | 2, 951 ns | 1, 813 ns | -39% | 800 B | 800 B | 0% |
 | Diamond | 169 ns | 137 ns | -19% | 73 B | 113 B | +55% |
 | Triangle | 299 ns | 218 ns | -27% | 393 B | 113 B | -71% |
-| Mux | 4,787 ns | 2,815 ns | -41% | 1.0 kB | 961 B | -4% |
+| Mux | 4, 787 ns | 2, 815 ns | -41% | 1.0 kB | 961 B | -4% |
 | Unstable | 390 ns | 164 ns | -58% | 256 B | 17 B | -93% |
 | Avoidable | 66 ns | 48 ns | -27% | 1 B | 0 B | — |
 | Repeated observers | 196 ns | 43 ns | -78% | 17 B | 16 B | -6% |
 | **CellX** | | | | | | |
-| 10 layers | 2,983 ns | 2,529 ns | -15% | 3.0 kB | 1.3 kB | -57% |
+| 10 layers | 2, 983 ns | 2, 529 ns | -15% | 3.0 kB | 1.3 kB | -57% |
 | **$mol_wire** | 30.9 µs | 30.2 µs | -2% | 1.7 kB | 868 B | -49% |
 | **Creation** | | | | | | |
 | 1k signals | 10.9 µs | 7.8 µs | -28% | 10.2 kB | 2.6 kB | -75% |
 | 1k computations | 43.5 µs | 44.3 µs | +2% | 529 kB | 431 kB | -19% |
 | **Dynamic graph** | | | | | | |
 | Build: simple | 2.4 µs | 2.5 µs | +4% | 4.7 kB | 2.7 kB | -43% |
-| Build: large web app | 996 µs | 1,073 µs | +8% | 7.4 MB | 7.2 MB | -3% |
-| Build: wide dense | 1,442 µs | 1,326 µs | -8% | 10.2 MB | 5.5 MB | -46% |
+| Build: large web app | 996 µs | 1, 073 µs | +8% | 7.4 MB | 7.2 MB | -3% |
+| Build: wide dense | 1, 442 µs | 1, 326 µs | -8% | 10.2 MB | 5.5 MB | -46% |
 | Update: simple | 230 ns | 221 ns | -4% | 329 B | 33 B | -90% |
 | Update: dynamic | 6.2 µs | 6.1 µs | -2% | 4.1 kB | 738 B | -82% |
 | Update: large web app | 23.0 µs | 17.5 µs | -24% | 8.7 kB | 1.3 kB | -85% |
@@ -1304,7 +1319,8 @@ The benchmarks above use the unbound API for fair comparison. But anod also supp
 The single dep is pretty much useless in contexts where you cannot control the input. You'd have to build a dedicated layer on top of anod that exposes that overload to the end user. But, consider a typical web app. Almost every reactive binding with signals is sender -> dom.
 
 ## Acknowledgements
-I got the idea to build anod once I stumbled upon [S.js by Adam Haile](github.com/adamhaile/S). It has been around for a long time, and I think it has been heavily influential to the modern reactive signals space. For years I wanted to extend it, but it took almost 7 years until I finally took the time to fully implement my idea.
+
+I got the idea to build anod once I stumbled upon [S.js by Adam Haile](https://github.com/adamhaile/S). It has been around for a long time, and I think it has been heavily influential to the modern reactive signals space. For years I wanted to extend it, but it took almost 7 years until I finally took the time to fully implement my idea.
 
 Then, I want to shout out to [ivi](https://github.com/localvoid/ivi), by Boris Kaul. The whole idea of the context in anod originates from ivi's elegant `component(c => {})` signature, that implements a two-phase state registration. Also, I think his library deserves more attention; it's an exceptionally well-built UI library.
 
