@@ -3156,7 +3156,7 @@ function notify(node, flag) {
 	if (sub !== null) {
 		let flags = sub._flag;
 		sub._flag |= flag;
-		if (!(flags & (FLAG_PENDING | FLAG_STALE | FLAG_DISPOSED | FLAG_LOCKED))) {
+		if (!(flags & (FLAG_PENDING | FLAG_STALE | FLAG_DISPOSED | FLAG_LOCKED | FLAG_PAUSED))) {
 			sub._receive();
 		}
 	}
@@ -3168,7 +3168,7 @@ function notify(node, flag) {
 			let flags = sub._flag;
 			sub._flag |= flag;
 			if (
-				!(flags & (FLAG_PENDING | FLAG_STALE | FLAG_DISPOSED | FLAG_LOCKED))
+				!(flags & (FLAG_PENDING | FLAG_STALE | FLAG_DISPOSED | FLAG_LOCKED | FLAG_PAUSED))
 			) {
 				sub._receive();
 			}
