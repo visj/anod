@@ -762,8 +762,8 @@ root((c) => {
 	// parsed holds the full row array in memory
 
 	view.dispose();
-	// "released parsed data" — weak compute drops its value and runs cleanup
-	// parsed is now dormant, no memory retained
+	// Since compute has no subscribers, it nulls out its value and calls
+	// the cleanup hook. It stays idle until someone reads it again
 
 	parsed.get(); // re-parses the file on demand
 });
@@ -783,15 +783,15 @@ anod provides a structured error model where every error is a `{ error, type }` 
 | `PANIC` | 2     | Expected error, throwing     | `c.panic(val)` |
 | `FATAL` | 3     | Unexpected crash             | Any uncaught `throw` |
 
-**`c.refuse(val)`** is available on computes only. It sets the compute into an error state without throwing — the caller returns the error value. This is useful for validation: the compute can't produce a valid result, but it's not a crash.
+**`c.refuse(val)`** is available on computes only. It sets the compute into an error state without throwing, the caller returns the error value. This is useful for validation: the compute can't produce a valid result, but it's not a crash.
 
 **`c.panic(val)`** is available on computes and effects. It throws, aborting the current run, but anod marks it as an expected error so recover handlers can distinguish it from crashes.
 
-**`FATAL`** is what you get when something throws unexpectedly — a null dereference, a network error, a bug. anod wraps the thrown value as `{ error: thrownValue, type: FATAL }` .
+**`FATAL`** is what you get when something throws unexpectedly, meaning, any error not explicitly created through the panic or refuse methods. anod wraps the thrown value as `{ error: thrownValue, type: FATAL }` .
 
 #### Recovery
 
-`c.recover()` intercepts errors before they dispose the node. The handler receives the `{ error, type }` object and returns `true` to swallow or `false` to propagate. When multiple handlers are registered, they run forward in registration order — the first handler that returns `true` wins. Recovery follows the ownership chain — if a child doesn't handle it, it bubbles to the parent. A root's `recover()` is the last line of defense.
+`c.recover()` intercepts errors before they dispose the node. The handler receives the `{ error, type }` object and returns `true` to swallow or `false` to propagate. If you register multiple recover hooks, they run forward, breaking at the first hook that returns true, or bubbles to next owner if none. A root's `recover()` is the last line of defense.
 
 This lets you build layered error handling: effects handle their own expected errors, and the root catches anything truly unexpected.
 
@@ -806,7 +806,7 @@ root((c) => {
 		return true;
 	});
 
-	// Compute uses refuse() for validation — no throw, no crash
+	// Compute uses refuse() for validation, just return error
 	const price = signal(100);
 	const discount = c.compute(price, (val, c) => {
 		if (val <= 0) {
@@ -815,7 +815,7 @@ root((c) => {
 		return val * 0.9;
 	});
 
-	// Spawn uses panic() when data is stale — throws, but expected
+	// Spawn uses panic() when data is stale, throws expected error
 	const token = signal("abc123");
 	c.spawn(async (c) => {
 		c.recover((err) => {
