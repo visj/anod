@@ -39,6 +39,7 @@ anod is a reactive state management library. It has built-in support for both sy
 		- [`stable()`](#stable)
 		- [`weak()`](#weak)
 		- [`eager()`](#eager)
+		- [`pause()` / `resume()`](#pause--resume)
 	- [Error recovery in depth](#error-recovery-in-depth)
 		- [Recovery](#recovery)
 - [Async reactivity in depth](#async-reactivity-in-depth)
@@ -772,6 +773,60 @@ root((c) => {
 #### `eager()`
 
 Converts a compute from pull-based to push-based. An eager compute re-evaluates immediately when notified, rather than waiting to be pulled. Use sparingly: this removes the laziness optimization but guarantees the value is always fresh.
+
+#### `pause()` / `resume()`
+
+Temporarily suspends an effect or root from reacting to dependency changes. While paused, the node still tracks that it has gone stale, but defers all re-evaluation until `resume()` is called. `pause()` recursively pauses all owned child effects. Computes are not pausable — they are pull-based and inherently lazy, so pausing an owning effect already prevents them from being read.
+
+```ts
+import { root, signal, batch } from "anod";
+root((c) => {
+	const name = signal("Vilhelm");
+	const age = signal(30);
+	const logger = c.effect((c) => {
+		console.log(c.val(name), c.val(age));
+	});
+
+	/**
+	 * Pause the effect. While paused, signal writes
+	 * still mark it stale, but it won't re-run.
+	 */
+	logger.pause();
+
+	name.set("Leif");
+	age.set(25);
+	// Nothing prints — the effect is paused.
+
+	/**
+	 * Resume brings it back up to date. If the effect
+	 * is stale, it re-runs. If it has owned children
+	 * that are stale, they re-run too.
+	 */
+	logger.resume(); // Prints "Leif 25"
+});
+```
+
+When you have multiple independent roots, you can resume them inside a `batch()` to coalesce everything into a single flush.
+
+```ts
+import { root, signal, batch } from "anod";
+const counter = signal(0);
+const r1 = root((c) => {
+	c.effect(counter, (val) => console.log("r1:", val));
+});
+const r2 = root((c) => {
+	c.effect(counter, (val) => console.log("r2:", val));
+});
+
+r1.pause();
+r2.pause();
+counter.set(42);
+
+batch(() => {
+	r1.resume();
+	r2.resume();
+}); // Both effects flush together
+```
 
 ### Error recovery in depth
 

@@ -1074,6 +1074,153 @@ function root(fn) {
 	};
 
 	/**
+	 * Enqueues a scoped effect into the level-indexed SCOPES queue.
+	 * Only used for effects with owned children, flat effects go
+	 * directly to RECEIVERS in the hot path.
+	 * @param {Effect} node
+	 */
+	function enqueueScope(node) {
+		let level = node._level;
+		let count = LEVELS[level];
+		SCOPES[level][count] = node;
+		LEVELS[level] = count + 1;
+		SCOPE_COUNT++;
+	}
+
+	/**
+	 * Pauses an owner node (Effect or Root) and recursively pauses
+	 * all owned child effects. While paused, notifications are
+	 * suppressed — the node accumulates stale/pending bits but
+	 * _receive() returns early. Computes are not paused because
+	 * they are pull-based and inherently lazy.
+	 * @this {Effect|Root}
+	 */
+	function pause() {
+		this._flag |= FLAG_PAUSED;
+		let owned = this._owned;
+		if (owned !== null) {
+			pauseOwned(owned);
+		}
+	}
+
+	/**
+	 * Recursively walks an owned array and flags each child effect
+	 * as paused. Only traverses into children with FLAG_OWNER
+	 * (Effects), since Computes have no owned subtree.
+	 * @param {Array<Receiver>} owned
+	 */
+	function pauseOwned(owned) {
+		let count = owned.length;
+		for (let i = 0; i < count; i++) {
+			let child = owned[i];
+			if (child._flag & FLAG_OWNER) {
+				child._flag |= FLAG_PAUSED;
+				let childOwned = child._owned;
+				if (childOwned !== null) {
+					pauseOwned(childOwned);
+				}
+			}
+		}
+	}
+
+	RootProto.pause = EffectProto.pause = pause;
+
+	/**
+	 * Resumes a paused effect. If the effect itself needs an update,
+	 * it enqueues and lets the re-run rebuild its owned subtree.
+	 * Otherwise, it walks owned children to resume them individually.
+	 * @this {Effect}
+	 */
+	function resumeEffect() {
+		let flag = this._flag;
+		if (!(flag & FLAG_PAUSED)) {
+			return;
+		}
+		this._flag = flag & ~FLAG_PAUSED;
+		if (flag & (FLAG_STALE | FLAG_PENDING)) {
+			if (flag & FLAG_STALE || needsUpdate(this, TIME)) {
+				/** Effect needs update — enqueue it. The re-run will
+				 *  clearOwned and rebuild the subtree, so no need to
+				 *  individually resume children. */
+				if (this._owned === null) {
+					RECEIVERS[RECEIVER_COUNT++] = this;
+				} else {
+					enqueueScope(this);
+				}
+				if (IDLE) {
+					flush();
+				}
+				return;
+			}
+			this._flag &= ~(FLAG_STALE | FLAG_PENDING);
+		}
+		let owned = this._owned;
+		if (owned !== null) {
+			resumeOwned(owned);
+			if (IDLE) {
+				flush();
+			}
+		}
+	}
+
+	/**
+	 * Resumes a paused root. Root has no dependencies, so it just
+	 * walks owned children and resumes any that need updating.
+	 * @this {Root}
+	 */
+	function resumeRoot() {
+		let flag = this._flag;
+		if (!(flag & FLAG_PAUSED)) {
+			return;
+		}
+		this._flag = flag & ~FLAG_PAUSED;
+		let owned = this._owned;
+		if (owned !== null) {
+			resumeOwned(owned);
+			if (IDLE) {
+				flush();
+			}
+		}
+	}
+
+	/**
+	 * Recursively resumes owned child effects. Only processes
+	 * children with FLAG_OWNER (Effects). If a child effect needs
+	 * to update, it is enqueued and its subtree will be rebuilt
+	 * by the re-run. Otherwise, it walks further down.
+	 * @param {Array<Receiver>} owned
+	 */
+	function resumeOwned(owned) {
+		let count = owned.length;
+		for (let i = 0; i < count; i++) {
+			let child = owned[i];
+			let flag = child._flag;
+			if (!(flag & FLAG_OWNER) || !(flag & FLAG_PAUSED) || flag & FLAG_DISPOSED) {
+				continue;
+			}
+			child._flag = flag & ~FLAG_PAUSED;
+			if (flag & (FLAG_STALE | FLAG_PENDING)) {
+				if (flag & FLAG_STALE || needsUpdate(child, TIME)) {
+					if (child._owned === null) {
+						RECEIVERS[RECEIVER_COUNT++] = child;
+					} else {
+						enqueueScope(child);
+					}
+					continue;
+				}
+				child._flag &= ~(FLAG_STALE | FLAG_PENDING);
+			}
+			let childOwned = child._owned;
+			if (childOwned !== null) {
+				resumeOwned(childOwned);
+			}
+		}
+	}
+
+	EffectProto.resume = resumeEffect;
+	RootProto.resume = resumeRoot;
+
+	/**
 	 * Intercepts a promise so the async continuation is silently dropped
 	 * when the owning node has been disposed or re-run since this call.
 	 * Uses an activation timestamp to detect staleness.
@@ -2558,11 +2705,7 @@ function root(fn) {
 		if (this._owned === null) {
 			RECEIVERS[RECEIVER_COUNT++] = this;
 		} else {
-			let level = this._level;
-			let count = LEVELS[level];
-			SCOPES[level][count] = this;
-			LEVELS[level] = count + 1;
-			SCOPE_COUNT++;
+			enqueueScope(this);
 		}
 	};
 

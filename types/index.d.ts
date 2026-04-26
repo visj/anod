@@ -72,6 +72,8 @@ export interface Root {
 	recover(fn: (error: Err) => boolean): void;
 	cleanup(fn: () => void): void;
 	dispose(): void;
+	pause(): void;
+	resume(): void;
 }
 
 export interface Effect extends Root {
