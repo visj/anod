@@ -1430,10 +1430,8 @@ function root(fn) {
 	 * @returns {Array<*> | Promise<Array<*>>}
 	 */
 	function _suspendArray(node, tasks) {
-		node._flag |= FLAG_BLOCKED;
 		let count = tasks.length;
 		if (count === 0) {
-			node._flag &= ~FLAG_BLOCKED;
 			return [];
 		}
 		let results = new Array(count);
@@ -1456,12 +1454,12 @@ function root(fn) {
 		}
 
 		if (allSettled) {
-			node._flag &= ~FLAG_BLOCKED;
 			for (let i = 0; i < count; i++) {
 				subscribe(node, tasks[i]);
 			}
 			return results;
 		}
+		node._flag |= FLAG_BLOCKED;
 
 		/** At least one is loading — allocate one Promise.
 		 *  _stepArray re-scans from scratch on each wake-up,
