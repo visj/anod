@@ -1,37 +1,4 @@
 /**
- * @interface
- */
-class Resolver {
-	constructor() {
-		/** @type {Array<AsyncReceiver | Function> | null} */
-		this._waiters = null;
-	}
-}
-
-/**
- * Async coordination context for task/spawn nodes.
- * @interface
- * @extends {Resolver}
- */
-class IChannel extends Resolver {
-	constructor() {
-		super();
-		/** @type {AsyncSender<*> | null} */
-		this._res1 = null;
-		/** @type {Array<AsyncSender<*> | null> | null} */
-		this._responds = null;
-		/** @type {AbortController | null} */
-		this._controller = null;
-		/** @type {Sender<*> | null} */
-		this._defer1 = null;
-		/** @type {*} */
-		this._defer1val = null;
-		/** @type {Array<Sender<*> | *> | null} */
-		this._defers = null;
-	}
-}
-
-/**
  * Base for all disposable nodes.
  * @interface
  */
@@ -69,9 +36,57 @@ class AsyncDisposer {
 }
 
 /**
+ * @interface
+ */
+class Resolver {
+	constructor() {
+		/** @type {Array<AsyncReceiver | Function> | null} */
+		this._waiters = null;
+	}
+}
+
+/**
+ * Async coordination context for task/spawn nodes.
+ * @interface
+ * @extends {Resolver}
+ */
+class IChannel extends Resolver {
+	constructor() {
+		super();
+		/** @type {AsyncSender<*> | null} */
+		this._res1 = null;
+		/** @type {Array<AsyncSender<*> | null> | null} */
+		this._responds = null;
+		/** @type {AbortController | null} */
+		this._controller = null;
+		/** @type {Sender<*> | null} */
+		this._defer1 = null;
+		/** @type {*} */
+		this._defer1val = null;
+		/** @type {Array<Sender<*> | *> | null} */
+		this._defers = null;
+	}
+}
+
+/**
+ * @interface
+ */
+class Factory {
+	constructor() {
+		/** @type {number} */
+		this._flag;
+		/** @type {number} */
+		this._level;
+		/** @type {Owner | null} */
+		this._owner;
+	}
+}
+
+/**
  * Ownership boundary — Root and Effect.
  * @interface
  * @extends {Disposer}
+ * @extends {Factory}
  */
 class Owner extends Disposer {
 	constructor() {
@@ -80,10 +95,6 @@ class Owner extends Disposer {
 		this._cleanup = null;
 		/** @type {Array<Receiver> | null} */
 		this._owned = null;
-		/** @type {number} */
-		this._level = 0;
-		/** @type {Owner | null} */
-		this._owner = null;
 		/** @type {(function(*): boolean) | Array<(function(*): boolean)> | null} */
 		this._recover = null;
 	}
@@ -175,6 +186,12 @@ class Receiver extends Disposer {
 		/** @type {(function(): void) | Array<(function(): void)> | null} */
 		this._cleanup;
 	}
+	/**
+	 * @template T
+	 * @param {Sender<T>} sender 
+	 * @returns {T}
+	 */
+	val(sender) { }
 	/**
 	 * @param {number} time
 	 * @returns {void}
@@ -349,7 +366,7 @@ class IEffect extends Owner {
 
 export {
 	Disposer, Owner,
-	AsyncDisposer,
+	AsyncDisposer, Factory,
 	Sender, AsyncSender,
 	Receiver, AsyncReceiver,
 	IChannel, Resolver,

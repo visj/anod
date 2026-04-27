@@ -1,6 +1,7 @@
 import {
 	IChannel,
 	Disposer,
+	Factory,
 	Owner,
 	Sender,
 	Receiver,
@@ -72,7 +73,12 @@ const ASYNC_SYNC = 3;
  * nothing, so the continuation never resumes and the closure is GC'd.
  * @const
  */
-const REGRET = { then: function () { } };
+var REGRET = { then: function () { } };
+
+/**
+ * @const
+ */
+var NOOP = function() {};
 
 /**
  * Thrown (synchronously) when an async node's fn returns a non-sync
@@ -81,7 +87,7 @@ const REGRET = { then: function () { } };
  * let code continue executing after the node is disposed.
  * @const
  */
-const ASSERT_NOT_DISPOSED = "Cannot access a disposed node";
+var ASSERT_NOT_DISPOSED = "Cannot access a disposed node";
 
 /**
  * @type {Array<Sender<*> | number>}
@@ -188,7 +194,7 @@ var DISPOSER_COUNT = 0;
  * tail pointer and cleared back to null on drain. Sized to the longest
  * queued burst the session has seen.
  * @const
- * @type {Array<Sender<*>>}
+ * @type {Array<Sender>}
  */
 var SENDERS = [];
 /**
@@ -200,19 +206,19 @@ var PAYLOADS = [];
 var UPDATES = [];
 var SENDER_COUNT = 0;
 
-/** @const @type {Array<ICompute<*>>} */
+/** @const @type {Array<Compute<*>>} */
 var COMPUTES = [];
 
 var COMPUTE_COUNT = 0;
 
 /** @const @type {Array<number>} */
 var LEVELS = [0, 0, 0, 0];
-/** @const @type {Array<Array<IEffect>>} */
+/** @const @type {Array<Array<Effect>>} */
 var SCOPES = [[], [], [], []];
 
 var SCOPE_COUNT = 0;
 
-/** @const @type {Array<IEffect>} */
+/** @const @type {Array<Effect>} */
 var RECEIVERS = [];
 
 var RECEIVER_COUNT = 0;
@@ -229,15 +235,13 @@ var PURGE_COUNT = 0;
  * through Clock are unowned — they live until GC or manual dispose.
  * Extensible via Clock.prototype for user-defined context methods.
  * @constructor
- * @implements {Owner}
+ * @implements {Factory}
  */
 function Clock() { }
 Clock.prototype._flag = 0;
 Clock.prototype._level = -1;
 /** @type {Owner | null} */
 Clock.prototype._owner = null;
-/** @type {(function(*): boolean) | Array<(function(*): boolean)> | null} */
-Clock.prototype._recover = null;
 
 /**
  * @constructor
@@ -378,7 +382,7 @@ function Effect(opts, fn, dep1, owner, args) {
 	this._owned = null;
 	/** @type {number} */
 	this._level = 0;
-	/** @type {Owner | Clock | null} */
+	/** @type {Owner | null} */
 	this._owner = owner;
 	/** @type {(function(*): boolean) | Array<(function(*): boolean)> | null} */
 	this._recover = null;
@@ -488,7 +492,7 @@ function val(sender) {
  * @template T
  * @this {Sender<T> | AsyncSender<T>}
  * @param {T | (function(T): T)} value
- * @param {(function(AsyncSender<*>, T): (T | Promise<T>))=} asyncFn
+ * @param {(function(AsyncSender<T>, T): (T | Promise<T>))=} asyncFn
  * @returns {boolean}
  */
 function set(value, asyncFn) {
@@ -559,7 +563,7 @@ function set(value, asyncFn) {
  * LWW, runs asyncFn, dispatches based on return type.
  * @template T
  * @param {AsyncSender<T>} node
- * @param {function(Receiver, T): (T | Promise<T>)} asyncFn
+ * @param {function(AsyncSender<T>, T): (T | Promise<T>)} asyncFn
  * @param {T} prev
  */
 function _runAsync(node, asyncFn, prev) {
@@ -645,7 +649,7 @@ function assign(node, value, time) {
  * with the resolved value as prev.
  * @template T
  * @param {AsyncSender<T>} node
- * @param {{ _value: T, _fn: Function }} payload
+ * @param {{ _value: T, _fn: (function(AsyncSender<T>, T): (T | Promise<T>)) }} payload
  * @param {number} time
  */
 function asyncAssign(node, payload, time) {
@@ -683,8 +687,9 @@ function asyncAssign(node, payload, time) {
 /**
  * Batch-drain handler for notify(). No value write — just clears
  * FLAG_SCHEDULED and notifies subscribers.
- * @param {Sender<*>} node
- * @param {*} _
+ * @template T
+ * @param {Sender<T>} node
+ * @param {T} _
  * @param {number} time
  */
 function poke(node, _, time) {
@@ -699,8 +704,8 @@ function poke(node, _, time) {
  * Used by extension packages (e.g. anod-list) to schedule custom
  * mutations like push, pop, splice without branching in the drain loop.
  * @template T
- * @param {Sender<*>} node
- * @param {*} payload
+ * @param {Sender<T>} node
+ * @param {T} payload
  * @param {Function} fn
  * @returns {void}
  */
@@ -776,7 +781,7 @@ function _readAsync(sender, safe) {
  * @template T
  * @param {T} value
  * @param {(function(T,T): boolean) | boolean=} equal
- * @returns {Signal<T>|Cell<T>}
+ * @returns {Signal<T> | Cell<T>}
  */
 function signal(value, equal) {
 	if (equal === false) {
@@ -820,7 +825,7 @@ function resource(value, equal) {
 }
 
 /**
- * @param {function(Root): ((function(): void) | void)} fn
+ * @param {function(Root): void} fn
  * @returns {Root}
  */
 function root(fn) {
@@ -848,8 +853,12 @@ function root(fn) {
 	SignalProto._time = 0;
 	SignalProto._equal = null;
 
-	/** Signal._drop: NOOP — signals don't drop values. */
-	SignalProto._drop = function () { };
+	/**
+	 * No op functions on signals
+	 */
+	SignalProto._drop = 
+		SignalProto._refresh =
+		SignalProto._update = NOOP;
 
 	/**
 	 * Compute._drop: releases cached value and marks STALE. Called
@@ -872,7 +881,7 @@ function root(fn) {
 	/**
 	 * Compacts _subs by removing FLAG_DISPOSED entries.
 	 * Pop-from-back for low churn, forward scan for high churn.
-	 * @this {Sender<*> | ICompute<*>}
+	 * @this {Sender}
 	 */
 	SignalProto._purge = ComputeProto._purge = function () {
 		let subs = this._subs;
@@ -1040,7 +1049,7 @@ function root(fn) {
 	/**
 	 * Registers a finalize callback that runs immediately when this
 	 * activation completes, regardless of error. Effect-level `finally`.
-	 * @this {IEffect}
+	 * @this {Effect}
 	 * @param {function(): void} fn
 	 */
 	EffectProto.finalize = function (fn) {
@@ -1063,8 +1072,9 @@ function root(fn) {
 	 * from their fn — _update sees FLAG_ERROR and stores it as the
 	 * compute's error value without hitting the catch path.
 	 * Named `fail` to avoid collision with the `.error` getter.
-	 * @this {ICompute<*>}
-	 * @param {*} val
+	 * @template T
+	 * @this {Compute<T>}
+	 * @param {T} val
 	 * @returns {{ error: *, type: number }}
 	 */
 	ComputeProto.refuse = function (val) {
@@ -1091,7 +1101,7 @@ function root(fn) {
 	/**
 	 * Marks this compute as eager (push-based). Once set, the node
 	 * eagerly re-runs on notification instead of waiting for a pull.
-	 * @this {ICompute<*>}
+	 * @this {Compute}
 	 */
 	ComputeProto.eager = function () {
 		this._flag |= FLAG_EAGER;
@@ -1101,7 +1111,7 @@ function root(fn) {
 	 * Enqueues a scoped effect into the level-indexed SCOPES queue.
 	 * Only used for effects with owned children, flat effects go
 	 * directly to RECEIVERS in the hot path.
-	 * @param {IEffect} node
+	 * @param {Effect} node
 	 */
 	function enqueueScope(node) {
 		let level = node._level;
@@ -1117,7 +1127,7 @@ function root(fn) {
 	 * suppressed — the node accumulates stale/pending bits but
 	 * _receive() returns early. Computes are not paused because
 	 * they are pull-based and inherently lazy.
-	 * @this {IEffect|Root}
+	 * @this {Owner}
 	 */
 	function pause() {
 		this._flag |= FLAG_PAUSED;
@@ -1131,7 +1141,7 @@ function root(fn) {
 	 * Recursively walks an owned array and flags each child effect
 	 * as paused. Only traverses into children with FLAG_OWNER
 	 * (Effects), since Computes have no owned subtree.
-	 * @param {Array<IEffect>|Array<Receiver>} owned
+	 * @param {Array<Receiver>} owned
 	 */
 	function pauseOwned(owned) {
 		let count = owned.length;
@@ -1139,7 +1149,7 @@ function root(fn) {
 			let child = owned[i];
 			if (child._flag & FLAG_OWNER) {
 				child._flag |= FLAG_PAUSED;
-				let childOwned = child._owned;
+				let childOwned = /** @type {Owner} */(child)._owned;
 				if (childOwned !== null) {
 					pauseOwned(childOwned);
 				}
@@ -1153,7 +1163,7 @@ function root(fn) {
 	 * Resumes a paused effect. If the effect itself needs an update,
 	 * it enqueues and lets the re-run rebuild its owned subtree.
 	 * Otherwise, it walks owned children to resume them individually.
-	 * @this {IEffect}
+	 * @this {Effect}
 	 */
 	function resumeEffect() {
 		let flag = this._flag;
@@ -1212,7 +1222,7 @@ function root(fn) {
 	 * children with FLAG_OWNER (Effects). If a child effect needs
 	 * to update, it is enqueued and its subtree will be rebuilt
 	 * by the re-run. Otherwise, it walks further down.
-	 * @param {Array<IEffect>|Array<Receiver>} owned
+	 * @param {Array<Owner | Receiver>} owned
 	 */
 	function resumeOwned(owned) {
 		let count = owned.length;
@@ -1224,11 +1234,11 @@ function root(fn) {
 			}
 			child._flag = flag & ~FLAG_PAUSED;
 			if (flag & (FLAG_STALE | FLAG_PENDING)) {
-				if (flag & FLAG_STALE || needsUpdate(child, TIME)) {
+				if (flag & FLAG_STALE || needsUpdate(/** @type {Effect} */(child), TIME)) {
 					if (child._owned === null) {
-						RECEIVERS[RECEIVER_COUNT++] = child;
+						RECEIVERS[RECEIVER_COUNT++] = /** @type {Effect} */(child);
 					} else {
-						enqueueScope(child);
+						enqueueScope(/** @type {Effect} */(child));
 					}
 					continue;
 				}
@@ -1415,7 +1425,7 @@ function root(fn) {
 	 * subscribe to every task in one pass and resolve the Promise.
 	 *
 	 * @param {AsyncReceiver} node
-	 * @param {Array<ICompute<*>>} tasks
+	 * @param {Array<Compute<*>>} tasks
 	 * @returns {Array<*> | Promise<Array<*>>}
 	 */
 	function _suspendArray(node, tasks) {
@@ -1467,7 +1477,7 @@ function root(fn) {
 	 * zero loading tasks, guaranteeing a consistent snapshot (all
 	 * values from the same moment). Mirrors c.pending() semantics.
 	 * @param {AsyncReceiver} node
-	 * @param {Array<ICompute<*>>} tasks
+	 * @param {Array<Compute>} tasks
 	 * @param {Array<*>} results
 	 * @param {function(Array<*>): void} resolve
 	 * @param {function(*): void} reject
@@ -1573,9 +1583,10 @@ function root(fn) {
 	 * Reads a sender's current value without subscribing immediately.
 	 * The subscription is deferred until settle time. For sync nodes
 	 * (FLAG_ASYNC not set), falls back to val().
-	 * @this {ICompute<*>}
-	 * @param {Sender<*>} sender
-	 * @returns {*}
+	 * @template T
+	 * @this {AsyncReceiver}
+	 * @param {Sender<T>} sender
+	 * @returns {T}
 	 */
 	function defer(sender) {
 		if (!(this._flag & FLAG_ASYNC)) {
@@ -1612,8 +1623,8 @@ function root(fn) {
 	 *
 	 * Usage: `if (c.pending([taskA, taskB])) return;`
 	 *
-	 * @this {Compute | Effect}
-	 * @param {Sender<*> | Array<Sender<*>>} tasks
+	 * @this {Receiver}
+	 * @param {Sender | Array<Sender>} tasks
 	 * @returns {boolean} true if any task has FLAG_LOADING set
 	 */
 	function pending(tasks) {
@@ -1644,10 +1655,10 @@ function root(fn) {
 	 * this is the safe way to check and consume errors reactively.
 	 *
 	 * Usage: `let err = c.rejected(task); if (err) handleError(err);`
-	 *
+	 * @template T
 	 * @this {Receiver}
-	 * @param {Sender<*>} sender
-	 * @returns {* | null}
+	 * @param {Sender<T>} sender
+	 * @returns {T | null}
 	 */
 	function rejected(sender) {
 		if (sender._flag & FLAG_DISPOSED) {
@@ -1686,15 +1697,16 @@ function root(fn) {
 	 * Returns the current activation's sequence number. Increments
 	 * on each re-run. Useful for attaching to requests for server-side
 	 * ordering, or for manual staleness detection across async boundaries.
-	 * @this {ICompute<*>|IEffect}
+	 * @this {Receiver}
 	 * @returns {number}
 	 */
-	ComputeProto.version = EffectProto.version = function () { return this._time; };
+	ComputeProto.version = 
+		EffectProto.version = function () { return this._time; };
 
 	/**
 	 * Lazily allocates a mini-channel on Cell nodes for waiter support.
 	 * Only contains _waiters — no controller, defers, or responds.
-	 * @this {Cell<*>}
+	 * @this {Cell}
 	 * @returns {Resolver}
 	 */
 	CellProto._channel = function () {
@@ -1711,9 +1723,10 @@ function root(fn) {
 	 * Resource-specific suspend. Only supports raw promises and the
 	 * callback pattern. Resources are senders, not receivers — they
 	 * cannot await tasks or other resources.
-	 * @this {Cell<*>}
-	 * @param {Promise<*> | Function} promiseOrFn
-	 * @returns {Promise<*> | void}
+	 * @template T
+	 * @this {Cell<T>}
+	 * @param {Promise<*> | (function(Function, Function): ?)} promiseOrFn
+	 * @returns {Promise<T> | void}
 	 */
 	CellProto.suspend = function (promiseOrFn) {
 		if (typeof promiseOrFn === "function") {
@@ -1765,8 +1778,9 @@ function root(fn) {
 	/**
 	 * Settles an async resource. Clears FLAG_LOADING, writes value
 	 * if changed, notifies subscribers, flushes.
-	 * @this {Cell<*>}
-	 * @param {*} value
+	 * @template T
+	 * @this {Cell<T>}
+	 * @param {T} value
 	 */
 	CellProto._settle = function (value) {
 		this._flag &= ~FLAG_LOADING;
@@ -1791,7 +1805,7 @@ function root(fn) {
 	/**
 	 * Settles an async resource with an error. Wraps as FATAL,
 	 * sets FLAG_ERROR, and delegates to _settle.
-	 * @this {Cell<*>}
+	 * @this {Cell}
 	 * @param {*} err
 	 */
 	CellProto._error = function (err) {
@@ -1817,8 +1831,9 @@ function root(fn) {
 	/**
 	 * Returns the signal's current value. No dependency tracking —
 	 * tracking happens via `c.val(sender)` on the context.
-	 * @this {Sender<*>}
-	 * @returns {*}
+	 * @template T
+	 * @this {Signal<T>}
+	 * @returns {T}
 	 */
 	SignalProto.get = function () {
 		return this._value;
@@ -1829,7 +1844,7 @@ function root(fn) {
 	/**
 	 * Notifies subscribers without changing the value. Useful after
 	 * mutating an object held by the signal in place.
-	 * @this {Sender<*> | ICompute<*>}
+	 * @this {Sender}
 	 */
 	function _notify() {
 		if (this._flag & FLAG_DISPOSED) {
@@ -1843,7 +1858,8 @@ function root(fn) {
 		}
 	}
 
-	SignalProto.notify = ComputeProto.notify = _notify;
+	SignalProto.notify =
+		ComputeProto.notify = _notify;
 
 	/**
 	 * Microtask-deferred set. Never writes the value immediately —
@@ -1855,9 +1871,10 @@ function root(fn) {
 	 *
 	 * Fast exit: when not already posting and the value is unchanged
 	 * (non-function), nothing to do.
-	 * @this {AsyncSender<*>}
-	 * @param {* | function(*): *} value
-	 * @param {*=} asyncFn
+	 * @template T
+	 * @this {Signal<T>}
+	 * @param {(function(T): T) | T} value
+	 * @param {function(AsyncSender<T>, T): T=} asyncFn
 	 * @returns {boolean}
 	 */
 	SignalProto.post = function (value, asyncFn) {
@@ -1901,9 +1918,10 @@ function root(fn) {
 
 	/**
 	 * Returns true if the sender's current value differs from `value`.
-	 * Used by deferred dep settlement to detect changes.
-	 * @this {Sender<*>}
-	 * @param {*} value
+	 * Used by deferred dep settlement to detect changes. 
+	 * @template T 
+	 * @this {Sender<T>}
+	 * @param {T} value
 	 * @returns {boolean}
 	 */
 	function _changed(value) {
@@ -1913,17 +1931,29 @@ function root(fn) {
 	/**
 	 * Returns true if the sender's current value differs from `value`.
 	 * Used by deferred dep settlement to detect changes.
-	 * @this {Sender<*>}
-	 * @param {*} value
+	 * @template T
+	 * @this {Signal}
+	 * @param {T} value
 	 * @returns {boolean}
 	 */
 	SignalProto._changed = ComputeProto._changed = _changed;
 
 	/**
-	 * @this {AsyncSender<*>}
+	 * @this {Signal}
 	 * @returns {void}
 	 */
 	SignalProto._dispose = function () {
+		this._flag = FLAG_DISPOSED;
+		clearSubs(this);
+		this._value = null;
+	};
+
+	/**
+	 * @override
+	 * @this {Cell}
+	 * @returns {void}
+	 */
+	CellProto._dispose = function() {
 		if (this._flag & FLAG_WAITER) {
 			let ch = this._chan;
 			if (ch._waiters !== null) {
@@ -1939,7 +1969,7 @@ function root(fn) {
 	 * Pulls and returns the compute's current value. Triggers lazy
 	 * re-evaluation if stale or pending. Rethrows if in error state.
 	 * @template T
-	 * @this {ICompute<T>}
+	 * @this {Compute<T>}
 	 * @returns {T}
 	 */
 	ComputeProto.get = function () {
@@ -1975,19 +2005,19 @@ function root(fn) {
 	/**
 	 * IReader: dependency-tracking read. Pulls the sender up to date,
 	 * registers it as a dependency, and returns its value.
-	 * @this {ICompute<T>}
-	 * @param {Sender<*>} sender
-	 * @returns {*}
+	 * @this {Compute}
+	 * @param {Sender<T>} sender
+	 * @returns {T}
 	 */
-
 	ComputeProto.val = val;
 
 	/**
 	 * Drain handler for contextual set. Wraps assign() with FLAG_PAUSED
 	 * on the receiver so that notifications propagating from this write
 	 * are ignored by the receiver that initiated the write.
-	 * @param {Sender<*>} node
-	 * @param {*} payload
+	 * @template T
+	 * @param {Sender<T>} node
+	 * @param {{ _value: T, _recv: Receiver }} payload
 	 * @param {number} time
 	 */
 	function guardedAssign(node, payload, time) {
@@ -2003,8 +2033,9 @@ function root(fn) {
 	/**
 	 * Drain handler for guarded async writes. Pauses the receiver
 	 * around asyncAssign so it ignores its own notification.
-	 * @param {AsyncSender<*>} node
-	 * @param {{ _value: *, _fn: Function, _recv: Receiver }} payload
+	 * @template T
+	 * @param {AsyncSender<T>} node
+	 * @param {{ _value: T, _fn: (function(AsyncSender<T>, T): (T | Promise<T>)), _recv: Receiver }} payload
 	 * @param {number} time
 	 */
 	function guardedAsyncAssign(node, payload, time) {
@@ -2026,7 +2057,7 @@ function root(fn) {
 	 * @this {Receiver}
 	 * @param {Sender<T> | AsyncSender<T>} sender
 	 * @param {(function(T): T) | T} value
-	 * @param {function(Receiver, T): (T | Promise<T>)=} asyncFn
+	 * @param {function(AsyncSender<T>, T): (T | Promise<T>)=} asyncFn
 	 * @returns {void}
 	 */
 	function contextSet(sender, value, asyncFn) {
@@ -2070,10 +2101,11 @@ function root(fn) {
 	 * guarded write that will pause this receiver at drain time. Triggers
 	 * a microtask flush if not already posting. Supports asyncFn for
 	 * resource senders.
-	 * @this {ICompute<*>|IEffect}
-	 * @param {Sender<*>} sender
-	 * @param {* | function(*): *} value
-	 * @param {Function=} asyncFn
+	 * @template T
+	 * @this {Receiver}
+	 * @param {Sender<T>} sender
+	 * @param {(function(T): T) | T} value
+	 * @param {(function(AsyncSender<T>, T) :T)=} asyncFn
 	 * @returns {void}
 	 */
 	function contextPost(sender, value, asyncFn) {
@@ -2096,7 +2128,7 @@ function root(fn) {
 	ComputeProto.post = contextPost;
 
 	/**
-	 * @this {ICompute<*>}
+	 * @this {Compute}
 	 * @returns {void}
 	 */
 	ComputeProto._refresh = function () {
@@ -2118,8 +2150,9 @@ function root(fn) {
 	 * error. Uses err || { error: err } guard on errors to guarantee a
 	 * non-falsy value (prevents skipping the comparison branch when user
 	 * throws null/undefined/0).
-	 * @this {ICompute<*>}
-	 * @param {*} value
+	 * @template T
+	 * @this {Compute}
+	 * @param {T} value
 	 */
 	ComputeProto._settle = function (value) {
 		let flag = this._flag;
@@ -2196,15 +2229,15 @@ function root(fn) {
 	/**
 	 * Settles an async compute with an error. Wraps as FATAL,
 	 * sets FLAG_ERROR, and delegates to _settle.
-	 * @this {ICompute<*>}
-	 * @param {*} err
+	 * @this {Compute}
+	 * @param {?} err
 	 */
 	ComputeProto._error = function (err) {
 		this._flag |= FLAG_ERROR;
 		this._settle({ error: err, type: FATAL });
 	};
 
-	/** @this {ICompute<*>} */
+	/** @this {Compute} */
 	ComputeProto._dispose = function () {
 		if (this._flag & FLAG_LOCKED) {
 			this._flag |= FLAG_DISPOSED;
@@ -2241,7 +2274,7 @@ function root(fn) {
 	};
 
 	/**
-	 * @this {ICompute<*>}
+	 * @this {Compute}
 	 * @param {number} time
 	 */
 	ComputeProto._update = function (time) {
@@ -2434,7 +2467,7 @@ function root(fn) {
 	 * 3. FLAG_WAITER: enqueue to COMPUTES + notify PENDING.
 	 * 4. FLAG_EAGER + FLAG_ASYNC: enqueue to COMPUTES for eager re-run.
 	 * 5. FLAG_EAGER + sync: notify FLAG_STALE directly (pure push).
-	 * @this {ICompute<*>}
+	 * @this {Compute}
 	 * @returns {void}
 	 */
 	ComputeProto._receive = function () {
@@ -2475,9 +2508,11 @@ function root(fn) {
 	};
 
 	/**
-	 * @this {IEffect}
-	 * @param {Sender<*>} sender
-	 * @returns {*}
+	 * @throws
+	 * @this {Effect}
+	 * @template T
+	 * @param {Sender<T>} sender
+	 * @returns {T}
 	 */
 	EffectProto.val = val;
 	EffectProto.set = contextSet;
@@ -2515,7 +2550,6 @@ function root(fn) {
 			try {
 				if (flag & FLAG_BOUND) {
 					let dep = this._dep1;
-					// @ts-expect-error - dep is non-null for bound node
 					if (dep._flag & (FLAG_STALE | FLAG_PENDING)) {
 						dep._refresh();
 					}
@@ -2627,7 +2661,7 @@ function root(fn) {
 	 * dispose, checks deferred deps, re-runs if stale. When FLAG_ERROR
 	 * is set before calling, treats the value as an error: attempts
 	 * recovery, disposes if unrecoverable.
-	 * @this {IEffect}
+	 * @this {Effect}
 	 * @param {*=} err
 	 */
 	EffectProto._settle = function (err) {
@@ -2679,7 +2713,7 @@ function root(fn) {
 	/**
 	 * Settles an async effect with an error. Wraps as FATAL,
 	 * sets FLAG_ERROR, and delegates to _settle.
-	 * @this {IEffect}
+	 * @this {Effect}
 	 * @param {*} err
 	 */
 	EffectProto._error = function (err) {
@@ -2688,7 +2722,7 @@ function root(fn) {
 	};
 
 	/**
-	 * @this {IEffect}
+	 * @this {Effect}
 	 * @returns {void}
 	 */
 	EffectProto._dispose = function () {
@@ -2728,7 +2762,7 @@ function root(fn) {
 	};
 
 	/**
-	 * @this {IEffect}
+	 * @this {Effect}
 	 * @returns {void}
 	 */
 	EffectProto._receive = function () {
@@ -2919,7 +2953,7 @@ function root(fn) {
 
 /**
  * @param {Receiver} receiver
- * @param {Sender<*>} sender
+ * @param {Sender} sender
  */
 function subscribe(receiver, sender) {
 	if (receiver._dep1 === null) {
@@ -2953,7 +2987,7 @@ function subscribe(receiver, sender) {
  * not so much more expensive. But right now, going from 2 to 3 subs
  * will cause a sudden big spike in memory. Since most senders have a few subs,
  * this is a real concern.
- * @param {Sender<*>} send
+ * @param {Sender} send
  * @param {Receiver} receiver
  * @returns {void}
  */
@@ -2971,8 +3005,8 @@ function connect(send, receiver) {
  * Marks receiver as removed from sender's subscriber list.
  * For _sub1, clears immediately. For _subs array entries,
  * defers compaction via _tombstones and purge heuristic.
- * @param {Sender<*>} send
- * @param {Receiver|ICompute<*>|IEffect} receiver
+ * @param {Sender} send
+ * @param {Receiver} receiver
  * @returns {void}
  */
 function clearReceiver(send, receiver) {
@@ -3003,7 +3037,7 @@ function clearReceiver(send, receiver) {
 
 /**
  * Removes receive from all its deps' subscriber lists.
- * @param {Receiver|ICompute<*>|IEffect} receive
+ * @param {Receiver} receive
  * @returns {void}
  */
 function clearDeps(receive) {
@@ -3026,7 +3060,7 @@ function clearDeps(receive) {
  * Receivers self-heal: dynamic nodes remove stale deps via
  * patchDeps on next re-run; stable bound nodes detect disposed
  * dep1 in _update via refreshDep1.
- * @param {Sender<*>} send
+ * @param {Sender} send
  * @returns {void}
  */
 function clearSubs(send) {
@@ -3057,7 +3091,7 @@ function clearCleanup(node) {
  * Runs all finalize callbacks registered on this effect and
  * clears the field. Errors inside finalizers are swallowed to
  * preserve finally semantics (mirroring JS try/finally).
- * @param {IEffect} node
+ * @param {Effect} node
  * @returns {void}
  */
 function clearFinalize(node) {
@@ -3149,7 +3183,7 @@ const RECOVER_OWNER = 2;
  * - RECOVER_OWNER: an ancestor handled it - node still disposes, error swallowed.
  * - RECOVER_NONE:  unhandled - node disposes, error propagates.
  *
- * @param {IEffect} node
+ * @param {Effect} node
  * @param {?} error
  * @returns {number}
  */
@@ -3180,7 +3214,7 @@ function tryRecover(node, error) {
  * New deps pushed beyond _depCount during fn() are already subscribed.
  * They just need to be shifted into the compacted region.
  *
- * @param {Receiver|ICompute<*>|IEffect} node
+ * @param {Receiver} node
  * @param {number} version
  * @param {number} depCount
  * @param {number} newLen
@@ -3307,8 +3341,8 @@ function patchDeps(node, version, depCount, newLen) {
 
 /**
  * @param {number} stamp
- * @param {Sender<*> | null} dep1
- * @param {Array<Sender<*>> | null} deps
+ * @param {Sender | null} dep1
+ * @param {Array<Sender> | null} deps
  * @returns {number}
  */
 function sweepDeps(stamp, dep1, deps) {
@@ -3343,7 +3377,7 @@ function sweepDeps(stamp, dep1, deps) {
 }
 
 /**
- * @param {Sender<*>} node
+ * @param {Sender} node
  * @param {number} flag
  */
 function notify(node, flag) {
@@ -3374,7 +3408,7 @@ function notify(node, flag) {
 /**
  * Checks if any dep of a receiver actually changed since it
  * last ran. Pulls stale compute deps to ensure they're current.
- * @param {Receiver|ICompute<*>|IEffect|Sender<*>} node
+ * @param {Receiver} node
  * @param {number} time
  * @returns {boolean}
  */
@@ -3389,9 +3423,9 @@ function needsUpdate(node, time) {
 		} else if (flag & FLAG_PENDING) {
 			FENCE = SEED;
 			if (flag & FLAG_SINGLE) {
-				checkSingle(dep, time);
+				checkSingle(/** @type {Receiver} */(dep), time);
 			} else {
-				checkRun(dep, time);
+				checkRun(/** @type {Receiver} */(dep), time);
 			}
 		}
 		if (dep._ctime > lastRun) {
@@ -3410,9 +3444,9 @@ function needsUpdate(node, time) {
 			} else if (flag & FLAG_PENDING) {
 				FENCE = SEED;
 				if (flag & FLAG_SINGLE) {
-					checkSingle(dep, time);
+					checkSingle(/** @type {Receiver} */(dep), time);
 				} else {
-					checkRun(dep, time);
+					checkRun(/** @type {Receiver} */(dep), time);
 				}
 			}
 			if (dep._ctime > lastRun) {
@@ -3424,20 +3458,20 @@ function needsUpdate(node, time) {
 }
 
 /**
- * @param {Receiver|ICompute<*>|Sender<*>} node
+ * @param {Receiver} node
  * @param {number} time
  * @returns {void}
  */
 function checkSingle(node, time) {
-	let dep = /** @type {Sender<*> | Receiver} */(node._dep1);
+	let dep = node._dep1;
 	let flag = dep._flag;
 	if (flag & FLAG_STALE) {
 		dep._update(time);
 	} else if (flag & FLAG_PENDING) {
 		if (flag & FLAG_SINGLE) {
-			checkSingle(dep, time);
+			checkSingle(/** @type {Receiver} */(dep), time);
 		} else {
-			checkRun(dep, time);
+			checkRun(/** @type {Receiver} */(dep), time);
 		}
 	}
 	if (dep._ctime > node._time) {
@@ -3449,7 +3483,7 @@ function checkSingle(node, time) {
 }
 
 /**
- * @param {ICompute<*>|Sender<*>|Receiver} node
+ * @param {Receiver} node
  * @param {number} time
  * @returns {void}
  */
@@ -3630,7 +3664,7 @@ function asyncKind(value) {
 /**
  * @template T
  * @param {AsyncDisposer<T>} node
- * @param {*} promise
+ * @param {IThenable<T>} promise
  * @param {number} time
  * @returns {void}
  */
@@ -3758,11 +3792,11 @@ function resolveIterator(node, iterable, time) {
  *         a sync sub (version - 1), stamp with `version` ("notified").
  * Pass 3: Inline notify — OR FLAG_STALE on all subs, but only call
  *         _receive() on subs not stamped `version` (not a waiter).
- *
- * @param {AsyncSender<*>} node
- * @param {*} value
+ * @template T
+ * @param {AsyncSender<T>} node
+ * @param {T} value
  * @param {boolean} isError
- * @param {Array<*>} waiters
+ * @param {Array<AsyncReceiver | Function>} waiters
  * @param {number} waiterCount
  */
 function settleNotify(node, value, isError, waiters, waiterCount) {
@@ -3973,7 +4007,7 @@ function addWaiter(responderCh, awaiter, resolve, reject) {
  * Stores the task in the awaiter's responds list and the awaiter
  * in the task's waiters list.
  * @param {AsyncReceiver} awaiter
- * @param {AsyncSender<*>} task
+ * @param {AsyncSender} task
  * @param {function(*): *} resolve
  * @param {function(*): *} reject
  * @returns {void}
@@ -4000,7 +4034,7 @@ function send(awaiter, task, resolve, reject) {
  * Removes a single awaiter from a responder's _waiters array.
  * Linear scan for identity match, then 3-stride swap-with-last.
  * Clears FLAG_WAITER on the responder when the last waiter is removed.
- * @param {AsyncSender<*>} responder
+ * @param {AsyncSender} responder
  * @param {Resolver} responderCh
  * @param {AsyncReceiver} awaiter
  * @returns {void}
@@ -4057,7 +4091,7 @@ function clearChannel(channel, awaiter) {
  * Clears an awaiter's back-reference to a responder.
  * Scans _res1 and _responds for identity match.
  * @param {AsyncReceiver} awaiter
- * @param {AsyncSender<*>} responder
+ * @param {AsyncSender} responder
  */
 function clearRespond(awaiter, responder) {
 	let awaiterCh = awaiter._chan;
@@ -4081,9 +4115,10 @@ function clearRespond(awaiter, responder) {
  * channel references. When panic is false, subscribes each awaiter as
  * a dep of the responder. When panic is true (responder is disposing),
  * skips subscription since the responder is dead.
- * @param {AsyncSender<*>} responder
+ * @template T
+ * @param {AsyncSender<T>} responder
  * @param {Resolver} responderCh
- * @param {*} value
+ * @param {T} value
  * @param {boolean} isError
  * @param {boolean} panic
  * @returns {void}
@@ -4111,7 +4146,7 @@ function resolveWaiters(responder, responderCh, value, isError, panic) {
  * Runs `fn` with the root node itself as the argument. Prototype methods
  * on Root (compute/effect/derive/etc.) use `this` (the root) as the owner.
  * @param {Root} root
- * @param {function(Root): ((function(): void) | void)} fn
+ * @param {function(Root): void} fn
  * @returns {void}
  */
 function startRoot(root, fn) {
@@ -4146,7 +4181,7 @@ function startCompute(node) {
 }
 
 /**
- * @param {IEffect} node
+ * @param {Effect} node
  * @returns {void}
  */
 function startEffect(node) {
@@ -4198,7 +4233,7 @@ function startEffect(node) {
  * Drains a queue of effect nodes: checks staleness, updates,
  * handles errors with finalize/recover/dispose. Returns the
  * first unrecoverable error POJO, or null if all succeeded.
- * @param {Array<IEffect>} queue
+ * @param {Array<Effect>} queue
  * @param {number} count
  * @param {number} time
  * @returns {?}
