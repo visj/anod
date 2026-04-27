@@ -7,12 +7,11 @@
     "strict": true,
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
-    "allowJs": true,
-    "checkJs": true,
     "noEmit": true
   },
   "include": [
     "src/**.js",
-    "types/*.d.ts"
+    "types/*.d.ts",
+    "global.d.ts"
   ]
 }

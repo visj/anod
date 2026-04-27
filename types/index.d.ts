@@ -142,7 +142,7 @@ export interface ComputeContext extends Context {
 export interface ComputeReader extends ComputeContext, Reader {}
 
 /** Root callback context — owned factories + lifecycle. */
-export interface RootContext extends Clock {
+export interface RootContext extends Factory {
 	cleanup(fn: () => void): void;
 	recover(fn: (error: Err) => boolean): void;
 }
@@ -214,7 +214,7 @@ export interface SpawnContext extends EffectContext {
 export interface SpawnReader extends SpawnContext, Reader {}
 
 /** Base factory — unowned node creation. Root and Effect extend this. */
-export interface Clock {
+export interface Factory {
 	// Unbound compute
 	compute<U>(fn: (c: ComputeReader) => U): Compute<U>;
 	compute<U>(fn: (c: ComputeReader, prev: U) => U, seed: U): Compute<U>;
@@ -297,7 +297,7 @@ export interface Clock {
 	): Spawn;
 }
 
-export declare const c: Clock;
+export declare const c: Factory;
 export declare function root(fn: (c: RootContext) => void): Root;
 export declare function signal<T>(value: T): Signal<T>;
 export declare function signal<T>(

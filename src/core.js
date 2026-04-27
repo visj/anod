@@ -1,11 +1,15 @@
 import {
+	IChannel,
 	Disposer,
 	Owner,
 	Sender,
 	Receiver,
-	ISignal,
+	Resolver,
 	ICompute,
-	IEffect
+	IEffect,
+	AsyncSender,
+	AsyncReceiver,
+	AsyncDisposer
 } from "./types.js";
 
 /* Sender flags (bits 0-6) — readable on any Sender (Signal or Compute).
@@ -68,7 +72,7 @@ const ASYNC_SYNC = 3;
  * nothing, so the continuation never resumes and the closure is GC'd.
  * @const
  */
-const REGRET = { then: function () {} };
+const REGRET = { then: function () { } };
 
 /**
  * Thrown (synchronously) when an async node's fn returns a non-sync
@@ -203,7 +207,7 @@ var COMPUTE_COUNT = 0;
 
 /** @const @type {Array<number>} */
 var LEVELS = [0, 0, 0, 0];
-/** @const @type {Array<Array<Effect>>} */
+/** @const @type {Array<Array<IEffect>>} */
 var SCOPES = [[], [], [], []];
 
 var SCOPE_COUNT = 0;
@@ -225,8 +229,9 @@ var PURGE_COUNT = 0;
  * through Clock are unowned — they live until GC or manual dispose.
  * Extensible via Clock.prototype for user-defined context methods.
  * @constructor
+ * @implements {Owner}
  */
-function Clock() {}
+function Clock() { }
 Clock.prototype._flag = 0;
 Clock.prototype._level = -1;
 /** @type {Owner | null} */
@@ -238,7 +243,6 @@ Clock.prototype._recover = null;
  * @constructor
  * @implements {Owner}
  */
-// @ts-ignore - Closure @implements on function constructor
 function Root() {
 	/** @type {number} */
 	this._flag = FLAG_OWNER;
@@ -253,10 +257,9 @@ function Root() {
 /**
  * @template T
  * @constructor
- * @implements {ISignal<T>}
+ * @implements {Sender<T>}
  * @param {T} value
  */
-// @ts-ignore - Closure @implements on function constructor
 function Signal(value) {
 	/** @type {number} */
 	this._flag = 0;
@@ -279,6 +282,8 @@ function Signal(value) {
  * (custom equality to skip notifications).
  * @template T
  * @constructor
+ * @extends {Signal<T>}
+ * @implements {AsyncSender<T>}
  * @param {T} value
  * @param {number} flag
  * @param {(function(T,T): boolean) | null} equal
@@ -300,27 +305,25 @@ function Cell(value, flag, equal) {
 	this._time = 0;
 	/** @type {(function(T,T): boolean) | null} */
 	this._equal = equal;
-	/** @type {{ _waiters: Array<*> | null } | null} */
+	/** @type {Resolver | null} */
 	this._chan = null;
 }
 Cell.prototype = Object.create(Signal.prototype);
 
 /**
  * @constructor
- * @template T
+ * @template T, U, W
  * @param {number} opts
- * @param {Function} fn
- * @param {Sender<*> | null} dep1
+ * @param {(function(U, T, W): T) | (function(T, W): T)} fn
+ * @param {Sender<U> | null} dep1
  * @param {T=} seed
- * @param {*=} args
+ * @param {W=} args
  * @implements {ICompute<T>}
  */
-// @ts-ignore - Closure @implements on function constructor
 function Compute(opts, fn, dep1, seed, args) {
 	/** @type {number} */
 	this._flag = FLAG_INIT | FLAG_STALE | opts;
 	/** @type {T} */
-	// @ts-ignore - seed is T | undefined but stored as T
 	this._value = seed;
 	/** @type {number} */
 	this._stamp = -1;
@@ -330,9 +333,9 @@ function Compute(opts, fn, dep1, seed, args) {
 	this._subs = null;
 	/** @type {number} */
 	this._tombstones = 0;
-	/** @type {Function | null} */
+	/** @type {(function(U, T, W): T) | (function(T, W): T) | null} */
 	this._fn = fn;
-	/** @type {Sender<*> | null} */
+	/** @type {Sender<U> | null} */
 	this._dep1 = dep1;
 	/** @type {Array<Sender<*>> | null} */
 	this._deps = null;
@@ -342,7 +345,7 @@ function Compute(opts, fn, dep1, seed, args) {
 	this._ctime = 0;
 	/** @type {Function | Array<Function> | null} */
 	this._cleanup = null;
-	/** @type {Channel | null} */
+	/** @type {IChannel | null} */
 	this._chan = null;
 	/** @type {*} */
 	this._args = args;
@@ -350,20 +353,20 @@ function Compute(opts, fn, dep1, seed, args) {
 
 /**
  * @constructor
+ * @template U, W
  * @param {number} opts
- * @param {Function} fn
- * @param {Sender<*> | null} dep1
- * @param {Owner | null} owner - parent owner, null for top-level effects
- * @param {*=} args
+ * @param {(function(U,W): void) | (function(W): void)} fn
+ * @param {Sender<U> | null} dep1
+ * @param {Owner | null} owner
+ * @param {W=} args
  * @implements {IEffect}
  */
-// @ts-ignore - Closure @implements on function constructor
 function Effect(opts, fn, dep1, owner, args) {
 	/** @type {number} */
 	this._flag = FLAG_INIT | FLAG_OWNER | (0 | opts);
-	/** @type {Function | null} */
+	/** @type {(function(U,W): void) | (function(W): void) | null} */
 	this._fn = fn;
-	/** @type {Sender<*> | null} */
+	/** @type {Sender<U> | null} */
 	this._dep1 = dep1;
 	/** @type {Array<Sender<*>> | null} */
 	this._deps = null;
@@ -375,13 +378,13 @@ function Effect(opts, fn, dep1, owner, args) {
 	this._owned = null;
 	/** @type {number} */
 	this._level = 0;
-	/** @type {Owner | null} */
+	/** @type {Owner | Clock | null} */
 	this._owner = owner;
 	/** @type {(function(*): boolean) | Array<(function(*): boolean)> | null} */
 	this._recover = null;
 	/** @type {(function(): void) | Array<(function(): void)> | null} */
 	this._finalize = null;
-	/** @type {Channel | null} */
+	/** @type {IChannel | null} */
 	this._chan = null;
 	/** @type {number} */
 	this._stamp = 0;
@@ -394,13 +397,14 @@ function Effect(opts, fn, dep1, owner, args) {
  * async utility call (controller(), defer(), suspend(task)). Stored
  * in the node's dedicated _channel field.
  * @constructor
+ * @implements {IChannel}
  */
 function Channel() {
-	/** @type {ICompute<*> | null} First responder we're waiting on. */
+	/** @type {AsyncSender<*> | null} First responder we're waiting on. */
 	this._res1 = null;
-	/** @type {Array<ICompute<*>> | null} Additional responders. */
+	/** @type {Array<AsyncSender<*> | null> | null} Additional responders. */
 	this._responds = null;
-	/** @type {Array<*> | null} 3-stride: [awaiter, resolve, reject]. */
+	/** @type {Array<AsyncReceiver | (function(*): void)> | null} 3-stride: [awaiter, resolve, reject]. */
 	this._waiters = null;
 	/** @type {AbortController | null} */
 	this._controller = null;
@@ -411,10 +415,6 @@ function Channel() {
 	/** @type {Array<Sender<*> | *> | null} Paired [sender, value] entries for 2+ defers. */
 	this._defers = null;
 }
-
-// Top-level named functions so they aren't anonymous closures and can be
-// shared between prototypes. Installed onto prototypes in the single
-// assignment block further down.
 
 /**
  * Shared across Root/Signal/Compute/Effect. Routes to `_dispose` directly
@@ -486,9 +486,9 @@ function val(sender) {
  * then asyncFn runs with the resource as context and the optimistic
  * value as prev. On resolve, _settle writes the final value.
  * @template T
- * @this {Sender<T>}
+ * @this {Sender<T> | AsyncSender<T>}
  * @param {T | (function(T): T)} value
- * @param {(function(ISignal<*>, T): (T | Promise<T>))=} asyncFn
+ * @param {(function(AsyncSender<*>, T): (T | Promise<T>))=} asyncFn
  * @returns {boolean}
  */
 function set(value, asyncFn) {
@@ -499,10 +499,8 @@ function set(value, asyncFn) {
 	/** Resource: single function arg → run as (c, current), dispatch on result. */
 	if (callback && asyncFn === undefined && this._flag & FLAG_ASYNC) {
 		if (IDLE) {
-			// @ts-ignore - Sender<T> used as ISignal<*> after FLAG_ASYNC guard
-			_runAsync(this, value, this._value);
+			_runAsync(/** @type {AsyncSender<T>} */(this), value, this._value);
 		} else {
-			// @ts-ignore - schedule types
 			schedule(this, { _value: this._value, _fn: value }, asyncAssign);
 		}
 		return true;
@@ -512,14 +510,12 @@ function set(value, asyncFn) {
 		let _value;
 		let write = true;
 		if (callback) {
-			// @ts-ignore - value is narrowed to function by callback check
 			_value = value(this._value);
 			/** Mutable updater returning void — keep current value, still notify. */
 			if (_value === undefined && this._flag & FLAG_MUTABLE) {
 				write = false;
 			}
 		} else {
-			// @ts-ignore - value is T when not a function
 			_value = value;
 		}
 		if (
@@ -537,13 +533,11 @@ function set(value, asyncFn) {
 			return false;
 		}
 		if (asyncFn !== undefined && this._flag & FLAG_ASYNC) {
-			// @ts-ignore - Sender<T> used as ISignal<*> after FLAG_ASYNC guard
-			_runAsync(this, asyncFn, _value);
+			_runAsync(/** @type {AsyncSender<T>} */(this), asyncFn, _value);
 		}
 		return true;
 	}
 	if (asyncFn !== undefined && this._flag & FLAG_ASYNC) {
-		// @ts-ignore - schedule types
 		schedule(this, { _value: value, _fn: asyncFn }, asyncAssign);
 		return true;
 	}
@@ -551,11 +545,9 @@ function set(value, asyncFn) {
 		callback ||
 		this._flag & FLAG_MUTABLE ||
 		(this._equal !== null
-			// @ts-ignore - value is T when not a callback function
 			? !this._equal(this._value, value)
 			: this._value !== value)
 	) {
-		// @ts-ignore - T | function(T): T assignable to T at runtime
 		schedule(this, value, assign);
 		return true;
 	}
@@ -565,9 +557,10 @@ function set(value, asyncFn) {
 /**
  * Starts async work for a resource signal. Increments _time for
  * LWW, runs asyncFn, dispatches based on return type.
- * @param {ISignal<*>} node
- * @param {function(ISignal<*>, *): (* | Promise<*>)} asyncFn
- * @param {*} prev
+ * @template T
+ * @param {AsyncSender<T>} node
+ * @param {function(Receiver, T): (T | Promise<T>)} asyncFn
+ * @param {T} prev
  */
 function _runAsync(node, asyncFn, prev) {
 	node._flag &= ~(FLAG_ERROR | FLAG_SUSPEND | FLAG_LOADING);
@@ -586,11 +579,9 @@ function _runAsync(node, asyncFn, prev) {
 	let kind = asyncKind(result);
 	if (kind === ASYNC_PROMISE) {
 		node._flag |= FLAG_LOADING;
-		// @ts-ignore - ISignal used as ICompute after FLAG_ASYNC guard
 		resolvePromise(node, result, time);
 	} else if (kind === ASYNC_ITERATOR) {
 		node._flag |= FLAG_LOADING;
-		// @ts-ignore - ISignal used as ICompute after FLAG_ASYNC guard
 		resolveIterator(node, result, time);
 	} else if (
 		result !== undefined &&
@@ -622,7 +613,6 @@ function assign(node, value, time) {
 	let _value;
 	let write = true;
 	if (typeof value === "function") {
-		// @ts-ignore - value narrowed to function by typeof check
 		_value = value(node._value);
 		/** Mutable updater returning void — keep current value, still notify. */
 		if (_value === undefined && node._flag & FLAG_MUTABLE) {
@@ -653,8 +643,9 @@ function assign(node, value, time) {
  * Batch-drain handler for resource async writes. Resolves the
  * optimistic value like assign(), then kicks off the async work
  * with the resolved value as prev.
- * @param {ISignal<*>} node
- * @param {{ _value: *, _fn: function }} payload
+ * @template T
+ * @param {AsyncSender<T>} node
+ * @param {{ _value: T, _fn: Function }} payload
  * @param {number} time
  */
 function asyncAssign(node, payload, time) {
@@ -686,7 +677,6 @@ function asyncAssign(node, payload, time) {
 	} else {
 		node._flag &= ~FLAG_SCHEDULED;
 	}
-	// @ts-ignore - Function used as typed callback
 	_runAsync(node, payload._fn, node._value);
 }
 
@@ -710,8 +700,8 @@ function poke(node, _, time) {
  * mutations like push, pop, splice without branching in the drain loop.
  * @template T
  * @param {Sender<*>} node
- * @param {T | (function(T): T)} payload
- * @param {function(Sender<*>, (T | (function(T): T)), number): *} fn
+ * @param {*} payload
+ * @param {Function} fn
  * @returns {void}
  */
 function schedule(node, payload, fn) {
@@ -785,22 +775,18 @@ function _readAsync(sender, safe) {
  * signal with custom equality function).
  * @template T
  * @param {T} value
- * @param {(function(T,T): boolean)=} equal
- * @returns {ISignal<T>}
+ * @param {(function(T,T): boolean) | boolean=} equal
+ * @returns {Signal<T>|Cell<T>}
  */
 function signal(value, equal) {
-	// @ts-ignore - equal can be boolean or function at runtime
 	if (equal === false) {
 		let node = new Signal(value);
 		node._flag = FLAG_MUTABLE;
-		// @ts-ignore - Signal used as ISignal
 		return node;
 	}
 	if (typeof equal === "function") {
-		// @ts-ignore - Cell used as ISignal
 		return new Cell(value, 0, equal);
 	}
-	// @ts-ignore - Signal used as ISignal
 	return new Signal(value);
 }
 
@@ -810,12 +796,11 @@ function signal(value, equal) {
  * where reference equality doesn't reflect changes.
  * @template T
  * @param {T} value
- * @returns {ISignal<T>}
+ * @returns {Signal<T>}
  */
 function mutable(value) {
 	let node = new Signal(value);
 	node._flag = FLAG_MUTABLE;
-	// @ts-ignore - Signal used as ISignal
 	return node;
 }
 
@@ -824,16 +809,14 @@ function mutable(value) {
  * with background async work via `set(value, asyncFn)`.
  * @template T
  * @param {T} value
- * @param {(boolean | (function(T,T): boolean))=} equals
- * @returns {ISignal<T>}
+ * @param {(function(T,T): boolean) | boolean=} equal
+ * @returns {Cell<T>}
  */
-function resource(value, equals) {
-	if (equals === false) {
-		// @ts-ignore - Cell used as ISignal
+function resource(value, equal) {
+	if (equal === false) {
 		return new Cell(value, FLAG_ASYNC | FLAG_MUTABLE, null);
 	}
-	// @ts-ignore - Cell used as ISignal
-	return new Cell(value, FLAG_ASYNC, typeof equals === "function" ? equals : null);
+	return new Cell(value, FLAG_ASYNC, typeof equal === "function" ? equal : null);
 }
 
 /**
@@ -852,6 +835,8 @@ function root(fn) {
 	/** @const */
 	let SignalProto = Signal.prototype;
 	/** @const */
+	let CellProto = Cell.prototype;
+	/** @const */
 	let ComputeProto = Compute.prototype;
 	/** @const */
 	let EffectProto = Effect.prototype;
@@ -860,17 +845,18 @@ function root(fn) {
 	RootProto._level = -1;
 
 	SignalProto._ctime = 0;
+	SignalProto._time = 0;
 	SignalProto._equal = null;
 
 	/** Signal._drop: NOOP — signals don't drop values. */
-	SignalProto._drop = function () {};
+	SignalProto._drop = function () { };
 
 	/**
 	 * Compute._drop: releases cached value and marks STALE. Called
 	 * from clearReceiver when FLAG_WEAK is set and no subscribers
 	 * remain. Loading nodes keep their value — active channel
 	 * waiters re-subscribe on settle.
-	 * @this {ICompute<*>}
+	 * @this {Compute}
 	 */
 	ComputeProto._drop = function () {
 		if (this._flag & FLAG_LOADING) {
@@ -879,15 +865,14 @@ function root(fn) {
 		this._flag |= FLAG_STALE;
 		this._value = null;
 		if (this._cleanup !== null) {
-			// @ts-ignore - passing cleanup value where Disposer expected
-			clearCleanup(this._cleanup);
+			clearCleanup(this);
 		}
 	};
 
 	/**
 	 * Compacts _subs by removing FLAG_DISPOSED entries.
 	 * Pop-from-back for low churn, forward scan for high churn.
-	 * @this {ISignal<*> | ICompute<*>}
+	 * @this {Sender<*> | ICompute<*>}
 	 */
 	SignalProto._purge = ComputeProto._purge = function () {
 		let subs = this._subs;
@@ -923,9 +908,7 @@ function root(fn) {
 					if (i >= subs.length) {
 						return;
 					}
-					// @ts-ignore - tail is defined since i < subs.length
 				} while (tail._flag & FLAG_DISPOSED);
-				// @ts-ignore - tail is defined after loop
 				subs[i] = tail;
 			}
 			i++;
@@ -937,7 +920,7 @@ function root(fn) {
 		SignalProto.dispose =
 		ComputeProto.dispose =
 		EffectProto.dispose =
-			dispose;
+		dispose;
 
 	// Receiver#_read — internal dep tracking, called from val() when listening
 	ComputeProto._read = EffectProto._read = _read;
@@ -945,31 +928,37 @@ function root(fn) {
 	ComputeProto._readAsync = EffectProto._readAsync = _readAsync;
 
 	let disposed = {
-		/** @returns {boolean} */
+		/**
+		 * @this {Disposer}
+		 * @returns {boolean}
+		 */
 		get: function () {
-			// @ts-ignore - this is the property descriptor target
 			return (this._flag & FLAG_DISPOSED) !== 0;
 		}
 	};
 
 	let _readonlyLoading = {
-		/** @returns {boolean} */
+		/**
+		 * @this {Disposer}
+		 * @returns {boolean}
+		 */
 		get: function () {
-			// @ts-ignore - this is the property descriptor target
 			return (this._flag & FLAG_LOADING) !== 0;
 		}
 	};
 	let _readonlyError = {
-		/** @returns {boolean} */
+		/**
+		 * @this {Disposer}
+		 * @returns {boolean}
+		 */
 		get: function () {
-			// @ts-ignore - this is the property descriptor target
 			return (this._flag & FLAG_ERROR) !== 0;
 		}
 	};
 
 	Object.defineProperties(RootProto, { disposed });
 	Object.defineProperties(SignalProto, { disposed });
-	Object.defineProperties(Cell.prototype, {
+	Object.defineProperties(CellProto, {
 		loading: _readonlyLoading,
 		error: _readonlyError
 	});
@@ -1134,7 +1123,6 @@ function root(fn) {
 		this._flag |= FLAG_PAUSED;
 		let owned = this._owned;
 		if (owned !== null) {
-			// @ts-ignore - Receiver[] used as IEffect[]
 			pauseOwned(owned);
 		}
 	}
@@ -1143,7 +1131,7 @@ function root(fn) {
 	 * Recursively walks an owned array and flags each child effect
 	 * as paused. Only traverses into children with FLAG_OWNER
 	 * (Effects), since Computes have no owned subtree.
-	 * @param {Array<IEffect>} owned
+	 * @param {Array<IEffect>|Array<Receiver>} owned
 	 */
 	function pauseOwned(owned) {
 		let count = owned.length;
@@ -1153,7 +1141,6 @@ function root(fn) {
 				child._flag |= FLAG_PAUSED;
 				let childOwned = child._owned;
 				if (childOwned !== null) {
-					// @ts-ignore - Receiver[] used as IEffect[]
 					pauseOwned(childOwned);
 				}
 			}
@@ -1193,7 +1180,6 @@ function root(fn) {
 		}
 		let owned = this._owned;
 		if (owned !== null) {
-			// @ts-ignore - Receiver[] used as IEffect[]
 			resumeOwned(owned);
 			if (IDLE) {
 				flush();
@@ -1214,7 +1200,6 @@ function root(fn) {
 		this._flag = flag & ~FLAG_PAUSED;
 		let owned = this._owned;
 		if (owned !== null) {
-			// @ts-ignore - Receiver[] used as IEffect[]
 			resumeOwned(owned);
 			if (IDLE) {
 				flush();
@@ -1227,7 +1212,7 @@ function root(fn) {
 	 * children with FLAG_OWNER (Effects). If a child effect needs
 	 * to update, it is enqueued and its subtree will be rebuilt
 	 * by the re-run. Otherwise, it walks further down.
-	 * @param {Array<IEffect>} owned
+	 * @param {Array<IEffect>|Array<Receiver>} owned
 	 */
 	function resumeOwned(owned) {
 		let count = owned.length;
@@ -1251,7 +1236,6 @@ function root(fn) {
 			}
 			let childOwned = child._owned;
 			if (childOwned !== null) {
-				// @ts-ignore - Receiver[] used as IEffect[]
 				resumeOwned(childOwned);
 			}
 		}
@@ -1269,9 +1253,10 @@ function root(fn) {
 	 * If stale or disposed, resolves to REGRET — a thenable whose
 	 * `.then()` is a no-op, so `await` never resumes and the closure
 	 * becomes eligible for GC.
-	 * @this {Receiver}
-	 * @param {Promise<*> | ICompute<*>} promiseOrTask
-	 * @returns {*}
+	 * @template T
+	 * @this {AsyncReceiver}
+	 * @param {IThenable<T> | AsyncSender<T> | Array<AsyncSender> | (function(Function, Function))} promiseOrTask
+	 * @returns {T | Array<T> | Promise<T | Array<T>> | void}
 	 */
 	function suspend(promiseOrTask) {
 		/** Branch: setup function → callback constructor path.
@@ -1286,7 +1271,6 @@ function root(fn) {
 			this._flag |= FLAG_SUSPEND | FLAG_LOADING;
 			let node = this;
 			let time = this._time;
-			// @ts-ignore - promiseOrTask narrowed to function by typeof check
 			promiseOrTask(
 				/** @param {*} val */
 				function (val) {
@@ -1330,43 +1314,39 @@ function root(fn) {
 			return;
 		}
 		this._flag |= FLAG_SUSPEND;
+		if (typeof promiseOrTask.then === "function") {
+			/** Promise path — wrap with staleness guard. */
+			let node = this;
+			let time = this._time;
+			return promiseOrTask.then(
+				/** @param {*} val */
+				function (val) {
+					if (
+						node._time === time &&
+						(!(node._flag & FLAG_DISPOSED) || node._flag & FLAG_LOCKED)
+					) {
+						return val;
+					}
+					return REGRET;
+				},
+				/** @param {*} error */
+				function (error) {
+					if (
+						node._time === time &&
+						(!(node._flag & FLAG_DISPOSED) || node._flag & FLAG_LOCKED)
+					) {
+						throw error;
+					}
+					return REGRET;
+				}
+			);
+		}
 		/** Branch: array of tasks → concurrent await. */
 		if (Array.isArray(promiseOrTask)) {
-			// @ts-ignore - this context
 			return _suspendArray(this, promiseOrTask);
 		}
 		/** Branch: Compute node with FLAG_ASYNC → task-await path. */
-		// @ts-ignore - _flag access on union type
-		if (promiseOrTask._flag !== undefined && promiseOrTask._flag & FLAG_ASYNC) {
-			// @ts-ignore - this context
-			return _suspendTask(this, promiseOrTask);
-		}
-		/** Promise path — wrap with staleness guard. */
-		let node = this;
-		let time = this._time;
-		// @ts-ignore - promiseOrTask is a Promise after prior guards
-		return promiseOrTask.then(
-			/** @param {*} val */
-			function (val) {
-				if (
-					node._time === time &&
-					(!(node._flag & FLAG_DISPOSED) || node._flag & FLAG_LOCKED)
-				) {
-					return val;
-				}
-				return REGRET;
-			},
-			/** @param {*} error */
-			function (error) {
-				if (
-					node._time === time &&
-					(!(node._flag & FLAG_DISPOSED) || node._flag & FLAG_LOCKED)
-				) {
-					throw error;
-				}
-				return REGRET;
-			}
-		);
+		return _suspendTask(this, /** @type {AsyncSender<T>} */(promiseOrTask));
 	}
 
 	/**
@@ -1379,10 +1359,10 @@ function root(fn) {
 	 * this node (IAwaiter) and the task (IResponder). Returns a Promise
 	 * that resolves when the task settles. At settle time, the task also
 	 * subscribes the awaiter as a dep for future reactive updates.
-	 *
-	 * @param {Receiver} node
-	 * @param {ICompute<*>} taskNode
-	 * @returns {*}
+	 * @template T
+	 * @param {AsyncReceiver} node
+	 * @param {AsyncSender<T>} taskNode
+	 * @returns {T | Promise<T>}
 	 */
 	function _suspendTask(node, taskNode) {
 		if (taskNode._flag & FLAG_DISPOSED) {
@@ -1434,7 +1414,7 @@ function root(fn) {
 	 * awaiter during the walk. After all slots are filled, we
 	 * subscribe to every task in one pass and resolve the Promise.
 	 *
-	 * @param {Receiver} node
+	 * @param {AsyncReceiver} node
 	 * @param {Array<ICompute<*>>} tasks
 	 * @returns {Array<*> | Promise<Array<*>>}
 	 */
@@ -1486,7 +1466,7 @@ function root(fn) {
 	 * scratch when it settles. Only resolves when a full scan finds
 	 * zero loading tasks, guaranteeing a consistent snapshot (all
 	 * values from the same moment). Mirrors c.pending() semantics.
-	 * @param {Receiver} node
+	 * @param {AsyncReceiver} node
 	 * @param {Array<ICompute<*>>} tasks
 	 * @param {Array<*>} results
 	 * @param {function(Array<*>): void} resolve
@@ -1559,8 +1539,8 @@ function root(fn) {
 	 * Lazily allocates the Channel for this node. Lifts _args into
 	 * the Channel so the original args are preserved but the node's
 	 * _args slot points directly to the Channel.
-	 * @this {Receiver}
-	 * @returns {Channel}
+	 * @this {AsyncReceiver}
+	 * @returns {IChannel}
 	 */
 	function _channel() {
 		if (this._flag & FLAG_CHANNEL) {
@@ -1577,7 +1557,7 @@ function root(fn) {
 	/**
 	 * Creates a fresh AbortController for this async activation.
 	 * The controller is automatically aborted on re-run or dispose.
-	 * @this {Receiver}
+	 * @this {AsyncReceiver}
 	 * @returns {AbortController}
 	 */
 	function controller() {
@@ -1632,32 +1612,27 @@ function root(fn) {
 	 *
 	 * Usage: `if (c.pending([taskA, taskB])) return;`
 	 *
-	 * @this {ICompute<*>}
-	 * @param {ICompute<*> | Array<ICompute<*>>} tasks
+	 * @this {Compute | Effect}
+	 * @param {Sender<*> | Array<Sender<*>>} tasks
 	 * @returns {boolean} true if any task has FLAG_LOADING set
 	 */
 	function pending(tasks) {
 		let loading = false;
-		// @ts-ignore - _flag access to distinguish single vs array
-		if (tasks._flag !== undefined) {
-			/** Single task. */
-			// @ts-ignore - tasks narrowed to single ICompute
-			this.val(tasks);
-			// @ts-ignore - tasks narrowed to single ICompute
-			if (tasks._flag & FLAG_LOADING) {
-				loading = true;
-			}
-		} else {
+		if (Array.isArray(tasks)) {
 			/** Array of tasks. */
-			// @ts-ignore - tasks narrowed to array
 			let count = tasks.length;
 			for (let i = 0; i < count; i++) {
-				// @ts-ignore - tasks narrowed to array
 				let task = tasks[i];
 				this.val(task);
 				if (task._flag & FLAG_LOADING) {
 					loading = true;
 				}
+			}
+		} else {
+			/** Single task. */
+			this.val(tasks);
+			if (tasks._flag & FLAG_LOADING) {
+				loading = true;
 			}
 		}
 		return loading;
@@ -1720,14 +1695,13 @@ function root(fn) {
 	 * Lazily allocates a mini-channel on Cell nodes for waiter support.
 	 * Only contains _waiters — no controller, defers, or responds.
 	 * @this {Cell<*>}
-	 * @returns {{ _waiters: Array<*> | null }}
+	 * @returns {Resolver}
 	 */
-	Cell.prototype._channel = function () {
+	CellProto._channel = function () {
 		if (this._flag & FLAG_CHANNEL) {
-			// @ts-ignore - _chan is non-null when FLAG_CHANNEL is set
 			return this._chan;
 		}
-		let channel = { _waiters: null };
+		let channel = /** @type {Resolver} */({ _waiters: null });
 		this._chan = channel;
 		this._flag |= FLAG_CHANNEL;
 		return channel;
@@ -1737,11 +1711,11 @@ function root(fn) {
 	 * Resource-specific suspend. Only supports raw promises and the
 	 * callback pattern. Resources are senders, not receivers — they
 	 * cannot await tasks or other resources.
-	 * @this {ISignal<*>}
-	 * @param {Promise<*> | function} promiseOrFn
-	 * @returns {*}
+	 * @this {Cell<*>}
+	 * @param {Promise<*> | Function} promiseOrFn
+	 * @returns {Promise<*> | void}
 	 */
-	SignalProto.suspend = function (promiseOrFn) {
+	CellProto.suspend = function (promiseOrFn) {
 		if (typeof promiseOrFn === "function") {
 			if (this._flag & FLAG_SUSPEND) {
 				throw new Error(
@@ -1791,10 +1765,10 @@ function root(fn) {
 	/**
 	 * Settles an async resource. Clears FLAG_LOADING, writes value
 	 * if changed, notifies subscribers, flushes.
-	 * @this {ISignal<*>}
+	 * @this {Cell<*>}
 	 * @param {*} value
 	 */
-	SignalProto._settle = function (value) {
+	CellProto._settle = function (value) {
 		this._flag &= ~FLAG_LOADING;
 		if (this._flag & FLAG_DISPOSED) {
 			return;
@@ -1817,10 +1791,10 @@ function root(fn) {
 	/**
 	 * Settles an async resource with an error. Wraps as FATAL,
 	 * sets FLAG_ERROR, and delegates to _settle.
-	 * @this {ISignal<*>}
+	 * @this {Cell<*>}
 	 * @param {*} err
 	 */
-	SignalProto._error = function (err) {
+	CellProto._error = function (err) {
 		this._flag |= FLAG_ERROR;
 		this._settle({ error: err, type: FATAL });
 	};
@@ -1832,11 +1806,9 @@ function root(fn) {
 	RootProto._dispose = function () {
 		this._flag = FLAG_DISPOSED;
 		if (this._cleanup !== null) {
-			// @ts-ignore - Root used as Disposer
 			clearCleanup(this);
 		}
 		if (this._owned !== null) {
-			// @ts-ignore - Root used as Owner
 			clearOwned(this);
 		}
 		this._owned = this._recover = null;
@@ -1845,7 +1817,7 @@ function root(fn) {
 	/**
 	 * Returns the signal's current value. No dependency tracking —
 	 * tracking happens via `c.val(sender)` on the context.
-	 * @this {ISignal<*>}
+	 * @this {Sender<*>}
 	 * @returns {*}
 	 */
 	SignalProto.get = function () {
@@ -1857,7 +1829,7 @@ function root(fn) {
 	/**
 	 * Notifies subscribers without changing the value. Useful after
 	 * mutating an object held by the signal in place.
-	 * @this {ISignal<*> | ICompute<*>}
+	 * @this {Sender<*> | ICompute<*>}
 	 */
 	function _notify() {
 		if (this._flag & FLAG_DISPOSED) {
@@ -1883,7 +1855,7 @@ function root(fn) {
 	 *
 	 * Fast exit: when not already posting and the value is unchanged
 	 * (non-function), nothing to do.
-	 * @this {ISignal<*>}
+	 * @this {AsyncSender<*>}
 	 * @param {* | function(*): *} value
 	 * @param {*=} asyncFn
 	 * @returns {boolean}
@@ -1898,7 +1870,6 @@ function root(fn) {
 			asyncFn === undefined &&
 			this._flag & FLAG_ASYNC
 		) {
-			// @ts-ignore - schedule types
 			schedule(this, { _value: this._value, _fn: value }, asyncAssign);
 			if (!POSTING) {
 				POSTING = true;
@@ -1907,7 +1878,6 @@ function root(fn) {
 			return true;
 		}
 		if (asyncFn !== undefined && this._flag & FLAG_ASYNC) {
-			// @ts-ignore - schedule types
 			schedule(this, { _value: value, _fn: asyncFn }, asyncAssign);
 		} else {
 			if (
@@ -1950,14 +1920,13 @@ function root(fn) {
 	SignalProto._changed = ComputeProto._changed = _changed;
 
 	/**
-	 * @this {ISignal<*>}
+	 * @this {AsyncSender<*>}
 	 * @returns {void}
 	 */
 	SignalProto._dispose = function () {
 		if (this._flag & FLAG_WAITER) {
 			let ch = this._chan;
 			if (ch._waiters !== null) {
-				// @ts-ignore - ISignal used as ICompute for waiter resolution
 				resolveWaiters(this, ch, new Error("Awaited resource was disposed"), true, true);
 			}
 		}
@@ -1998,7 +1967,6 @@ function root(fn) {
 			(this._dep1 === null || this._dep1._flag & FLAG_DISPOSED)
 		) {
 			this._flag |= FLAG_ERROR;
-			// @ts-ignore - error POJO stored as T
 			this._value = { error: ASSERT_NOT_DISPOSED, type: FATAL };
 		}
 		return this._value;
@@ -2007,7 +1975,7 @@ function root(fn) {
 	/**
 	 * IReader: dependency-tracking read. Pulls the sender up to date,
 	 * registers it as a dependency, and returns its value.
-	 * @this {Compute<T,U,V,W>}
+	 * @this {ICompute<T>}
 	 * @param {Sender<*>} sender
 	 * @returns {*}
 	 */
@@ -2019,7 +1987,7 @@ function root(fn) {
 	 * on the receiver so that notifications propagating from this write
 	 * are ignored by the receiver that initiated the write.
 	 * @param {Sender<*>} node
-	 * @param {{ _recv: Receiver, _value: * }} payload
+	 * @param {*} payload
 	 * @param {number} time
 	 */
 	function guardedAssign(node, payload, time) {
@@ -2035,9 +2003,9 @@ function root(fn) {
 	/**
 	 * Drain handler for guarded async writes. Pauses the receiver
 	 * around asyncAssign so it ignores its own notification.
-	 * @param {*} node
-	 * @param {*} payload
-	 * @param {*} time
+	 * @param {AsyncSender<*>} node
+	 * @param {{ _value: *, _fn: Function, _recv: Receiver }} payload
+	 * @param {number} time
 	 */
 	function guardedAsyncAssign(node, payload, time) {
 		let receiver = payload._recv;
@@ -2054,10 +2022,11 @@ function root(fn) {
 	 * so it ignores any notifications that propagate from the write.
 	 * When IDLE (e.g. inside an async continuation after await), mirrors
 	 * the immediate set() path. Supports asyncFn for resource senders.
-	 * @this {ICompute<*>|IEffect}
-	 * @param {Sender<*>} sender
-	 * @param {* | function(*): *} value
-	 * @param {function=} asyncFn
+	 * @template T
+	 * @this {Receiver}
+	 * @param {Sender<T> | AsyncSender<T>} sender
+	 * @param {(function(T): T) | T} value
+	 * @param {function(Receiver, T): (T | Promise<T>)=} asyncFn
 	 * @returns {void}
 	 */
 	function contextSet(sender, value, asyncFn) {
@@ -2081,19 +2050,16 @@ function root(fn) {
 				flush();
 			}
 			if (asyncFn !== undefined && sender._flag & FLAG_ASYNC) {
-				// @ts-ignore - Sender used as ISignal after FLAG_ASYNC guard
-				_runAsync(sender, asyncFn, _value);
+				_runAsync(/** @type {AsyncSender} */(sender), asyncFn, _value);
 			}
 		} else {
 			if (asyncFn !== undefined && sender._flag & FLAG_ASYNC) {
-				// @ts-ignore - schedule types
 				schedule(
 					sender,
 					{ _recv: this, _value: value, _fn: asyncFn },
 					guardedAsyncAssign
 				);
 			} else {
-				// @ts-ignore - schedule types
 				schedule(sender, { _recv: this, _value: value }, guardedAssign);
 			}
 		}
@@ -2107,19 +2073,17 @@ function root(fn) {
 	 * @this {ICompute<*>|IEffect}
 	 * @param {Sender<*>} sender
 	 * @param {* | function(*): *} value
-	 * @param {function=} asyncFn
+	 * @param {Function=} asyncFn
 	 * @returns {void}
 	 */
 	function contextPost(sender, value, asyncFn) {
 		if (asyncFn !== undefined && sender._flag & FLAG_ASYNC) {
-			// @ts-ignore - schedule types
 			schedule(
 				sender,
 				{ _recv: this, _value: value, _fn: asyncFn },
 				guardedAsyncAssign
 			);
 		} else {
-			// @ts-ignore - schedule types
 			schedule(sender, { _recv: this, _value: value }, guardedAssign);
 		}
 		if (!POSTING) {
@@ -2248,21 +2212,15 @@ function root(fn) {
 		}
 		let flag = this._flag;
 		this._flag = FLAG_DISPOSED;
-		// @ts-ignore - ICompute used as Sender
 		clearSubs(this);
-		// @ts-ignore - ICompute used as Receiver
 		clearDeps(this);
 		if (flag & FLAG_CHANNEL) {
 			let chan = this._chan;
-			// @ts-ignore - chan is non-null when FLAG_CHANNEL set
 			if (chan._controller !== null) {
-				// @ts-ignore - chan is non-null when FLAG_CHANNEL set
 				chan._controller.abort();
 			}
 			/** Panic any nodes awaiting this task. */
-			// @ts-ignore - chan is non-null when FLAG_CHANNEL set
 			if (chan._waiters !== null) {
-				// @ts-ignore - this used as ICompute
 				resolveWaiters(
 					this,
 					chan,
@@ -2272,9 +2230,7 @@ function root(fn) {
 				);
 			}
 			/** Remove ourselves from any responders we were awaiting. */
-			// @ts-ignore - chan is non-null when FLAG_CHANNEL set
 			if (chan._res1 !== null || chan._responds !== null) {
-				// @ts-ignore - chan type
 				clearChannel(chan, this);
 			}
 		}
@@ -2323,22 +2279,16 @@ function root(fn) {
 			run: try {
 				if (flag & FLAG_BOUND) {
 					let dep = this._dep1;
-					// @ts-ignore - dep is non-null for bound nodes
 					if (dep._flag & (FLAG_STALE | FLAG_PENDING)) {
-						// @ts-ignore - dep is non-null for bound nodes
 						dep._refresh();
 					}
-					// @ts-ignore - dep is non-null for bound nodes
 					if (dep._flag & FLAG_ERROR) {
-						// @ts-ignore - dep is non-null for bound nodes
 						value = dep._value;
 						this._flag |= FLAG_ERROR;
 						break run;
 					}
-					// @ts-ignore - dep/fn are non-null for bound nodes
 					value = this._fn(dep._value, this, this._value, args);
 				} else {
-					// @ts-ignore - fn is non-null during _update
 					value = this._fn(this, this._value, args);
 				}
 			} catch (error) {
@@ -2358,7 +2308,9 @@ function root(fn) {
 			let saveStart = VCOUNT;
 			let depsLen = 0;
 			let depCount = 0;
+			/** @type {number} */
 			let prevDBase;
+			/** @type {number} */
 			let prevReused;
 			if (flag & FLAG_SETUP) {
 				prevDBase = DBASE;
@@ -2376,24 +2328,17 @@ function root(fn) {
 					 *  so val() treats it as already-tracked, then pass its
 					 *  value as the first argument. */
 					let dep = this._dep1;
-					// @ts-ignore - dep is non-null for bound nodes
 					if (dep._flag & (FLAG_STALE | FLAG_PENDING)) {
-						// @ts-ignore - dep is non-null for bound nodes
 						dep._refresh();
 					}
-					// @ts-ignore - dep is non-null for bound nodes
 					if (dep._flag & FLAG_ERROR) {
-						// @ts-ignore - dep is non-null for bound nodes
 						value = dep._value;
 						this._flag |= FLAG_ERROR;
 						break call;
 					}
-					// @ts-ignore - dep is non-null for bound nodes
 					dep._stamp = version;
-					// @ts-ignore - dep/fn are non-null for bound nodes
 					value = this._fn(dep._value, this, this._value, args);
 				} else {
-					// @ts-ignore - fn is non-null during _update
 					value = this._fn(this, this._value, args);
 				}
 			} catch (error) {
@@ -2411,21 +2356,18 @@ function root(fn) {
 					let stack = DSTACK;
 					this._deps = stack.slice(DBASE, DCOUNT);
 					for (let i = DBASE; i < DCOUNT; i++) {
-						// @ts-ignore - clearing stack slots
 						stack[i] = null;
 					}
 					DCOUNT = DBASE;
 				} else if (this._dep1 !== null) {
 					this._flag |= FLAG_SINGLE;
 				}
-				// @ts-ignore - prevDBase is defined when FLAG_SETUP
 				DBASE = prevDBase;
 			} else {
 				let newLen = this._deps !== null ? this._deps.length : 0;
 				if (REUSED !== depCount || newLen !== depsLen) {
 					patchDeps(this, version, depCount, newLen);
 				}
-				// @ts-ignore - prevReused is defined when not FLAG_SETUP
 				REUSED = prevReused;
 			}
 
@@ -2433,9 +2375,7 @@ function root(fn) {
 				let count = VCOUNT;
 				let stack = VSTACK;
 				for (let i = saveStart; i < count; i += 2) {
-					// @ts-ignore - stack entries are Sender at even indices
 					stack[i]._stamp = stack[i + 1];
-					// @ts-ignore - clearing stack slots
 					stack[i] = null;
 				}
 				VCOUNT = saveStart;
@@ -2460,11 +2400,11 @@ function root(fn) {
 			if (kind !== ASYNC_SYNC) {
 				this._flag |= FLAG_LOADING;
 				if (kind === ASYNC_PROMISE) {
-					resolvePromise(this, /** @type {PromiseLike<*>} */ (value), time);
+					resolvePromise(this, /** @type {IThenable<*>} */(value), time);
 				} else {
 					resolveIterator(
 						this,
-						/** @type {AsyncIterator<*,*,*> | AsyncIterable<*,*,*>} */ (value),
+						/** @type {AsyncIterator<*,*,*> | AsyncIterable<*,*,*>} */(value),
 						time
 					);
 				}
@@ -2544,7 +2484,7 @@ function root(fn) {
 	EffectProto.post = contextPost;
 
 	/**
-	 * @this {IEffect}
+	 * @this {Effect}
 	 * @param {number} time
 	 */
 	EffectProto._update = function (time) {
@@ -2577,18 +2517,13 @@ function root(fn) {
 					let dep = this._dep1;
 					// @ts-expect-error - dep is non-null for bound node
 					if (dep._flag & (FLAG_STALE | FLAG_PENDING)) {
-						// @ts-ignore - dep is non-null for bound nodes
 						dep._refresh();
 					}
-					// @ts-ignore - dep is non-null for bound nodes
 					if (dep._flag & FLAG_ERROR) {
-						// @ts-ignore - dep is non-null for bound nodes
 						throw dep._value;
 					}
-					// @ts-ignore - dep/fn are non-null for bound nodes
 					value = this._fn(dep._value, this, args);
 				} else {
-					// @ts-ignore - fn is non-null during _update
 					value = this._fn(this, args);
 				}
 			} finally {
@@ -2602,7 +2537,9 @@ function root(fn) {
 			let saveStart = VCOUNT;
 			let depCount = 0;
 			let depsLen = 0;
+			/** @type {number} */
 			let dbase;
+			/** @type {number} */
 			let reused;
 			if (flag & FLAG_SETUP) {
 				dbase = DBASE;
@@ -2618,20 +2555,14 @@ function root(fn) {
 			try {
 				if (flag & FLAG_BOUND) {
 					let dep = this._dep1;
-					// @ts-ignore - dep is non-null for bound nodes
 					if (dep._flag & (FLAG_STALE | FLAG_PENDING)) {
-						// @ts-ignore - dep is non-null for bound nodes
 						dep._refresh();
 					}
-					// @ts-ignore - dep is non-null for bound nodes
 					if (dep._flag & FLAG_ERROR) {
-						// @ts-ignore - dep is non-null for bound nodes
 						throw dep._value;
 					}
-					// @ts-ignore - dep/fn are non-null for bound nodes
 					value = this._fn(dep._value, this, args);
 				} else {
-					// @ts-ignore - fn is non-null during _update
 					value = this._fn(this, args);
 				}
 			} finally {
@@ -2640,30 +2571,25 @@ function root(fn) {
 						let stack = DSTACK;
 						this._deps = stack.slice(DBASE, DCOUNT);
 						for (let i = DBASE; i < DCOUNT; i++) {
-							// @ts-ignore - clearing stack slots
 							stack[i] = null;
 						}
 						DCOUNT = DBASE;
 					} else if (this._dep1 !== null) {
 						this._flag |= FLAG_SINGLE;
 					}
-					// @ts-ignore - dbase is defined when FLAG_SETUP
 					DBASE = dbase;
 				} else {
 					let newLen = this._deps !== null ? this._deps.length : 0;
 					if (REUSED !== depCount || newLen !== depsLen) {
 						patchDeps(this, version, depCount, newLen);
 					}
-					// @ts-ignore - reused is defined when not FLAG_SETUP
 					REUSED = reused;
 				}
 				if (VCOUNT > saveStart) {
 					let count = VCOUNT;
 					let stack = VSTACK;
 					for (let i = saveStart; i < count; i += 2) {
-						// @ts-ignore - stack entries are Sender at even indices
 						stack[i]._stamp = stack[i + 1];
-						// @ts-ignore - clearing stack slots
 						stack[i] = null;
 					}
 					VCOUNT = saveStart;
@@ -2682,10 +2608,8 @@ function root(fn) {
 			if (kind !== ASYNC_SYNC) {
 				this._flag |= FLAG_LOADING;
 				if (kind === ASYNC_PROMISE) {
-					// @ts-ignore - IEffect used as ICompute for async resolution
 					resolvePromise(this, value, time);
 				} else {
-					// @ts-ignore - IEffect used as ICompute for async resolution
 					resolveIterator(this, value, time);
 				}
 				return;
@@ -2800,7 +2724,7 @@ function root(fn) {
 			this._owner =
 			this._recover =
 			this._finalize =
-				null;
+			null;
 	};
 
 	/**
@@ -2831,13 +2755,14 @@ function root(fn) {
 	 * Creates a sync compute node.
 	 * Unbound: compute(fn, seed?, opts?, args?)
 	 * Bound:   compute(dep, fn, seed?, opts?, args?)
-	 * @this {Owner|Clock}
-	 * @param {Sender<*> | Function} depOrFn
-	 * @param {Function | *} fnOrSeed
-	 * @param {number | *} optsOrSeed
-	 * @param {number | *} argsOrOpts
-	 * @param {*} [args]
-	 * @returns {ICompute<*>}
+	 * @this {Owner}
+	 * @template T, U, W
+	 * @param {Sender<U> | (function(T, W): T)} depOrFn
+	 * @param {(function(U, T, W): T) | T=} fnOrSeed
+	 * @param {number | T=} optsOrSeed
+	 * @param {number | W=} argsOrOpts
+	 * @param {W=} args
+	 * @returns {Compute<T, U, W>}
 	 */
 	function compute(depOrFn, fnOrSeed, optsOrSeed, argsOrOpts, args) {
 		if (this._flag & FLAG_DISPOSED) {
@@ -2850,17 +2775,15 @@ function root(fn) {
 		} else {
 			flag =
 				FLAG_STABLE | FLAG_BOUND | FLAG_SINGLE | ((0 | argsOrOpts) & OPTIONS);
-			node = new Compute(flag, fnOrSeed, depOrFn, optsOrSeed, args);
-			// @ts-ignore - Compute used as Receiver
+			node = new Compute(flag, /** @type {!Function} */(fnOrSeed), depOrFn, optsOrSeed, args);
 			connect(depOrFn, node);
 		}
-		// @ts-ignore - Clock|Owner used as Owner
-		addOwned(this, node);
+		if (this._flag & FLAG_OWNER) {
+			addOwned(this, node);
+		}
 		if (!(flag & FLAG_DEFER)) {
-			// @ts-ignore - Compute used as ICompute
 			startCompute(node);
 		}
-		// @ts-ignore - Compute used as ICompute
 		return node;
 	}
 
@@ -2868,13 +2791,14 @@ function root(fn) {
 	 * Creates an async compute node (task).
 	 * Unbound: task(fn, seed?, opts?, args?)
 	 * Bound:   task(dep, fn, seed?, opts?, args?)
-	 * @this {Owner|Clock}
-	 * @param {Sender<*> | Function} depOrFn
-	 * @param {Function | *} fnOrSeed
-	 * @param {number | *} optsOrSeed
-	 * @param {number | *} argsOrOpts
-	 * @param {*} [args]
-	 * @returns {ICompute<*>}
+	 * @this {Owner}
+	 * @template T, U, W
+	 * @param {Sender<U> | (function(T, W): T)} depOrFn
+	 * @param {(function(U, T, W): T) | T=} fnOrSeed
+	 * @param {number | T=} optsOrSeed
+	 * @param {number | W=} argsOrOpts
+	 * @param {W=} args
+	 * @returns {Compute<*>}
 	 */
 	function task(depOrFn, fnOrSeed, optsOrSeed, argsOrOpts, args) {
 		if (this._flag & FLAG_DISPOSED) {
@@ -2892,16 +2816,14 @@ function root(fn) {
 				FLAG_SINGLE |
 				((0 | argsOrOpts) & OPTIONS);
 			node = new Compute(flag, fnOrSeed, depOrFn, optsOrSeed, args);
-			// @ts-ignore - Compute used as Receiver
 			connect(depOrFn, node);
 		}
-		// @ts-ignore - Clock|Owner used as Owner
-		addOwned(this, node);
+		if (this._flag & FLAG_OWNER) {
+			addOwned(this, node);
+		}
 		if (!(flag & FLAG_DEFER)) {
-			// @ts-ignore - Compute used as ICompute
 			startCompute(node);
 		}
-		// @ts-ignore - Compute used as ICompute
 		return node;
 	}
 
@@ -2909,12 +2831,13 @@ function root(fn) {
 	 * Creates a sync effect node.
 	 * Unbound: effect(fn, opts?, args?)
 	 * Bound:   effect(dep, fn, opts?, args?)
-	 * @this {Owner|Clock}
-	 * @param {Sender<*> | Function} depOrFn
-	 * @param {Function | number} fnOrOpts
-	 * @param {number | *} optsOrArgs
-	 * @param {*} [args]
-	 * @returns {IEffect}
+	 * @this {Owner}
+	 * @template U, W
+	 * @param {Sender<U> | (function(W): void)} depOrFn
+	 * @param {(function(U, W): void) | number=} fnOrOpts
+	 * @param {number | W=} optsOrArgs
+	 * @param {W=} args
+	 * @returns {Effect}
 	 */
 	function effect(depOrFn, fnOrOpts, optsOrArgs, args) {
 		if (this._flag & FLAG_DISPOSED) {
@@ -2922,17 +2845,12 @@ function root(fn) {
 		}
 		let flag, node;
 		if (typeof depOrFn === "function") {
-			// @ts-ignore - arithmetic on number | Function
 			flag = FLAG_SETUP | ((0 | fnOrOpts) & OPTIONS);
-			// @ts-ignore - Clock|Owner used as Owner
 			node = new Effect(flag, depOrFn, null, this, optsOrArgs);
 		} else {
 			flag =
-				// @ts-ignore - arithmetic on number | *
 				FLAG_STABLE | FLAG_BOUND | FLAG_SINGLE | ((0 | optsOrArgs) & OPTIONS);
-			// @ts-ignore - number|Function used as Function
-			node = new Effect(flag, fnOrOpts, depOrFn, this, args);
-			// @ts-ignore - Effect used as Receiver
+			node = new Effect(flag, /** @type {!Function} */(fnOrOpts), depOrFn, this, args);
 			connect(depOrFn, node);
 		}
 		let level = this._level + 1;
@@ -2941,11 +2859,10 @@ function root(fn) {
 			SCOPES.push([]);
 		}
 		node._level = level;
-		// @ts-ignore - Clock|Owner used as Owner
-		addOwned(this, node);
-		// @ts-ignore - Effect used as IEffect
+		if (this._flag & FLAG_OWNER) {
+			addOwned(this, node);
+		}
 		startEffect(node);
-		// @ts-ignore - Effect used as IEffect
 		return node;
 	}
 
@@ -2953,12 +2870,13 @@ function root(fn) {
 	 * Creates an async effect node (spawn).
 	 * Unbound: spawn(fn, opts?, args?)
 	 * Bound:   spawn(dep, fn, opts?, args?)
-	 * @this {Owner|Clock}
-	 * @param {Sender<*> | Function} depOrFn
-	 * @param {Function | number} fnOrOpts
-	 * @param {number | *} optsOrArgs
-	 * @param {*} [args]
-	 * @returns {IEffect}
+	 * @template U, W
+	 * @this {Owner}
+	 * @param {Sender<U> | (function(W): void)} depOrFn
+	 * @param {(function(U, W): void) | number=} fnOrOpts
+	 * @param {number | W=} optsOrArgs
+	 * @param {W=} args
+	 * @returns {Effect}
 	 */
 	function spawn(depOrFn, fnOrOpts, optsOrArgs, args) {
 		if (this._flag & FLAG_DISPOSED) {
@@ -2966,9 +2884,7 @@ function root(fn) {
 		}
 		let flag, node;
 		if (typeof depOrFn === "function") {
-			// @ts-ignore - arithmetic on number | Function
 			flag = FLAG_ASYNC | FLAG_SETUP | ((0 | fnOrOpts) & OPTIONS);
-			// @ts-ignore - Clock|Owner used as Owner
 			node = new Effect(flag, depOrFn, null, this, optsOrArgs);
 		} else {
 			flag =
@@ -2976,11 +2892,8 @@ function root(fn) {
 				FLAG_STABLE |
 				FLAG_BOUND |
 				FLAG_SINGLE |
-				// @ts-ignore - arithmetic on number | *
 				((0 | optsOrArgs) & OPTIONS);
-			// @ts-ignore - number|Function used as Function
-			node = new Effect(flag, fnOrOpts, depOrFn, this, args);
-			// @ts-ignore - Effect used as Receiver
+			node = new Effect(flag, /** @type {!Function} */(fnOrOpts), depOrFn, this, args);
 			connect(depOrFn, node);
 		}
 		let level = this._level + 1;
@@ -2989,11 +2902,10 @@ function root(fn) {
 			SCOPES.push([]);
 		}
 		node._level = level;
-		// @ts-ignore - Clock|Owner used as Owner
-		addOwned(this, node);
-		// @ts-ignore - Effect used as IEffect
+		if (this._flag & FLAG_OWNER) {
+			addOwned(this, node);
+		}
 		startEffect(node);
-		// @ts-ignore - Effect used as IEffect
 		return node;
 	}
 
@@ -3060,7 +2972,7 @@ function connect(send, receiver) {
  * For _sub1, clears immediately. For _subs array entries,
  * defers compaction via _tombstones and purge heuristic.
  * @param {Sender<*>} send
- * @param {Receiver} receiver
+ * @param {Receiver|ICompute<*>|IEffect} receiver
  * @returns {void}
  */
 function clearReceiver(send, receiver) {
@@ -3091,7 +3003,7 @@ function clearReceiver(send, receiver) {
 
 /**
  * Removes receive from all its deps' subscriber lists.
- * @param {Receiver} receive
+ * @param {Receiver|ICompute<*>|IEffect} receive
  * @returns {void}
  */
 function clearDeps(receive) {
@@ -3125,7 +3037,7 @@ function clearSubs(send) {
 
 /**
  *
- * @param {Disposer} node
+ * @param {Owner | Receiver} node
  */
 function clearCleanup(node) {
 	let cleanup = node._cleanup;
@@ -3134,10 +3046,8 @@ function clearCleanup(node) {
 		node._cleanup = null;
 	} else {
 		/** array form */
-		// @ts-ignore - cleanup is non-null array after typeof check
 		let count = cleanup.length;
 		while (count-- > 0) {
-			// @ts-ignore - cleanup is non-null array
 			cleanup.pop()();
 		}
 	}
@@ -3155,17 +3065,14 @@ function clearFinalize(node) {
 	node._finalize = null;
 	if (typeof finalize === "function") {
 		try {
-			// @ts-ignore - finalize is non-null after typeof check
 			finalize();
 		} catch (error) {
 			/* swallow — finally semantics */
 		}
 	} else {
-		// @ts-ignore - finalize is non-null array in else branch
 		let count = finalize.length;
 		for (let i = 0; i < count; i++) {
 			try {
-				// @ts-ignore - finalize is non-null array
 				finalize[i]();
 			} catch (error) {
 				/* swallow */
@@ -3180,18 +3087,13 @@ function clearFinalize(node) {
  * node, so `_owned` is populated even when the factory runs the node's fn
  * inside its startup path.
  * @param {Owner} owner
- * @param {Receiver | Root} child
+ * @param {Receiver} child
  * @returns {void}
  */
 function addOwned(owner, child) {
-	if (!(owner._flag & FLAG_OWNER)) {
-		return;
-	}
 	if (owner._owned === null) {
-		// @ts-ignore - Root | Receiver stored in Receiver array
 		owner._owned = [child];
 	} else {
-		// @ts-ignore - Root | Receiver stored in Receiver array
 		owner._owned.push(child);
 	}
 }
@@ -3205,10 +3107,8 @@ function addOwned(owner, child) {
  */
 function clearOwned(owner) {
 	let owned = owner._owned;
-	// @ts-ignore - owned is non-null (caller checks)
 	let count = owned.length;
 	while (count-- > 0) {
-		// @ts-ignore - owned is non-null
 		owned.pop()._dispose();
 	}
 	owner._recover = null;
@@ -3280,14 +3180,13 @@ function tryRecover(node, error) {
  * New deps pushed beyond _depCount during fn() are already subscribed.
  * They just need to be shifted into the compacted region.
  *
- * @param {Receiver} node
+ * @param {Receiver|ICompute<*>|IEffect} node
  * @param {number} version
  * @param {number} depCount
  * @param {number} newLen
  * @returns {void}
  */
 function patchDeps(node, version, depCount, newLen) {
-	// @ts-ignore - deps is non-null when depCount > 0
 	let deps = node._deps;
 	let existingLen = depCount > 1 ? depCount - 1 : 0;
 	let newidx = existingLen;
@@ -3300,7 +3199,6 @@ function patchDeps(node, version, depCount, newLen) {
 		if (dep1._stamp !== version) {
 			clearReceiver(dep1, node);
 			if (newidx < newLen) {
-				// @ts-ignore - deps is non-null when newLen > 0
 				let newDep = deps[newidx];
 				node._dep1 = newDep;
 				connect(newDep, node);
@@ -3476,7 +3374,7 @@ function notify(node, flag) {
 /**
  * Checks if any dep of a receiver actually changed since it
  * last ran. Pulls stale compute deps to ensure they're current.
- * @param {Receiver} node
+ * @param {Receiver|ICompute<*>|IEffect|Sender<*>} node
  * @param {number} time
  * @returns {boolean}
  */
@@ -3487,15 +3385,12 @@ function needsUpdate(node, time) {
 		let flag = dep._flag;
 		if (flag & FLAG_STALE) {
 			FENCE = SEED;
-			// @ts-ignore - Sender used as ICompute after flag guard
 			dep._update(time);
 		} else if (flag & FLAG_PENDING) {
 			FENCE = SEED;
 			if (flag & FLAG_SINGLE) {
-				// @ts-ignore - Sender used as ICompute after flag guard
 				checkSingle(dep, time);
 			} else {
-				// @ts-ignore - Sender used as ICompute after flag guard
 				checkRun(dep, time);
 			}
 		}
@@ -3511,15 +3406,12 @@ function needsUpdate(node, time) {
 			let flag = dep._flag;
 			if (flag & FLAG_STALE) {
 				FENCE = SEED;
-				// @ts-ignore - Sender used as ICompute after flag guard
 				dep._update(time);
 			} else if (flag & FLAG_PENDING) {
 				FENCE = SEED;
 				if (flag & FLAG_SINGLE) {
-					// @ts-ignore - Sender used as ICompute after flag guard
 					checkSingle(dep, time);
 				} else {
-					// @ts-ignore - Sender used as ICompute after flag guard
 					checkRun(dep, time);
 				}
 			}
@@ -3532,7 +3424,7 @@ function needsUpdate(node, time) {
 }
 
 /**
- * @param {Receiver} node
+ * @param {Receiver|ICompute<*>|Sender<*>} node
  * @param {number} time
  * @returns {void}
  */
@@ -3543,14 +3435,11 @@ function checkSingle(node, time) {
 		dep._update(time);
 	} else if (flag & FLAG_PENDING) {
 		if (flag & FLAG_SINGLE) {
-			// @ts-ignore - Sender used as Receiver
 			checkSingle(dep, time);
 		} else {
-			// @ts-ignore - Sender used as ICompute
 			checkRun(dep, time);
 		}
 	}
-	// @ts-ignore - dep is non-null
 	if (dep._ctime > node._time) {
 		node._update(time);
 	} else {
@@ -3560,7 +3449,7 @@ function checkSingle(node, time) {
 }
 
 /**
- * @param {ICompute<*>} node
+ * @param {ICompute<*>|Sender<*>|Receiver} node
  * @param {number} time
  * @returns {void}
  */
@@ -3573,13 +3462,11 @@ function checkRun(node, time) {
 	 * of the full scan loop (no resumeFrom branching, no updated flag).
 	 * Stops when dep1 is STALE, clean, null, or both STALE+PENDING.
 	 */
-	// @ts-ignore - dep is non-null at entry (node has deps)
 	if ((dep._flag & (FLAG_STALE | FLAG_PENDING)) === FLAG_PENDING) {
 		do {
 			CSTACK[CTOP] = node;
 			CINDEX[CTOP] = -1;
 			CTOP++;
-			// @ts-ignore - Sender used as ICompute
 			node = dep;
 			dep = node._dep1;
 		} while (
@@ -3591,7 +3478,7 @@ function checkRun(node, time) {
 	/** -2 = fresh entry (scan from dep1), -1 = resume after dep1, >= 0 = resume after _deps[n] */
 	let resumeFrom = -2;
 
-	outer: for (;;) {
+	outer: for (; ;) {
 		let lastRun = node._time;
 		let i;
 
@@ -3607,14 +3494,12 @@ function checkRun(node, time) {
 				if (dep !== null) {
 					let flag = dep._flag;
 					if (flag & FLAG_STALE) {
-						// @ts-ignore - Sender used as ICompute
 						dep._update(time);
 					} else if (flag & FLAG_PENDING) {
 						/** Descend into dep1 — push current node, resume later */
 						CSTACK[CTOP] = node;
 						CINDEX[CTOP] = -1;
 						CTOP++;
-						// @ts-ignore - Sender used as ICompute
 						node = dep;
 						continue outer;
 					}
@@ -3626,7 +3511,6 @@ function checkRun(node, time) {
 				i = 0;
 			} else if (resumeFrom === -1) {
 				/** Returned from processing dep1 — check if it changed */
-				// @ts-ignore - _dep1 is non-null
 				if (node._dep1._ctime > lastRun) {
 					node._update(time);
 					break scan;
@@ -3634,7 +3518,6 @@ function checkRun(node, time) {
 				i = 0;
 			} else {
 				/** Returned from processing _deps[resumeFrom] — check ctime */
-				// @ts-ignore - _deps is non-null
 				if (node._deps[resumeFrom]._ctime > lastRun) {
 					node._update(time);
 					break scan;
@@ -3649,14 +3532,12 @@ function checkRun(node, time) {
 					dep = deps[i];
 					let flag = dep._flag;
 					if (flag & FLAG_STALE) {
-						// @ts-ignore - Sender used as ICompute
 						dep._update(time);
 					} else if (flag & FLAG_PENDING) {
 						/** Descend into deps[i] — push current node */
 						CSTACK[CTOP] = node;
 						CINDEX[CTOP] = i;
 						CTOP++;
-						// @ts-ignore - Sender used as ICompute
 						node = dep;
 						resumeFrom = -2;
 						continue outer;
@@ -3686,7 +3567,6 @@ function checkRun(node, time) {
 			/** Release the slot so the popped compute isn't rooted in
 			 *  CSTACK until the slot is overwritten by a future call.
 			 *  CINDEX holds numbers, so no cleanup needed there. */
-			// @ts-ignore - clearing stack slot
 			CSTACK[CTOP] = null;
 			/**
 			 * node is always the child that the parent was scanning
@@ -3711,7 +3591,6 @@ function checkRun(node, time) {
 					resumeFrom = -1;
 					continue outer;
 				}
-			// @ts-ignore - _deps is non-null when idx >= 0
 			} else if (idx + 1 < parent._deps.length) {
 				/** More entries in deps array — resume scanning */
 				node = parent;
@@ -3750,8 +3629,8 @@ function asyncKind(value) {
 
 /**
  * @template T
- * @param {ICompute<T>} node
- * @param {PromiseLike<T>} promise
+ * @param {AsyncDisposer<T>} node
+ * @param {*} promise
  * @param {number} time
  * @returns {void}
  */
@@ -3768,7 +3647,7 @@ function resolvePromise(node, promise, time) {
 				if (node._flag & FLAG_STALE) {
 					return;
 				}
-				if (node._flag & FLAG_PENDING && needsUpdate(node, TIME)) {
+				if (node._flag & FLAG_PENDING && needsUpdate(/** @type {Receiver} */(node), TIME)) {
 					node._flag |= FLAG_STALE;
 					return;
 				}
@@ -3786,7 +3665,7 @@ function resolvePromise(node, promise, time) {
 				if (node._flag & FLAG_STALE) {
 					return;
 				}
-				if (node._flag & FLAG_PENDING && needsUpdate(node, TIME)) {
+				if (node._flag & FLAG_PENDING && needsUpdate(/** @type {Receiver} */(node), TIME)) {
 					node._flag |= FLAG_STALE;
 					return;
 				}
@@ -3798,7 +3677,7 @@ function resolvePromise(node, promise, time) {
 
 /**
  * @template T
- * @param {ICompute<T>} node
+ * @param {AsyncDisposer<T>} node
  * @param {*} iterable
  * @param {number} time
  * @returns {void}
@@ -3806,9 +3685,7 @@ function resolvePromise(node, promise, time) {
 function resolveIterator(node, iterable, time) {
 	/** @type {*} */
 	let iterator =
-		// @ts-ignore - Symbol.asyncIterator access on union
 		typeof iterable[Symbol.asyncIterator] === "function"
-			// @ts-ignore - Symbol.asyncIterator access on union
 			? iterable[Symbol.asyncIterator]()
 			: iterable;
 
@@ -3830,7 +3707,7 @@ function resolveIterator(node, iterable, time) {
 				}
 				return;
 			}
-			if (node._flag & FLAG_PENDING && needsUpdate(node, TIME)) {
+			if (node._flag & FLAG_PENDING && needsUpdate(/** @type {Receiver} */(node), TIME)) {
 				node._flag |= FLAG_STALE;
 				if (typeof iterator.return === "function") {
 					iterator.return();
@@ -3860,7 +3737,7 @@ function resolveIterator(node, iterable, time) {
 			if (node._flag & FLAG_STALE) {
 				return;
 			}
-			if (node._flag & FLAG_PENDING && needsUpdate(node, TIME)) {
+			if (node._flag & FLAG_PENDING && needsUpdate(/** @type {Receiver} */(node), TIME)) {
 				node._flag |= FLAG_STALE;
 				return;
 			}
@@ -3882,7 +3759,7 @@ function resolveIterator(node, iterable, time) {
  * Pass 3: Inline notify — OR FLAG_STALE on all subs, but only call
  *         _receive() on subs not stamped `version` (not a waiter).
  *
- * @param {Sender<*>} node
+ * @param {AsyncSender<*>} node
  * @param {*} value
  * @param {boolean} isError
  * @param {Array<*>} waiters
@@ -3906,11 +3783,11 @@ function settleNotify(node, value, isError, waiters, waiterCount) {
 
 	/** Pass 2: resolve waiters, skip subscribe if already a sync sub. */
 	for (let i = 0; i < waiterCount; i += 3) {
-		let awaiter = waiters[i];
+		let awaiter = /** @type {AsyncReceiver} */(waiters[i]);
 		if (isError) {
-			waiters[i + 2](value);
+			/** @type {Function} */(waiters[i + 2])(value);
 		} else {
-			waiters[i + 1](value);
+			/** @type {Function} */(waiters[i + 1])(value);
 		}
 		if (!(awaiter._flag & FLAG_BLOCKED)) {
 			if (awaiter._stamp !== version - 1) {
@@ -3918,7 +3795,6 @@ function settleNotify(node, value, isError, waiters, waiterCount) {
 			}
 		}
 		awaiter._stamp = version;
-		// @ts-ignore - Sender used as ICompute
 		clearRespond(awaiter, node);
 	}
 
@@ -3952,7 +3828,7 @@ function settleNotify(node, value, isError, waiters, waiterCount) {
  * 1. Deduplicates _deps (val() across awaits can insert duplicates).
  * 2. If deferred deps exist, subscribes unique deferred senders and
  *    checks if any changed. Returns true if node needs to re-run.
- * @param {Receiver} node
+ * @param {AsyncReceiver} node
  * @returns {boolean}
  */
 function settleDeps(node) {
@@ -4000,7 +3876,6 @@ function settleDeps(node) {
 					} else {
 						lastDep = deps.pop();
 					}
-					// @ts-ignore - lastDep is defined (array not empty)
 					deps[i] = lastDep;
 				} else if (!hasDefers) {
 					deps.pop();
@@ -4039,8 +3914,8 @@ function settleDeps(node) {
 
 	/** Check overflow defers. */
 	for (let i = 0; i < deferLen; i += 2) {
-		let sender = defers[i];
-		let snapshot = defers[i + 1];
+		let sender = /** @type {Sender<*>} */(defers[i]);
+		let snapshot = /** @type {*} */(defers[i + 1]);
 		if (sender._stamp === stamp) {
 			if (sender._changed(snapshot)) {
 				changed = true;
@@ -4060,7 +3935,7 @@ function settleDeps(node) {
  * Resets async fiber state before re-execution. Aborts the previous
  * controller, clears stale defers, and removes channel bindings.
  * Shared between Compute and Effect _update paths.
- * @param {Receiver} node
+ * @param {AsyncReceiver} node
  * @returns {void}
  */
 function resetChannel(node) {
@@ -4078,10 +3953,10 @@ function resetChannel(node) {
 
 /**
  * Adds a waiter entry to a responder's _waiters array (3-stride).
- * @param {Channel} responderCh
- * @param {Receiver} awaiter
- * @param {function} resolve
- * @param {function} reject
+ * @param {Resolver} responderCh
+ * @param {AsyncReceiver} awaiter
+ * @param {Function} resolve
+ * @param {Function} reject
  * @returns {void}
  */
 function addWaiter(responderCh, awaiter, resolve, reject) {
@@ -4097,8 +3972,8 @@ function addWaiter(responderCh, awaiter, resolve, reject) {
  * Creates a two-way channel binding between an awaiter and a task.
  * Stores the task in the awaiter's responds list and the awaiter
  * in the task's waiters list.
- * @param {Receiver} awaiter
- * @param {ICompute<*>} task
+ * @param {AsyncReceiver} awaiter
+ * @param {AsyncSender<*>} task
  * @param {function(*): *} resolve
  * @param {function(*): *} reject
  * @returns {void}
@@ -4125,38 +4000,28 @@ function send(awaiter, task, resolve, reject) {
  * Removes a single awaiter from a responder's _waiters array.
  * Linear scan for identity match, then 3-stride swap-with-last.
  * Clears FLAG_WAITER on the responder when the last waiter is removed.
- * @param {ICompute<*>} responder
- * @param {Channel} responderCh
- * @param {Receiver} awaiter
+ * @param {AsyncSender<*>} responder
+ * @param {Resolver} responderCh
+ * @param {AsyncReceiver} awaiter
  * @returns {void}
  */
 function removeWaiter(responder, responderCh, awaiter) {
 	let waiters = responderCh._waiters;
-	// @ts-ignore - waiters is non-null (caller ensures)
 	let count = waiters.length;
 	for (let i = 0; i < count; i += 3) {
-		// @ts-ignore - waiters is non-null
 		if (waiters[i] !== awaiter) {
 			continue;
 		}
-		// @ts-ignore - waiters is non-null
 		let lastReject = waiters.pop();
-		// @ts-ignore - waiters is non-null
 		let lastResolve = waiters.pop();
-		// @ts-ignore - waiters is non-null
 		let lastAwaiter = waiters.pop();
-		// @ts-ignore - waiters is non-null
 		if (i < waiters.length) {
-			// @ts-ignore - waiters is non-null
 			waiters[i] = lastAwaiter;
-			// @ts-ignore - waiters is non-null
 			waiters[i + 1] = lastResolve;
-			// @ts-ignore - waiters is non-null
 			waiters[i + 2] = lastReject;
 		}
 		break;
 	}
-	// @ts-ignore - waiters is non-null
 	if (waiters.length === 0) {
 		responderCh._waiters = null;
 		responder._flag &= ~FLAG_WAITER;
@@ -4165,8 +4030,8 @@ function removeWaiter(responder, responderCh, awaiter) {
 
 /**
  * Removes this awaiter from all responders it's waiting on.
- * @param {Channel} channel
- * @param {Receiver} awaiter
+ * @param {IChannel} channel
+ * @param {AsyncReceiver} awaiter
  * @returns {void}
  */
 function clearChannel(channel, awaiter) {
@@ -4191,8 +4056,8 @@ function clearChannel(channel, awaiter) {
 /**
  * Clears an awaiter's back-reference to a responder.
  * Scans _res1 and _responds for identity match.
- * @param {Receiver} awaiter
- * @param {ICompute<*>} responder
+ * @param {AsyncReceiver} awaiter
+ * @param {AsyncSender<*>} responder
  */
 function clearRespond(awaiter, responder) {
 	let awaiterCh = awaiter._chan;
@@ -4216,8 +4081,8 @@ function clearRespond(awaiter, responder) {
  * channel references. When panic is false, subscribes each awaiter as
  * a dep of the responder. When panic is true (responder is disposing),
  * skips subscription since the responder is dead.
- * @param {ICompute<*>} responder
- * @param {Channel} responderCh
+ * @param {AsyncSender<*>} responder
+ * @param {Resolver} responderCh
  * @param {*} value
  * @param {boolean} isError
  * @param {boolean} panic
@@ -4225,17 +4090,13 @@ function clearRespond(awaiter, responder) {
  */
 function resolveWaiters(responder, responderCh, value, isError, panic) {
 	let waiters = responderCh._waiters;
-	// @ts-ignore - waiters is non-null (caller ensures)
 	let count = waiters.length;
 	for (let i = 0; i < count; i += 3) {
-		// @ts-ignore - waiters is non-null
-		let awaiter = waiters[i];
+		let awaiter = /** @type {AsyncReceiver} */(waiters[i]);
 		if (isError) {
-			// @ts-ignore - waiters is non-null
-			waiters[i + 2](value);
+			/** @type {Function} */(waiters[i + 2])(value);
 		} else {
-			// @ts-ignore - waiters is non-null
-			waiters[i + 1](value);
+			/** @type {Function} */(waiters[i + 1])(value);
 		}
 		if (!panic && !(awaiter._flag & FLAG_BLOCKED)) {
 			subscribe(awaiter, responder);
@@ -4340,13 +4201,12 @@ function startEffect(node) {
  * @param {Array<IEffect>} queue
  * @param {number} count
  * @param {number} time
- * @returns {*}
+ * @returns {?}
  */
 function flushEffects(queue, count, time) {
 	let thrown = null;
 	for (let i = 0; i < count; i++) {
 		let node = queue[i];
-		// @ts-ignore - clearing queue slot
 		queue[i] = null;
 		if (
 			node._flag & FLAG_STALE ||
@@ -4396,7 +4256,6 @@ function flush() {
 				let count = DISPOSER_COUNT;
 				for (let i = 0; i < count; i++) {
 					DISPOSES[i]._dispose();
-					// @ts-ignore - clearing queue slot
 					DISPOSES[i] = null;
 				}
 				DISPOSER_COUNT = 0;
@@ -4405,7 +4264,6 @@ function flush() {
 				let count = SENDER_COUNT;
 				for (let i = 0; i < count; i++) {
 					UPDATES[i](SENDERS[i], PAYLOADS[i], time);
-					// @ts-ignore - clearing queue slots
 					SENDERS[i] = PAYLOADS[i] = UPDATES[i] = null;
 				}
 				SENDER_COUNT = 0;
@@ -4414,7 +4272,6 @@ function flush() {
 				let count = COMPUTE_COUNT;
 				for (let i = 0; i < count; i++) {
 					let node = COMPUTES[i];
-					// @ts-ignore - clearing queue slot
 					COMPUTES[i] = null;
 					if (
 						node._flag & FLAG_STALE ||
@@ -4431,8 +4288,7 @@ function flush() {
 				let levels = LEVELS.length;
 				for (let i = 0; i < levels; i++) {
 					if (!thrown) {
-						// @ts-ignore - Effect[] used as IEffect[]
-					let err = flushEffects(SCOPES[i], LEVELS[i], time);
+						let err = flushEffects(SCOPES[i], LEVELS[i], time);
 						if (err !== null) {
 							error = err;
 							thrown = true;
@@ -4456,7 +4312,6 @@ function flush() {
 				let count = PURGE_COUNT;
 				for (let i = 0; i < count; i++) {
 					PURGES[i]._purge();
-					// @ts-ignore - clearing queue slot
 					PURGES[i] = null;
 				}
 				PURGE_COUNT = 0;
@@ -4474,7 +4329,7 @@ function flush() {
 			SCOPE_COUNT =
 			RECEIVER_COUNT =
 			PURGE_COUNT =
-				0;
+			0;
 		if (thrown) {
 			throw error;
 		}

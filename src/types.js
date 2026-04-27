@@ -1,16 +1,71 @@
 /**
+ * @interface
+ */
+class Resolver {
+	constructor() {
+		/** @type {Array<AsyncReceiver | Function> | null} */
+		this._waiters = null;
+	}
+}
+
+/**
+ * Async coordination context for task/spawn nodes.
+ * @interface
+ * @extends {Resolver}
+ */
+class IChannel extends Resolver {
+	constructor() {
+		super();
+		/** @type {AsyncSender<*> | null} */
+		this._res1 = null;
+		/** @type {Array<AsyncSender<*> | null> | null} */
+		this._responds = null;
+		/** @type {AbortController | null} */
+		this._controller = null;
+		/** @type {Sender<*> | null} */
+		this._defer1 = null;
+		/** @type {*} */
+		this._defer1val = null;
+		/** @type {Array<Sender<*> | *> | null} */
+		this._defers = null;
+	}
+}
+
+/**
  * Base for all disposable nodes.
  * @interface
  */
 class Disposer {
 	constructor() {
 		/** @type {number} */
-		this._flag = 0;
-		/** @type {(function(): void) | Array<(function(): void)> | null} */
-		this._cleanup = null;
+		this._flag;
 	}
 	/** @returns {void} */
 	_dispose() { }
+}
+
+/**
+ * @interface
+ * @template T
+ * @extends {Disposer}
+ */
+class AsyncDisposer {
+	constructor() {
+		/**
+		 * @type {number}
+		 */
+		this._time;
+	}
+	/**
+	 * @param {T} value
+	 * @returns {void}
+	 */
+	_settle(value) { }
+	/**
+	 * @param {?} err
+	 * @returns {void}
+	 */
+	_error(err) { }
 }
 
 /**
@@ -21,6 +76,8 @@ class Disposer {
 class Owner extends Disposer {
 	constructor() {
 		super();
+		/** @type {(function(): void) | Array<(function(): void)> | null} */
+		this._cleanup = null;
 		/** @type {Array<Receiver> | null} */
 		this._owned = null;
 		/** @type {number} */
@@ -34,7 +91,6 @@ class Owner extends Disposer {
 
 /**
  * Value-producing node — Signal and Compute.
- * Includes properties accessed on Sender-typed params after flag guards.
  * @interface
  * @template T
  * @extends {Disposer}
@@ -43,21 +99,21 @@ class Sender extends Disposer {
 	constructor() {
 		super();
 		/** @type {T} */
-		this._value = /** @type {T} */ (/** @type {*} */ (undefined));
+		this._value;
 		/** @type {number} */
-		this._stamp = 0;
+		this._stamp;
 		/** @type {Receiver | null} */
-		this._sub1 = null;
+		this._sub1;
 		/** @type {Array<Receiver> | null} */
-		this._subs = null;
+		this._subs;
 		/** @type {number} */
-		this._tombstones = 0;
+		this._tombstones;
 		/** @type {number} */
-		this._mod = 0;
+		this._ctime;
 		/** @type {number} */
-		this._ctime = 0;
-		/** @type {(function(T, T): boolean) | null} */
-		this._equal = null;
+		this._time;
+		/** @type {(function(T, T): boolean) | null | undefined} */
+		this._equal;
 	}
 	/** @returns {void} */
 	_drop() { }
@@ -67,7 +123,8 @@ class Sender extends Disposer {
 	 * @param {T} value
 	 * @returns {boolean}
 	 */
-	_changed(value) { return false; }
+	_changed(value) { }
+
 	/** @returns {void} */
 	_refresh() { }
 	/**
@@ -78,8 +135,25 @@ class Sender extends Disposer {
 }
 
 /**
+ * Async-capable sender — Cell (resource) and async Compute (task).
+ * Adds channel, settlement, and error handling on top of Sender.
+ * @interface
+ * @template T
+ * @extends {Sender<T>}
+ * @extends {AsyncDisposer}
+ */
+class AsyncSender extends Sender {
+	constructor() {
+		super();
+		/** @type {Resolver | IChannel | null} */
+		this._chan;
+	}
+	/** @returns {Resolver | IChannel} */
+	_channel() { }
+}
+
+/**
  * Value-consuming node — Compute and Effect.
- * Properties here exist on ALL receivers.
  * @interface
  * @extends {Disposer}
  */
@@ -87,19 +161,19 @@ class Receiver extends Disposer {
 	constructor() {
 		super();
 		/** @type {Sender<*> | null} */
-		this._dep1 = null;
+		this._dep1;
 		/** @type {Array<Sender<*>> | null} */
-		this._deps = null;
+		this._deps;
 		/** @type {number} */
-		this._time = 0;
+		this._time;
 		/** @type {number} */
-		this._stamp = 0;
+		this._stamp;
 		/** @type {Function | null} */
-		this._fn = null;
-		/** @type {* | null} */
-		this._chan = null;
+		this._fn;
 		/** @type {*} */
-		this._args = undefined;
+		this._args;
+		/** @type {(function(): void) | Array<(function(): void)> | null} */
+		this._cleanup;
 	}
 	/**
 	 * @param {number} time
@@ -120,7 +194,22 @@ class Receiver extends Disposer {
 	 * @returns {*}
 	 */
 	_readAsync(sender, safe) { }
-	/** @returns {*} */
+}
+
+/**
+ * Async-capable receiver — async Compute (task) and async Effect (spawn).
+ * Adds channel, settlement, and error handling on top of Receiver.
+ * @interface
+ * @extends {Receiver}
+ * @extends {AsyncDisposer}
+ */
+class AsyncReceiver extends Receiver {
+	constructor() {
+		super();
+		/** @type {IChannel | null} */
+		this._chan = null;
+	}
+	/** @returns {IChannel} */
 	_channel() { }
 	/**
 	 * @param {*} value
@@ -147,46 +236,12 @@ class ReadonlySignal {
 }
 
 /**
- * Signal interface. Extends Sender with Cell-specific properties
- * (_time, _chan) and async settlement methods.
- * @interface
- * @template T
- * @extends {Sender<T>}
- */
-class ISignal extends Sender {
-	constructor() {
-		super();
-		/** @type {number} */
-		this._time = 0;
-		/** @type {* | null} */
-		this._chan = null;
-	}
-	/**
-	 * @param {*} value
-	 * @returns {void}
-	 */
-	_settle(value) { }
-	/**
-	 * @param {*} err
-	 * @returns {void}
-	 */
-	_error(err) { }
-	/** @returns {*} */
-	_channel() { }
-	/**
-	 * @param {T} value
-	 * @returns {void}
-	 */
-	set(value) { }
-}
-
-/**
  * Compute interface — merges Sender and Receiver.
- * Extends Sender for value-producing side; manually declares
- * Receiver properties for value-consuming side (JS single inheritance).
  * @interface
  * @template T
- * @extends {Sender<T>}
+ * @extends {AsyncReceiver}
+ * @extends {AsyncSender<T>}
+ * @extends {AsyncDisposer<T>}
  */
 class ICompute extends Sender {
 	constructor() {
@@ -196,14 +251,14 @@ class ICompute extends Sender {
 		this._dep1 = null;
 		/** @type {Array<Sender<*>> | null} */
 		this._deps = null;
-		/** @type {number} */
-		this._time = 0;
 		/** @type {Function | null} */
 		this._fn = null;
-		/** @type {* | null} */
+		/** @type {IChannel | null} */
 		this._chan = null;
 		/** @type {*} */
 		this._args = undefined;
+		/** @type {(function(): void) | Array<(function(): void)> | null} */
+		this._cleanup = null;
 	}
 	/* Receiver methods */
 	/**
@@ -225,18 +280,8 @@ class ICompute extends Sender {
 	 * @returns {*}
 	 */
 	_readAsync(sender, safe) { }
-	/** @returns {*} */
+	/** @returns {IChannel} */
 	_channel() { }
-	/**
-	 * @param {*} value
-	 * @returns {void}
-	 */
-	_settle(value) { }
-	/**
-	 * @param {*} err
-	 * @returns {void}
-	 */
-	_error(err) { }
 	/* ICompute-specific */
 	/** @returns {void} */
 	_refresh() { }
@@ -245,18 +290,14 @@ class ICompute extends Sender {
 	 * @returns {*}
 	 */
 	val(sender) { }
-	/** @returns {boolean} */
-	get error() { return false; }
-	/** @returns {boolean} */
-	get loading() { return false; }
 }
 
 /**
  * Effect interface — merges Owner and Receiver.
- * Extends Owner for ownership side; manually declares
- * Receiver properties for value-consuming side.
  * @interface
  * @extends {Owner}
+ * @extends {AsyncReceiver}
+ * @extends {AsyncDisposer<void>}
  */
 class IEffect extends Owner {
 	constructor() {
@@ -272,7 +313,7 @@ class IEffect extends Owner {
 		this._stamp = 0;
 		/** @type {Function | null} */
 		this._fn = null;
-		/** @type {* | null} */
+		/** @type {IChannel | null} */
 		this._chan = null;
 		/** @type {*} */
 		this._args = undefined;
@@ -300,22 +341,17 @@ class IEffect extends Owner {
 	 * @returns {*}
 	 */
 	_readAsync(sender, safe) { }
-	/** @returns {*} */
+	/** @returns {IChannel} */
 	_channel() { }
-	/**
-	 * @param {*} value
-	 * @returns {void}
-	 */
-	_settle(value) { }
-	/**
-	 * @param {*} err
-	 * @returns {void}
-	 */
-	_error(err) { }
 	/** @returns {void} */
 	dispose() { }
-	/** @returns {boolean} */
-	get loading() { return false; }
 }
 
-export { Disposer, Owner, Sender, Receiver, ISignal, ICompute, IEffect };
+export {
+	Disposer, Owner,
+	AsyncDisposer,
+	Sender, AsyncSender,
+	Receiver, AsyncReceiver,
+	IChannel, Resolver,
+	ICompute, IEffect
+};
