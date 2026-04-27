@@ -5,6 +5,3 @@ node_modules/
 dist/
 bench/browser/*
 bench/reactivity/runs/*
-solid-repo/
-preact/
-alien/
