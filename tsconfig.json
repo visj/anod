@@ -6,11 +6,13 @@
     "composite": true,
     "strict": true,
     "module": "NodeNext",
-    "moduleResolution": "NodeNext"
+    "moduleResolution": "NodeNext",
+    "allowJs": true,
+    "checkJs": true,
+    "noEmit": true
   },
   "include": [
     "src/**.js",
-    "tests/*.js",
     "types/*.d.ts"
   ]
 }

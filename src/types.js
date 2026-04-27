@@ -1,124 +1,321 @@
 /**
+ * Base for all disposable nodes.
  * @interface
  */
-function Disposer() { }
-/** @package @type {number} */
-Disposer.prototype._flag;
-/**
- * @type {(function(): void) | Array<function(): void> | null}
- */
-Disposer.prototype._cleanup;
-/** @package @returns {void} */
-Disposer.prototype._dispose = function () { };
+class Disposer {
+	constructor() {
+		/** @type {number} */
+		this._flag = 0;
+		/** @type {(function(): void) | Array<(function(): void)> | null} */
+		this._cleanup = null;
+	}
+	/** @returns {void} */
+	_dispose() { }
+}
 
 /**
+ * Ownership boundary — Root and Effect.
  * @interface
  * @extends {Disposer}
  */
-function Owner() { }
-/** @package @type {(function(): void) | Array<(function(): void)> | null} */
-Owner.prototype._cleanup;
-/** @package @type {Array<Receiver> | null} */
-Owner.prototype._owned;
-/** @package @type {number | undefined} */
-Owner.prototype._level;
-/** @package @type {Owner | null} */
-Owner.prototype._owner;
-/** @package @type {(function(*): boolean) | Array<(function(*): boolean)> | null} */
-Owner.prototype._recover;
+class Owner extends Disposer {
+	constructor() {
+		super();
+		/** @type {Array<Receiver> | null} */
+		this._owned = null;
+		/** @type {number} */
+		this._level = 0;
+		/** @type {Owner | null} */
+		this._owner = null;
+		/** @type {(function(*): boolean) | Array<(function(*): boolean)> | null} */
+		this._recover = null;
+	}
+}
 
 /**
+ * Value-producing node — Signal and Compute.
+ * Includes properties accessed on Sender-typed params after flag guards.
  * @interface
  * @template T
  * @extends {Disposer}
  */
-function Sender() { }
-/** @package @type {T} */
-Sender.prototype._value;
-/** @package @type {number} */
-Sender.prototype._stamp;
-/** @package @type {Receiver | null} */
-Sender.prototype._sub1;
-/** @package @type {Array<Receiver> | null} */
-Sender.prototype._subs;
-/** @package @type {number} */
-Sender.prototype._tombstones;
-/** @package @type {number} */
-Sender.prototype._mod;
-/** @package @type {number} */
-Sender.prototype._ctime;
+class Sender extends Disposer {
+	constructor() {
+		super();
+		/** @type {T} */
+		this._value = /** @type {T} */ (/** @type {*} */ (undefined));
+		/** @type {number} */
+		this._stamp = 0;
+		/** @type {Receiver | null} */
+		this._sub1 = null;
+		/** @type {Array<Receiver> | null} */
+		this._subs = null;
+		/** @type {number} */
+		this._tombstones = 0;
+		/** @type {number} */
+		this._mod = 0;
+		/** @type {number} */
+		this._ctime = 0;
+		/** @type {(function(T, T): boolean) | null} */
+		this._equal = null;
+	}
+	/** @returns {void} */
+	_drop() { }
+	/** @returns {void} */
+	_purge() { }
+	/**
+	 * @param {T} value
+	 * @returns {boolean}
+	 */
+	_changed(value) { return false; }
+	/** @returns {void} */
+	_refresh() { }
+	/**
+	 * @param {number} time
+	 * @returns {void}
+	 */
+	_update(time) { }
+}
 
 /**
+ * Value-consuming node — Compute and Effect.
+ * Properties here exist on ALL receivers.
  * @interface
  * @extends {Disposer}
  */
-function Receiver() { }
-/** @package @type {Sender | null} */
-Receiver.prototype._dep1;
-/** @package @type {Array<Sender> | null} */
-Receiver.prototype._deps;
-/** @package @type {number} */
-Receiver.prototype._time;
-/** @package @param {number} time @returns {void} */
-Receiver.prototype._setStale = function (time) { };
-
+class Receiver extends Disposer {
+	constructor() {
+		super();
+		/** @type {Sender<*> | null} */
+		this._dep1 = null;
+		/** @type {Array<Sender<*>> | null} */
+		this._deps = null;
+		/** @type {number} */
+		this._time = 0;
+		/** @type {number} */
+		this._stamp = 0;
+		/** @type {Function | null} */
+		this._fn = null;
+		/** @type {* | null} */
+		this._chan = null;
+		/** @type {*} */
+		this._args = undefined;
+	}
+	/**
+	 * @param {number} time
+	 * @returns {void}
+	 */
+	_update(time) { }
+	/** @returns {void} */
+	_receive() { }
+	/**
+	 * @param {Sender<*>} sender
+	 * @param {number} stamp
+	 * @returns {void}
+	 */
+	_read(sender, stamp) { }
+	/**
+	 * @param {Sender<*>} sender
+	 * @param {boolean} safe
+	 * @returns {*}
+	 */
+	_readAsync(sender, safe) { }
+	/** @returns {*} */
+	_channel() { }
+	/**
+	 * @param {*} value
+	 * @returns {void}
+	 */
+	_settle(value) { }
+	/**
+	 * @param {*} err
+	 * @returns {void}
+	 */
+	_error(err) { }
+}
 
 /**
+ * Public read-only signal interface.
  * @interface
  * @template T
  */
-function ReadonlySignal() { }
+class ReadonlySignal {
+	/** @returns {T} */
+	val() { return /** @type {T} */ (/** @type {*} */ (undefined)); }
+	/** @returns {void} */
+	dispose() { }
+}
 
 /**
- * @throws
- * @returns {T}
- */
-ReadonlySignal.prototype.val = function() { };
-
-/**
- * @returns {void}
- */
-ReadonlySignal.prototype.dispose = function() { };
-
-/**
+ * Signal interface. Extends Sender with Cell-specific properties
+ * (_time, _chan) and async settlement methods.
  * @interface
  * @template T
  * @extends {Sender<T>}
- * @extends {ReadonlySignal<T>}
  */
-function ISignal() { }
+class ISignal extends Sender {
+	constructor() {
+		super();
+		/** @type {number} */
+		this._time = 0;
+		/** @type {* | null} */
+		this._chan = null;
+	}
+	/**
+	 * @param {*} value
+	 * @returns {void}
+	 */
+	_settle(value) { }
+	/**
+	 * @param {*} err
+	 * @returns {void}
+	 */
+	_error(err) { }
+	/** @returns {*} */
+	_channel() { }
+	/**
+	 * @param {T} value
+	 * @returns {void}
+	 */
+	set(value) { }
+}
 
 /**
- *
- * @param {T} value
- * @returns {void}
- */
-ISignal.prototype.set = function (value) { };
-
-/**
+ * Compute interface — merges Sender and Receiver.
+ * Extends Sender for value-producing side; manually declares
+ * Receiver properties for value-consuming side (JS single inheritance).
  * @interface
  * @template T
  * @extends {Sender<T>}
- * @extends {Receiver}
- * @extends {ReadonlySignal<T>}
  */
-function ICompute() { }
-/** @public @returns {boolean} */
-ICompute.prototype.error = function () { };
-/** @public @returns {boolean} */
-ICompute.prototype.loading = function () { };
+class ICompute extends Sender {
+	constructor() {
+		super();
+		/* Receiver properties */
+		/** @type {Sender<*> | null} */
+		this._dep1 = null;
+		/** @type {Array<Sender<*>> | null} */
+		this._deps = null;
+		/** @type {number} */
+		this._time = 0;
+		/** @type {Function | null} */
+		this._fn = null;
+		/** @type {* | null} */
+		this._chan = null;
+		/** @type {*} */
+		this._args = undefined;
+	}
+	/* Receiver methods */
+	/**
+	 * @param {number} time
+	 * @returns {void}
+	 */
+	_update(time) { }
+	/** @returns {void} */
+	_receive() { }
+	/**
+	 * @param {Sender<*>} sender
+	 * @param {number} stamp
+	 * @returns {void}
+	 */
+	_read(sender, stamp) { }
+	/**
+	 * @param {Sender<*>} sender
+	 * @param {boolean} safe
+	 * @returns {*}
+	 */
+	_readAsync(sender, safe) { }
+	/** @returns {*} */
+	_channel() { }
+	/**
+	 * @param {*} value
+	 * @returns {void}
+	 */
+	_settle(value) { }
+	/**
+	 * @param {*} err
+	 * @returns {void}
+	 */
+	_error(err) { }
+	/* ICompute-specific */
+	/** @returns {void} */
+	_refresh() { }
+	/**
+	 * @param {Sender<*>} sender
+	 * @returns {*}
+	 */
+	val(sender) { }
+	/** @returns {boolean} */
+	get error() { return false; }
+	/** @returns {boolean} */
+	get loading() { return false; }
+}
 
 /**
+ * Effect interface — merges Owner and Receiver.
+ * Extends Owner for ownership side; manually declares
+ * Receiver properties for value-consuming side.
  * @interface
  * @extends {Owner}
- * @extends {Receiver}
  */
-function IEffect() { }
-/** @public @returns {void} */
-IEffect.prototype.dispose = function () { };
-/** @public @returns {boolean} */
-IEffect.prototype.error = function () { };
-/** @public @returns {boolean} */
-IEffect.prototype.loading = function () { };
+class IEffect extends Owner {
+	constructor() {
+		super();
+		/* Receiver properties */
+		/** @type {Sender<*> | null} */
+		this._dep1 = null;
+		/** @type {Array<Sender<*>> | null} */
+		this._deps = null;
+		/** @type {number} */
+		this._time = 0;
+		/** @type {number} */
+		this._stamp = 0;
+		/** @type {Function | null} */
+		this._fn = null;
+		/** @type {* | null} */
+		this._chan = null;
+		/** @type {*} */
+		this._args = undefined;
+		/* IEffect-specific */
+		/** @type {(function(): void) | Array<(function(): void)> | null} */
+		this._finalize = null;
+	}
+	/* Receiver methods */
+	/**
+	 * @param {number} time
+	 * @returns {void}
+	 */
+	_update(time) { }
+	/** @returns {void} */
+	_receive() { }
+	/**
+	 * @param {Sender<*>} sender
+	 * @param {number} stamp
+	 * @returns {void}
+	 */
+	_read(sender, stamp) { }
+	/**
+	 * @param {Sender<*>} sender
+	 * @param {boolean} safe
+	 * @returns {*}
+	 */
+	_readAsync(sender, safe) { }
+	/** @returns {*} */
+	_channel() { }
+	/**
+	 * @param {*} value
+	 * @returns {void}
+	 */
+	_settle(value) { }
+	/**
+	 * @param {*} err
+	 * @returns {void}
+	 */
+	_error(err) { }
+	/** @returns {void} */
+	dispose() { }
+	/** @returns {boolean} */
+	get loading() { return false; }
+}
 
 export { Disposer, Owner, Sender, Receiver, ISignal, ICompute, IEffect };

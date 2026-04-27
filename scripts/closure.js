@@ -14,17 +14,11 @@ const args = [
   '--language_in', 'ECMASCRIPT_NEXT',
   '--language_out', 'ECMASCRIPT_2015',
   '--rewrite_polyfills', 'false',
-  '--chunk_output_type', 'ES_MODULES',
-  '--chunk_output_path_prefix', `${tempDir}/`,
+  '--js_output_file', 'dist/closure.js',
   '--externs' ,'externs/externs.js',
-  '--js', 'src/core/api.js',
-  '--js', 'src/core/types.js',
-  '--js', 'src/core/anod.js',
-  '--chunk', 'signal.min:3',
-  '--js', 'src/internal.js',
-  '--chunk', 'internal.min:1:signal.min',
-  '--js', 'src/index.js',
-  '--chunk', 'index.min:1:signal.min'
+  '--js', 'src/core.js',
+  '--js', 'src/types.js',
+  '--js', 'src/index.js'
 ];
 
 console.log(`Compiling 3 chunks with Advanced Optimizations...`);
