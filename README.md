@@ -26,6 +26,7 @@ anod is a reactive state management library. It has built-in support for both sy
 		- [c.recover(), REFUSE, PANIC, FATAL](#crecover-refuse-panic-fatal)
 		- [c.finalize()](#cfinalize)
 		- [Batching](#batching)
+- [Bundling](#bundling)
 - [The reactive graph in depth](#the-reactive-graph-in-depth)
 	- [Eager creation, lazy pull](#eager-creation-lazy-pull)
 	- [Dependency tracking](#dependency-tracking)
@@ -561,6 +562,12 @@ console.log(counter.get()); // still 0 — flush hasn't run
 ```
 
 Both `.set()` and `.post()` accept an updater function `(prev) => next` . For `.set()` , the updater is called immediately when idle, or deferred to drain time when inside a flush cycle. For `.post()` , the updater is always deferred to flush time, so it sees the latest value at that point.
+
+## Bundling
+
+anod supports two JavaScript type systems: Typescript and Google's Closure Compiler. For those wondering why the source code is written in plain JavaScript: Closure Compiler had some experimental support for Typescript in the past, but it has since been discontinued. Closure operates on JSDoc style type safety. To my knowledge, no bundler except Closure Compiler can confidently tree-shake prototype based method dispatch. Since anod uses a context object, which internally is Compute/Effect node, it's impossible to tree-shake anod with normal bundlers.
+
+anod is fully typed for Closure Compiler, meaning, it's safe to use with ADVANCED OPTIMIZATIONS. On npm, the package exposes the raw source code. Import those files directly and it will work out of the box.
 
 ## The reactive graph in depth
 

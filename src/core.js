@@ -90,7 +90,7 @@ var NOOP = function() {};
 var ASSERT_NOT_DISPOSED = "Cannot access a disposed node";
 
 /**
- * @type {Array<Sender<*> | number>}
+ * @type {Array<Sender | number>}
  */
 var VSTACK = [];
 /** @type {number} Tail pointer into VSTACK */
@@ -101,7 +101,7 @@ var REUSED = 0;
 /**
  * Pre-allocated stack for iterative checkRun.
  * CSTACK holds node references, CINDEX holds dep iteration positions.
- * @type {Array<ICompute<*>>}
+ * @type {Array<Compute>}
  */
 var CSTACK = [];
 /**
@@ -124,7 +124,7 @@ var CTOP = 0;
  * This allows the growth factor problem that arises when going from
  * dep2 -> dep3.
  * @see {connect}
- * @type {Array<Sender<*>>}
+ * @type {Array<Sender>}
  */
 var DSTACK = [];
 /** @type {number} Tail pointer into DSTACK */
@@ -202,11 +202,11 @@ var SENDERS = [];
  * @type {Array<*>}
  */
 var PAYLOADS = [];
-/** @const @type {Array<Function>} */
+/** @const @type {Array<(function(Sender, *, number): void) | null>} */
 var UPDATES = [];
 var SENDER_COUNT = 0;
 
-/** @const @type {Array<Compute<*>>} */
+/** @const @type {Array<Compute>} */
 var COMPUTES = [];
 
 var COMPUTE_COUNT = 0;
@@ -225,7 +225,7 @@ var RECEIVER_COUNT = 0;
 
 /**
  * @const
- * @type {Array<Sender<*>>}
+ * @type {Array<Sender>}
  */
 var PURGES = [];
 var PURGE_COUNT = 0;
@@ -351,7 +351,7 @@ function Compute(opts, fn, dep1, seed, args) {
 	this._cleanup = null;
 	/** @type {IChannel | null} */
 	this._chan = null;
-	/** @type {*} */
+	/** @type {W | undefined} */
 	this._args = args;
 }
 
@@ -392,7 +392,7 @@ function Effect(opts, fn, dep1, owner, args) {
 	this._chan = null;
 	/** @type {number} */
 	this._stamp = 0;
-	/** @type {*} */
+	/** @type {W | undefined} */
 	this._args = args;
 }
 
@@ -753,10 +753,11 @@ function _read(sender, stamp) {
 }
 
 /**
+ * @template T
  * @this {Receiver}
- * @param {Sender<*>} sender
+ * @param {Sender<T>} sender
  * @param {boolean} safe - if true, return error value instead of throwing
- * @returns {*}
+ * @returns {T}
  */
 function _readAsync(sender, safe) {
 	if (sender._flag & (FLAG_STALE | FLAG_PENDING)) {
@@ -1725,7 +1726,7 @@ function root(fn) {
 	 * cannot await tasks or other resources.
 	 * @template T
 	 * @this {Cell<T>}
-	 * @param {Promise<*> | (function(Function, Function): ?)} promiseOrFn
+	 * @param {Promise<T> | (function(Function, Function): ?)} promiseOrFn
 	 * @returns {Promise<T> | void}
 	 */
 	CellProto.suspend = function (promiseOrFn) {
@@ -2274,7 +2275,8 @@ function root(fn) {
 	};
 
 	/**
-	 * @this {Compute}
+	 * @template T
+	 * @this {Compute<T>}
 	 * @param {number} time
 	 */
 	ComputeProto._update = function (time) {
@@ -2433,11 +2435,11 @@ function root(fn) {
 			if (kind !== ASYNC_SYNC) {
 				this._flag |= FLAG_LOADING;
 				if (kind === ASYNC_PROMISE) {
-					resolvePromise(this, /** @type {IThenable<*>} */(value), time);
+					resolvePromise(this, /** @type {IThenable<T>} */(value), time);
 				} else {
 					resolveIterator(
 						this,
-						/** @type {AsyncIterator<*,*,*> | AsyncIterable<*,*,*>} */(value),
+						/** @type {AsyncIterator<T> | AsyncIterable<T>} */(value),
 						time
 					);
 				}
@@ -2832,7 +2834,7 @@ function root(fn) {
 	 * @param {number | T=} optsOrSeed
 	 * @param {number | W=} argsOrOpts
 	 * @param {W=} args
-	 * @returns {Compute<*>}
+	 * @returns {Compute<T, U, W>}
 	 */
 	function task(depOrFn, fnOrSeed, optsOrSeed, argsOrOpts, args) {
 		if (this._flag & FLAG_DISPOSED) {
@@ -2871,7 +2873,7 @@ function root(fn) {
 	 * @param {(function(U, W): void) | number=} fnOrOpts
 	 * @param {number | W=} optsOrArgs
 	 * @param {W=} args
-	 * @returns {Effect}
+	 * @returns {Effect<U, W>}
 	 */
 	function effect(depOrFn, fnOrOpts, optsOrArgs, args) {
 		if (this._flag & FLAG_DISPOSED) {
@@ -2910,7 +2912,7 @@ function root(fn) {
 	 * @param {(function(U, W): void) | number=} fnOrOpts
 	 * @param {number | W=} optsOrArgs
 	 * @param {W=} args
-	 * @returns {Effect}
+	 * @returns {Effect<U, W>}
 	 */
 	function spawn(depOrFn, fnOrOpts, optsOrArgs, args) {
 		if (this._flag & FLAG_DISPOSED) {
@@ -3712,12 +3714,12 @@ function resolvePromise(node, promise, time) {
 /**
  * @template T
  * @param {AsyncDisposer<T>} node
- * @param {*} iterable
+ * @param {AsyncIterator<T> | AsyncIterable<T>} iterable
  * @param {number} time
  * @returns {void}
  */
 function resolveIterator(node, iterable, time) {
-	/** @type {*} */
+	/** @type {AsyncIterator<T>} */
 	let iterator =
 		typeof iterable[Symbol.asyncIterator] === "function"
 			? iterable[Symbol.asyncIterator]()
@@ -4404,6 +4406,7 @@ export {
 	Cell,
 	Compute,
 	Effect,
+	Channel,
 	FLAG_STALE,
 	FLAG_PENDING,
 	FLAG_SCHEDULED,
