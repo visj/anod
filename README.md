@@ -1415,7 +1415,7 @@ The benchmarks above use the unbound API for fair comparison. But anod also supp
 | Update: large web app | 23.0 µs | 17.5 µs | -24% | 8.7 kB | 1.3 kB | -85% |
 | Update: wide dense | 80.4 µs | 48.6 µs | -40% | 23.4 kB | 2.5 kB | -89% |
 | Update: deep | 115 µs | 135 µs | +17% | 159 kB | 39.9 kB | -75% |
-| Update: very dynamic | 57.7 µs | 53.0 µs | -8% | 40.1 kB | 4.4 kB | -89% |
+| Update: very dynamic | 57.7 µs | 53.0 µs | -8% | 40.1 kB | 20.4 kB | -89% |
 
 The single dep is pretty much useless in contexts where you cannot control the input. You'd have to build a dedicated layer on top of anod that exposes that overload to the end user. But, consider a typical web app. Almost every reactive binding with signals is sender -> dom.
 
