@@ -1211,7 +1211,7 @@ Compared using the unbound API ( `c.compute(fn)` , `c.effect(fn)` ) which is the
 | Update: large web app | 23.0 µs | 17.4 µs | -24% | 8.7 kB | 1.3 kB | -85% |
 | Update: wide dense | 80.4 µs | 50.7 µs | -37% | 23.4 kB | 2.5 kB | -89% |
 | Update: deep | 115 µs | 134 µs | +17% | 159 kB | 39.9 kB | -75% |
-| Update: very dynamic | 57.7 µs | 53.3 µs | -8% | 40.1 kB | 4.4 kB | -89% |
+| Update: very dynamic | 57.7 µs | 53.3 µs | -8% | 40.1 kB | 20.4 kB | -49% |
 
 Negative Δ = anod is faster / uses less. Benchmarks ran on Intel i7-14700, Node v25.9.0, Linux 6.19.13.
 
@@ -1308,7 +1308,7 @@ Earlier, I think (?) solid was largely built upon [S.js](https://github.com/adam
 | Update: large web app | 298 µs | 17.4 µs | -94% | 18.4 kB | 1.3 kB | -93% |
 | Update: wide dense | 426 µs | 50.7 µs | -88% | 16.6 kB | 2.5 kB | -85% |
 | Update: deep | 140 µs | 134 µs | -4% | 40.1 kB | 39.9 kB | 0% |
-| Update: very dynamic | 88.6 µs | 53.3 µs | -40% | 20.1 kB | 4.4 kB | -78% |
+| Update: very dynamic | 88.6 µs | 53.3 µs | -40% | 20.1 kB | 20.4 kB | +1% |
 
 preact-signals perform well on tight graphs, and decent on deep graphs, but struggle on wide graphs.
 
@@ -1415,7 +1415,7 @@ The benchmarks above use the unbound API for fair comparison. But anod also supp
 | Update: large web app | 23.0 µs | 17.5 µs | -24% | 8.7 kB | 1.3 kB | -85% |
 | Update: wide dense | 80.4 µs | 48.6 µs | -40% | 23.4 kB | 2.5 kB | -89% |
 | Update: deep | 115 µs | 135 µs | +17% | 159 kB | 39.9 kB | -75% |
-| Update: very dynamic | 57.7 µs | 53.0 µs | -8% | 40.1 kB | 20.4 kB | -89% |
+| Update: very dynamic | 57.7 µs | 53.0 µs | -8% | 40.1 kB | 20.4 kB | -49% |
 
 The single dep is pretty much useless in contexts where you cannot control the input. You'd have to build a dedicated layer on top of anod that exposes that overload to the end user. But, consider a typical web app. Almost every reactive binding with signals is sender -> dom.
 
