@@ -317,14 +317,14 @@ Cell.prototype = Object.create(Signal.prototype);
 /**
  * @constructor
  * @template T, U, W
- * @param {number} opts
  * @param {(function(U, T, W): T) | (function(T, W): T)} fn
+ * @param {number} opts
  * @param {Sender<U> | null} dep1
  * @param {T=} seed
  * @param {W=} args
  * @implements {ICompute<T>}
  */
-function Compute(opts, fn, dep1, seed, args) {
+function Compute(fn, opts, dep1, seed, args) {
 	/** @type {number} */
 	this._flag = FLAG_INIT | FLAG_STALE | opts;
 	/** @type {T} */
@@ -2807,11 +2807,11 @@ function root(fn) {
 		let flag, node;
 		if (typeof depOrFn === "function") {
 			flag = FLAG_SETUP | ((0 | optsOrSeed) & OPTIONS);
-			node = new Compute(flag, depOrFn, null, fnOrSeed, argsOrOpts);
+			node = new Compute(depOrFn, flag, null, fnOrSeed, argsOrOpts);
 		} else {
 			flag =
 				FLAG_STABLE | FLAG_BOUND | FLAG_SINGLE | ((0 | argsOrOpts) & OPTIONS);
-			node = new Compute(flag, /** @type {!Function} */(fnOrSeed), depOrFn, optsOrSeed, args);
+			node = new Compute(/** @type {!Function} */(fnOrSeed), flag, depOrFn, optsOrSeed, args);
 			connect(depOrFn, node);
 		}
 		if (this._flag & FLAG_OWNER) {
@@ -2843,7 +2843,7 @@ function root(fn) {
 		let flag, node;
 		if (typeof depOrFn === "function") {
 			flag = FLAG_ASYNC | FLAG_SETUP | ((0 | optsOrSeed) & OPTIONS);
-			node = new Compute(flag, depOrFn, null, fnOrSeed, argsOrOpts);
+			node = new Compute(depOrFn, flag, null, fnOrSeed, argsOrOpts);
 		} else {
 			flag =
 				FLAG_ASYNC |
@@ -2851,7 +2851,7 @@ function root(fn) {
 				FLAG_BOUND |
 				FLAG_SINGLE |
 				((0 | argsOrOpts) & OPTIONS);
-			node = new Compute(flag, fnOrSeed, depOrFn, optsOrSeed, args);
+			node = new Compute(fnOrSeed, flag, depOrFn, optsOrSeed, args);
 			connect(depOrFn, node);
 		}
 		if (this._flag & FLAG_OWNER) {
