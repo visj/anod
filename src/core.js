@@ -87,7 +87,7 @@ var NOOP = function() {};
  * let code continue executing after the node is disposed.
  * @const
  */
-var ASSERT_NOT_DISPOSED = "Cannot access a disposed node";
+var ILLEGAL_READ = "Cannot read a disposed node or yourself";
 
 /**
  * @type {Array<Sender | number>}
@@ -446,8 +446,8 @@ function dispose() {
  */
 function val(sender) {
 	let flag = this._flag;
-	if (sender._flag & FLAG_DISPOSED) {
-		throw new Error(ASSERT_NOT_DISPOSED);
+	if (sender._flag & FLAG_DISPOSED || sender === this) {
+		throw new Error(ILLEGAL_READ);
 	}
 	if (flag & FLAG_LOADING) {
 		return this._readAsync(sender, false);
@@ -497,7 +497,7 @@ function val(sender) {
  */
 function set(value, asyncFn) {
 	if (this._flag & FLAG_DISPOSED) {
-		throw new Error(ASSERT_NOT_DISPOSED);
+		throw new Error(ILLEGAL_READ);
 	}
 	let callback = typeof value === "function";
 	/** Resource: single function arg → run as (c, current), dispatch on result. */
@@ -1377,7 +1377,7 @@ function root(fn) {
 	 */
 	function _suspendTask(node, taskNode) {
 		if (taskNode._flag & FLAG_DISPOSED) {
-			throw new Error(ASSERT_NOT_DISPOSED);
+			throw new Error(ILLEGAL_READ);
 		}
 		if (taskNode._flag & (FLAG_STALE | FLAG_PENDING)) {
 			taskNode._refresh();
@@ -1590,7 +1590,7 @@ function root(fn) {
 	 * @returns {T}
 	 */
 	function defer(sender) {
-		if (!(this._flag & FLAG_ASYNC)) {
+		if (!(this._flag & FLAG_ASYNC) || sender === this) {
 			return this.val(sender);
 		}
 		if (sender._flag & (FLAG_STALE | FLAG_PENDING)) {
@@ -1662,8 +1662,8 @@ function root(fn) {
 	 * @returns {T | null}
 	 */
 	function rejected(sender) {
-		if (sender._flag & FLAG_DISPOSED) {
-			throw new Error(ASSERT_NOT_DISPOSED);
+		if ((sender._flag & FLAG_DISPOSED) || sender === this) {
+			throw new Error(ILLEGAL_READ);
 		}
 		let flag = this._flag;
 		if (flag & FLAG_LOADING) {
@@ -1849,7 +1849,7 @@ function root(fn) {
 	 */
 	function _notify() {
 		if (this._flag & FLAG_DISPOSED) {
-			throw new Error(ASSERT_NOT_DISPOSED);
+			throw new Error(ILLEGAL_READ);
 		}
 		if (IDLE) {
 			notify(this, FLAG_STALE);
@@ -1880,7 +1880,7 @@ function root(fn) {
 	 */
 	SignalProto.post = function (value, asyncFn) {
 		if (this._flag & FLAG_DISPOSED) {
-			throw new Error(ASSERT_NOT_DISPOSED);
+			throw new Error(ILLEGAL_READ);
 		}
 		/** Resource: single function arg = asyncFn with no optimistic update. */
 		if (
@@ -1998,7 +1998,7 @@ function root(fn) {
 			(this._dep1 === null || this._dep1._flag & FLAG_DISPOSED)
 		) {
 			this._flag |= FLAG_ERROR;
-			this._value = { error: ASSERT_NOT_DISPOSED, type: FATAL };
+			this._value = { error: ILLEGAL_READ, type: FATAL };
 		}
 		return this._value;
 	};
@@ -2802,7 +2802,7 @@ function root(fn) {
 	 */
 	function compute(depOrFn, fnOrSeed, optsOrSeed, argsOrOpts, args) {
 		if (this._flag & FLAG_DISPOSED) {
-			throw new Error(ASSERT_NOT_DISPOSED);
+			throw new Error(ILLEGAL_READ);
 		}
 		let flag, node;
 		if (typeof depOrFn === "function") {
@@ -2838,7 +2838,7 @@ function root(fn) {
 	 */
 	function task(depOrFn, fnOrSeed, optsOrSeed, argsOrOpts, args) {
 		if (this._flag & FLAG_DISPOSED) {
-			throw new Error(ASSERT_NOT_DISPOSED);
+			throw new Error(ILLEGAL_READ);
 		}
 		let flag, node;
 		if (typeof depOrFn === "function") {
@@ -2877,7 +2877,7 @@ function root(fn) {
 	 */
 	function effect(depOrFn, fnOrOpts, optsOrArgs, args) {
 		if (this._flag & FLAG_DISPOSED) {
-			throw new Error(ASSERT_NOT_DISPOSED);
+			throw new Error(ILLEGAL_READ);
 		}
 		let flag, node;
 		if (typeof depOrFn === "function") {
@@ -2916,7 +2916,7 @@ function root(fn) {
 	 */
 	function spawn(depOrFn, fnOrOpts, optsOrArgs, args) {
 		if (this._flag & FLAG_DISPOSED) {
-			throw new Error(ASSERT_NOT_DISPOSED);
+			throw new Error(ILLEGAL_READ);
 		}
 		let flag, node;
 		if (typeof depOrFn === "function") {
