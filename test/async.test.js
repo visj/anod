@@ -1,7 +1,5 @@
 import { describe, test, expect } from "#test-runner";
-import { signal, root } from "#anod";
-
-let c; root((_c) => { c = _c; });
+import { signal, root, c } from "#anod";
 
 const tick = () => Promise.resolve();
 /** suspend() adds one extra microtask layer; settle needs 2 ticks for

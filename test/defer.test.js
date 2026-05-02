@@ -1,7 +1,5 @@
 import { describe, test, expect } from "#test-runner";
-import { signal, root, OPT_DEFER } from "#anod";
-
-let c; root((_c) => { c = _c; });
+import { signal, root, OPT_DEFER, c } from "#anod";
 
 describe("OPT_DEFER", () => {
     describe("compute", () => {

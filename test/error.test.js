@@ -1,7 +1,5 @@
 import { describe, test, expect } from "#test-runner";
-import { signal, root, REFUSE, PANIC, FATAL } from "#anod";
-
-let c; root((_c) => { c = _c; });
+import { signal, root, REFUSE, PANIC, FATAL, c } from "#anod";
 
 const tick = () => Promise.resolve();
 const settle = () => tick().then(tick).then(tick);

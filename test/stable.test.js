@@ -1,7 +1,5 @@
 import { describe, test, expect } from "#test-runner";
-import { signal, root } from "#anod";
-
-let c; root((_c) => { c = _c; });
+import { signal, root, c } from "#anod";
 
 describe("stable compute", () => {
 	test("val() returns stale value for unread compute (version 0 collision)", () => {

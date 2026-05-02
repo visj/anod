@@ -1,7 +1,5 @@
 import { describe, test, expect, collectAsync, expectCollected } from "#test-runner";
-import { signal, root } from "#anod";
-
-let c; root((_c) => { c = _c; });
+import { signal, root, c } from "#anod";
 
 /**
  * Runs `fn` in a child scope and returns WeakRefs to everything `fn`

@@ -1,7 +1,5 @@
 import { describe, test, expect } from "#test-runner";
-import { signal, mutable, root } from "#anod";
-
-let c; root((_c) => { c = _c; });
+import { signal, mutable, root, c } from "#anod";
 
 describe("mutable", () => {
   test("always notifies on set even when value is the same", () => {

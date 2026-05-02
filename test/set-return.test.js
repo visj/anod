@@ -1,7 +1,5 @@
 import { describe, test, expect } from "#test-runner";
-import { signal, mutable, root, batch } from "#anod";
-
-let c; root((_c) => { c = _c; });
+import { signal, mutable, root, batch, c } from "#anod";
 
 describe("signal.set() return value", () => {
     test("returns true when value changes", () => {

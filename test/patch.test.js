@@ -1,7 +1,5 @@
 import { describe, test, expect } from "#test-runner";
-import { signal, root } from "#anod-src";
-
-let c; root((_c) => { c = _c; });
+import { signal, root, c } from "#anod-src";
 
 /**
  * Tests for dynamic dep reconciliation (patchDeps) in compute() and

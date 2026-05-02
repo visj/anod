@@ -1,7 +1,5 @@
 import { describe, test, expect, expectCollected } from "#test-runner";
-import { signal, root } from "#anod";
-
-let c; root((_c) => { c = _c; });
+import { signal, root, c } from "#anod";
 
 const tick = () => Promise.resolve();
 const settle = () => tick().then(tick).then(tick);

@@ -1,9 +1,7 @@
 import { describe, test, expect } from "#test-runner";
-import { signal, root } from "#anod";
+import { signal, c } from "#anod";
 
-let c; root((_c) => { c = _c; });
-
-describe.skip("signal guard", () => {
+describe("signal guard", () => {
     describe("custom equality", () => {
         test("skips set when guard returns true (equal)", () => {
             const s = signal(

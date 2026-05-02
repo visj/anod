@@ -53,17 +53,17 @@ class Resolver {
 class IChannel extends Resolver {
 	constructor() {
 		super();
-		/** @type {AsyncSender<*> | null} */
+		/** @type {AsyncSender | null} */
 		this._res1 = null;
-		/** @type {Array<AsyncSender<*> | null> | null} */
+		/** @type {Array<AsyncSender | null> | null} */
 		this._responds = null;
 		/** @type {AbortController | null} */
 		this._controller = null;
-		/** @type {Sender<*> | null} */
+		/** @type {Sender | null} */
 		this._defer1 = null;
 		/** @type {*} */
 		this._defer1val = null;
-		/** @type {Array<Sender<*> | *> | null} */
+		/** @type {Array<Sender | *> | null} */
 		this._defers = null;
 	}
 }
@@ -171,9 +171,9 @@ class AsyncSender extends Sender {
 class Receiver extends Disposer {
 	constructor() {
 		super();
-		/** @type {Sender<*> | null} */
+		/** @type {Sender | null} */
 		this._dep1;
-		/** @type {Array<Sender<*>> | null} */
+		/** @type {Array<Sender> | null} */
 		this._deps;
 		/** @type {number} */
 		this._time;
@@ -200,13 +200,13 @@ class Receiver extends Disposer {
 	/** @returns {void} */
 	_receive() { }
 	/**
-	 * @param {Sender<*>} sender
+	 * @param {Sender} sender
 	 * @param {number} stamp
 	 * @returns {void}
 	 */
 	_read(sender, stamp) { }
 	/**
-	 * @param {Sender<*>} sender
+	 * @param {Sender} sender
 	 * @param {boolean} safe
 	 * @returns {*}
 	 */
@@ -264,9 +264,9 @@ class ICompute extends Sender {
 	constructor() {
 		super();
 		/* Receiver properties */
-		/** @type {Sender<*> | null} */
+		/** @type {Sender | null} */
 		this._dep1 = null;
-		/** @type {Array<Sender<*>> | null} */
+		/** @type {Array<Sender> | null} */
 		this._deps = null;
 		/** @type {Function | null} */
 		this._fn = null;
@@ -286,13 +286,13 @@ class ICompute extends Sender {
 	/** @returns {void} */
 	_receive() { }
 	/**
-	 * @param {Sender<*>} sender
+	 * @param {Sender} sender
 	 * @param {number} stamp
 	 * @returns {void}
 	 */
 	_read(sender, stamp) { }
 	/**
-	 * @param {Sender<*>} sender
+	 * @param {Sender} sender
 	 * @param {boolean} safe
 	 * @returns {*}
 	 */
@@ -303,7 +303,7 @@ class ICompute extends Sender {
 	/** @returns {void} */
 	_refresh() { }
 	/**
-	 * @param {Sender<*>} sender
+	 * @param {Sender} sender
 	 * @returns {*}
 	 */
 	val(sender) { }
@@ -320,9 +320,9 @@ class IEffect extends Owner {
 	constructor() {
 		super();
 		/* Receiver properties */
-		/** @type {Sender<*> | null} */
+		/** @type {Sender | null} */
 		this._dep1 = null;
-		/** @type {Array<Sender<*>> | null} */
+		/** @type {Array<Sender> | null} */
 		this._deps = null;
 		/** @type {number} */
 		this._time = 0;
@@ -347,13 +347,13 @@ class IEffect extends Owner {
 	/** @returns {void} */
 	_receive() { }
 	/**
-	 * @param {Sender<*>} sender
+	 * @param {Sender} sender
 	 * @param {number} stamp
 	 * @returns {void}
 	 */
 	_read(sender, stamp) { }
 	/**
-	 * @param {Sender<*>} sender
+	 * @param {Sender} sender
 	 * @param {boolean} safe
 	 * @returns {*}
 	 */

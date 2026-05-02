@@ -1,7 +1,5 @@
 import { describe, test, expect } from "#test-runner";
-import { signal, root, batch, OPT_WEAK } from "#anod";
-
-let c; root((_c) => { c = _c; });
+import { signal, root, batch, OPT_WEAK, c } from "#anod";
 
 describe("OPT_WEAK", () => {
     test("releases value when last subscriber disposes", () => {

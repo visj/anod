@@ -199,7 +199,7 @@ var DISPOSER_COUNT = 0;
 var SENDERS = [];
 /**
  * @const
- * @type {Array<*>}
+ * @type {Array}
  */
 var PAYLOADS = [];
 /** @const @type {Array<(function(Sender, *, number): void) | null>} */
@@ -341,7 +341,7 @@ function Compute(fn, opts, dep1, seed, args) {
 	this._fn = fn;
 	/** @type {Sender<U> | null} */
 	this._dep1 = dep1;
-	/** @type {Array<Sender<*>> | null} */
+	/** @type {Array<Sender> | null} */
 	this._deps = null;
 	/** @type {number} */
 	this._time = 0;
@@ -372,7 +372,7 @@ function Effect(opts, fn, dep1, owner, args) {
 	this._fn = fn;
 	/** @type {Sender<U> | null} */
 	this._dep1 = dep1;
-	/** @type {Array<Sender<*>> | null} */
+	/** @type {Array<Sender> | null} */
 	this._deps = null;
 	/** @type {number} */
 	this._time = 0;
@@ -404,19 +404,19 @@ function Effect(opts, fn, dep1, owner, args) {
  * @implements {IChannel}
  */
 function Channel() {
-	/** @type {AsyncSender<*> | null} First responder we're waiting on. */
+	/** @type {AsyncSender | null} First responder we're waiting on. */
 	this._res1 = null;
-	/** @type {Array<AsyncSender<*> | null> | null} Additional responders. */
+	/** @type {Array<AsyncSender | null> | null} Additional responders. */
 	this._responds = null;
 	/** @type {Array<AsyncReceiver | (function(*): void)> | null} 3-stride: [awaiter, resolve, reject]. */
 	this._waiters = null;
 	/** @type {AbortController | null} */
 	this._controller = null;
-	/** @type {Sender<*> | null} First deferred dep (inline fast path). */
+	/** @type {Sender | null} First deferred dep (inline fast path). */
 	this._defer1 = null;
 	/** @type {*} Snapshot of _defer1's value at defer() time. */
 	this._defer1val = null;
-	/** @type {Array<Sender<*> | *> | null} Paired [sender, value] entries for 2+ defers. */
+	/** @type {Array<Sender | *> | null} Paired [sender, value] entries for 2+ defers. */
 	this._defers = null;
 }
 
@@ -446,7 +446,7 @@ function dispose() {
  */
 function val(sender) {
 	let flag = this._flag;
-	if (sender._flag & FLAG_DISPOSED || sender === this) {
+	if (sender._flag & FLAG_DISPOSED || sender === /** @type {Sender} */(this)) {
 		throw new Error(ILLEGAL_READ);
 	}
 	if (flag & FLAG_LOADING) {
@@ -723,7 +723,7 @@ function schedule(node, payload, fn) {
  * The common reuse case (stamp === RVER - 1) is handled inline in val().
  *
  * @this {Receiver}
- * @param {Sender<*>} sender
+ * @param {Sender} sender
  * @param {number} stamp - sender's previous _version before tagging
  * @returns {void}
  */
@@ -1426,8 +1426,8 @@ function root(fn) {
 	 * subscribe to every task in one pass and resolve the Promise.
 	 *
 	 * @param {AsyncReceiver} node
-	 * @param {Array<Compute<*>>} tasks
-	 * @returns {Array<*> | Promise<Array<*>>}
+	 * @param {Array<Compute>} tasks
+	 * @returns {Array | Promise<Array>}
 	 */
 	function _suspendArray(node, tasks) {
 		let count = tasks.length;
@@ -1477,8 +1477,8 @@ function root(fn) {
 	 * values from the same moment). Mirrors c.pending() semantics.
 	 * @param {AsyncReceiver} node
 	 * @param {Array<Compute>} tasks
-	 * @param {Array<*>} results
-	 * @param {function(Array<*>): void} resolve
+	 * @param {Array} results
+	 * @param {function(Array	): void} resolve
 	 * @param {function(*): void} reject
 	 */
 	function _stepArray(node, tasks, results, resolve, reject) {
@@ -1588,7 +1588,7 @@ function root(fn) {
 	 * @returns {T}
 	 */
 	function defer(sender) {
-		if (!(this._flag & FLAG_ASYNC) || sender === this) {
+		if (!(this._flag & FLAG_ASYNC) || sender === /** @type {Sender} */(this)) {
 			return this.val(sender);
 		}
 		if (sender._flag & (FLAG_STALE | FLAG_PENDING)) {
@@ -1660,7 +1660,7 @@ function root(fn) {
 	 * @returns {T | null}
 	 */
 	function rejected(sender) {
-		if ((sender._flag & FLAG_DISPOSED) || sender === this) {
+		if ((sender._flag & FLAG_DISPOSED) || sender === /** @type {Sender} */(this)) {
 			throw new Error(ILLEGAL_READ);
 		}
 		let flag = this._flag;
@@ -3948,7 +3948,7 @@ function settleDeps(node) {
 
 	/** Check overflow defers. */
 	for (let i = 0; i < deferLen; i += 2) {
-		let sender = /** @type {Sender<*>} */(defers[i]);
+		let sender = /** @type {Sender} */(defers[i]);
 		let snapshot = /** @type {*} */(defers[i + 1]);
 		if (sender._stamp === stamp) {
 			if (sender._changed(snapshot)) {
@@ -4160,7 +4160,7 @@ function startRoot(root, fn) {
 }
 
 /**
- * @param {ICompute<*>} node
+ * @param {ICompute} node
  * @returns {void}
  */
 function startCompute(node) {

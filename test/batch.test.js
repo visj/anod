@@ -1,7 +1,5 @@
 import { describe, test, expect } from "#test-runner";
-import { signal, root, batch } from "#anod";
-
-let c; root((_c) => { c = _c; });
+import { signal, root, batch, c } from "#anod";
 
 describe("batch", () => {
     test("batches changes until end", () => {

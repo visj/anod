@@ -1,7 +1,5 @@
 import { describe, test, expect } from "#test-runner";
-import { signal, root, batch } from "#anod";
-
-let c; root((_c) => { c = _c; });
+import { signal, root, batch, c } from "#anod";
 
 /**
  * Tests exploring whether _ptime is necessary when the library
