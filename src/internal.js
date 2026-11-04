@@ -2134,8 +2134,10 @@ function root(fn) {
 
 	/**
 	 * Settles an async compute. Clears loading/lock/init, handles deferred
-	 * dispose, resolves waiters, notifies subscribers, and re-runs if the
-	 * node was marked stale while locked. Handles both value and error:
+	 * dispose, settles deferred deps, resolves waiters, notifies subscribers,
+	 * and re-runs if the node was marked stale while locked. Settling always
+	 * completes the activation; only the subscriber notification depends on
+	 * the value having changed. Handles both value and error:
 	 * when FLAG_ERROR is set before calling, the value is treated as an
 	 * error. Uses err || { error: err } guard on errors to guarantee a
 	 * non-falsy value (prevents skipping the comparison branch when user
@@ -2156,51 +2158,46 @@ function root(fn) {
 			return;
 		}
 
-		if (value !== this._value || flag & (FLAG_INIT | FLAG_ERROR)) {
+		let changed =
+			value !== this._value || !!(flag & (FLAG_INIT | FLAG_ERROR));
+		if (changed) {
 			this._value = value;
-			let time = TIME + 1;
-			this._ctime = time;
+			this._ctime = TIME + 1;
+		}
 
-			let stale = false;
-			if (this._flag & FLAG_ASYNC) {
-				let hasDefers =
-					this._flag & FLAG_CHANNEL &&
-					(this._chan._defer1 !== null || this._chan._defers !== null);
-				if (this._deps !== null || hasDefers) {
-					stale = settleDeps(this);
-				}
+		let stale = false;
+		if (this._flag & FLAG_ASYNC) {
+			let hasDefers =
+				this._flag & FLAG_CHANNEL &&
+				(this._chan._defer1 !== null || this._chan._defers !== null);
+			if (this._deps !== null || hasDefers) {
+				stale = settleDeps(this);
 			}
+		}
 
-			let waiters = null;
-			if (this._flag & FLAG_CHANNEL) {
-				let ch = this._chan;
-				if (ch !== null && ch._waiters !== null) {
-					waiters = ch._waiters;
-					let waiterCount = waiters.length;
-					settleNotify(this, value, !!isError, waiters, waiterCount);
-					ch._waiters = null;
-					this._flag &= ~FLAG_WAITER;
-				}
+		let waiters = null;
+		if (this._flag & FLAG_CHANNEL) {
+			let ch = this._chan;
+			if (ch !== null && ch._waiters !== null) {
+				waiters = ch._waiters;
+				let waiterCount = waiters.length;
+				settleNotify(this, value, !!isError, waiters, waiterCount, !changed);
+				ch._waiters = null;
+				this._flag &= ~FLAG_WAITER;
 			}
+		}
+		if (changed) {
 			if (waiters === null) {
 				notify(this, FLAG_STALE);
 			}
-
 			flush();
+		}
 
-			if (
-				stale ||
-				(flag & FLAG_LOCKED &&
-					(this._flag & FLAG_STALE ||
-						(this._flag & FLAG_PENDING && needsUpdate(this, TIME))))
-			) {
-				this._flag |= FLAG_STALE;
-				this._update(TIME);
-			}
-		} else if (
-			flag & FLAG_LOCKED &&
-			(this._flag & FLAG_STALE ||
-				(this._flag & FLAG_PENDING && needsUpdate(this, TIME)))
+		if (
+			stale ||
+			(flag & FLAG_LOCKED &&
+				(this._flag & FLAG_STALE ||
+					(this._flag & FLAG_PENDING && needsUpdate(this, TIME))))
 		) {
 			this._flag |= FLAG_STALE;
 			this._update(TIME);
@@ -2414,10 +2411,11 @@ function root(fn) {
 		 *  FLAG_LOADING via the setup function. Skip async dispatch.
 		 *  Check both FLAG_SUSPEND and FLAG_LOADING: the callback path
 		 *  sets both, while promise/task paths only set FLAG_SUSPEND
-		 *  (FLAG_LOADING is set later by this dispatch code). */
+		 *  (FLAG_LOADING is set later by this dispatch code). Like the
+		 *  promise path, FLAG_INIT is kept for _settle, so the first
+		 *  settle notifies even if it resolves to the seed. */
 		if (flag & FLAG_ASYNC) {
 			if (this._flag & FLAG_SUSPEND && this._flag & FLAG_LOADING) {
-				this._flag &= ~FLAG_INIT;
 				return;
 			}
 			let kind = asyncKind(value);
@@ -2433,6 +2431,13 @@ function root(fn) {
 					);
 				}
 				return;
+			}
+			/** Sync result: the activation settles here, deferred deps too. */
+			if (
+				this._flag & FLAG_CHANNEL &&
+				(this._chan._defer1 !== null || this._chan._defers !== null)
+			) {
+				settleDefers(this);
 			}
 		}
 
@@ -2637,6 +2642,13 @@ function root(fn) {
 					resolveIterator(this, value, time);
 				}
 				return;
+			}
+			/** Sync result: the activation settles here, deferred deps too. */
+			if (
+				this._flag & FLAG_CHANNEL &&
+				(this._chan._defer1 !== null || this._chan._defers !== null)
+			) {
+				settleDefers(this);
 			}
 		}
 
@@ -3772,14 +3784,17 @@ function resolveIterator(node, iterable, time) {
  *         a sync sub (version - 1), stamp with `version` ("notified").
  * Pass 3: Inline notify — OR FLAG_STALE on all subs, but only call
  *         _receive() on subs not stamped `version` (not a waiter).
+ *         Skipped when quiet.
  * @template T
  * @param {AsyncSender<T>} node
  * @param {T} value
  * @param {boolean} isError
  * @param {Array<AsyncReceiver | Function>} waiters
  * @param {number} waiterCount
+ * @param {boolean=} quiet - Only resolve the waiters, without marking
+ *     subscribers stale (the value did not change).
  */
-function settleNotify(node, value, isError, waiters, waiterCount) {
+function settleNotify(node, value, isError, waiters, waiterCount, quiet) {
 	let version = (SEED += 2);
 
 	/** Pass 1: stamp all sync subs with version - 1. */
@@ -3810,6 +3825,10 @@ function settleNotify(node, value, isError, waiters, waiterCount) {
 		}
 		awaiter._stamp = version;
 		clearRespond(awaiter, node);
+	}
+
+	if (quiet) {
+		return;
 	}
 
 	/** Pass 3: inline notify — skip subs that were resolved as waiters. */
@@ -3943,6 +3962,49 @@ function settleDeps(node) {
 		}
 	}
 	return changed;
+}
+
+/**
+ * Subscribes the deferred deps of an async node whose fn returned a
+ * sync value, so the activation settles without ever loading. The run
+ * has just tracked the node's other deps, so a sender it already has
+ * is found by scan instead of by stamp: settleDeps' stamps would
+ * overwrite those of an outer node that is still running. A deferred
+ * value was read in this same run, so there is nothing to re-run for.
+ * @param {AsyncReceiver} node
+ * @returns {void}
+ */
+function settleDefers(node) {
+	let chan = node._chan;
+	let defer1 = chan._defer1;
+	let defers = chan._defers;
+	chan._defer1 = null;
+	chan._defers = null;
+	if (defer1 !== null && !hasDep(node, defer1)) {
+		subscribe(node, defer1);
+	}
+	if (defers !== null) {
+		let count = defers.length;
+		for (let i = 0; i < count; i += 2) {
+			let sender = /** @type {Sender} */(defers[i]);
+			if (!hasDep(node, sender)) {
+				subscribe(node, sender);
+			}
+		}
+	}
+}
+
+/**
+ * @param {Receiver} node
+ * @param {Sender} sender
+ * @returns {boolean} true if sender is already a dep of node
+ */
+function hasDep(node, sender) {
+	if (node._dep1 === sender) {
+		return true;
+	}
+	let deps = node._deps;
+	return deps !== null && deps.indexOf(sender) !== -1;
 }
 
 /**
