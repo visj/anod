@@ -2451,13 +2451,13 @@ function root(fn) {
 	};
 
 	/**
-	 * Compute notification handler.
+	 * Compute notification handler. In-flight async work is left alone:
+	 * the notice may resolve to no change, so it is only torn down when
+	 * the node actually re-runs (_update) or is disposed.
 	 * 1. Default: propagate PENDING downstream (pure pull).
-	 * 2. FLAG_LOADING: abort in-flight async work immediately so
-	 *    stale fetches/promises are cancelled without waiting for a pull.
-	 * 3. FLAG_WAITER: enqueue to COMPUTES + notify PENDING.
-	 * 4. FLAG_EAGER + FLAG_ASYNC: enqueue to COMPUTES for eager re-run.
-	 * 5. FLAG_EAGER + sync: notify FLAG_STALE directly (pure push).
+	 * 2. FLAG_WAITER: enqueue to COMPUTES + notify PENDING.
+	 * 3. FLAG_EAGER + FLAG_ASYNC: enqueue to COMPUTES for eager re-run.
+	 * 4. FLAG_EAGER + sync: notify FLAG_STALE directly (pure push).
 	 * @this {Compute}
 	 * @returns {void}
 	 */
@@ -2468,7 +2468,6 @@ function root(fn) {
 				flag &
 				(FLAG_EAGER |
 					FLAG_WAITER |
-					FLAG_LOADING |
 					FLAG_LOCKED |
 					FLAG_PAUSED |
 					FLAG_DISPOSED)
@@ -2478,15 +2477,6 @@ function root(fn) {
 		} else if (flag & (FLAG_LOCKED | FLAG_PAUSED | FLAG_DISPOSED)) {
 			return;
 		} else {
-			/** Abort in-flight async work. The stale/pending flag check
-			 *  in resolvePromise ensures old callbacks are rejected. */
-			if (flag & FLAG_LOADING && flag & FLAG_CHANNEL) {
-				resetChannel(this);
-			}
-			if (!(flag & (FLAG_EAGER | FLAG_WAITER))) {
-				notify(this, FLAG_PENDING);
-				return;
-			}
 			COMPUTES[COMPUTE_COUNT++] = this;
 			if (flag & FLAG_EAGER) {
 				if (!(flag & FLAG_ASYNC)) {
@@ -2520,6 +2510,15 @@ function root(fn) {
 		}
 
 		this._time = time;
+		/** Tear down the in-flight activation. Done here rather than in
+		 *  _receive, so a pending notice that resolves to no change
+		 *  leaves its waiters and controller alone. */
+		if (flag & FLAG_LOADING) {
+			this._flag &= ~(FLAG_LOADING | FLAG_SUSPEND);
+			if (flag & FLAG_CHANNEL) {
+				resetChannel(this);
+			}
+		}
 		if (!(flag & FLAG_INIT)) {
 			if (this._cleanup !== null) {
 				clearCleanup(this);
@@ -2760,14 +2759,6 @@ function root(fn) {
 		let flag = this._flag;
 		if (flag & (FLAG_LOCKED | FLAG_PAUSED | FLAG_DISPOSED)) {
 			return;
-		}
-		/** Abort in-flight async work eagerly so stale fetches/promises
-		 *  are cancelled without waiting for _update to run. */
-		if (flag & FLAG_LOADING) {
-			this._flag &= ~(FLAG_LOADING | FLAG_SUSPEND);
-			if (flag & FLAG_CHANNEL) {
-				resetChannel(this);
-			}
 		}
 		if (this._owned === null) {
 			RECEIVERS[RECEIVER_COUNT++] = this;
@@ -3468,7 +3459,6 @@ function checkSingle(node, time) {
 	if (dep._ctime > node._time) {
 		node._update(time);
 	} else {
-		node._time = time;
 		node._flag &= ~(FLAG_STALE | FLAG_PENDING);
 	}
 }
@@ -3574,8 +3564,8 @@ function checkRun(node, time) {
 				}
 			}
 
-			/** No dep changed - clear flags without re-executing */
-			node._time = time;
+			/** No dep changed - clear flags without re-executing. _time
+			 *  stays: it is also the in-flight activation's token. */
 			node._flag &= ~(FLAG_STALE | FLAG_PENDING);
 		}
 
@@ -3623,7 +3613,6 @@ function checkRun(node, time) {
 				continue outer;
 			}
 			/** No more deps — clear parent and keep ascending */
-			parent._time = time;
 			parent._flag &= ~(FLAG_STALE | FLAG_PENDING);
 			node = parent;
 		}
