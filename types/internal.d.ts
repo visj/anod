@@ -533,7 +533,7 @@ export declare const SCOPES: Array<Array<Effect>>;
 export declare var SCOPE_COUNT: number;
 export declare const RECEIVERS: Array<Effect>;
 export declare var RECEIVER_COUNT: number;
-export declare const PURGES: Array<Sender>;
+export declare const PURGES: Array<Sender | Owner>;
 export declare var PURGE_COUNT: number;
 
 /* What the factories do once a node is constructed: connect() a bound

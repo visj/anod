@@ -421,16 +421,32 @@ function Channel() {
 }
 
 /**
- * Shared across Root/Signal/Compute/Effect. Routes to `_dispose` directly
- * when idle, otherwise queues onto DISPOSES so the batch drain runs it in
- * the same transaction as any pending sets.
+ * Shared across Root/Signal/Compute/Effect. When idle, disposes inside its
+ * own transaction: writes and disposes made by cleanups are queued and
+ * flushed once the whole subtree is disposed, so nothing being torn down
+ * re-runs. Otherwise queues onto DISPOSES so the batch drain runs it in the
+ * same transaction as any pending sets. Either way, an effect's live owner
+ * then drops it from `_owned`.
  * @this {Disposer}
  * @returns {void}
  */
 function dispose() {
 	if (!(this._flag & FLAG_DISPOSED)) {
 		if (IDLE) {
-			this._dispose();
+			let owner = this._owner;
+			IDLE = false;
+			try {
+				this._dispose();
+			} finally {
+				/** Writes made before a throwing cleanup still commit. */
+				if (SENDER_COUNT > 0 || DISPOSER_COUNT > 0) {
+					flush();
+				}
+				IDLE = true;
+			}
+			if (owner !== null) {
+				purgeOwned(owner);
+			}
 		} else {
 			DISPOSES[DISPOSER_COUNT++] = this;
 		}
@@ -845,6 +861,13 @@ function root(fn) {
 	SignalProto._equal = null;
 
 	/**
+	 * Read on disposal to find the owner to compact. Signals are unowned,
+	 * and an owned compute keeps no reference back to its owner.
+	 */
+	SignalProto._owner =
+		ComputeProto._owner = null;
+
+	/**
 	 * No op functions on signals
 	 */
 	SignalProto._drop = 
@@ -913,6 +936,28 @@ function root(fn) {
 			}
 			i++;
 		}
+	};
+
+	/**
+	 * Compacts _owned by removing FLAG_DISPOSED children. Keeps creation
+	 * order, so clearOwned still disposes them in reverse.
+	 * @this {Owner}
+	 */
+	RootProto._purge = EffectProto._purge = function () {
+		let owned = this._owned;
+		this._flag &= ~FLAG_PURGE;
+		if (owned === null) {
+			return;
+		}
+		let write = 0;
+		let count = owned.length;
+		for (let read = 0; read < count; read++) {
+			let child = owned[read];
+			if (!(child._flag & FLAG_DISPOSED)) {
+				owned[write++] = child;
+			}
+		}
+		owned.length = write;
 	};
 
 	// Disposer#dispose — shared by all four node types
@@ -3140,6 +3185,27 @@ function clearOwned(owner) {
 }
 
 /**
+ * Drops disposed children from a live owner's `_owned`, so an owner that
+ * outlives its children does not keep a slot for every child it ever had.
+ * Called once dispose() has taken a child down on its own. When idle, the
+ * owner compacts right away; inside a transaction it is queued onto
+ * PURGES, which runs after the disposes of the same pass. Owners already
+ * disposed or queued are skipped, as is the global `c`, which owns nothing.
+ * @param {Owner} owner
+ * @returns {void}
+ */
+function purgeOwned(owner) {
+	if ((owner._flag & (FLAG_OWNER | FLAG_DISPOSED | FLAG_PURGE)) === FLAG_OWNER) {
+		if (IDLE) {
+			owner._purge();
+		} else {
+			owner._flag |= FLAG_PURGE;
+			PURGES[PURGE_COUNT++] = owner;
+		}
+	}
+}
+
+/**
  * Checks a single owner's _recover handlers.
  * @param {Owner} owner
  * @param {?} error
@@ -4136,6 +4202,8 @@ function resolveWaiters(responder, responderCh, value, isError, panic) {
 /**
  * Runs `fn` with the root node itself as the argument. Prototype methods
  * on Root (compute/effect/derive/etc.) use `this` (the root) as the owner.
+ * If `fn` throws, the caller never gets the root back, so it is disposed
+ * before the error is rethrown.
  * @param {Root} root
  * @param {function(Root): void} fn
  * @returns {void}
@@ -4145,6 +4213,13 @@ function startRoot(root, fn) {
 	IDLE = true;
 	try {
 		fn(root);
+	} catch (error) {
+		try {
+			root.dispose();
+		} catch (err) {
+			/* swallow — the setup error wins */
+		}
+		throw error;
 	} finally {
 		IDLE = idle;
 	}
@@ -4279,10 +4354,15 @@ function flush() {
 		do {
 			time = ++TIME;
 			if (DISPOSER_COUNT > 0) {
-				let count = DISPOSER_COUNT;
-				for (let i = 0; i < count; i++) {
-					DISPOSES[i]._dispose();
+				/** Disposes queued by a cleanup join this drain. */
+				for (let i = 0; i < DISPOSER_COUNT; i++) {
+					let node = DISPOSES[i];
+					let owner = node._owner;
 					DISPOSES[i] = null;
+					node._dispose();
+					if (owner !== null) {
+						purgeOwned(owner);
+					}
 				}
 				DISPOSER_COUNT = 0;
 			}
