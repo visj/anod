@@ -32,4 +32,15 @@ Run with `bun test --conditions=src test/explore/ownership.test.js`.
 
 ## Fix
 
-_Not fixed yet. The fix branch fills this in._
+- **`Clock.prototype._recover = null`.** The Clock already defined `_flag`, `_level` and `_owner` on its prototype so it could stand in as an owner. It now also defines `_recover`, so it looks like an owner with no handlers. `tryRecover` reaches the Clock, `_checkRecover` sees `null` and returns false, and the walk ends at `Clock._owner === null`. The effect then gets `RECOVER_NONE`: it is disposed and the FATAL error is rethrown to the creator (`startEffect`) or the writer (`flushEffects` → `flush`), the same as under a root with no handlers. An async error (a spawn's rejected promise) disposes the effect in `EffectProto._settle` and is not rethrown, again as under a handler-less root.
+- `tryRecover` is the only code that walks the owner chain, and it reads only `_recover` and `_owner`. `_owned` and `_cleanup` are never read off the Clock, because `addOwned` is guarded by `FLAG_OWNER`, which the Clock does not set. So nothing else is needed.
+
+Behavior decisions: none. The spec's intended behavior is implemented as written.
+
+Test expectations changed: none.
+
+Other bugs' tests turned green: none.
+
+### Hot paths touched
+
+None. It is one prototype property, so Clock instances and node constructors are unchanged, and the only reader is the error path (`tryRecover`).

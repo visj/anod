@@ -242,6 +242,12 @@ Clock.prototype._flag = 0;
 Clock.prototype._level = -1;
 /** @type {Owner | null} */
 Clock.prototype._owner = null;
+/**
+ * No recover handlers: owner-chain walks (tryRecover) treat the Clock
+ * as the end of the chain, like a root with nothing registered.
+ * @type {null}
+ */
+Clock.prototype._recover = null;
 
 /**
  * @constructor
