@@ -1634,7 +1634,9 @@ function root(fn) {
 	/**
 	 * Checks if one or more tasks are currently loading. Subscribes to
 	 * each task as a dep (so the caller re-runs when they settle).
-	 * Accepts a single task or an array of tasks.
+	 * Accepts a single task or an array of tasks. Subscribes through
+	 * rejected(), which tracks like val() but never throws for an
+	 * errored task: checking errors is rejected()'s job.
 	 *
 	 * Usage: `if (c.pending([taskA, taskB])) return;`
 	 *
@@ -1649,14 +1651,14 @@ function root(fn) {
 			let count = tasks.length;
 			for (let i = 0; i < count; i++) {
 				let task = tasks[i];
-				this.val(task);
+				this.rejected(task);
 				if (task._flag & FLAG_LOADING) {
 					loading = true;
 				}
 			}
 		} else {
 			/** Single task. */
-			this.val(tasks);
+			this.rejected(tasks);
 			if (tasks._flag & FLAG_LOADING) {
 				loading = true;
 			}
