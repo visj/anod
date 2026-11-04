@@ -651,6 +651,59 @@ describe("contextual writes (c.set / c.post)", () => {
     });
 
     /**
+     * Expected: a writer that reads its target through a compute still sees
+     * later external writes.
+     * Actual (before fix 10): seen stays [0]. The guarded write marked the
+     * compute STALE and its PENDING to the paused writer was cleared, so the
+     * compute stayed stale with the writer unmarked. notify() stops at an
+     * already-stale compute, so no later write reached the writer.
+     */
+    test("a writer that reads its target through a compute still sees later writes", () => {
+        const s = signal(0);
+        const seen = [];
+        const r = root((r) => {
+            const x = r.compute(s, (v) => v * 10);
+            r.effect((cx) => {
+                const v = cx.val(x);
+                seen.push(v);
+                if (v === 0) {
+                    cx.set(s, 1);
+                }
+            });
+        });
+        expect(s.get()).toBe(1);
+        s.set(2);
+        expect(seen).toEqual([0, 20]);
+        r.dispose();
+    });
+
+    /** The interceptor case above, reading `name` through a compute. */
+    test("an interceptor reading through a compute sees an external write in the same drain", () => {
+        const name = signal("alice");
+        const trigger = signal(0);
+        const seen = [];
+        const r = root((r) => {
+            const x = r.compute(name, (v) => v);
+            r.effect((cx) => {
+                const v = cx.val(x);
+                seen.push(v);
+                const low = v.toLowerCase();
+                if (low !== v) {
+                    cx.set(name, low);
+                }
+            });
+            r.effect(trigger, (t) => { if (t) name.set("CAROL"); });
+        });
+        batch(() => {
+            name.set("BOB");
+            trigger.set(1);
+        });
+        expect(seen).toEqual(["alice", "BOB", "CAROL"]);
+        expect(name.get()).toBe("carol");
+        r.dispose();
+    });
+
+    /**
      * Expected: a paused spawn does not re-run when a dep changes.
      * Actual: the spawn's own c.post (after an await) drains through
      * guardedAssign, whose finally clears FLAG_PAUSED (src/internal.js:2016).

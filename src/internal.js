@@ -1999,9 +1999,46 @@ function root(fn) {
 	ComputeProto.val = val;
 
 	/**
+	 * Lifts the guard of a contextual write. Clears the pause and the
+	 * stale/pending bits that the write's own notification left on the
+	 * receiver, but keeps the ones it held before the write, so a user
+	 * pause() or a change from another dep survives. When the write
+	 * reached a clean receiver through a compute, that compute is left
+	 * stale with the receiver unmarked, and later changes would stop at
+	 * it. Its deps are brought up to date so they reach it again.
+	 * @param {Receiver} receiver
+	 * @param {number} flag - the receiver's flags before the write
+	 * @returns {void}
+	 */
+	function unguard(receiver, flag) {
+		let added = receiver._flag & ~flag;
+		receiver._flag &= flag | ~(FLAG_PAUSED | FLAG_STALE | FLAG_PENDING);
+		if (added & FLAG_PENDING && !(flag & (FLAG_STALE | FLAG_PENDING))) {
+			let dep = receiver._dep1;
+			if (dep !== null && dep._flag & (FLAG_STALE | FLAG_PENDING)) {
+				FENCE = SEED;
+				dep._refresh();
+			}
+			let deps = receiver._deps;
+			if (deps !== null) {
+				let count = deps.length;
+				for (let i = 0; i < count; i++) {
+					dep = deps[i];
+					if (dep._flag & (FLAG_STALE | FLAG_PENDING)) {
+						FENCE = SEED;
+						dep._refresh();
+					}
+				}
+			}
+		}
+	}
+
+	/**
 	 * Drain handler for contextual set. Wraps assign() with FLAG_PAUSED
 	 * on the receiver so that notifications propagating from this write
-	 * are ignored by the receiver that initiated the write.
+	 * are ignored by the receiver that initiated the write. The write
+	 * skips the receiver, so FLAG_SCHEDULED stays armed for the sender:
+	 * a later write to it in the same drain still notifies the receiver.
 	 * @template T
 	 * @param {Sender<T>} node
 	 * @param {{ _value: T, _recv: Receiver }} payload
@@ -2009,17 +2046,21 @@ function root(fn) {
 	 */
 	function guardedAssign(node, payload, time) {
 		let receiver = payload._recv;
-		receiver._flag |= FLAG_PAUSED;
+		let flag = receiver._flag;
+		let scheduled = node._flag & FLAG_SCHEDULED;
+		receiver._flag = flag | FLAG_PAUSED;
 		try {
 			assign(node, payload._value, time);
 		} finally {
-			receiver._flag &= ~(FLAG_PAUSED | FLAG_STALE | FLAG_PENDING);
+			unguard(receiver, flag);
+			node._flag |= scheduled;
 		}
 	}
 
 	/**
 	 * Drain handler for guarded async writes. Pauses the receiver
-	 * around asyncAssign so it ignores its own notification.
+	 * around asyncAssign so it ignores its own notification, and
+	 * keeps FLAG_SCHEDULED armed like guardedAssign.
 	 * @template T
 	 * @param {AsyncSender<T>} node
 	 * @param {{ _value: T, _fn: (function(AsyncSender<T>, T): (T | Promise<T>)), _recv: Receiver }} payload
@@ -2027,11 +2068,14 @@ function root(fn) {
 	 */
 	function guardedAsyncAssign(node, payload, time) {
 		let receiver = payload._recv;
-		receiver._flag |= FLAG_PAUSED;
+		let flag = receiver._flag;
+		let scheduled = node._flag & FLAG_SCHEDULED;
+		receiver._flag = flag | FLAG_PAUSED;
 		try {
 			asyncAssign(node, payload, time);
 		} finally {
-			receiver._flag &= ~(FLAG_PAUSED | FLAG_STALE | FLAG_PENDING);
+			unguard(receiver, flag);
+			node._flag |= scheduled;
 		}
 	}
 
@@ -2065,9 +2109,10 @@ function root(fn) {
 					: sender._value !== _value)
 			) {
 				sender._value = _value;
-				this._flag |= FLAG_PAUSED;
+				let flag = this._flag;
+				this._flag = flag | FLAG_PAUSED;
 				notify(sender, FLAG_STALE);
-				this._flag &= ~(FLAG_PAUSED | FLAG_STALE | FLAG_PENDING);
+				unguard(this, flag);
 				flush();
 			}
 			if (asyncFn !== undefined && sender._flag & FLAG_ASYNC) {
