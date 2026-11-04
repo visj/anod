@@ -45,6 +45,7 @@ const FLAG_EAGER = 1 << 23;
 const FLAG_PURGE = 1 << 24;
 const FLAG_PAUSED = 1 << 25;
 const FLAG_OWNER = 1 << 26;
+const FLAG_CALLBACK = 1 << 27;
 
 /** Error type constants for { error, type } POJOs. */
 const REFUSE = 1;
@@ -1262,14 +1263,17 @@ function root(fn) {
 	function suspend(promiseOrTask) {
 		/** Branch: setup function → callback constructor path.
 		 *  Sets FLAG_SUSPEND so _update knows the node is waiting
-		 *  for a callback-driven settlement, not a returned promise. */
+		 *  for a callback-driven settlement, not a returned promise.
+		 *  FLAG_CALLBACK stays set until the node's fn returns, so a
+		 *  callback that settles before then (synchronously, inside
+		 *  the setup fn) is finished by _update, not mid-run. */
 		if (typeof promiseOrTask === "function") {
 			if (this._flag & FLAG_SUSPEND) {
 				throw new Error(
 					"Cannot call suspend() with callbacks after a previous suspend()"
 				);
 			}
-			this._flag |= FLAG_SUSPEND | FLAG_LOADING;
+			this._flag |= FLAG_SUSPEND | FLAG_LOADING | FLAG_CALLBACK;
 			let node = this;
 			let time = this._time;
 			promiseOrTask(
@@ -2160,6 +2164,19 @@ function root(fn) {
 
 		let changed =
 			value !== this._value || !!(flag & (FLAG_INIT | FLAG_ERROR));
+
+		/** Settled from inside the fn that called c.suspend(fn), which is
+		 *  still running. Only write the value, as part of that run (its
+		 *  _time); _update finishes the settle once the fn has returned
+		 *  and its deps are tracked. */
+		if (flag & FLAG_CALLBACK) {
+			if (changed) {
+				this._value = value;
+				this._ctime = this._time;
+			}
+			return;
+		}
+
 		if (changed) {
 			this._value = value;
 			this._ctime = TIME + 1;
@@ -2319,7 +2336,8 @@ function root(fn) {
 				} else {
 					value = { error, type: FATAL };
 				}
-				this._flag |= FLAG_ERROR;
+				/** A throw wins over a callback that already settled. */
+				this._flag = (this._flag | FLAG_ERROR) & ~FLAG_CALLBACK;
 			}
 		} else {
 			/** Setup or dynamic: bump STAMP for dep tracking */
@@ -2369,7 +2387,8 @@ function root(fn) {
 				} else {
 					value = { error, type: FATAL };
 				}
-				this._flag |= FLAG_ERROR;
+				/** A throw wins over a callback that already settled. */
+				this._flag = (this._flag | FLAG_ERROR) & ~FLAG_CALLBACK;
 			}
 
 			if (flag & FLAG_SETUP) {
@@ -2416,6 +2435,27 @@ function root(fn) {
 		 *  settle notifies even if it resolves to the seed. */
 		if (flag & FLAG_ASYNC) {
 			if (this._flag & FLAG_SUSPEND && this._flag & FLAG_LOADING) {
+				this._flag &= ~FLAG_CALLBACK;
+				return;
+			}
+			/** The callback settled before the fn returned, and _settle
+			 *  only wrote the value. As with any callback suspend, the
+			 *  fn's return value is ignored; finish the settle here. */
+			if (this._flag & FLAG_CALLBACK) {
+				this._flag &= ~FLAG_CALLBACK;
+				if (this._flag & FLAG_CHANNEL) {
+					let chan = this._chan;
+					if (chan._defer1 !== null || chan._defers !== null) {
+						settleDefers(this);
+					}
+					let waiters = chan._waiters;
+					if (waiters !== null) {
+						let isError = !!(this._flag & FLAG_ERROR);
+						settleNotify(this, this._value, isError, waiters, waiters.length, true);
+						chan._waiters = null;
+						this._flag &= ~FLAG_WAITER;
+					}
+				}
 				return;
 			}
 			let kind = asyncKind(value);
@@ -2441,7 +2481,7 @@ function root(fn) {
 			}
 		}
 
-		flag = this._flag &= ~FLAG_INIT;
+		flag = this._flag &= ~(FLAG_INIT | FLAG_CALLBACK);
 		if (flag & FLAG_ERROR) {
 			this._value = value;
 			this._ctime = time;
@@ -2630,7 +2670,7 @@ function root(fn) {
 
 		if (flag & FLAG_ASYNC) {
 			if (this._flag & FLAG_SUSPEND && this._flag & FLAG_LOADING) {
-				this._flag &= ~FLAG_INIT;
+				this._flag &= ~(FLAG_INIT | FLAG_CALLBACK);
 				return;
 			}
 			let kind = asyncKind(value);
@@ -2652,7 +2692,9 @@ function root(fn) {
 			}
 		}
 
-		this._flag &= ~FLAG_INIT;
+		/** An effect has no value for its fn's return to overwrite, so
+		 *  its callbacks settle as they fire; FLAG_CALLBACK is unused. */
+		this._flag &= ~(FLAG_INIT | FLAG_CALLBACK);
 		if (this._finalize !== null) {
 			clearFinalize(this);
 		}
@@ -3742,7 +3784,15 @@ function resolveIterator(node, iterable, time) {
 			}
 		}
 
+		/** A finished iterator settles with its return value. If it returned
+		 *  nothing, the last yield already settled the node; if it never
+		 *  yielded, it settles to its current value (the seed or previous). */
 		if (result.done) {
+			if (result.value !== undefined) {
+				node._settle(result.value);
+			} else if (node._flag & FLAG_LOADING) {
+				node._settle(node._value);
+			}
 			return;
 		}
 
@@ -4476,6 +4526,7 @@ export {
 	FLAG_PURGE,
 	FLAG_PAUSED,
 	FLAG_OWNER,
+	FLAG_CALLBACK,
 	REFUSE,
 	PANIC,
 	FATAL,
