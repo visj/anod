@@ -651,6 +651,9 @@ describe("lock / unlock", () => {
         await settle();
         s.set(3);
         await settle();
+        /** The re-run locked again, so the change to 3 waits for its unlock. */
+        ds[ds.length - 1].resolve();
+        await settle();
         expect(runs.length > 1).toBe(true);
         expect(runs[runs.length - 1]).toBe(3);
         r.dispose();

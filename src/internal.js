@@ -410,7 +410,7 @@ function Channel() {
 	this._responds = null;
 	/** @type {Array<AsyncReceiver | (function(*): void)> | null} 3-stride: [awaiter, resolve, reject]. */
 	this._waiters = null;
-	/** @type {AbortController | null} */
+	/** @type {AbortController | Array<AbortController> | null} */
 	this._controller = null;
 	/** @type {Sender | null} First deferred dep (inline fast path). */
 	this._defer1 = null;
@@ -1338,10 +1338,11 @@ function root(fn) {
 		}
 		this._flag |= FLAG_SUSPEND;
 		if (typeof promiseOrTask.then === "function") {
-			/** Promise path — wrap with staleness guard. */
+			/** Promise path — wrap with staleness guard. A thenable is
+			 *  adopted first, since its then() need not return a promise. */
 			let node = this;
 			let time = this._time;
-			return promiseOrTask.then(
+			return Promise.resolve(promiseOrTask).then(
 				/** @param {*} val */
 				function (val) {
 					if (
@@ -1388,7 +1389,7 @@ function root(fn) {
 	 * @returns {T | Promise<T>}
 	 */
 	function _suspendTask(node, taskNode) {
-		if (taskNode._flag & FLAG_DISPOSED) {
+		if (taskNode._flag & FLAG_DISPOSED || taskNode === node) {
 			throw new Error(ILLEGAL_READ);
 		}
 		if (taskNode._flag & (FLAG_STALE | FLAG_PENDING)) {
@@ -1434,8 +1435,9 @@ function root(fn) {
 	 * callback that re-enters `_stepArray` from the next index.
 	 *
 	 * FLAG_BLOCKED prevents resolveWaiters from subscribing the
-	 * awaiter during the walk. After all slots are filled, we
-	 * subscribe to every task in one pass and resolve the Promise.
+	 * awaiter during the walk. After all slots are filled, or a
+	 * member fails, we subscribe to every task in one pass and
+	 * resolve or reject the Promise.
 	 *
 	 * @param {AsyncReceiver} node
 	 * @param {Array<Compute>} tasks
@@ -1448,10 +1450,15 @@ function root(fn) {
 		}
 		let results = new Array(count);
 
-		/** Fast-path: try to collect everything synchronously. */
+		/** Fast-path: try to collect everything synchronously. A
+		 *  failing member throws, after subscribing like a single task. */
 		let allSettled = true;
 		for (let i = 0; i < count; i++) {
 			let task = tasks[i];
+			if (task._flag & FLAG_DISPOSED || task === node) {
+				subscribeArray(node, tasks);
+				throw new Error(ILLEGAL_READ);
+			}
 			if (task._flag & (FLAG_STALE | FLAG_PENDING)) {
 				task._refresh();
 			}
@@ -1460,15 +1467,14 @@ function root(fn) {
 				break;
 			}
 			if (task._flag & FLAG_ERROR) {
+				subscribeArray(node, tasks);
 				throw task._value;
 			}
 			results[i] = task._value;
 		}
 
 		if (allSettled) {
-			for (let i = 0; i < count; i++) {
-				subscribe(node, tasks[i]);
-			}
+			subscribeArray(node, tasks);
 			return results;
 		}
 		node._flag |= FLAG_BLOCKED;
@@ -1487,6 +1493,8 @@ function root(fn) {
 	 * scratch when it settles. Only resolves when a full scan finds
 	 * zero loading tasks, guaranteeing a consistent snapshot (all
 	 * values from the same moment). Mirrors c.pending() semantics.
+	 * A member that rejected, or was disposed, fails the await when
+	 * the scan reaches it.
 	 * @param {AsyncReceiver} node
 	 * @param {Array<Compute>} tasks
 	 * @param {Array} results
@@ -1496,8 +1504,16 @@ function root(fn) {
 	function _stepArray(node, tasks, results, resolve, reject) {
 		let count = tasks.length;
 		let blocked = -1;
+		/** @type {*} */
+		let error = null;
+		let failed = false;
 		for (let i = 0; i < count; i++) {
 			let task = tasks[i];
+			if (task._flag & FLAG_DISPOSED || task === node) {
+				error = new Error(ILLEGAL_READ);
+				failed = true;
+				break;
+			}
 			if (task._flag & (FLAG_STALE | FLAG_PENDING)) {
 				task._refresh();
 			}
@@ -1506,19 +1522,23 @@ function root(fn) {
 				break;
 			}
 			if (task._flag & FLAG_ERROR) {
-				reject(task._value);
-				return;
+				error = task._value;
+				failed = true;
+				break;
 			}
 			results[i] = task._value;
 		}
 
-		/** All settled — subscribe and resolve with consistent snapshot. */
+		/** All settled, or a member failed — subscribe and settle
+		 *  the await with a consistent snapshot. */
 		if (blocked === -1) {
 			node._flag &= ~FLAG_BLOCKED;
-			for (let i = 0; i < count; i++) {
-				subscribe(node, tasks[i]);
+			subscribeArray(node, tasks);
+			if (failed) {
+				reject(error);
+			} else {
+				resolve(results);
 			}
-			resolve(results);
 			return;
 		}
 
@@ -1532,16 +1552,29 @@ function root(fn) {
 
 		/** Bind waiter to the blocked task. On settle, re-scan
 		 *  ALL tasks from scratch — a previously settled task may
-		 *  have gone back to loading. */
-		let task = tasks[blocked];
-		send(
-			node,
-			task,
-			function () {
-				_stepArray(node, tasks, results, resolve, reject);
-			},
-			reject
-		);
+		 *  have gone back to loading. A rejection or dispose wakes
+		 *  the scan too, which then fails the await. */
+		let step = function () {
+			_stepArray(node, tasks, results, resolve, reject);
+		};
+		send(node, tasks[blocked], step, step);
+	}
+
+	/**
+	 * Subscribes an array awaiter to every live member, so that it
+	 * re-runs when any of them changes, whether the await resolved
+	 * or failed.
+	 * @param {AsyncReceiver} node
+	 * @param {Array<Compute>} tasks
+	 */
+	function subscribeArray(node, tasks) {
+		let count = tasks.length;
+		for (let i = 0; i < count; i++) {
+			let task = tasks[i];
+			if (!(task._flag & FLAG_DISPOSED) && task !== node) {
+				subscribe(node, task);
+			}
+		}
 	}
 
 	ComputeProto.suspend = EffectProto.suspend = suspend;
@@ -1551,9 +1584,28 @@ function root(fn) {
 		this._flag |= FLAG_LOCKED;
 	};
 
-	/** @this {Receiver} */
+	/**
+	 * Releases the lock. A change or dispose that arrived while locked
+	 * was deferred, and is replayed: when the activation settles if it
+	 * is still in flight (the lock holds until then, and _settle replays
+	 * it), or right away if it has already finished.
+	 * @this {Receiver}
+	 */
 	ComputeProto.unlock = EffectProto.unlock = function () {
-		this._flag &= ~FLAG_LOCKED;
+		let flag = this._flag;
+		if (!(flag & (FLAG_STALE | FLAG_PENDING | FLAG_DISPOSED))) {
+			this._flag = flag & ~FLAG_LOCKED;
+		} else if (flag & FLAG_LOCKED && !(flag & FLAG_LOADING)) {
+			this._flag = flag & ~FLAG_LOCKED;
+			if (flag & FLAG_DISPOSED) {
+				this._dispose();
+			} else {
+				this._receive();
+				if (IDLE) {
+					flush();
+				}
+			}
+		}
 	};
 
 	/**
@@ -1578,13 +1630,22 @@ function root(fn) {
 	/**
 	 * Creates a fresh AbortController for this async activation.
 	 * The controller is automatically aborted on re-run or dispose.
+	 * Stored compactly: _controller holds a single controller for
+	 * count=1, graduating to an array on the second.
 	 * @this {AsyncReceiver}
 	 * @returns {AbortController}
 	 */
 	function controller() {
 		let channel = this._channel();
 		let ctrl = new AbortController();
-		channel._controller = ctrl;
+		let current = channel._controller;
+		if (current === null) {
+			channel._controller = ctrl;
+		} else if (Array.isArray(current)) {
+			current.push(ctrl);
+		} else {
+			channel._controller = [current, ctrl];
+		}
 		return ctrl;
 	}
 
@@ -1766,10 +1827,11 @@ function root(fn) {
 			);
 			return;
 		}
-		/** Promise path — wrap with staleness guard. */
+		/** Promise path — wrap with staleness guard. A thenable is
+		 *  adopted first, since its then() need not return a promise. */
 		let node = this;
 		let time = this._time;
-		return promiseOrFn.then(
+		return Promise.resolve(promiseOrFn).then(
 			function (val) {
 				if (node._time === time && !(node._flag & FLAG_DISPOSED)) {
 					return val;
@@ -1964,13 +2026,15 @@ function root(fn) {
 	 * @returns {void}
 	 */
 	CellProto._dispose = function() {
-		if (this._flag & FLAG_WAITER) {
+		let flag = this._flag;
+		/** Disposed before the waiters run, so that they see it. */
+		this._flag = FLAG_DISPOSED;
+		if (flag & FLAG_WAITER) {
 			let ch = this._chan;
 			if (ch._waiters !== null) {
 				resolveWaiters(this, ch, new Error("Awaited resource was disposed"), true, true);
 			}
 		}
-		this._flag = FLAG_DISPOSED;
 		clearSubs(this);
 		this._value = null;
 	};
@@ -2263,7 +2327,7 @@ function root(fn) {
 		if (flag & FLAG_CHANNEL) {
 			let chan = this._chan;
 			if (chan._controller !== null) {
-				chan._controller.abort();
+				abortControllers(chan._controller);
 			}
 			/** Panic any nodes awaiting this task. */
 			if (chan._waiters !== null) {
@@ -2538,8 +2602,14 @@ function root(fn) {
 	 */
 	EffectProto._update = function (time) {
 		let flag = this._flag;
-		if (flag & FLAG_LOCKED) {
-			return;
+		if (flag & (FLAG_LOCKED | FLAG_CHANNEL)) {
+			if (flag & FLAG_LOCKED) {
+				return;
+			}
+			/** A completed activation's controllers are released, not
+			 *  aborted: only an activation in flight is aborted on re-run,
+			 *  by _receive. This keeps them from piling up. */
+			this._chan._controller = null;
 		}
 
 		this._time = time;
@@ -2759,7 +2829,7 @@ function root(fn) {
 		if (flag & FLAG_CHANNEL) {
 			let chan = this._chan;
 			if (chan._controller !== null) {
-				chan._controller.abort();
+				abortControllers(chan._controller);
 			}
 			if (chan._res1 !== null || chan._responds !== null) {
 				clearChannel(chan, this);
@@ -2966,6 +3036,9 @@ function root(fn) {
 }
 
 /**
+ * Adds a dependency outside the version-tracked sync scope (reads
+ * after an await, settled waiters, deferred deps). Like _read, a
+ * second dependency clears FLAG_SINGLE.
  * @param {Receiver} receiver
  * @param {Sender} sender
  */
@@ -2977,6 +3050,7 @@ function subscribe(receiver, sender) {
 		let deps = receiver._deps;
 		if (deps === null) {
 			receiver._deps = [sender];
+			receiver._flag &= ~FLAG_SINGLE;
 		} else {
 			deps.push(sender);
 		}
@@ -3980,8 +4054,24 @@ function settleDeps(node) {
 }
 
 /**
+ * Aborts the controllers handed out by c.controller() in one activation.
+ * @param {AbortController | Array<AbortController>} controller
+ * @returns {void}
+ */
+function abortControllers(controller) {
+	if (Array.isArray(controller)) {
+		for (let i = 0; i < controller.length; i++) {
+			controller[i].abort();
+		}
+	} else {
+		controller.abort();
+	}
+}
+
+/**
  * Resets async fiber state before re-execution. Aborts the previous
- * controller, clears stale defers, and removes channel bindings.
+ * controllers, clears stale defers, and removes channel bindings,
+ * abandoning an array await (FLAG_BLOCKED) along with them.
  * Shared between Compute and Effect _update paths.
  * @param {AsyncReceiver} node
  * @returns {void}
@@ -3989,7 +4079,7 @@ function settleDeps(node) {
 function resetChannel(node) {
 	let chan = node._chan;
 	if (chan._controller !== null) {
-		chan._controller.abort();
+		abortControllers(chan._controller);
 		chan._controller = null;
 	}
 	chan._defer1 = null;
@@ -3997,6 +4087,7 @@ function resetChannel(node) {
 	if (chan._res1 !== null || chan._responds !== null) {
 		clearChannel(chan, node);
 	}
+	node._flag &= ~FLAG_BLOCKED;
 }
 
 /**

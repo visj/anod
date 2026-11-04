@@ -57,7 +57,7 @@ class IChannel extends Resolver {
 		this._res1 = null;
 		/** @type {Array<AsyncSender | null> | null} */
 		this._responds = null;
-		/** @type {AbortController | null} */
+		/** @type {AbortController | Array<AbortController> | null} */
 		this._controller = null;
 		/** @type {Sender | null} */
 		this._defer1 = null;
