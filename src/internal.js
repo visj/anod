@@ -44,6 +44,8 @@ const FLAG_SINGLE = 1 << 22;
 const FLAG_EAGER = 1 << 23;
 const FLAG_PAUSED = 1 << 25;
 const FLAG_OWNER = 1 << 26;
+/** stable() was called during a run: its reads stay tracked until it ends. */
+const FLAG_FREEZE = 1 << 27;
 
 /** Error type constants for { error, type } POJOs. */
 const REFUSE = 1;
@@ -474,7 +476,7 @@ function val(sender) {
 	if (sender._flag & (FLAG_STALE | FLAG_PENDING)) {
 		sender._refresh();
 	}
-	if ((flag & (FLAG_STABLE | FLAG_SETUP)) === FLAG_STABLE) {
+	if ((flag & (FLAG_STABLE | FLAG_SETUP | FLAG_FREEZE)) === FLAG_STABLE) {
 		if (sender._flag & FLAG_ERROR) {
 			throw sender._value;
 		}
@@ -993,16 +995,34 @@ function root(fn) {
 
 	/**
 	 * Marks the node stable — no dynamic dep tracking on subsequent runs.
-	 * For async nodes, also clears FLAG_SETUP so the stable short-circuit
-	 * in val() fires immediately (SETUP persists across awaits). For sync
-	 * nodes, SETUP is left in place — the natural cleanup at the end of
-	 * _update clears it, and during setup, deps must still be tracked via
-	 * the DSTACK mechanism.
-	 * @this {Receiver}
+	 * The deps are frozen as they are at the end of the run stable() is
+	 * called in: FLAG_FREEZE keeps val() tracking until that run ends, so
+	 * patchDeps does not drop the deps read after the call. Between runs,
+	 * the deps are frozen as they are. A compute clears FLAG_FREEZE at the
+	 * start and the end of every run, so it is always safe to set.
+	 * @this {Compute}
 	 * @returns {void}
 	 */
 	function stable() {
-		this._flag |= FLAG_STABLE;
+		if (!(this._flag & FLAG_STABLE)) {
+			this._flag |= FLAG_STABLE | FLAG_FREEZE;
+		}
+	}
+
+	/**
+	 * Effect version of stable(). An effect clears FLAG_FREEZE only when
+	 * a run ends, so it is set only while the effect is stale or pending:
+	 * running, or queued or paused with a run to come, which then still
+	 * tracks its reads. Otherwise the deps are frozen as they are.
+	 * @this {Effect}
+	 * @returns {void}
+	 */
+	function stableEffect() {
+		let flag = this._flag;
+		if (!(flag & FLAG_STABLE)) {
+			this._flag =
+				flag | FLAG_STABLE | (flag & (FLAG_STALE | FLAG_PENDING) ? FLAG_FREEZE : 0);
+		}
 	}
 
 	/** IOwner: cleanup/recover exposed on Root + Effect prototypes */
@@ -1027,7 +1047,8 @@ function root(fn) {
 	};
 
 	ComputeProto.equal = EffectProto.equal = equal;
-	ComputeProto.stable = EffectProto.stable = stable;
+	ComputeProto.stable = stable;
+	EffectProto.stable = stableEffect;
 
 	/**
 	 * Signals an expected error from a compute. Sets FLAG_ERROR and
@@ -1068,6 +1089,21 @@ function root(fn) {
 	 */
 	ComputeProto.eager = function () {
 		this._flag |= FLAG_EAGER;
+	};
+
+	/**
+	 * Marks this compute as weak, like OPT_WEAK: once it loses its last
+	 * subscriber, it releases its value and runs its cleanups. Called
+	 * before the first run, it keeps the seed for the recompute, as
+	 * OPT_WEAK does. After the first run the seed is gone, so the
+	 * recompute gets null as prev.
+	 * @this {Compute}
+	 */
+	ComputeProto.weak = function () {
+		if (this._flag & FLAG_INIT && this._value !== undefined) {
+			SEEDS.set(this, this._value);
+		}
+		this._flag |= FLAG_WEAK;
 	};
 
 	/**
@@ -1629,7 +1665,7 @@ function root(fn) {
 			if (sender._flag & (FLAG_STALE | FLAG_PENDING)) {
 				sender._refresh();
 			}
-			if ((flag & (FLAG_STABLE | FLAG_SETUP)) !== FLAG_STABLE) {
+			if ((flag & (FLAG_STABLE | FLAG_SETUP | FLAG_FREEZE)) !== FLAG_STABLE) {
 				if (sender._stamp !== version) {
 					let stamp = sender._stamp;
 					sender._stamp = version;
@@ -2252,7 +2288,8 @@ function root(fn) {
 				FLAG_EQUAL |
 				FLAG_NOTEQUAL |
 				FLAG_SUSPEND |
-				FLAG_PANIC
+				FLAG_PANIC |
+				FLAG_FREEZE
 			);
 
 		if (!(flag & FLAG_INIT) && this._cleanup !== null) {
@@ -2355,6 +2392,8 @@ function root(fn) {
 						rebaseDeps(deps);
 					}
 					DCOUNT = DBASE;
+					/** A bound node starts single. */
+					this._flag &= ~FLAG_SINGLE;
 				} else if (this._dep1 !== null) {
 					this._flag |= FLAG_SINGLE;
 				}
@@ -2379,7 +2418,7 @@ function root(fn) {
 			STAMP = prevRVer;
 		}
 
-		this._flag &= ~(FLAG_STALE | FLAG_PENDING | FLAG_SETUP);
+		this._flag &= ~(FLAG_STALE | FLAG_PENDING | FLAG_SETUP | FLAG_FREEZE);
 		flag = this._flag;
 
 		/** Async: if fn used callback suspend, the node is already
@@ -2429,7 +2468,8 @@ function root(fn) {
 	 *    stale fetches/promises are cancelled without waiting for a pull.
 	 * 3. FLAG_WAITER: enqueue to COMPUTES + notify PENDING.
 	 * 4. FLAG_EAGER + FLAG_ASYNC: enqueue to COMPUTES for eager re-run.
-	 * 5. FLAG_EAGER + sync: notify FLAG_STALE directly (pure push).
+	 * 5. FLAG_EAGER + sync: enqueue to COMPUTES + notify PENDING, so
+	 *    subscribers only re-run if the eager re-run changes the value.
 	 * @this {Compute}
 	 * @returns {void}
 	 */
@@ -2460,11 +2500,8 @@ function root(fn) {
 				return;
 			}
 			COMPUTES[COMPUTE_COUNT++] = this;
-			if (flag & FLAG_EAGER) {
-				if (!(flag & FLAG_ASYNC)) {
-					notify(this, FLAG_STALE);
-				}
-			} else {
+			/** An eager task notifies its subscribers when it settles. */
+			if (!(flag & FLAG_EAGER && flag & FLAG_ASYNC)) {
 				notify(this, FLAG_PENDING);
 			}
 		}
@@ -2509,7 +2546,8 @@ function root(fn) {
 		let value;
 		let args = this._args;
 
-		if ((flag & (FLAG_STABLE | FLAG_SETUP)) === FLAG_STABLE) {
+		/** FLAG_FREEZE: stable() was called while queued, so this run still tracks. */
+		if ((flag & (FLAG_STABLE | FLAG_SETUP | FLAG_FREEZE)) === FLAG_STABLE) {
 			try {
 				if (flag & FLAG_BOUND) {
 					let dep = this._dep1;
@@ -2574,6 +2612,8 @@ function root(fn) {
 							rebaseDeps(deps);
 						}
 						DCOUNT = DBASE;
+						/** A bound node starts single. */
+						this._flag &= ~FLAG_SINGLE;
 					} else if (this._dep1 !== null) {
 						this._flag |= FLAG_SINGLE;
 					}
@@ -2595,7 +2635,7 @@ function root(fn) {
 					VCOUNT = saveStart;
 				}
 				STAMP = current;
-				this._flag &= ~(FLAG_SETUP | FLAG_STALE | FLAG_PENDING);
+				this._flag &= ~(FLAG_SETUP | FLAG_STALE | FLAG_PENDING | FLAG_FREEZE);
 			}
 		}
 
@@ -2868,7 +2908,11 @@ function root(fn) {
 		if (this._flag & FLAG_OWNER) {
 			addOwned(this, node);
 		}
-		startEffect(node);
+		if ((flag & (FLAG_DEFER | FLAG_BOUND)) === (FLAG_DEFER | FLAG_BOUND)) {
+			deferEffect(node);
+		} else {
+			startEffect(node);
+		}
 		return node;
 	}
 
@@ -2911,7 +2955,11 @@ function root(fn) {
 		if (this._flag & FLAG_OWNER) {
 			addOwned(this, node);
 		}
-		startEffect(node);
+		if ((flag & (FLAG_DEFER | FLAG_BOUND)) === (FLAG_DEFER | FLAG_BOUND)) {
+			deferEffect(node);
+		} else {
+			startEffect(node);
+		}
 		return node;
 	}
 
@@ -4332,6 +4380,36 @@ function startEffect(node) {
 }
 
 /**
+ * Starts a bound effect created with OPT_DEFER without running it.
+ * A stale or pending compute does not pass notifications on, so the
+ * dep is brought up to date first: its next change then reaches the
+ * effect. The effect counts as having run now, so a dep that does not
+ * change after this does not run it either.
+ * @param {Effect} node
+ * @returns {void}
+ */
+function deferEffect(node) {
+	let dep = node._dep1;
+	node._time = TIME;
+	if (dep._flag & (FLAG_STALE | FLAG_PENDING)) {
+		if (IDLE) {
+			IDLE = false;
+			try {
+				FENCE = SEED;
+				dep._refresh();
+				if (SENDER_COUNT > 0 || DISPOSER_COUNT > 0) {
+					flush();
+				}
+			} finally {
+				IDLE = true;
+			}
+		} else {
+			dep._refresh();
+		}
+	}
+}
+
+/**
  * Drains a queue of effect nodes: checks staleness, updates,
  * handles errors with finalize/recover/dispose. Returns the
  * first unrecoverable error POJO, or null if all succeeded.
@@ -4345,9 +4423,11 @@ function flushEffects(queue, count, time) {
 	for (let i = 0; i < count; i++) {
 		let node = queue[i];
 		queue[i] = null;
+		/** A node paused after it was queued keeps its flags for resume(). */
 		if (
-			node._flag & FLAG_STALE ||
-			(node._flag & FLAG_PENDING && needsUpdate(node, time))
+			(node._flag & (FLAG_STALE | FLAG_PAUSED)) === FLAG_STALE ||
+			((node._flag & (FLAG_PENDING | FLAG_PAUSED)) === FLAG_PENDING &&
+				needsUpdate(node, time))
 		) {
 			FENCE = SEED;
 			try {
@@ -4366,7 +4446,7 @@ function flushEffects(queue, count, time) {
 					thrown = err;
 				}
 			}
-		} else {
+		} else if (!(node._flag & FLAG_PAUSED)) {
 			node._flag &= ~(FLAG_STALE | FLAG_PENDING);
 		}
 	}
@@ -4526,6 +4606,7 @@ export {
 	FLAG_EAGER,
 	FLAG_PAUSED,
 	FLAG_OWNER,
+	FLAG_FREEZE,
 	REFUSE,
 	PANIC,
 	FATAL,
