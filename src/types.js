@@ -6,6 +6,8 @@ class Disposer {
 	constructor() {
 		/** @type {number} */
 		this._flag;
+		/** @type {Owner | null} */
+		this._owner;
 	}
 	/** @returns {void} */
 	_dispose() { }
@@ -98,6 +100,8 @@ class Owner extends Disposer {
 		/** @type {(function(*): boolean) | Array<(function(*): boolean)> | null} */
 		this._recover = null;
 	}
+	/** @returns {void} */
+	_purge() { }
 }
 
 /**

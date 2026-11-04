@@ -451,23 +451,20 @@ function Channel() {
 }
 
 /**
- * Shared across Root/Signal/Compute/Effect. Routes to `_dispose` directly
- * when idle, otherwise queues onto DISPOSES so the batch drain runs it in
- * the same transaction as any pending sets. A cleanup that throws is
- * reported once the disposal has finished, as an error of its node.
+ * Shared across Root/Signal/Compute/Effect. Queues onto DISPOSES, and
+ * when idle runs the drain for it at once: writes and disposes made by
+ * cleanups join the same transaction and flush once the whole subtree is
+ * disposed, so nothing being torn down re-runs. An effect's live owner
+ * then drops it from `_owned`. A cleanup that throws is reported once the
+ * disposal has finished, as an error of its node.
  * @this {Disposer}
  * @returns {void}
  */
 function dispose() {
 	if (!(this._flag & FLAG_DISPOSED)) {
+		DISPOSES[DISPOSER_COUNT++] = this;
 		if (IDLE) {
-			try {
-				this._dispose();
-			} catch (error) {
-				throw { error, type: FATAL };
-			}
-		} else {
-			DISPOSES[DISPOSER_COUNT++] = this;
+			flush();
 		}
 	}
 }
@@ -899,6 +896,13 @@ function root(fn) {
 	SignalProto._equal = null;
 
 	/**
+	 * Read on disposal to find the owner to compact. Signals are unowned,
+	 * and an owned compute keeps no reference back to its owner.
+	 */
+	SignalProto._owner =
+		ComputeProto._owner = null;
+
+	/**
 	 * No op functions on signals
 	 */
 	SignalProto._drop = 
@@ -967,6 +971,28 @@ function root(fn) {
 			}
 			i++;
 		}
+	};
+
+	/**
+	 * Compacts _owned by removing FLAG_DISPOSED children. Keeps creation
+	 * order, so clearOwned still disposes them in reverse.
+	 * @this {Owner}
+	 */
+	RootProto._purge = EffectProto._purge = function () {
+		let owned = this._owned;
+		this._flag &= ~FLAG_PURGE;
+		if (owned === null) {
+			return;
+		}
+		let write = 0;
+		let count = owned.length;
+		for (let read = 0; read < count; read++) {
+			let child = owned[read];
+			if (!(child._flag & FLAG_DISPOSED)) {
+				owned[write++] = child;
+			}
+		}
+		owned.length = write;
 	};
 
 	// Disposer#dispose — shared by all four node types
@@ -2417,7 +2443,7 @@ function root(fn) {
 					resetChannel(this);
 				}
 				this._flag = (this._flag | FLAG_ERROR) & ~FLAG_PENDING;
-				this._value = { error, type: FATAL };
+				this._value = fault(error, FATAL);
 				this._ctime = time;
 				return;
 			}
@@ -3308,6 +3334,23 @@ function fault(error, type) {
  */
 function fatal(error) {
 	return FAULTS.has(error) ? error : fault(error, FATAL);
+}
+
+/**
+ * Drops disposed children from a live owner's `_owned`, so an owner that
+ * outlives its children does not keep a slot for every child it ever had.
+ * Called by the dispose drain once it has taken a child down on its own.
+ * The owner is queued onto PURGES, which runs after the disposes of the
+ * same pass. Owners already disposed or queued are skipped, as is the
+ * global `c`, which owns nothing.
+ * @param {Owner} owner
+ * @returns {void}
+ */
+function purgeOwned(owner) {
+	if ((owner._flag & (FLAG_OWNER | FLAG_DISPOSED | FLAG_PURGE)) === FLAG_OWNER) {
+		owner._flag |= FLAG_PURGE;
+		PURGES[PURGE_COUNT++] = owner;
+	}
 }
 
 /**
@@ -4325,12 +4368,23 @@ function resolveWaiters(responder, responderCh, value, isError, panic) {
  * on Root (compute/effect/derive/etc.) use `this` (the root) as the owner.
  * A root created inside a running node stays in its transaction: writes
  * are queued for the running flush, and the dependency fence is kept.
+ * If `fn` throws, the caller never gets the root back, so it is disposed
+ * before the error is rethrown.
  * @param {Root} root
  * @param {function(Root): void} fn
  * @returns {void}
  */
 function startRoot(root, fn) {
-	fn(root);
+	try {
+		fn(root);
+	} catch (error) {
+		try {
+			root.dispose();
+		} catch (err) {
+			/* swallow — the setup error wins */
+		}
+		throw error;
+	}
 }
 
 /**
@@ -4469,7 +4523,7 @@ function flushEffects(queue, count, time) {
 						node._dispose();
 					} catch (cleanupError) {
 						if (thrown === null) {
-							thrown = { error: cleanupError, type: FATAL };
+							thrown = fault(cleanupError, FATAL);
 						}
 					}
 				}
@@ -4513,16 +4567,21 @@ function flush() {
 				do {
 					count = DISPOSER_COUNT;
 					for (; i < count; i++) {
+						let node = DISPOSES[i];
+						let owner = node._owner;
+						DISPOSES[i] = null;
 						try {
-							DISPOSES[i]._dispose();
+							node._dispose();
 						} catch (err) {
 							/** The node is disposed, but one of its cleanups threw. */
 							if (!thrown) {
-								error = { error: err, type: FATAL };
+								error = fault(err, FATAL);
 								thrown = true;
 							}
 						}
-						DISPOSES[i] = null;
+						if (owner !== null) {
+							purgeOwned(owner);
+						}
 					}
 				} while (DISPOSER_COUNT > count && ++cycle < 1e5);
 				DISPOSER_COUNT = 0;
