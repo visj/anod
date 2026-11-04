@@ -482,6 +482,10 @@ function val(sender) {
 	/** Sync path: version-tagged dep tracking with VSTACK restore. */
 	let version = STAMP;
 	if (sender._stamp === version) {
+		/** Already read this run: an errored sender throws on every read. */
+		if (sender._flag & FLAG_ERROR) {
+			throw sender._value;
+		}
 		return sender._value;
 	}
 	if (sender._flag & (FLAG_STALE | FLAG_PENDING)) {
