@@ -4368,39 +4368,52 @@ function flush() {
 		do {
 			time = ++TIME;
 			if (DISPOSER_COUNT > 0) {
-				let count = DISPOSER_COUNT;
-				for (let i = 0; i < count; i++) {
-					try {
-						DISPOSES[i]._dispose();
-					} catch (err) {
-						/** The node is disposed, but one of its cleanups threw. */
-						if (!thrown) {
-							error = { error: err, type: FATAL };
-							thrown = true;
-						}
-					}
-					DISPOSES[i] = null;
-				}
-				DISPOSER_COUNT = 0;
-			}
-			if (SENDER_COUNT > 0) {
-				let count = SENDER_COUNT;
-				for (let i = 0; i < count; i++) {
-					let node = SENDERS[i];
-					/** A sender disposed after its write was queued takes no writes. */
-					if (!(node._flag & FLAG_DISPOSED)) {
+				let count = 0;
+				let i = 0;
+				/** Disposes queued by a cleanup during the drain run in the same pass. */
+				do {
+					count = DISPOSER_COUNT;
+					for (; i < count; i++) {
 						try {
-							UPDATES[i](node, PAYLOADS[i], time);
+							DISPOSES[i]._dispose();
 						} catch (err) {
-							/** A failing updater only loses its own write. */
+							/** The node is disposed, but one of its cleanups threw. */
 							if (!thrown) {
-								error = err;
+								error = { error: err, type: FATAL };
 								thrown = true;
 							}
 						}
+						DISPOSES[i] = null;
 					}
-				}
-				/** Cleared once every write has run, so an unchanged write can't hide a later change. */
+				} while (DISPOSER_COUNT > count && ++cycle < 1e5);
+				DISPOSER_COUNT = 0;
+			}
+			if (SENDER_COUNT > 0) {
+				let count = 0;
+				let i = 0;
+				/** Writes queued while the queue drains, by an updater or an
+				 *  equality function, drain in the same pass, in order. */
+				do {
+					count = SENDER_COUNT;
+					for (; i < count; i++) {
+						let node = SENDERS[i];
+						/** A sender disposed after its write was queued takes no writes. */
+						if (!(node._flag & FLAG_DISPOSED)) {
+							try {
+								UPDATES[i](node, PAYLOADS[i], time);
+							} catch (err) {
+								/** A failing updater only loses its own write. */
+								if (!thrown) {
+									error = err;
+									thrown = true;
+								}
+							}
+						}
+					}
+				} while (SENDER_COUNT > count && ++cycle < 1e5);
+				/** Cleared once every write has run, so an unchanged write can't hide a later change.
+				 *  A runaway stop leaves writes behind; they are dropped here with their marker. */
+				count = SENDER_COUNT;
 				for (let i = 0; i < count; i++) {
 					SENDERS[i]._flag &= ~FLAG_SCHEDULED;
 					SENDERS[i] = PAYLOADS[i] = UPDATES[i] = null;
@@ -4454,7 +4467,7 @@ function flush() {
 				}
 				PURGE_COUNT = 0;
 			}
-			if (cycle++ === 1e5) {
+			if (cycle++ >= 1e5) {
 				error = new Error("Runaway cycle");
 				thrown = true;
 				break;

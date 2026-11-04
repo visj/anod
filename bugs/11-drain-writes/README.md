@@ -38,4 +38,25 @@ Run with `bun test --conditions=src test/explore/scheduling.test.js`.
 
 ## Fix
 
-_Not fixed yet. The fix branch fills this in._
+The sender drain in `flush()` keeps going until the queue stops growing, so writes queued while it runs are applied in the same pass. The dispose drain had the same snapshot problem and gets the same treatment.
+
+### Changes
+
+- `flush()`, sender drain: the loop over `SENDERS` is wrapped in a `do/while` that takes the count again after each round and resumes at the first entry it hasn't run. A `set()`, `post()` or `notify()` made by an updater, an equality function or a resource callback that runs synchronously (`asyncAssign → _runAsync`) is appended to the queue (the engine isn't idle), and now runs in the same pass, after the writes queued before it. `FLAG_SCHEDULED` is still cleared only after every write in the pass has run, and the clear loop now uses the final count, so it covers the appended entries too.
+- `flush()`, dispose drain: same shape. A cleanup that disposes another node during the dispose drain (a root's cleanup calling `other.dispose()`) queued that node past the count and was dropped. The other root stayed alive and its effects kept running. Now it is disposed in the same pass. No listed test covers this; I checked it with a scratch script.
+- Both inner loops count each extra round toward the flush's runaway guard (`cycle`), so an updater that keeps queuing a new write ends with `Runaway cycle` instead of hanging. The guard check is now `cycle++ >= 1e5` instead of `=== 1e5`, because the inner rounds can step `cycle` past the exact value.
+
+### Behavior decisions
+
+- Writes queued during the drain run in the same pass, in FIFO order, with the cycle's `time`. They don't wait for the next cycle, so computes and effects see the final values once, not each intermediate value. The spec asks for this ("drained in the same flush (FIFO)").
+- When the runaway guard stops the sender drain partway, the writes it hasn't run are dropped and their senders lose `FLAG_SCHEDULED`, like the rest of the work a runaway abort drops. The error thrown is `Runaway cycle`.
+
+### Tests
+
+4 of 4 pass. No test expectations changed. No other group's tests changed state.
+
+### Hot paths touched
+
+- `flush()` sender and dispose drains: one extra compare per drain pass (does the queue still have entries past the count?), plus one more round only when it grew. Per-entry work is unchanged.
+- The runaway check compares with `>=` instead of `===`, at the same cost.
+- No node fields added.
