@@ -114,6 +114,14 @@ var CINDEX = [];
  * @type {number}
  */
 var CTOP = 0;
+/**
+ * Stack depth at which checkRun next makes sure it is not walking a
+ * cycle. Raised past every acyclic depth reached, so only a walk deeper
+ * than any before it, or a cycle, ever reaches it.
+ * @see {checkCycle}
+ * @type {number}
+ */
+var CMARK = 1024;
 
 /**
  * Pre-allocated stack for batching deps during setup execution.
@@ -3564,6 +3572,7 @@ function checkSingle(node, time) {
 function checkRun(node, time) {
 	let base = CTOP;
 	let dep = node._dep1;
+	let mark = CMARK;
 
 	/**
 	 * Fast descent: walk single-dep PENDING chains without the overhead
@@ -3574,7 +3583,9 @@ function checkRun(node, time) {
 		do {
 			CSTACK[CTOP] = node;
 			CINDEX[CTOP] = -1;
-			CTOP++;
+			if (++CTOP === mark) {
+				mark = checkCycle(base);
+			}
 			node = dep;
 			dep = node._dep1;
 		} while (
@@ -3607,7 +3618,9 @@ function checkRun(node, time) {
 						/** Descend into dep1 — push current node, resume later */
 						CSTACK[CTOP] = node;
 						CINDEX[CTOP] = -1;
-						CTOP++;
+						if (++CTOP === mark) {
+							mark = checkCycle(base);
+						}
 						node = dep;
 						continue outer;
 					}
@@ -3645,7 +3658,9 @@ function checkRun(node, time) {
 						/** Descend into deps[i] — push current node */
 						CSTACK[CTOP] = node;
 						CINDEX[CTOP] = i;
-						CTOP++;
+						if (++CTOP === mark) {
+							mark = checkCycle(base);
+						}
 						node = dep;
 						resumeFrom = -2;
 						continue outer;
@@ -3712,6 +3727,36 @@ function checkRun(node, time) {
 		}
 		return;
 	}
+}
+
+/**
+ * Called by checkRun when its stack reaches CMARK, which only happens
+ * on a walk deeper than any before it or on a cycle. An acyclic walk
+ * never has a node on the stack twice, so a repeat means the descent
+ * has looped: unwinds the stack and throws instead of descending
+ * forever. Otherwise doubles CMARK and returns it, so deep graphs pay
+ * this scan once per doubling of the deepest walk, not per pull.
+ * @param {number} base
+ * @returns {number}
+ */
+function checkCycle(base) {
+	let seen = new Set();
+	for (let i = base; i < CTOP; i++) {
+		let node = CSTACK[i];
+		if (seen.has(node)) {
+			for (let j = base; j < CTOP; j++) {
+				CSTACK[j] = null;
+			}
+			CTOP = base;
+			throw new Error("Cycle detected");
+		}
+		seen.add(node);
+	}
+	/** A nested checkRun may already have raised it past this depth. */
+	if (CTOP >= CMARK) {
+		CMARK = CTOP << 1;
+	}
+	return CMARK;
 }
 
 /**
