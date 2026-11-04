@@ -36,4 +36,34 @@ Run with `bun test --conditions=src test/explore/async.test.js`.
 
 ## Fix
 
-_Not fixed yet. The fix branch fills this in._
+The teardown of in-flight async work moves from the notification to the re-run, which is the one place that knows the node really re-runs.
+
+- `ComputeProto._receive`: no longer calls `resetChannel` on a loading task. `ComputeProto._update` already resets the channel on every re-run, so the eager reset was redundant except in the absorbed case, where it was wrong. `FLAG_LOADING` drops out of the fast-path mask, and the branch that only existed for loading tasks goes with it.
+- `EffectProto._receive`: no longer clears `FLAG_LOADING | FLAG_SUSPEND` or calls `resetChannel`.
+- `EffectProto._update`: does that teardown instead, right after taking the new `_time`, when the previous activation is still loading. It runs before the cleanups, the same order as before.
+- `checkSingle` / `checkRun`: the clean path ("no dep changed") no longer moves `node._time`. `_time` is both "when the node last ran" and the activation token captured by `c.suspend`, `resolvePromise` and `resolveIterator`, so moving it without a re-run killed the live activation. Change detection does not need the bump: a dep's `_ctime` is the time it changed, which is either at or before the node's last run (already verified clean) or after the check (still greater than the old `_time`).
+
+### Behavior decisions
+
+- A pull-based task that is notified while loading keeps its controller, waiters and defer snapshots until it is actually pulled and re-runs, or is disposed. Before, any notice aborted its controller, even if nobody ever read the task again. Its result is still dropped if the change was real: `resolvePromise` sees `FLAG_STALE` (or `FLAG_PENDING` with `needsUpdate`) and discards it. This is the contract in the spec and in the README's `c.controller()` section ("aborted when the node re-runs or is disposed").
+- In that state, a task the stale task awaits may settle first and resume the stale activation's continuation. That matches `c.suspend(promise)`, which also only checks the activation token. The continuation's return value is discarded as above.
+- Effects tear down only a still-loading activation on re-run, as before. `test/async.test.js` › controller works with spawn requires that a completed spawn activation's controller is not aborted.
+- `c.version()` now changes only when the node re-runs, which is what the README documents ("increments every time the node re-runs"). Before, a clean pull through `checkRun` also changed it.
+
+### Side effects
+
+- A spawn that is paused while loading, goes stale, and is then resumed now tears down its old activation. `resumeEffect` enqueues the effect without calling `_receive`, so before the fix the old waiter survived and the stale continuation ran next to the new one. No test covers this.
+- A task awaiting another task (`c.suspend(task)`) through an absorbed change no longer loses its waiter. Same root cause as the spawn case. No test covers this either.
+- No other group's tests changed state.
+
+### Test expectations changed
+
+None.
+
+### Hot paths touched
+
+- `ComputeProto._receive`: less work. One flag dropped from the fast-path mask; the loading branch (a `resetChannel` call, two flag tests and an extra `notify` call site) is gone.
+- `EffectProto._receive`: less work. The `FLAG_LOADING` test and the teardown are gone.
+- `EffectProto._update`: one added `flag & FLAG_LOADING` test, moved from `_receive`. It now runs once per re-run instead of once per notice.
+- `checkSingle` / `checkRun`: less work. One store fewer on each of the three clean paths.
+- No fields added.

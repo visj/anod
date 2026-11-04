@@ -45,6 +45,7 @@ const FLAG_EAGER = 1 << 23;
 const FLAG_PURGE = 1 << 24;
 const FLAG_PAUSED = 1 << 25;
 const FLAG_OWNER = 1 << 26;
+const FLAG_CALLBACK = 1 << 27;
 
 /** Error type constants for { error, type } POJOs. */
 const REFUSE = 1;
@@ -1341,14 +1342,17 @@ function root(fn) {
 	function suspend(promiseOrTask) {
 		/** Branch: setup function → callback constructor path.
 		 *  Sets FLAG_SUSPEND so _update knows the node is waiting
-		 *  for a callback-driven settlement, not a returned promise. */
+		 *  for a callback-driven settlement, not a returned promise.
+		 *  FLAG_CALLBACK stays set until the node's fn returns, so a
+		 *  callback that settles before then (synchronously, inside
+		 *  the setup fn) is finished by _update, not mid-run. */
 		if (typeof promiseOrTask === "function") {
 			if (this._flag & FLAG_SUSPEND) {
 				throw new Error(
 					"Cannot call suspend() with callbacks after a previous suspend()"
 				);
 			}
-			this._flag |= FLAG_SUSPEND | FLAG_LOADING;
+			this._flag |= FLAG_SUSPEND | FLAG_LOADING | FLAG_CALLBACK;
 			let node = this;
 			let time = this._time;
 			promiseOrTask(
@@ -2279,8 +2283,10 @@ function root(fn) {
 
 	/**
 	 * Settles an async compute. Clears loading/lock/init, handles deferred
-	 * dispose, resolves waiters, notifies subscribers, and re-runs if the
-	 * node was marked stale while locked. Handles both value and error:
+	 * dispose, settles deferred deps, resolves waiters, notifies subscribers,
+	 * and re-runs if the node was marked stale while locked. Settling always
+	 * completes the activation; only the subscriber notification depends on
+	 * the value having changed. Handles both value and error:
 	 * when FLAG_ERROR is set before calling, the value is treated as an
 	 * error. Uses err || { error: err } guard on errors to guarantee a
 	 * non-falsy value (prevents skipping the comparison branch when user
@@ -2301,51 +2307,59 @@ function root(fn) {
 			return;
 		}
 
-		if (value !== this._value || flag & (FLAG_INIT | FLAG_ERROR)) {
+		let changed =
+			value !== this._value || !!(flag & (FLAG_INIT | FLAG_ERROR));
+
+		/** Settled from inside the fn that called c.suspend(fn), which is
+		 *  still running. Only write the value, as part of that run (its
+		 *  _time); _update finishes the settle once the fn has returned
+		 *  and its deps are tracked. */
+		if (flag & FLAG_CALLBACK) {
+			if (changed) {
+				this._value = value;
+				this._ctime = this._time;
+			}
+			return;
+		}
+
+		if (changed) {
 			this._value = value;
-			let time = TIME + 1;
-			this._ctime = time;
+			this._ctime = TIME + 1;
+		}
 
-			let stale = false;
-			if (this._flag & FLAG_ASYNC) {
-				let hasDefers =
-					this._flag & FLAG_CHANNEL &&
-					(this._chan._defer1 !== null || this._chan._defers !== null);
-				if (this._deps !== null || hasDefers) {
-					stale = settleDeps(this);
-				}
+		let stale = false;
+		if (this._flag & FLAG_ASYNC) {
+			let hasDefers =
+				this._flag & FLAG_CHANNEL &&
+				(this._chan._defer1 !== null || this._chan._defers !== null);
+			if (this._deps !== null || hasDefers) {
+				stale = settleDeps(this);
 			}
+		}
 
-			let waiters = null;
-			if (this._flag & FLAG_CHANNEL) {
-				let ch = this._chan;
-				if (ch !== null && ch._waiters !== null) {
-					waiters = ch._waiters;
-					let waiterCount = waiters.length;
-					settleNotify(this, value, !!isError, waiters, waiterCount);
-					ch._waiters = null;
-					this._flag &= ~FLAG_WAITER;
-				}
+		let waiters = null;
+		if (this._flag & FLAG_CHANNEL) {
+			let ch = this._chan;
+			if (ch !== null && ch._waiters !== null) {
+				waiters = ch._waiters;
+				let waiterCount = waiters.length;
+				settleNotify(this, value, !!isError, waiters, waiterCount, !changed);
+				ch._waiters = null;
+				this._flag &= ~FLAG_WAITER;
 			}
+		}
+		if (changed) {
 			if (waiters === null) {
 				notify(this, FLAG_STALE);
 			}
-
 			flush();
+		}
 
-			if (
-				stale ||
-				(flag & FLAG_LOCKED &&
-					(this._flag & FLAG_STALE ||
-						(this._flag & FLAG_PENDING && needsUpdate(this, TIME))))
-			) {
-				this._flag |= FLAG_STALE;
-				this._update(TIME);
-			}
-		} else if (
-			flag & FLAG_LOCKED &&
-			(this._flag & FLAG_STALE ||
-				(this._flag & FLAG_PENDING && needsUpdate(this, TIME)))
+		if (
+			stale ||
+			(flag & FLAG_LOCKED &&
+				(this._flag & FLAG_STALE ||
+					(this._flag & FLAG_PENDING && needsUpdate(this, TIME))))
 		) {
 			this._flag |= FLAG_STALE;
 			this._update(TIME);
@@ -2476,7 +2490,8 @@ function root(fn) {
 				}
 			} catch (error) {
 				value = fatal(error);
-				this._flag |= FLAG_ERROR;
+				/** A throw wins over a callback that already settled. */
+				this._flag = (this._flag | FLAG_ERROR) & ~FLAG_CALLBACK;
 			}
 		} else {
 			/** Setup or dynamic: bump STAMP for dep tracking */
@@ -2521,7 +2536,8 @@ function root(fn) {
 				}
 			} catch (error) {
 				value = fatal(error);
-				this._flag |= FLAG_ERROR;
+				/** A throw wins over a callback that already settled. */
+				this._flag = (this._flag | FLAG_ERROR) & ~FLAG_CALLBACK;
 			}
 
 			if (flag & FLAG_SETUP) {
@@ -2563,10 +2579,32 @@ function root(fn) {
 		 *  FLAG_LOADING via the setup function. Skip async dispatch.
 		 *  Check both FLAG_SUSPEND and FLAG_LOADING: the callback path
 		 *  sets both, while promise/task paths only set FLAG_SUSPEND
-		 *  (FLAG_LOADING is set later by this dispatch code). */
+		 *  (FLAG_LOADING is set later by this dispatch code). Like the
+		 *  promise path, FLAG_INIT is kept for _settle, so the first
+		 *  settle notifies even if it resolves to the seed. */
 		if (flag & FLAG_ASYNC) {
 			if (this._flag & FLAG_SUSPEND && this._flag & FLAG_LOADING) {
-				this._flag &= ~FLAG_INIT;
+				this._flag &= ~FLAG_CALLBACK;
+				return;
+			}
+			/** The callback settled before the fn returned, and _settle
+			 *  only wrote the value. As with any callback suspend, the
+			 *  fn's return value is ignored; finish the settle here. */
+			if (this._flag & FLAG_CALLBACK) {
+				this._flag &= ~FLAG_CALLBACK;
+				if (this._flag & FLAG_CHANNEL) {
+					let chan = this._chan;
+					if (chan._defer1 !== null || chan._defers !== null) {
+						settleDefers(this);
+					}
+					let waiters = chan._waiters;
+					if (waiters !== null) {
+						let isError = !!(this._flag & FLAG_ERROR);
+						settleNotify(this, this._value, isError, waiters, waiters.length, true);
+						chan._waiters = null;
+						this._flag &= ~FLAG_WAITER;
+					}
+				}
 				return;
 			}
 			let kind = asyncKind(value);
@@ -2583,9 +2621,16 @@ function root(fn) {
 				}
 				return;
 			}
+			/** Sync result: the activation settles here, deferred deps too. */
+			if (
+				this._flag & FLAG_CHANNEL &&
+				(this._chan._defer1 !== null || this._chan._defers !== null)
+			) {
+				settleDefers(this);
+			}
 		}
 
-		flag = this._flag &= ~FLAG_INIT;
+		flag = this._flag &= ~(FLAG_INIT | FLAG_CALLBACK);
 		if (flag & FLAG_ERROR) {
 			this._value = value;
 			this._ctime = time;
@@ -2600,13 +2645,13 @@ function root(fn) {
 	};
 
 	/**
-	 * Compute notification handler.
+	 * Compute notification handler. In-flight async work is left alone:
+	 * the notice may resolve to no change, so it is only torn down when
+	 * the node actually re-runs (_update) or is disposed.
 	 * 1. Default: propagate PENDING downstream (pure pull).
-	 * 2. FLAG_LOADING: abort in-flight async work immediately so
-	 *    stale fetches/promises are cancelled without waiting for a pull.
-	 * 3. FLAG_WAITER: enqueue to COMPUTES + notify PENDING.
-	 * 4. FLAG_EAGER + FLAG_ASYNC: enqueue to COMPUTES for eager re-run.
-	 * 5. FLAG_EAGER + sync: notify FLAG_STALE directly (pure push).
+	 * 2. FLAG_WAITER: enqueue to COMPUTES + notify PENDING.
+	 * 3. FLAG_EAGER + FLAG_ASYNC: enqueue to COMPUTES for eager re-run.
+	 * 4. FLAG_EAGER + sync: notify FLAG_STALE directly (pure push).
 	 * @this {Compute}
 	 * @returns {void}
 	 */
@@ -2617,7 +2662,6 @@ function root(fn) {
 				flag &
 				(FLAG_EAGER |
 					FLAG_WAITER |
-					FLAG_LOADING |
 					FLAG_LOCKED |
 					FLAG_PAUSED |
 					FLAG_DISPOSED)
@@ -2627,15 +2671,6 @@ function root(fn) {
 		} else if (flag & (FLAG_LOCKED | FLAG_PAUSED | FLAG_DISPOSED)) {
 			return;
 		} else {
-			/** Abort in-flight async work. The stale/pending flag check
-			 *  in resolvePromise ensures old callbacks are rejected. */
-			if (flag & FLAG_LOADING && flag & FLAG_CHANNEL) {
-				resetChannel(this);
-			}
-			if (!(flag & (FLAG_EAGER | FLAG_WAITER))) {
-				notify(this, FLAG_PENDING);
-				return;
-			}
 			COMPUTES[COMPUTE_COUNT++] = this;
 			if (flag & FLAG_EAGER) {
 				if (!(flag & FLAG_ASYNC)) {
@@ -2669,6 +2704,15 @@ function root(fn) {
 		}
 
 		this._time = time;
+		/** Tear down the in-flight activation. Done here rather than in
+		 *  _receive, so a pending notice that resolves to no change
+		 *  leaves its waiters and controller alone. */
+		if (flag & FLAG_LOADING) {
+			this._flag &= ~(FLAG_LOADING | FLAG_SUSPEND);
+			if (flag & FLAG_CHANNEL) {
+				resetChannel(this);
+			}
+		}
 		if (!(flag & FLAG_INIT)) {
 			if (this._cleanup !== null) {
 				clearCleanup(this);
@@ -2775,7 +2819,7 @@ function root(fn) {
 
 		if (flag & FLAG_ASYNC) {
 			if (this._flag & FLAG_SUSPEND && this._flag & FLAG_LOADING) {
-				this._flag &= ~FLAG_INIT;
+				this._flag &= ~(FLAG_INIT | FLAG_CALLBACK);
 				return;
 			}
 			let kind = asyncKind(value);
@@ -2788,9 +2832,18 @@ function root(fn) {
 				}
 				return;
 			}
+			/** Sync result: the activation settles here, deferred deps too. */
+			if (
+				this._flag & FLAG_CHANNEL &&
+				(this._chan._defer1 !== null || this._chan._defers !== null)
+			) {
+				settleDefers(this);
+			}
 		}
 
-		this._flag &= ~FLAG_INIT;
+		/** An effect has no value for its fn's return to overwrite, so
+		 *  its callbacks settle as they fire; FLAG_CALLBACK is unused. */
+		this._flag &= ~(FLAG_INIT | FLAG_CALLBACK);
 		if (this._finalize !== null) {
 			clearFinalize(this);
 		}
@@ -2916,14 +2969,6 @@ function root(fn) {
 		let flag = this._flag;
 		if (flag & (FLAG_LOCKED | FLAG_PAUSED | FLAG_DISPOSED)) {
 			return;
-		}
-		/** Abort in-flight async work eagerly so stale fetches/promises
-		 *  are cancelled without waiting for _update to run. */
-		if (flag & FLAG_LOADING) {
-			this._flag &= ~(FLAG_LOADING | FLAG_SUSPEND);
-			if (flag & FLAG_CHANNEL) {
-				resetChannel(this);
-			}
 		}
 		if (this._owned === null) {
 			RECEIVERS[RECEIVER_COUNT++] = this;
@@ -3698,7 +3743,6 @@ function checkSingle(node, time) {
 	if (dep._ctime > node._time) {
 		node._update(time);
 	} else {
-		node._time = time;
 		node._flag &= ~(FLAG_STALE | FLAG_PENDING);
 	}
 }
@@ -3804,8 +3848,8 @@ function checkRun(node, time) {
 				}
 			}
 
-			/** No dep changed - clear flags without re-executing */
-			node._time = time;
+			/** No dep changed - clear flags without re-executing. _time
+			 *  stays: it is also the in-flight activation's token. */
 			node._flag &= ~(FLAG_STALE | FLAG_PENDING);
 		}
 
@@ -3853,7 +3897,6 @@ function checkRun(node, time) {
 				continue outer;
 			}
 			/** No more deps — clear parent and keep ascending */
-			parent._time = time;
 			parent._flag &= ~(FLAG_STALE | FLAG_PENDING);
 			node = parent;
 		}
@@ -3971,7 +4014,15 @@ function resolveIterator(node, iterable, time) {
 			}
 		}
 
+		/** A finished iterator settles with its return value. If it returned
+		 *  nothing, the last yield already settled the node; if it never
+		 *  yielded, it settles to its current value (the seed or previous). */
 		if (result.done) {
+			if (result.value !== undefined) {
+				node._settle(result.value);
+			} else if (node._flag & FLAG_LOADING) {
+				node._settle(node._value);
+			}
 			return;
 		}
 
@@ -4013,14 +4064,17 @@ function resolveIterator(node, iterable, time) {
  *         a sync sub (version - 1), stamp with `version` ("notified").
  * Pass 3: Inline notify — OR FLAG_STALE on all subs, but only call
  *         _receive() on subs not stamped `version` (not a waiter).
+ *         Skipped when quiet.
  * @template T
  * @param {AsyncSender<T>} node
  * @param {T} value
  * @param {boolean} isError
  * @param {Array<AsyncReceiver | Function>} waiters
  * @param {number} waiterCount
+ * @param {boolean=} quiet - Only resolve the waiters, without marking
+ *     subscribers stale (the value did not change).
  */
-function settleNotify(node, value, isError, waiters, waiterCount) {
+function settleNotify(node, value, isError, waiters, waiterCount, quiet) {
 	let version = (SEED += 2);
 
 	/** Pass 1: stamp all sync subs with version - 1. */
@@ -4051,6 +4105,10 @@ function settleNotify(node, value, isError, waiters, waiterCount) {
 		}
 		awaiter._stamp = version;
 		clearRespond(awaiter, node);
+	}
+
+	if (quiet) {
+		return;
 	}
 
 	/** Pass 3: inline notify — skip subs that were resolved as waiters. */
@@ -4184,6 +4242,49 @@ function settleDeps(node) {
 		}
 	}
 	return changed;
+}
+
+/**
+ * Subscribes the deferred deps of an async node whose fn returned a
+ * sync value, so the activation settles without ever loading. The run
+ * has just tracked the node's other deps, so a sender it already has
+ * is found by scan instead of by stamp: settleDeps' stamps would
+ * overwrite those of an outer node that is still running. A deferred
+ * value was read in this same run, so there is nothing to re-run for.
+ * @param {AsyncReceiver} node
+ * @returns {void}
+ */
+function settleDefers(node) {
+	let chan = node._chan;
+	let defer1 = chan._defer1;
+	let defers = chan._defers;
+	chan._defer1 = null;
+	chan._defers = null;
+	if (defer1 !== null && !hasDep(node, defer1)) {
+		subscribe(node, defer1);
+	}
+	if (defers !== null) {
+		let count = defers.length;
+		for (let i = 0; i < count; i += 2) {
+			let sender = /** @type {Sender} */(defers[i]);
+			if (!hasDep(node, sender)) {
+				subscribe(node, sender);
+			}
+		}
+	}
+}
+
+/**
+ * @param {Receiver} node
+ * @param {Sender} sender
+ * @returns {boolean} true if sender is already a dep of node
+ */
+function hasDep(node, sender) {
+	if (node._dep1 === sender) {
+		return true;
+	}
+	let deps = node._deps;
+	return deps !== null && deps.indexOf(sender) !== -1;
 }
 
 /**
@@ -4754,6 +4855,7 @@ export {
 	FLAG_PURGE,
 	FLAG_PAUSED,
 	FLAG_OWNER,
+	FLAG_CALLBACK,
 	REFUSE,
 	PANIC,
 	FATAL,
