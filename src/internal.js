@@ -2098,6 +2098,7 @@ function root(fn) {
 	 * so it ignores any notifications that propagate from the write.
 	 * When IDLE (e.g. inside an async continuation after await), mirrors
 	 * the immediate set() path. Supports asyncFn for resource senders.
+	 * @throws
 	 * @template T
 	 * @this {Receiver}
 	 * @param {Sender<T> | AsyncSender<T>} sender
@@ -2106,10 +2107,18 @@ function root(fn) {
 	 * @returns {void}
 	 */
 	function contextSet(sender, value, asyncFn) {
+		if (sender._flag & FLAG_DISPOSED) {
+			throw new Error(ILLEGAL_READ);
+		}
 		if (IDLE) {
 			let _value;
+			let write = true;
 			if (typeof value === "function") {
 				_value = value(sender._value);
+				/** Mutable updater returning void — keep current value, still notify. */
+				if (_value === undefined && sender._flag & FLAG_MUTABLE) {
+					write = false;
+				}
 			} else {
 				_value = value;
 			}
@@ -2122,7 +2131,9 @@ function root(fn) {
 					? !sender._equal(sender._value, _value)
 					: sender._value !== _value)
 			) {
-				sender._value = _value;
+				if (write) {
+					sender._value = _value;
+				}
 				let flag = this._flag;
 				this._flag = flag | FLAG_PAUSED;
 				notify(sender, FLAG_STALE);
@@ -2150,6 +2161,7 @@ function root(fn) {
 	 * guarded write that will pause this receiver at drain time. Triggers
 	 * a microtask flush if not already posting. Supports asyncFn for
 	 * resource senders.
+	 * @throws
 	 * @template T
 	 * @this {Receiver}
 	 * @param {Sender<T>} sender
@@ -2158,6 +2170,9 @@ function root(fn) {
 	 * @returns {void}
 	 */
 	function contextPost(sender, value, asyncFn) {
+		if (sender._flag & FLAG_DISPOSED) {
+			throw new Error(ILLEGAL_READ);
+		}
 		if (asyncFn !== undefined && sender._flag & FLAG_ASYNC) {
 			schedule(
 				sender,
