@@ -32,4 +32,20 @@ Run with `bun test --conditions=src test/explore/async.test.js`.
 
 ## Fix
 
-_Not fixed yet. The fix branch fills this in._
+- **`pending()` subscribes through `this.rejected(task)` instead of `this.val(task)`**, for both the single-task and the array form.
+  - `rejected()` already tracks a sender exactly as `val()` does: it refreshes it if stale or pending, uses stamp/`_read` in the sync scope and `_readAsync(sender, true)` after an await, and skips tracking for a stable node. Its only difference is that it never throws for `FLAG_ERROR`.
+  - So `pending()` keeps the same subscription and simply stops throwing. The loading check that follows is unchanged.
+  - Reusing `rejected()` avoids a third copy of the tracking logic, and makes the division of labour explicit: `pending()` answers "loading?", and `rejected()` answers "errored?".
+
+Behavior decisions:
+
+- A disposed sender (or the node itself) still throws ILLEGAL_READ from `pending()`, as it did through `val()` and as `rejected()` does. Only the error state stops throwing; reading a dead node is still a usage error.
+- In the array form, an errored member counts as not loading. `pending()` is still true if any other member is loading.
+
+Test expectations changed: none.
+
+Other bugs' tests turned green: none.
+
+### Hot paths touched
+
+None. `pending()` is not on the propagation path, and it now makes one method call per sender, as before (`rejected` instead of `val`).

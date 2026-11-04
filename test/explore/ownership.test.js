@@ -739,7 +739,9 @@ describe("error propagation", () => {
                     seen.push(e);
                     return true;
                 });
-                creator = r2.effect((cx) => {
+                /** The downstream error escapes this call, so capture the node from its context. */
+                r2.effect((cx) => {
+                    creator = cx;
                     runs.push(cx.val(s));
                     trigger.set(1);
                 });

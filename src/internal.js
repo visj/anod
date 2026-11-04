@@ -234,6 +234,27 @@ var PURGES = [];
 var PURGE_COUNT = 0;
 
 /**
+ * Every { error, type } object anod creates. An error keeps its
+ * identity as it travels through reads, awaits and owner chains, so a
+ * caught value found here passes on unchanged. Anything else was
+ * thrown by user code and is wrapped as FATAL, exactly once.
+ * @const
+ * @type {WeakSet<Object>}
+ */
+var FAULTS = new WeakSet();
+
+/**
+ * The error startEffect last rethrew to a creator after the new
+ * effect's owner chain declined it, and that effect. An owner whose
+ * run it escapes into has already declined it, so tryRecover does not
+ * ask the same handlers again.
+ * @type {*}
+ */
+var UNHANDLED = null;
+/** @type {Effect | null} */
+var UNHANDLED_NODE = null;
+
+/**
  * Minimal factory-only context with no ownership. Nodes created
  * through Clock are unowned — they live until GC or manual dispose.
  * Extensible via Clock.prototype for user-defined context methods.
@@ -245,6 +266,12 @@ Clock.prototype._flag = 0;
 Clock.prototype._level = -1;
 /** @type {Owner | null} */
 Clock.prototype._owner = null;
+/**
+ * No recover handlers: owner-chain walks (tryRecover) treat the Clock
+ * as the end of the chain, like a root with nothing registered.
+ * @type {null}
+ */
+Clock.prototype._recover = null;
 
 /**
  * @constructor
@@ -463,6 +490,10 @@ function val(sender) {
 	/** Sync path: version-tagged dep tracking with VSTACK restore. */
 	let version = STAMP;
 	if (sender._stamp === version) {
+		/** Already read this run: an errored sender throws on every read. */
+		if (sender._flag & FLAG_ERROR) {
+			throw sender._value;
+		}
 		return sender._value;
 	}
 	if (sender._flag & (FLAG_STALE | FLAG_PENDING)) {
@@ -1079,21 +1110,20 @@ function root(fn) {
 	 */
 	ComputeProto.refuse = function (val) {
 		this._flag |= FLAG_ERROR;
-		return { error: val, type: REFUSE };
+		return fault(val, REFUSE);
 	};
 
 	/**
-	 * Signals an expected panic from a compute or effect. Sets
-	 * FLAG_PANIC and throws a { error, type: PANIC } POJO. The
-	 * catch block checks FLAG_PANIC to distinguish this from
-	 * unexpected throws (which are wrapped as FATAL).
+	 * Signals an expected panic from a compute or effect. Throws a
+	 * { error, type: PANIC } POJO. anod created it, so every catch
+	 * passes it on as PANIC instead of wrapping it as FATAL, in this
+	 * run or after an await.
 	 * @this {Receiver}
 	 * @param {*} val
 	 * @returns {void}
 	 */
 	function panic(val) {
-		this._flag |= FLAG_PANIC;
-		throw { error: val, type: PANIC };
+		throw fault(val, PANIC);
 	}
 
 	ComputeProto.panic = EffectProto.panic = panic;
@@ -1617,7 +1647,9 @@ function root(fn) {
 	/**
 	 * Checks if one or more tasks are currently loading. Subscribes to
 	 * each task as a dep (so the caller re-runs when they settle).
-	 * Accepts a single task or an array of tasks.
+	 * Accepts a single task or an array of tasks. Subscribes through
+	 * rejected(), which tracks like val() but never throws for an
+	 * errored task: checking errors is rejected()'s job.
 	 *
 	 * Usage: `if (c.pending([taskA, taskB])) return;`
 	 *
@@ -1632,14 +1664,14 @@ function root(fn) {
 			let count = tasks.length;
 			for (let i = 0; i < count; i++) {
 				let task = tasks[i];
-				this.val(task);
+				this.rejected(task);
 				if (task._flag & FLAG_LOADING) {
 					loading = true;
 				}
 			}
 		} else {
 			/** Single task. */
-			this.val(tasks);
+			this.rejected(tasks);
 			if (tasks._flag & FLAG_LOADING) {
 				loading = true;
 			}
@@ -1800,14 +1832,14 @@ function root(fn) {
 	};
 
 	/**
-	 * Settles an async resource with an error. Wraps as FATAL,
-	 * sets FLAG_ERROR, and delegates to _settle.
+	 * Settles an async resource with an error. Wraps as FATAL unless
+	 * anod created it, sets FLAG_ERROR, and delegates to _settle.
 	 * @this {Cell}
 	 * @param {*} err
 	 */
 	CellProto._error = function (err) {
 		this._flag |= FLAG_ERROR;
-		this._settle({ error: err, type: FATAL });
+		this._settle(fatal(err));
 	};
 
 	/**
@@ -1996,7 +2028,7 @@ function root(fn) {
 			(this._dep1 === null || this._dep1._flag & FLAG_DISPOSED)
 		) {
 			this._flag |= FLAG_ERROR;
-			this._value = { error: ILLEGAL_READ, type: FATAL };
+			this._value = fault(ILLEGAL_READ, FATAL);
 		}
 		return this._value;
 	};
@@ -2230,14 +2262,14 @@ function root(fn) {
 	};
 
 	/**
-	 * Settles an async compute with an error. Wraps as FATAL,
-	 * sets FLAG_ERROR, and delegates to _settle.
+	 * Settles an async compute with an error. Wraps as FATAL unless
+	 * anod created it, sets FLAG_ERROR, and delegates to _settle.
 	 * @this {Compute}
 	 * @param {?} err
 	 */
 	ComputeProto._error = function (err) {
 		this._flag |= FLAG_ERROR;
-		this._settle({ error: err, type: FATAL });
+		this._settle(fatal(err));
 	};
 
 	/** @this {Compute} */
@@ -2298,8 +2330,7 @@ function root(fn) {
 				FLAG_ERROR |
 				FLAG_EQUAL |
 				FLAG_NOTEQUAL |
-				FLAG_SUSPEND |
-				FLAG_PANIC
+				FLAG_SUSPEND
 			);
 
 		if (!(flag & FLAG_INIT) && this._cleanup !== null) {
@@ -2344,12 +2375,7 @@ function root(fn) {
 					value = this._fn(this, this._value, args);
 				}
 			} catch (error) {
-				if (this._flag & FLAG_PANIC) {
-					value = error;
-					this._flag &= ~FLAG_PANIC;
-				} else {
-					value = { error, type: FATAL };
-				}
+				value = fatal(error);
 				this._flag |= FLAG_ERROR;
 			}
 		} else {
@@ -2394,12 +2420,7 @@ function root(fn) {
 					value = this._fn(this, this._value, args);
 				}
 			} catch (error) {
-				if (this._flag & FLAG_PANIC) {
-					value = error;
-					this._flag &= ~FLAG_PANIC;
-				} else {
-					value = { error, type: FATAL };
-				}
+				value = fatal(error);
 				this._flag |= FLAG_ERROR;
 			}
 
@@ -2730,14 +2751,14 @@ function root(fn) {
 	};
 
 	/**
-	 * Settles an async effect with an error. Wraps as FATAL,
-	 * sets FLAG_ERROR, and delegates to _settle.
+	 * Settles an async effect with an error. Wraps as FATAL unless
+	 * anod created it, sets FLAG_ERROR, and delegates to _settle.
 	 * @this {Effect}
 	 * @param {*} err
 	 */
 	EffectProto._error = function (err) {
 		this._flag |= FLAG_ERROR;
-		this._settle({ error: err, type: FATAL });
+		this._settle(fatal(err));
 	};
 
 	/**
@@ -3193,6 +3214,29 @@ function clearOwned(owner) {
 }
 
 /**
+ * Creates a { error, type } object and records it in FAULTS, so it
+ * passes through every later catch unchanged.
+ * @param {*} error
+ * @param {number} type
+ * @returns {{ error: *, type: number }}
+ */
+function fault(error, type) {
+	let err = { error, type };
+	FAULTS.add(err);
+	return err;
+}
+
+/**
+ * Classifies a caught value. An error anod created travels on
+ * unchanged; a value thrown by user code is wrapped as FATAL.
+ * @param {*} error
+ * @returns {{ error: *, type: number }}
+ */
+function fatal(error) {
+	return FAULTS.has(error) ? error : fault(error, FATAL);
+}
+
+/**
  * Checks a single owner's _recover handlers.
  * @param {Owner} owner
  * @param {?} error
@@ -3227,12 +3271,23 @@ const RECOVER_OWNER = 2;
  * - RECOVER_OWNER: an ancestor handled it - node still disposes, error swallowed.
  * - RECOVER_NONE:  unhandled - node disposes, error propagates.
  *
- * A handler that throws leaves the error unhandled.
+ * An error that startEffect rethrew from one of node's own children
+ * has already been declined by node and its owners, so it is
+ * unhandled without asking them again. A handler that throws leaves
+ * the error unhandled.
  * @param {Effect} node
  * @param {?} error
  * @returns {number}
  */
 function tryRecover(node, error) {
+	if (
+		error === UNHANDLED &&
+		node._owned !== null &&
+		node._owned.lastIndexOf(UNHANDLED_NODE) !== -1
+	) {
+		UNHANDLED = UNHANDLED_NODE = null;
+		return RECOVER_NONE;
+	}
 	try {
 		/** Self-recovery: node stays alive. */
 		if (node._recover !== null && _checkRecover(node, error)) {
@@ -4226,6 +4281,10 @@ function startCompute(node) {
 }
 
 /**
+ * Runs a new effect's first activation. When idle, it also flushes
+ * what the run queued. The flush sits outside the run's try: an error
+ * from an effect it triggers belongs to that effect's owners, and
+ * passes straight to the caller.
  * @param {Effect} node
  * @returns {void}
  */
@@ -4234,22 +4293,13 @@ function startEffect(node) {
 		IDLE = false;
 		try {
 			FENCE = SEED;
-			node._update(TIME);
+			try {
+				node._update(TIME);
+			} catch (error) {
+				failStart(node, error);
+			}
 			if (SENDER_COUNT > 0 || DISPOSER_COUNT > 0) {
 				flush();
-			}
-		} catch (error) {
-			if (node._finalize !== null) {
-				clearFinalize(node);
-			}
-			let err = node._flag & FLAG_PANIC ? error : { error, type: FATAL };
-			node._flag &= ~FLAG_PANIC;
-			let result = tryRecover(node, err);
-			if (result !== RECOVER_SELF) {
-				node._dispose();
-			}
-			if (result === RECOVER_NONE) {
-				throw err;
 			}
 		} finally {
 			IDLE = true;
@@ -4258,18 +4308,7 @@ function startEffect(node) {
 		try {
 			node._update(TIME);
 		} catch (error) {
-			if (node._finalize !== null) {
-				clearFinalize(node);
-			}
-			let err = node._flag & FLAG_PANIC ? error : { error, type: FATAL };
-			node._flag &= ~FLAG_PANIC;
-			let result = tryRecover(node, err);
-			if (result !== RECOVER_SELF) {
-				node._dispose();
-			}
-			if (result === RECOVER_NONE) {
-				throw err;
-			}
+			failStart(node, error);
 		}
 	}
 }
@@ -4292,6 +4331,31 @@ function requeue(queue, count, total) {
 		queue[left++] = node;
 	}
 	return left;
+}
+
+/**
+ * Handles an error thrown by a new effect's first run. The effect's
+ * handlers and owner chain see it once. If none handles it, the effect
+ * is disposed and the error is rethrown to the creator, recorded in
+ * UNHANDLED so the creator's own tryRecover does not ask them again.
+ * @param {Effect} node
+ * @param {*} error
+ * @returns {void}
+ */
+function failStart(node, error) {
+	if (node._finalize !== null) {
+		clearFinalize(node);
+	}
+	let err = fatal(error);
+	let result = tryRecover(node, err);
+	if (result !== RECOVER_SELF) {
+		node._dispose();
+	}
+	if (result === RECOVER_NONE) {
+		UNHANDLED = err;
+		UNHANDLED_NODE = node;
+		throw err;
+	}
 }
 
 /**
@@ -4321,8 +4385,7 @@ function flushEffects(queue, count, time) {
 				if (node._finalize !== null) {
 					clearFinalize(node);
 				}
-				let err = node._flag & FLAG_PANIC ? error : { error, type: FATAL };
-				node._flag &= ~FLAG_PANIC;
+				let err = fatal(error);
 				let result = tryRecover(node, err);
 				if (thrown === null && result === RECOVER_NONE) {
 					thrown = err;
