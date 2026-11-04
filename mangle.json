@@ -63,7 +63,6 @@
       "$poke": "st",
       "$schedule": "ut",
       "$signal": "ht",
-      "$mutable": "ft",
       "$resource": "rt",
       "$root": "ot",
       "$ClockProto": "ct",
@@ -131,7 +130,8 @@
       "$ASYNC_PROMISE": "_i",
       "$ASYNC_ITERATOR": "ki",
       "$ASYNC_SYNC": "Ei",
-      "$NOOP": "ji"
+      "$NOOP": "ji",
+      "$supersede": "ft"
     }
   },
   "props": {

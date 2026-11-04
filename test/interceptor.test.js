@@ -1,5 +1,5 @@
 import { describe, test, expect } from "#test-runner";
-import { signal, mutable, root, batch } from "#anod";
+import { signal, root, batch } from "#anod";
 
 const tick = () => Promise.resolve();
 const settle = () => tick().then(tick).then(tick);
@@ -130,9 +130,9 @@ describe("contextual set (interceptor pattern)", () => {
         });
     });
 
-    test("guarded write with mutable always notifies", () => {
+    test("guarded write with signal(value, false) always notifies", () => {
         root((c) => {
-            const r = mutable({ count: 0 });
+            const r = signal({ count: 0 }, false);
             let runs = 0;
             c.effect(r, (val, c) => {
                 runs++;

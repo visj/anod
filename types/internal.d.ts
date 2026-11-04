@@ -107,6 +107,10 @@ export interface SignalConstructor {
 
 export declare var Signal: SignalConstructor;
 
+/**
+ * The signal from signal(value, false): every write notifies, and an
+ * updater may return void to keep the current value.
+ */
 export interface MutableSignal<T = any> extends ReadonlySignal<T> {
 	set(value: T | ((prev: T) => T | void)): boolean;
 	post(value: T | ((prev: T) => T | void)): boolean;
@@ -552,7 +556,6 @@ export declare function signal<T>(
 	value: T,
 	equals: (prev: T, next: T) => boolean
 ): Signal<T>;
-export declare function mutable<T>(value: T): MutableSignal<T>;
 export declare function resource<T>(value: T): Resource<T>;
 export declare function resource<T>(
 	value: T,

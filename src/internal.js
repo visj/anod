@@ -485,6 +485,11 @@ function val(sender) {
  * flushes. When not IDLE, schedules for drain. Updater functions
  * are resolved at drain time by assign() to see the latest value.
  *
+ * An immediate write supersedes the writes posted before it: their
+ * queue entries are cancelled once the updater has returned, so a
+ * throwing updater leaves them in place. Inside a batch or a flush,
+ * set() queues behind them instead, and the last write wins.
+ *
  * For Resource nodes (FLAG_ASYNC), accepts an optional asyncFn as
  * second argument. The optimistic value is written immediately,
  * then asyncFn runs with the resource as context and the optimistic
@@ -503,6 +508,9 @@ function set(value, asyncFn) {
 	/** Resource: single function arg → run as (c, current), dispatch on result. */
 	if (callback && asyncFn === undefined && this._flag & FLAG_ASYNC) {
 		if (IDLE) {
+			if (this._flag & FLAG_SCHEDULED) {
+				supersede(this);
+			}
 			_runAsync(/** @type {AsyncSender<T>} */(this), value, this._value);
 		} else {
 			schedule(this, { _value: this._value, _fn: value }, asyncAssign);
@@ -521,6 +529,9 @@ function set(value, asyncFn) {
 			}
 		} else {
 			_value = value;
+		}
+		if (this._flag & FLAG_SCHEDULED) {
+			supersede(this);
 		}
 		if (
 			this._flag & FLAG_MUTABLE ||
@@ -547,7 +558,7 @@ function set(value, asyncFn) {
 	}
 	if (
 		callback ||
-		this._flag & FLAG_MUTABLE ||
+		this._flag & (FLAG_MUTABLE | FLAG_SCHEDULED) ||
 		(this._equal !== null
 			? !this._equal(this._value, value)
 			: this._value !== value)
@@ -638,8 +649,6 @@ function assign(node, value, time) {
 			node._flag &= ~FLAG_SCHEDULED;
 			notify(node, FLAG_STALE);
 		}
-	} else {
-		node._flag &= ~FLAG_SCHEDULED;
 	}
 }
 
@@ -653,34 +662,7 @@ function assign(node, value, time) {
  * @param {number} time
  */
 function asyncAssign(node, payload, time) {
-	let value = payload._value;
-	let _value;
-	let write = true;
-	if (typeof value === "function") {
-		_value = value(node._value);
-		/** Mutable updater returning void — keep current value, still notify. */
-		if (_value === undefined && node._flag & FLAG_MUTABLE) {
-			write = false;
-		}
-	} else {
-		_value = value;
-	}
-	if (
-		node._flag & FLAG_MUTABLE ||
-		(node._equal !== null
-			? !node._equal(node._value, _value)
-			: node._value !== _value)
-	) {
-		if (write) {
-			node._value = _value;
-		}
-		if (node._flag & FLAG_SCHEDULED) {
-			node._flag &= ~FLAG_SCHEDULED;
-			notify(node, FLAG_STALE);
-		}
-	} else {
-		node._flag &= ~FLAG_SCHEDULED;
-	}
+	assign(node, payload._value, time);
 	_runAsync(node, payload._fn, node._value);
 }
 
@@ -703,6 +685,9 @@ function poke(node, _, time) {
  * Enqueues a deferred update to run during the next drain cycle.
  * Used by extension packages (e.g. anod-list) to schedule custom
  * mutations like push, pop, splice without branching in the drain loop.
+ * FLAG_SCHEDULED marks the sender as having queued writes. The first
+ * write that changes the value clears it and notifies; the drain clears
+ * what is left once every write has run.
  * @template T
  * @param {Sender<T>} node
  * @param {T} payload
@@ -715,6 +700,22 @@ function schedule(node, payload, fn) {
 	SENDERS[index] = node;
 	PAYLOADS[index] = payload;
 	UPDATES[index] = fn;
+}
+
+/**
+ * Cancels the queued writes to a sender, so that an immediate write
+ * takes precedence over the writes posted before it. The entries keep
+ * their place and drain as no-ops, leaving other senders untouched.
+ * @param {Sender} node
+ * @returns {void}
+ */
+function supersede(node) {
+	node._flag &= ~FLAG_SCHEDULED;
+	for (let i = 0; i < SENDER_COUNT; i++) {
+		if (SENDERS[i] === node) {
+			UPDATES[i] = NOOP;
+		}
+	}
 }
 
 /**
@@ -778,7 +779,10 @@ function _readAsync(sender, safe) {
 
 /**
  * Creates a signal. When equal is provided, uses Cell (extended
- * signal with custom equality function).
+ * signal with custom equality function). Passing `false` instead
+ * skips the equality check, so every write notifies — for objects
+ * mutated in place, where an updater may return void to keep the
+ * current value.
  * @template T
  * @param {T} value
  * @param {(function(T,T): boolean) | boolean=} equal
@@ -794,20 +798,6 @@ function signal(value, equal) {
 		return new Cell(value, 0, equal);
 	}
 	return new Signal(value);
-}
-
-/**
- * Creates a mutable signal that always propagates on set(),
- * bypassing the equality check. Useful for mutable objects
- * where reference equality doesn't reflect changes.
- * @template T
- * @param {T} value
- * @returns {Signal<T>}
- */
-function mutable(value) {
-	let node = new Signal(value);
-	node._flag = FLAG_MUTABLE;
-	return node;
 }
 
 /**
@@ -1867,8 +1857,8 @@ function root(fn) {
 	 * cycle (not IDLE), the current flush picks up the scheduled
 	 * value without needing a microtask.
 	 *
-	 * Fast exit: when not already posting and the value is unchanged
-	 * (non-function), nothing to do.
+	 * Fast exit: when nothing is queued for this signal and the value
+	 * is unchanged (non-function), nothing to do.
 	 * @template T
 	 * @this {Signal<T>}
 	 * @param {(function(T): T) | T} value
@@ -1896,8 +1886,7 @@ function root(fn) {
 			schedule(this, { _value: value, _fn: asyncFn }, asyncAssign);
 		} else {
 			if (
-				!POSTING &&
-				!(this._flag & FLAG_MUTABLE) &&
+				!(this._flag & (FLAG_MUTABLE | FLAG_SCHEDULED)) &&
 				typeof value !== "function" &&
 				(this._equal !== null
 					? this._equal(this._value, value)
@@ -2065,6 +2054,9 @@ function root(fn) {
 				_value = value(sender._value);
 			} else {
 				_value = value;
+			}
+			if (sender._flag & FLAG_SCHEDULED) {
+				supersede(sender);
 			}
 			if (
 				sender._flag & FLAG_MUTABLE ||
@@ -4297,7 +4289,15 @@ function flush() {
 			if (SENDER_COUNT > 0) {
 				let count = SENDER_COUNT;
 				for (let i = 0; i < count; i++) {
-					UPDATES[i](SENDERS[i], PAYLOADS[i], time);
+					let node = SENDERS[i];
+					/** A sender disposed after its write was queued takes no writes. */
+					if (!(node._flag & FLAG_DISPOSED)) {
+						UPDATES[i](node, PAYLOADS[i], time);
+					}
+				}
+				/** Cleared once every write has run, so an unchanged write can't hide a later change. */
+				for (let i = 0; i < count; i++) {
+					SENDERS[i]._flag &= ~FLAG_SCHEDULED;
 					SENDERS[i] = PAYLOADS[i] = UPDATES[i] = null;
 				}
 				SENDER_COUNT = 0;
@@ -4491,7 +4491,6 @@ export {
 	startEffect,
 
 	signal,
-	mutable,
 	resource,
 	root,
 	batch,

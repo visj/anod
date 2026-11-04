@@ -9,7 +9,6 @@ export {
     OPT_EAGER,
     c,
     signal,
-    mutable,
     resource,
     root,
     batch,

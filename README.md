@@ -14,7 +14,7 @@ anod is a reactive state management library. It has built-in support for both sy
 	- [Sync reactivity](#sync-reactivity)
 		- [Root](#root)
 		- [Global `c` context](#global-c-context)
-		- [Signal \& Mutable](#signal--mutable)
+		- [Signal](#signal)
 		- [Compute](#compute)
 		- [Effect](#effect)
 	- [Async reactivity](#async-reactivity)
@@ -108,7 +108,7 @@ const app = root((c) => {
 
 The following primitives exist in anod:
 
-* Signal, holds a value and notifies when it changes. `mutable()` creates a signal that always notifies.
+* Signal, holds a value and notifies when it changes. `signal(value, false)` creates a signal that always notifies.
 * Compute, a derived signal, updates and notifies when its derived value changes
 * Effect, a sink that listens to signals and computes and performs actions
 * Resource, an async signal for optimistic updates with server confirmation
@@ -138,18 +138,18 @@ app.dispose();
 
 For simple use cases where you don't need ownership or disposal, anod exports a global `c` that creates unowned nodes: `import { c } from "anod"` . Nodes created through `c` live until GC collects them.
 
-#### Signal & Mutable
+#### Signal
 
 A signal stores a value and notifies subscribers when changed. You can read it to get its current value, and write to it to update anyone who depends on it.
 
-Signals accept an optional equality function to customize when subscribers are notified: `signal(value, (prev, next) => boolean)` . When provided, the function is called on every write — return `true` to skip notification. Mutable signals are useful for objects that you want to change in place and notify about changes. They notify always, without checking equality.
+Signals accept an optional equality function to customize when subscribers are notified: `signal(value, (prev, next) => boolean)` . When provided, the function is called on every write — return `true` to skip notification. Pass `false` instead, `signal(value, false)` , for objects that you want to change in place and notify about changes. Such a signal notifies always, without checking equality.
 
 ```ts
-import { root, signal, mutable } from "anod";
+import { root, signal } from "anod";
 
 root((c) => {
 	const name = signal("Vilhelm");
-	const shape = mutable({ job: "dev", hobby: "fidology" });
+	const shape = signal({ job: "dev", hobby: "fidology" }, false);
 	/**
 	 * The .get() method only returns the current value.
 	 * Unlike other libraries, this method by itself does
@@ -173,7 +173,7 @@ root((c) => {
 	name.set("Leif");
 
 	/**
-	 * A mutable signal is convenient when you work with mutable
+	 * A signal without equality is convenient when you work with mutable
 	 * data structures. It takes a callback where you can mutate
 	 * the value in place. Returning void keeps the current value
 	 * and still notifies all subscribers.
@@ -562,6 +562,19 @@ console.log(counter.get()); // still 0 — flush hasn't run
 ```
 
 Both `.set()` and `.post()` accept an updater function `(prev) => next` . For `.set()` , the updater is called immediately when idle, or deferred to drain time when inside a flush cycle. For `.post()` , the updater is always deferred to flush time, so it sees the latest value at that point.
+
+When you mix the two, a later `.set()` takes precedence over earlier posts to the same signal. It cancels them, so their updaters never run, then writes and flushes. Posts to other signals stay queued and flush along with it. A `.post()` after the `.set()` is a new write, applied on the next microtask.
+
+```ts
+import { signal } from "anod";
+const count = signal(0);
+count.post(1); // scheduled
+count.set(2); // cancels the post, count is 2
+count.post(3); // scheduled again
+// after microtask: count is 3
+```
+
+An idle updater `.set(fn)` sees the committed value, since the posts it supersedes never run. If the updater throws, the posts stay queued. Inside a batch or a flush, `.set()` is queued as well, behind the earlier posts, so the last write wins.
 
 ## Bundling
 
