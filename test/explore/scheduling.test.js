@@ -6,7 +6,9 @@ const settle = () => tick().then(tick).then(tick).then(tick);
 
 describe("throw mid-drain: engine state afterwards", () => {
     /**
-     * Expected: after the batch throws, writing `a` again re-runs its effect.
+     * Expected: the committed write to `a` still re-runs its effect in the
+     * failed flush (README: effects "are always push-based"), and after the
+     * batch throws, writing `a` again re-runs it.
      * Actual: the effect never runs again (runs stays 1).
      * Root cause: assign(a) notified the effect (FLAG_STALE, queued in
      * RECEIVERS), then b's updater threw inside the drain loop
@@ -27,8 +29,9 @@ describe("throw mid-drain: engine state afterwards", () => {
                 b.set(() => { throw new Error("updater"); });
             });
         }).toThrow();
-        a.set(2);
         expect(runs).toBe(2);
+        a.set(2);
+        expect(runs).toBe(3);
         r.dispose();
     });
 
@@ -86,8 +89,10 @@ describe("throw mid-drain: engine state afterwards", () => {
     });
 
     /**
-     * Expected: the plain effect that was skipped because a scoped sibling
-     * threw unrecovered runs again on the next write.
+     * Expected: the plain effect queued behind a scoped sibling that threw
+     * unrecovered still runs in that flush, as siblings in the same queue
+     * do (README: effects "are always push-based"), and runs again on the
+     * next write.
      * Actual: it never runs again (e2 stays 1).
      * Root cause: once `thrown` is set, the later queue phases are skipped
      * (src/internal.js:4324, 4336). Their counts are reset, but the skipped
@@ -107,8 +112,9 @@ describe("throw mid-drain: engine state afterwards", () => {
             r.effect(s, () => { e2++; });
         });
         expect(() => s.set(1)).toThrow();
-        s.set(2);
         expect(e2).toBe(2);
+        s.set(2);
+        expect(e2).toBe(3);
         r.dispose();
     });
 

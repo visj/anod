@@ -423,14 +423,19 @@ function Channel() {
 /**
  * Shared across Root/Signal/Compute/Effect. Routes to `_dispose` directly
  * when idle, otherwise queues onto DISPOSES so the batch drain runs it in
- * the same transaction as any pending sets.
+ * the same transaction as any pending sets. A cleanup that throws is
+ * reported once the disposal has finished, as an error of its node.
  * @this {Disposer}
  * @returns {void}
  */
 function dispose() {
 	if (!(this._flag & FLAG_DISPOSED)) {
 		if (IDLE) {
-			this._dispose();
+			try {
+				this._dispose();
+			} catch (error) {
+				throw { error, type: FATAL };
+			}
 		} else {
 			DISPOSES[DISPOSER_COUNT++] = this;
 		}
@@ -1807,13 +1812,16 @@ function root(fn) {
 	 */
 	RootProto._dispose = function () {
 		this._flag = FLAG_DISPOSED;
-		if (this._cleanup !== null) {
-			clearCleanup(this);
+		try {
+			if (this._cleanup !== null) {
+				clearCleanup(this);
+			}
+		} finally {
+			if (this._owned !== null) {
+				clearOwned(this);
+			}
+			this._owned = this._recover = null;
 		}
-		if (this._owned !== null) {
-			clearOwned(this);
-		}
-		this._owned = this._recover = null;
 	};
 
 	/**
@@ -2257,10 +2265,13 @@ function root(fn) {
 				clearChannel(chan, this);
 			}
 		}
-		if (this._cleanup !== null) {
-			clearCleanup(this);
+		try {
+			if (this._cleanup !== null) {
+				clearCleanup(this);
+			}
+		} finally {
+			this._fn = this._value = this._args = this._chan = null;
 		}
-		this._fn = this._value = this._args = this._chan = null;
 	};
 
 	/**
@@ -2287,7 +2298,19 @@ function root(fn) {
 			);
 
 		if (!(flag & FLAG_INIT) && this._cleanup !== null) {
-			clearCleanup(this);
+			try {
+				clearCleanup(this);
+			} catch (error) {
+				/** A throwing cleanup fails this run. The deps are kept,
+				 *  so the next change runs the compute again. */
+				if (flag & FLAG_CHANNEL) {
+					resetChannel(this);
+				}
+				this._flag = (this._flag | FLAG_ERROR) & ~FLAG_PENDING;
+				this._value = { error, type: FATAL };
+				this._ctime = time;
+				return;
+			}
 		}
 
 		/** Reset channel state from previous activation. Handles both
@@ -2727,29 +2750,36 @@ function root(fn) {
 			clearFinalize(this);
 		}
 		clearDeps(this);
-		if (this._cleanup !== null) {
-			clearCleanup(this);
-		}
-		if (this._owned !== null) {
-			clearOwned(this);
-		}
-		if (flag & FLAG_CHANNEL) {
-			let chan = this._chan;
-			if (chan._controller !== null) {
-				chan._controller.abort();
+		/** A throwing cleanup, here or in a child, still finishes the disposal. */
+		try {
+			if (this._cleanup !== null) {
+				clearCleanup(this);
 			}
-			if (chan._res1 !== null || chan._responds !== null) {
-				clearChannel(chan, this);
+		} finally {
+			try {
+				if (this._owned !== null) {
+					clearOwned(this);
+				}
+			} finally {
+				if (flag & FLAG_CHANNEL) {
+					let chan = this._chan;
+					if (chan._controller !== null) {
+						chan._controller.abort();
+					}
+					if (chan._res1 !== null || chan._responds !== null) {
+						clearChannel(chan, this);
+					}
+				}
+				this._fn =
+					this._args =
+					this._chan =
+					this._owned =
+					this._owner =
+					this._recover =
+					this._finalize =
+					null;
 			}
 		}
-		this._fn =
-			this._args =
-			this._chan =
-			this._owned =
-			this._owner =
-			this._recover =
-			this._finalize =
-			null;
 	};
 
 	/**
@@ -3061,19 +3091,29 @@ function clearSubs(send) {
 }
 
 /**
- *
+ * Runs the node's cleanups, last registered first. Each one is removed
+ * before it runs, so it runs exactly once. A cleanup that throws does
+ * not stop the rest; its error is rethrown once they have all run (the
+ * last one if several throw, as with nested `finally` blocks).
  * @param {Owner | Receiver} node
  */
 function clearCleanup(node) {
 	let cleanup = node._cleanup;
 	if (typeof cleanup === "function") {
-		cleanup();
 		node._cleanup = null;
+		cleanup();
 	} else {
 		/** array form */
 		let count = cleanup.length;
-		while (count-- > 0) {
-			cleanup.pop()();
+		try {
+			while (count-- > 0) {
+				cleanup.pop()();
+			}
+		} finally {
+			/** Positive only after a throw: the cleanups still left to run. */
+			if (count > 0) {
+				clearCleanup(node);
+			}
 		}
 	}
 }
@@ -3126,17 +3166,25 @@ function addOwned(owner, child) {
 /**
  * Disposes all owned children. Called before re-running an owner effect
  * and on disposal. Only call when `_owned !== null` — owned is lazy and
- * only allocated when an effect or root actually adopts children.
+ * only allocated when an effect or root actually adopts children. A
+ * child whose cleanup throws is still disposed, and so are its siblings.
  * @param {Owner} owner
  * @returns {void}
  */
 function clearOwned(owner) {
 	let owned = owner._owned;
 	let count = owned.length;
-	while (count-- > 0) {
-		owned.pop()._dispose();
+	try {
+		while (count-- > 0) {
+			owned.pop()._dispose();
+		}
+	} finally {
+		owner._recover = null;
+		/** Positive only after a throw: the children still left to dispose. */
+		if (count > 0) {
+			clearOwned(owner);
+		}
 	}
-	owner._recover = null;
 }
 
 /**
@@ -3174,22 +3222,27 @@ const RECOVER_OWNER = 2;
  * - RECOVER_OWNER: an ancestor handled it - node still disposes, error swallowed.
  * - RECOVER_NONE:  unhandled - node disposes, error propagates.
  *
+ * A handler that throws leaves the error unhandled.
  * @param {Effect} node
  * @param {?} error
  * @returns {number}
  */
 function tryRecover(node, error) {
-	/** Self-recovery: node stays alive. */
-	if (node._recover !== null && _checkRecover(node, error)) {
-		return RECOVER_SELF;
-	}
-	/** Bubble up the owner chain. Node will be disposed by caller. */
-	let owner = node._owner;
-	while (owner !== null) {
-		if (_checkRecover(owner, error)) {
-			return RECOVER_OWNER;
+	try {
+		/** Self-recovery: node stays alive. */
+		if (node._recover !== null && _checkRecover(node, error)) {
+			return RECOVER_SELF;
 		}
-		owner = owner._owner;
+		/** Bubble up the owner chain. Node will be disposed by caller. */
+		let owner = node._owner;
+		while (owner !== null) {
+			if (_checkRecover(owner, error)) {
+				return RECOVER_OWNER;
+			}
+			owner = owner._owner;
+		}
+	} catch (err) {
+		/* the handler's own error is dropped, the node's error propagates */
 	}
 	return RECOVER_NONE;
 }
@@ -4242,17 +4295,25 @@ function flushEffects(queue, count, time) {
 			try {
 				node._update(time);
 			} catch (error) {
+				/** A cleanup that throws aborts the run before it clears these. */
+				node._flag &= ~(FLAG_STALE | FLAG_PENDING);
 				if (node._finalize !== null) {
 					clearFinalize(node);
 				}
 				let err = node._flag & FLAG_PANIC ? error : { error, type: FATAL };
 				node._flag &= ~FLAG_PANIC;
 				let result = tryRecover(node, err);
-				if (result !== RECOVER_SELF) {
-					node._dispose();
-				}
 				if (thrown === null && result === RECOVER_NONE) {
 					thrown = err;
+				}
+				if (result !== RECOVER_SELF) {
+					try {
+						node._dispose();
+					} catch (cleanupError) {
+						if (thrown === null) {
+							thrown = { error: cleanupError, type: FATAL };
+						}
+					}
 				}
 			}
 		} else {
@@ -4281,7 +4342,15 @@ function flush() {
 			if (DISPOSER_COUNT > 0) {
 				let count = DISPOSER_COUNT;
 				for (let i = 0; i < count; i++) {
-					DISPOSES[i]._dispose();
+					try {
+						DISPOSES[i]._dispose();
+					} catch (err) {
+						/** The node is disposed, but one of its cleanups threw. */
+						if (!thrown) {
+							error = { error: err, type: FATAL };
+							thrown = true;
+						}
+					}
 					DISPOSES[i] = null;
 				}
 				DISPOSER_COUNT = 0;
@@ -4292,7 +4361,15 @@ function flush() {
 					let node = SENDERS[i];
 					/** A sender disposed after its write was queued takes no writes. */
 					if (!(node._flag & FLAG_DISPOSED)) {
-						UPDATES[i](node, PAYLOADS[i], time);
+						try {
+							UPDATES[i](node, PAYLOADS[i], time);
+						} catch (err) {
+							/** A failing updater only loses its own write. */
+							if (!thrown) {
+								error = err;
+								thrown = true;
+							}
+						}
 					}
 				}
 				/** Cleared once every write has run, so an unchanged write can't hide a later change. */
@@ -4321,24 +4398,20 @@ function flush() {
 			if (SCOPE_COUNT > 0) {
 				let levels = LEVELS.length;
 				for (let i = 0; i < levels; i++) {
-					if (!thrown) {
-						let err = flushEffects(SCOPES[i], LEVELS[i], time);
-						if (err !== null) {
-							error = err;
-							thrown = true;
-						}
+					let err = flushEffects(SCOPES[i], LEVELS[i], time);
+					if (err !== null && !thrown) {
+						error = err;
+						thrown = true;
 					}
 					LEVELS[i] = 0;
 				}
 				SCOPE_COUNT = 0;
 			}
 			if (RECEIVER_COUNT > 0) {
-				if (!thrown) {
-					let err = flushEffects(RECEIVERS, RECEIVER_COUNT, time);
-					if (err !== null) {
-						error = err;
-						thrown = true;
-					}
+				let err = flushEffects(RECEIVERS, RECEIVER_COUNT, time);
+				if (err !== null && !thrown) {
+					error = err;
+					thrown = true;
 				}
 				RECEIVER_COUNT = 0;
 			}
@@ -4355,7 +4428,7 @@ function flush() {
 				thrown = true;
 				break;
 			}
-		} while (!thrown && (SENDER_COUNT > 0 || DISPOSER_COUNT > 0));
+		} while (SENDER_COUNT > 0 || DISPOSER_COUNT > 0);
 	} finally {
 		IDLE = true;
 		DISPOSER_COUNT =
@@ -4388,9 +4461,10 @@ function batch(fn) {
 		IDLE = false;
 		try {
 			fn();
-			flush();
 		} finally {
+			/** Commits the writes made before a throw, so no later flush picks them up. */
 			IDLE = true;
+			flush();
 		}
 	} else {
 		fn();
