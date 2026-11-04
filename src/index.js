@@ -1,23 +1,17 @@
 export {
+    REFUSE,
+    PANIC,
+    FATAL,
     OPT_DEFER,
     OPT_STABLE,
     OPT_SETUP,
     OPT_WEAK,
-    REFUSE,
-    PANIC,
-    FATAL,
+    OPT_EAGER,
     c,
     signal,
     mutable,
     resource,
     root,
     batch,
-    flush,
-    Clock,
-    Root,
-    Signal,
-    Cell,
-    Compute,
-    Effect,
-    Channel
-} from "./core.js";
+    flush
+} from "./internal.js";
