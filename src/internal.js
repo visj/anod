@@ -146,6 +146,9 @@ var TIME = 1;
  */
 var IDLE = true;
 
+/** Whether flush() is draining the queues. A nested flush() leaves the work to it. */
+var FLUSHING = false;
+
 /** Whether a microtask flush is already scheduled. */
 var POSTING = false;
 
@@ -4189,18 +4192,14 @@ function resolveWaiters(responder, responderCh, value, isError, panic) {
 /**
  * Runs `fn` with the root node itself as the argument. Prototype methods
  * on Root (compute/effect/derive/etc.) use `this` (the root) as the owner.
+ * A root created inside a running node stays in its transaction: writes
+ * are queued for the running flush, and the dependency fence is kept.
  * @param {Root} root
  * @param {function(Root): void} fn
  * @returns {void}
  */
 function startRoot(root, fn) {
-	let idle = IDLE;
-	IDLE = true;
-	try {
-		fn(root);
-	} finally {
-		IDLE = idle;
-	}
+	fn(root);
 }
 
 /**
@@ -4274,6 +4273,26 @@ function startEffect(node) {
 }
 
 /**
+ * Moves the nodes queued while a queue was draining to its front, so the
+ * next cycle runs them. Only reached when a node settles or resumes
+ * synchronously mid-drain; returns how many are left.
+ * @template T
+ * @param {Array<T>} queue
+ * @param {number} count - the entries already drained
+ * @param {number} total - the entries queued now
+ * @returns {number}
+ */
+function requeue(queue, count, total) {
+	let left = 0;
+	for (let i = count; i < total; i++) {
+		let node = queue[i];
+		queue[i] = null;
+		queue[left++] = node;
+	}
+	return left;
+}
+
+/**
  * Drains a queue of effect nodes: checks staleness, updates,
  * handles errors with finalize/recover/dispose. Returns the
  * first unrecoverable error POJO, or null if all succeeded.
@@ -4324,9 +4343,15 @@ function flushEffects(queue, count, time) {
 }
 
 /**
+ * Drains the queues until they are empty. Called during a drain, it
+ * returns at once and the running drain picks up the new work. Called
+ * inside a batch, it drains now and leaves the batch open.
  * @returns {void}
  */
 function flush() {
+	if (FLUSHING) {
+		return;
+	}
 	/** @type {number} */
 	let time = 0;
 	/** @type {number} */
@@ -4335,6 +4360,9 @@ function flush() {
 	let error = null;
 	/** @type {boolean} */
 	let thrown = false;
+	/** @type {boolean} */
+	let idle = IDLE;
+	FLUSHING = true;
 	IDLE = false;
 	try {
 		do {
@@ -4393,27 +4421,30 @@ function flush() {
 						node._flag &= ~(FLAG_STALE | FLAG_PENDING);
 					}
 				}
-				COMPUTE_COUNT = 0;
+				COMPUTE_COUNT = COMPUTE_COUNT > count ? requeue(COMPUTES, count, COMPUTE_COUNT) : 0;
 			}
 			if (SCOPE_COUNT > 0) {
+				/** Counts the effects scoped again while the levels drain. */
+				SCOPE_COUNT = 0;
 				let levels = LEVELS.length;
 				for (let i = 0; i < levels; i++) {
-					let err = flushEffects(SCOPES[i], LEVELS[i], time);
+					let count = LEVELS[i];
+					let err = flushEffects(SCOPES[i], count, time);
 					if (err !== null && !thrown) {
 						error = err;
 						thrown = true;
 					}
-					LEVELS[i] = 0;
+					LEVELS[i] = LEVELS[i] > count ? requeue(SCOPES[i], count, LEVELS[i]) : 0;
 				}
-				SCOPE_COUNT = 0;
 			}
 			if (RECEIVER_COUNT > 0) {
-				let err = flushEffects(RECEIVERS, RECEIVER_COUNT, time);
+				let count = RECEIVER_COUNT;
+				let err = flushEffects(RECEIVERS, count, time);
 				if (err !== null && !thrown) {
 					error = err;
 					thrown = true;
 				}
-				RECEIVER_COUNT = 0;
+				RECEIVER_COUNT = RECEIVER_COUNT > count ? requeue(RECEIVERS, count, RECEIVER_COUNT) : 0;
 			}
 			if (PURGE_COUNT > 0) {
 				let count = PURGE_COUNT;
@@ -4428,9 +4459,17 @@ function flush() {
 				thrown = true;
 				break;
 			}
-		} while (SENDER_COUNT > 0 || DISPOSER_COUNT > 0);
+		} while (
+			SENDER_COUNT > 0 ||
+			DISPOSER_COUNT > 0 ||
+			COMPUTE_COUNT > 0 ||
+			SCOPE_COUNT > 0 ||
+			RECEIVER_COUNT > 0
+		);
 	} finally {
-		IDLE = true;
+		/** Only the outermost transaction goes back to idle. */
+		FLUSHING = false;
+		IDLE = idle;
 		DISPOSER_COUNT =
 			SENDER_COUNT =
 			SCOPE_COUNT =
@@ -4529,6 +4568,7 @@ export {
 	DBASE,
 	TIME,
 	IDLE,
+	FLUSHING,
 	POSTING,
 	c,
 	SEED,

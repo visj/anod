@@ -515,6 +515,7 @@ export declare var DCOUNT: number;
 export declare var DBASE: number;
 export declare var TIME: number;
 export declare var IDLE: boolean;
+export declare var FLUSHING: boolean;
 export declare var POSTING: boolean;
 export declare const c: Factory;
 export declare var SEED: number;
