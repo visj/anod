@@ -513,7 +513,7 @@ function set(value, asyncFn) {
 			}
 			_runAsync(/** @type {AsyncSender<T>} */(this), value, this._value);
 		} else {
-			schedule(this, { _value: this._value, _fn: value }, asyncAssign);
+			schedule(this, value, asyncRun);
 		}
 		return true;
 	}
@@ -664,6 +664,20 @@ function assign(node, value, time) {
 function asyncAssign(node, payload, time) {
 	assign(node, payload._value, time);
 	_runAsync(node, payload._fn, node._value);
+}
+
+/**
+ * Batch-drain handler for the single-argument resource form,
+ * set(asyncFn) / post(asyncFn). Writes no value of its own: runs
+ * the callback against the value at drain time, so it sees every
+ * write queued before it.
+ * @template T
+ * @param {AsyncSender<T>} node
+ * @param {function(AsyncSender<T>, T): (T | Promise<T>)} fn
+ * @param {number} time
+ */
+function asyncRun(node, fn, time) {
+	_runAsync(node, fn, node._value);
 }
 
 /**
@@ -1875,7 +1889,7 @@ function root(fn) {
 			asyncFn === undefined &&
 			this._flag & FLAG_ASYNC
 		) {
-			schedule(this, { _value: this._value, _fn: value }, asyncAssign);
+			schedule(this, value, asyncRun);
 			if (!POSTING) {
 				POSTING = true;
 				queueMicrotask(microflush);
