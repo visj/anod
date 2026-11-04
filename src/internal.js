@@ -493,7 +493,9 @@ function val(sender) {
  * For Resource nodes (FLAG_ASYNC), accepts an optional asyncFn as
  * second argument. The optimistic value is written immediately,
  * then asyncFn runs with the resource as context and the optimistic
- * value as prev. On resolve, _settle writes the final value.
+ * value as prev, before the flush. On resolve, _settle writes the
+ * final value. An immediate plain write settles the resource, so the
+ * activation in flight is discarded.
  * @template T
  * @this {Sender<T> | AsyncSender<T>}
  * @param {T | (function(T): T)} value
@@ -530,8 +532,17 @@ function set(value, asyncFn) {
 		} else {
 			_value = value;
 		}
-		if (this._flag & FLAG_SCHEDULED) {
-			supersede(this);
+		if (this._flag & (FLAG_SCHEDULED | FLAG_LOADING)) {
+			if (this._flag & FLAG_SCHEDULED) {
+				supersede(this);
+			}
+			/** Resource: a plain write also supersedes the activation in
+			 *  flight. The new token orphans it, and the write settles. */
+			if (this._flag & FLAG_LOADING && asyncFn === undefined) {
+				this._time++;
+				/** @type {AsyncSender<T>} */(this)._settle(_value);
+				return true;
+			}
 		}
 		if (
 			this._flag & FLAG_MUTABLE ||
@@ -543,11 +554,18 @@ function set(value, asyncFn) {
 				this._value = _value;
 			}
 			notify(this, FLAG_STALE);
+			/** Resource: start the activation before flushing, so that
+			 *  subscribers see the optimistic value as loading. */
+			if (asyncFn !== undefined && this._flag & FLAG_ASYNC) {
+				_runAsync(/** @type {AsyncSender<T>} */(this), asyncFn, _value);
+			}
 			flush();
-		} else if (asyncFn === undefined) {
+			return true;
+		}
+		if (asyncFn === undefined) {
 			return false;
 		}
-		if (asyncFn !== undefined && this._flag & FLAG_ASYNC) {
+		if (this._flag & FLAG_ASYNC) {
 			_runAsync(/** @type {AsyncSender<T>} */(this), asyncFn, _value);
 		}
 		return true;
@@ -571,14 +589,17 @@ function set(value, asyncFn) {
 
 /**
  * Starts async work for a resource signal. Increments _time for
- * LWW, runs asyncFn, dispatches based on return type.
+ * LWW, runs asyncFn, dispatches based on return type. A sync result
+ * that supersedes an activation in flight settles even if unchanged,
+ * so loading ends and the waiters resume.
  * @template T
  * @param {AsyncSender<T>} node
  * @param {function(AsyncSender<T>, T): (T | Promise<T>)} asyncFn
  * @param {T} prev
  */
 function _runAsync(node, asyncFn, prev) {
-	node._flag &= ~(FLAG_ERROR | FLAG_SUSPEND | FLAG_LOADING);
+	let flag = node._flag;
+	node._flag = flag & ~(FLAG_ERROR | FLAG_SUSPEND | FLAG_LOADING);
 	let time = ++node._time;
 	let result;
 	try {
@@ -587,8 +608,9 @@ function _runAsync(node, asyncFn, prev) {
 		node._error(err);
 		return;
 	}
-	if (node._flag & FLAG_SUSPEND && node._flag & FLAG_LOADING) {
-		/** Callback suspend path — settlement handled by the callback. */
+	if (node._flag & FLAG_SUSPEND) {
+		/** Callback suspend path — settlement handled by the callback,
+		 *  which may already have settled synchronously. */
 		return;
 	}
 	let kind = asyncKind(result);
@@ -605,10 +627,10 @@ function _runAsync(node, asyncFn, prev) {
 				? !node._equal(node._value, result)
 				: node._value !== result))
 	) {
-		/** ASYNC_SYNC: write the value immediately if changed. */
-		node._value = result;
-		notify(node, FLAG_STALE);
-		flush();
+		/** ASYNC_SYNC: settle with the value immediately if changed. */
+		node._settle(result);
+	} else if (flag & FLAG_LOADING) {
+		node._settle(node._value);
 	}
 }
 
@@ -1764,8 +1786,8 @@ function root(fn) {
 	};
 
 	/**
-	 * Settles an async resource. Clears FLAG_LOADING, writes value
-	 * if changed, notifies subscribers, flushes.
+	 * Settles an async resource. Clears FLAG_LOADING, writes value,
+	 * resolves waiters, notifies the other subscribers, flushes.
 	 * @template T
 	 * @this {Cell<T>}
 	 * @param {T} value
@@ -1781,12 +1803,13 @@ function root(fn) {
 			let ch = this._chan;
 			let waiters = ch._waiters;
 			let waiterCount = waiters.length;
+			/** Notifies every subscriber that is not a resolved waiter. */
 			settleNotify(this, value, !!(this._flag & FLAG_ERROR), waiters, waiterCount);
 			ch._waiters = null;
 			this._flag &= ~FLAG_WAITER;
+		} else {
+			notify(this, FLAG_STALE);
 		}
-
-		notify(this, FLAG_STALE);
 		flush();
 	};
 
