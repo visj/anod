@@ -30,4 +30,27 @@ Run with `bun test --conditions=src test/explore/scheduling.test.js`.
 
 ## Fix
 
-_Not fixed yet. The fix branch fills this in._
+Both tests pass.
+
+### Changes
+
+- **`asyncRun(node, fn, time)`** (new drain handler, next to `asyncAssign`): runs `_runAsync(node, fn, node._value)`, writing nothing of its own. The callback's `current` is the value at drain time, after every earlier queued write.
+- **`set`** (queued branch of the single-argument resource form) and **`SignalProto.post`** (single-argument resource form) now `schedule(this, value, asyncRun)`. They no longer queue `{ _value: this._value, _fn: value }` through `asyncAssign`. The payload is the callback itself, so this also saves one object allocation per queued call.
+- `asyncAssign` is unchanged and still handles the two-argument form `set(value, asyncFn)` / `post(value, asyncFn)`, whose optimistic value is a real write.
+
+### Behavior decisions
+
+- A queued `set(asyncFn)` behaves like the idle form, which already runs the callback against the committed value without writing. It queues behind earlier writes and does not supersede them, as `set()` inside a batch or flush always does ("the last write wins").
+- `asyncRun` does not touch `FLAG_SCHEDULED`. Before the fix, its snapshot `assign()` cleared the flag and notified only when it reverted a value, which was the bug. A sync result is still written and notified by `_runAsync` as before.
+
+### Test expectations changed
+
+None.
+
+### Other bugs' tests
+
+None changed state. The neighboring "batched resource set(fn) with a sync result settles without overflowing the stack" (bug 02) still fails the same way. The nested `flush()` in `_runAsync`'s sync branch re-drains the queue entry, which belongs to chain A.
+
+### Hot paths touched
+
+None. `set` changes only in the queued branch of the single-argument resource form, which now schedules the callback directly instead of allocating a payload object. No new fields.
