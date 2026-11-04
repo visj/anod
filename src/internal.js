@@ -494,9 +494,10 @@ function val(sender) {
  * are resolved at drain time by assign() to see the latest value.
  *
  * An immediate write supersedes the writes posted before it: their
- * queue entries are cancelled once the updater has returned, so a
- * throwing updater leaves them in place. Inside a batch or a flush,
- * set() queues behind them instead, and the last write wins.
+ * queue entries are cancelled once the updater has returned and the
+ * value is compared, so a throwing updater or equality function
+ * leaves them in place. Inside a batch or a flush, set() queues
+ * behind them instead, and the last write wins.
  *
  * For Resource nodes (FLAG_ASYNC), accepts an optional asyncFn as
  * second argument. The optimistic value is written immediately,
@@ -538,15 +539,15 @@ function set(value, asyncFn) {
 		} else {
 			_value = value;
 		}
-		if (this._flag & FLAG_SCHEDULED) {
-			supersede(this);
-		}
-		if (
+		let changed =
 			this._flag & FLAG_MUTABLE ||
 			(this._equal !== null
 				? !this._equal(this._value, _value)
-				: this._value !== _value)
-		) {
+				: this._value !== _value);
+		if (this._flag & FLAG_SCHEDULED) {
+			supersede(this);
+		}
+		if (changed) {
 			if (write) {
 				this._value = _value;
 			}
@@ -2066,15 +2067,16 @@ function root(fn) {
 			} else {
 				_value = value;
 			}
-			if (sender._flag & FLAG_SCHEDULED) {
-				supersede(sender);
-			}
-			if (
+			/** Compared first, so a throwing equality function cancels no posts. */
+			let changed =
 				sender._flag & FLAG_MUTABLE ||
 				(sender._equal !== null
 					? !sender._equal(sender._value, _value)
-					: sender._value !== _value)
-			) {
+					: sender._value !== _value);
+			if (sender._flag & FLAG_SCHEDULED) {
+				supersede(sender);
+			}
+			if (changed) {
 				sender._value = _value;
 				this._flag |= FLAG_PAUSED;
 				notify(sender, FLAG_STALE);
@@ -4483,6 +4485,11 @@ function flush() {
 		/** Only the outermost transaction goes back to idle. */
 		FLUSHING = false;
 		IDLE = idle;
+		/** Writes an aborted drain leaves behind are dropped with their marker. */
+		for (let i = 0; i < SENDER_COUNT; i++) {
+			SENDERS[i]._flag &= ~FLAG_SCHEDULED;
+			SENDERS[i] = PAYLOADS[i] = UPDATES[i] = null;
+		}
 		DISPOSER_COUNT =
 			SENDER_COUNT =
 			SCOPE_COUNT =
