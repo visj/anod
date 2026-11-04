@@ -45,4 +45,77 @@ Run with `bun test --conditions=src test/explore/async.test.js test/explore/grap
 
 ## Fix
 
-_Not fixed yet. The fix branch fills this in._
+9 of the 10 tests pass. `c.suspend(task, onResolve)` is left for a maintainer decision (see below). Each sub-issue is a separate, self-contained change.
+
+### unlock
+
+`ComputeProto.unlock` / `EffectProto.unlock` now look at what the lock deferred:
+
+- Nothing deferred (no `FLAG_STALE`, `FLAG_PENDING` or `FLAG_DISPOSED`): release the lock, as before.
+- Something deferred and the activation still in flight (`FLAG_LOADING`): the lock holds until the activation settles. `_settle` already replays a change (re-run) or a dispose that arrived while locked, so the stale run is no longer dropped by `resolvePromise`.
+- Something deferred and the activation already finished (for example a sync node that locked): release, then replay right away, with `_dispose()` for a deferred dispose, otherwise `_receive()` and a flush.
+
+Behavior decisions:
+
+- I followed the spec ("re-run when the activation finishes") and did not re-run at the `unlock()` call. A re-run from inside `unlock()` would start the new activation while the old continuation is still on the stack, and that continuation's synchronous code after `unlock()` would then run interleaved with the new activation.
+- While the lock holds after `unlock()`, a further change is folded into the same replay. It would be anyway: the node is already `FLAG_STALE`, so `notify` skips it.
+- Side effect: a dispose that arrived during the lock, followed by `unlock()` mid-flight, used to leak. The continuation was dropped, `_settle` never ran, and the cleanups never ran. Disposal now completes when the activation settles.
+
+**Test expectation changed:** `lock / unlock` › "spawn that unlocks mid-flight still re-runs for a dep change made during the lock". The spawn's re-run (with `s = 2`) locks again and waits on a deferred that the test never resolves, so README lock semantics ("prevents the node from re-running until the current activation completes (or `c.unlock()` is called)", also pinned by `lock.test.js` › "locked spawn ignores mid-flight dep changes") require `s.set(3)` to wait. The final expectation (`runs` ends with 3) could not hold under any implementation of the documented behavior. I added two lines that resolve the re-run's deferred before the assertions, so the re-run reaches its own `unlock()` and replays the change to 3. The assertions are unchanged, and the test still fails on `fix/18-resource-races` (`runs` stays `[1]`).
+
+### controllers
+
+- `Channel._controller` holds one controller or an array, stored the same way as `_cleanup` (single value, array from the second). `controller()` appends.
+- The new helper `abortControllers()` aborts all of them. `resetChannel`, `ComputeProto._dispose` and `EffectProto._dispose` use it.
+- `EffectProto._update`: when a node with a channel re-runs, it releases the previous activation's controllers, without aborting them.
+
+Conflict to review: the README says the controller "is automatically aborted when the node re-runs or is disposed", and the spec repeats it. But the original test `async.test.js` › controller › "controller works with spawn" pins that a *completed* spawn activation's controller is **not** aborted on re-run ("Abort only happens when the spawn is actively loading"). The original test wins here. An in-flight activation's controllers are aborted on re-run (`_receive` → `resetChannel`), and the current ones on dispose. A completed activation's controllers are released on re-run, which is what the old single slot did when the next `controller()` call overwrote it. With an array, releasing on re-run is also what keeps them from piling up across completed activations. Tasks are unaffected: `ComputeProto._update` already resets the channel, aborting the controllers, on every re-run. To make spawns match the README instead, call `resetChannel` from `EffectProto._update` and update that test.
+
+### suspend arrays
+
+- **`_stepArray`.** A rejected member, a disposed member, or the awaiter itself fails the await, with the member's error or `ILLEGAL_READ`. On failure, as on success, it clears `FLAG_BLOCKED` and subscribes the awaiter to every live member (new helper `subscribeArray`). The waiter bound to the blocked member now re-enters the scan on reject too (`send(node, task, step, step)`), so a rejection or dispose of that member goes through the same path instead of rejecting directly.
+- **`_suspendArray` fast path.** Same checks. It subscribes before throwing, like the single-task fast path.
+- **`resetChannel`** clears `FLAG_BLOCKED`, so an array await that is abandoned (re-run, or loading node notified) no longer leaves it set.
+- **`CellProto._dispose`** now sets `FLAG_DISPOSED` before resolving its waiters, as `ComputeProto._dispose` does. Otherwise a woken array scan saw a still-loading resource, re-bound its waiter to the array being cleared, and hung.
+
+Behavior decisions:
+
+- A disposed member rejects with `ILLEGAL_READ` ("Cannot read a disposed node or yourself"), like `c.suspend(disposedTask)` or `c.val(disposed)`. This includes a blocked member disposed while awaited, which used to reject with "Awaited task was disposed". After disposal the scan cannot tell a task from a resource. Awaiting a single task keeps its messages.
+- Failures follow scan order, as before: a member that fails after a still-loading one is reported once the loading one settles.
+
+### suspend inputs
+
+- **`suspend()` and `CellProto.suspend()`** now return `Promise.resolve(thenable).then(guards)`. `Promise.resolve` returns a native promise as is, so nothing changes for promises. A thenable is adopted, so `await c.suspend(thenable)` yields its value.
+- **`_suspendTask`** throws `ILLEGAL_READ` when awaiting itself, like `val()`. Array awaits do the same (see above).
+- **`c.suspend(task, onResolve)` is not implemented. Proposal: drop the declaration.** The `suspend(sender, onResolve, onReject?)` and `suspend(senders, onResolve, onReject?)` overloads of `TaskContext` and `SpawnContext` (`types/internal.d.ts`, re-exported by `types/index.d.ts`) are not in README.md, which describes three delivery paths: `c.pending()`, awaiting `c.suspend()`, and `c.suspend(setupFn)`. Doing it properly is a design change, not a small fix:
+  - For a loading task the callbacks would run from `settleNotify`'s waiter loop, synchronously in the middle of the task's settle and before its other subscribers are notified. A callback that writes a signal or awaits the same task re-enters the engine mid-settle. For example, a waiter added there goes into the array being iterated and is lost when the settle clears it. Promise waiters avoid this by resuming in a microtask.
+  - Also undefined: whether the caller is loading while it waits (it is with the setup form), what a task that uses it settles to, and where an error goes without `onReject`.
+
+  Options:
+  1. Drop the two overloads from the types (recommended), and rewrite or remove the test, which then asks for an API anod doesn't have.
+  2. Build it on the promise path: call `onResolve(value)` synchronously when settled, otherwise `.then(onResolve, onReject)` on the waiter promise. Small and safe, but it allocates the promise a callback form would exist to avoid, the caller isn't loading meanwhile, and a rejection without `onReject` must be routed to the node's error handling rather than left unhandled.
+  3. A real callback path: invoke the callbacks after the settle completes, with loading and error semantics like the setup form.
+
+  The test `c.suspend() inputs` › "c.suspend(task, onResolve) calls onResolve as the public types declare" stays failing until this is decided.
+
+### post-await reads
+
+`subscribe()` clears `FLAG_SINGLE` when it creates `_deps`, as `_read` does. A setup run that read one dependency leaves `FLAG_SINGLE` set, so a dependency added after an await went unchecked by `checkSingle`.
+
+### Found, not fixed
+
+A related gap that predates this change: when `c.suspend([...])` takes the fast path synchronously, during a setup run that already read two or more dependencies with `val()`, `subscribe()` appends the members to `_deps`, and the end of the setup run then overwrites `_deps` with its DSTACK slice. The node still sits in the members' subscriber lists, but `needsUpdate` never checks them, so it misses their changes. `clearDeps` doesn't remove it either, so a disposed node stays in their subscriber lists. Reproduction: a spawn doing `c.val(s1); c.val(s2); await c.suspend([t]);` with `t` settled does not re-run when `t` changes. The fix is to track members in the sync scope with version stamps, as `val()` does (the single-task fast path in `_suspendTask` does this, but also skips `val()`'s already-read and `stable()` checks). It's a different root cause from this spec, so I left it out.
+
+### Tests
+
+- 9 of 10 pass. Still failing: "c.suspend(task, onResolve) calls onResolve as the public types declare" (decision above).
+- One test expectation changed: the unlock test, explained above.
+- No other group's tests changed state. The original suite is unchanged: 510 passing tests, 1624 `expect()` calls.
+
+### Hot paths touched
+
+- `EffectProto._update`: the `FLAG_LOCKED` test became `FLAG_LOCKED | FLAG_CHANNEL`. That is the same cost for effects without a channel (only the mask changed). Effects with a channel pay one inner test and one store per re-run.
+- `subscribe()`: one flag clear, only on the branch that allocates `_deps`. `subscribe` serves async reads and settles, not the sync `val()` path.
+- `c.suspend(promise)`: one `Promise.resolve()` call per suspend, which returns a native promise unchanged.
+- `resetChannel`: one flag clear (channel nodes only, on re-run or a loading node's notification). It also calls `abortControllers` instead of `.abort()`. Note for merging: chain E also edits `resetChannel` and `_receive`.
+- No new fields. `Channel._controller` may now hold an array (same field, typed in `src/types.js` and the `Channel` constructor).

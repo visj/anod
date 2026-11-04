@@ -732,19 +732,20 @@ describe("error propagation", () => {
                 }
             });
         });
+        /** Created after setup: an error escaping root() would dispose the root. */
+        const r2 = root((r2) => {
+            r2.recover((e) => {
+                seen.push(e);
+                return true;
+            });
+        });
         let creator;
         try {
-            root((r2) => {
-                r2.recover((e) => {
-                    seen.push(e);
-                    return true;
-                });
-                /** The downstream error escapes this call, so capture the node from its context. */
-                r2.effect((cx) => {
-                    creator = cx;
-                    runs.push(cx.val(s));
-                    trigger.set(1);
-                });
+            /** The downstream error escapes this call, so capture the node from its context. */
+            r2.effect((cx) => {
+                creator = cx;
+                runs.push(cx.val(s));
+                trigger.set(1);
             });
         } catch (e) { }
         expect(creator.disposed).toBe(false);
