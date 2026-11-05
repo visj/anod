@@ -1192,6 +1192,8 @@ Every call to `c.suspend()` captures the current activation timestamp. When the 
 
 This applies to both resolve and reject: if a promise rejects after the node was invalidated, the error is also discarded. You are never notified about errors from stale activations.
 
+The same holds for awaiting a task, and for the callback form: a node that has been disposed never resumes, whatever it waits on. When a task is disposed, the nodes waiting on it are rejected with an error once the disposal has finished. A waiter that the same disposal tore down (a spawn and the task it awaits, owned by the same root) is not told; a waiter elsewhere is. A locked node (`c.lock()`) counts as alive until its activation finishes, so it is told, and is disposed once it completes.
+
 Instead, you must rely on the builtin lifecycle helpers. If you await a promise, and create some state that needs cleaning up, use c.cleanup(). If you must run the async function to completion, run c.lock(). The idea about anod's async correctness guarantee is that we do not want promises firing all over the place, writing state in an unpredictable way. The sync reactive graph is always consistent. When you write a value, every reader is guaranteed to see a consistent state of that signal. This idea extends to async, but with a different guarantee: every async primitive is guaranteed a consistent snapshot in time, but there is no guarantee exactly which time that is. This means: if you await and suspend 10 tasks, we will block until all 10 tasks have settled at some point in time, and all produce a valid value.
 
 ### Manual versioning with `c.version()`

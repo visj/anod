@@ -43,6 +43,7 @@ To review a fix, diff it against the branch before it in its chain, for example 
 | [19](19-async-gaps/README.md) | Smaller async gaps | 10 | `fix/19-async-gaps` | F |
 | [20](20-options/README.md) | Documented options that misbehave | 7 | `fix/20-options` | D |
 | [21](21-ownership/README.md) | Ownership leaks | 3 | `fix/21-ownership` | G |
+| [22](22-dispose-waiters/README.md) | Disposal reaches the nodes waiting on a task at the wrong time | 16 | `fix/all` | — |
 
 ## Performance
 

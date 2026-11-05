@@ -46,10 +46,18 @@ import { signal, resource, root, Defect } from "#anod";
  *       pass 3    the task's other subscribers are marked stale,
  *       pass 4    the stored functions are called, one waiter at a time.
  *
- *   - The task is disposed (resolveWaiters, from ComputeProto._dispose).
- *     Every waiter's `reject` is called with
- *     `new Error("Awaited task was disposed")`, one at a time, while
- *     the list is still attached to the task.
+ *   - The task is disposed (rejectWaiters, from ComputeProto._dispose).
+ *     The list is detached and every link back to the task cleared.
+ *     Then every waiter's `reject` gets
+ *     `new Error("Awaited task was disposed")`. If the disposal is part
+ *     of a teardown (inside a flush, or inside teardown()), the
+ *     rejections are not called yet: they go into a queue (REJECTS),
+ *     which is delivered once the teardown has finished.
+ *
+ * Whoever calls a stored function first checks the waiter: a disposed
+ * waiter is skipped, unless it is locked (c.lock() promises to run to
+ * the end). An await on a task also re-checks when it resumes, a
+ * microtask later, as an await on a promise always did.
  *
  * ─── Background: how disposal is scheduled ──────────────────────────
  *
@@ -63,7 +71,15 @@ import { signal, resource, root, Defect } from "#anod";
  *   - A node whose error no handler of its own keeps is disposed on
  *     the spot by internal code, not queued.
  *
- * ─── How to read the results ────────────────────────────────────────
+ * ─── The rules these tests check ────────────────────────────────────
+ *
+ *   A. A disposed node never resumes, for every waiter kind. A locked
+ *      node counts as not disposed until its activation finishes.
+ *   B. Nothing a waiter's callback does can corrupt the walk over the
+ *      waiter list: links are cleared before anything is called.
+ *   C. A task disposed in a teardown rejects its waiters after the
+ *      teardown, so the outcome does not depend on creation order, and
+ *      only waiters that survive the teardown are told.
  *
  * Tests marked PENDING wait on a design decision. They print a line
  *
@@ -71,14 +87,8 @@ import { signal, resource, root, Defect } from "#anod";
  *
  * with what anod does today, and fail until the decision is made:
  *
- *   A. A disposed node never resumes, for every waiter kind.
- *   C. Waiters are rejected after the owner's teardown, not during it,
- *      so the outcome does not depend on creation order.
  *   D. What the "Awaited task was disposed" error is: a Defect, and of
  *      which type (FATAL or PANIC).
- *
- * The other tests are bugs whose expected behavior is settled, or
- * behavior that is already correct.
  */
 
 /** Resolves after `ms` milliseconds: long enough for every pending
@@ -140,8 +150,8 @@ function waitOnTask(r, taskFirst, body) {
 
 describe("an owner's teardown and the waiters inside it", () => {
     /**
-     * PENDING C. Does creation order change what a waiter sees when its
-     * owner is torn down?
+     * Rule C. Creation order does not change what a waiter sees when
+     * its owner is torn down.
      *
      * The setup is the same in both rounds: one root owns a task that
      * loads forever and a spawn that awaits it inside try/catch. Only
@@ -154,27 +164,24 @@ describe("an owner's teardown and the waiters inside it", () => {
      *            removes its waiter entry from the task's list
      *       └─ dispose task
      *            waiter list is empty: nothing to reject
-     *     → the spawn never hears about anything. seen = []
+     *     → seen = []
      *
      * Round 2, task created second (_owned = [spawn, task]):
      *
-     *     r.dispose()
+     *     r.dispose()                 (drains inside a flush)
      *       └─ dispose task           ← last created, goes first
-     *            resolveWaiters: calls the spawn's Promise reject with
-     *            Error("Awaited task was disposed")
-     *            → only queues the continuation (a microtask)
+     *            rejectWaiters: the spawn's reject goes into REJECTS
      *       └─ dispose spawn
-     *     r.dispose() returns
-     *     ── microtask ──
-     *     the spawn's `await` throws, and its catch block runs,
-     *     on a spawn that is already disposed
-     *     → seen = ["catch ran (spawn disposed: true)"]
+     *       teardown finished → deliver REJECTS:
+     *            the spawn is disposed → skipped
+     *     → seen = []
      *
-     * Both rounds tear down the same graph, yet user code runs in one
-     * and not the other. Decision C (reject after the teardown) would
-     * make the rounds agree. The test prints both rounds.
+     * Before rule C, round 2 called the spawn's reject inside the task's
+     * disposal, while the spawn was still alive. A microtask later its
+     * catch block ran on a disposed spawn:
+     *     seen = ["catch ran (spawn disposed: true)"]
      */
-    test("PENDING C: a waiter sees the same thing whatever the creation order", async () => {
+    test("a waiter sees the same thing whatever the creation order", async () => {
         const observed = {};
         for (const taskFirst of [true, false]) {
             const seen = [];
@@ -195,34 +202,32 @@ describe("an owner's teardown and the waiters inside it", () => {
             await wait();
             observed[taskFirst ? "task created first" : "task created second"] = seen;
         }
-        pending("C", observed);
+        expect(observed).toEqual({ "task created first": [], "task created second": [] });
     });
 
     /**
-     * PENDING A. Does a task-path await resume on a disposed node?
+     * Rule A. A task await does not resume on a node its owner's
+     * teardown disposed.
      *
-     * Awaiting a promise is guarded: `c.suspend(promise)` returns
-     * `promise.then(guard)`, and the guard checks whether the node was
-     * re-run or disposed. If it was, it returns REGRET, a thenable whose
-     * `then` never calls back, so the `await` never resumes.
-     *
-     * Awaiting a task has no guard: `c.suspend(task)` returns the raw
-     * Promise whose resolve/reject sit in the task's waiter list.
-     *
-     * Timeline (task created second, so it is disposed first):
+     * This is round 2 of the previous test, checked on its own. Two
+     * things now stop the continuation:
      *
      *     r.dispose()
-     *       └─ dispose task → reject the spawn's Promise (queued)
+     *       └─ dispose task → reject queued in REJECTS
      *       └─ dispose spawn
-     *     ── microtask ──
-     *     the spawn's await throws inside a disposed spawn
-     *     → its catch block runs: { catchRan: true, spawnDisposed: true }
+     *       deliver REJECTS → the spawn is disposed → skipped (rule A)
      *
-     * Any code in that catch (or in a finally) runs on a dead node: it
-     * can write signals or create nodes after its owner tore it down.
-     * Decision A: a disposed node never resumes, for every waiter kind.
+     * Even if the reject had been called, the await would not resume:
+     * `c.suspend(task)` now returns `promise.then(guard)`, like
+     * `c.suspend(promise)` always did. The guard runs when the await
+     * would resume. If the node was disposed or re-run by then, it
+     * returns REGRET, a thenable whose `then` never calls back.
+     *
+     * Before, the reject ran during the teardown, and a microtask later
+     * the spawn's catch block ran on a dead node:
+     *     { catchRan: true, spawnDisposed: true }
      */
-    test("PENDING A: a task-path await does not resume on a disposed node", async () => {
+    test("a task-path await does not resume on a disposed node", async () => {
         const seen = [];
         const r = root((r) => {
             waitOnTask(r, false, async (cx, task, me) => {
@@ -236,32 +241,29 @@ describe("an owner's teardown and the waiters inside it", () => {
         await wait();
         r.dispose();
         await wait();
-        pending("A", seen.length === 0 ? "the continuation did not run" : seen);
+        expect(seen).toEqual([]);
     });
 
     /**
-     * PENDING C. Does onReject run in the middle of its owner's teardown?
+     * Rule C. onReject does not run in the middle of its owner's
+     * teardown.
      *
      * This is the callback form of the previous test. A callback waiter
      * has no microtask in between: its functions run synchronously when
-     * the waiter list is walked.
+     * they are delivered, so only the timing of the delivery protects it.
      *
      *     r.dispose()
-     *       └─ dispose task
-     *            resolveWaiters → the spawn has FLAG_RELAY → relay:
-     *              onReject(Defect) runs NOW, inside r.dispose(),
-     *              while the spawn is still alive
-     *              → { onRejectRan: true, spawnDisposed: false }
-     *              then the spawn settles (onReject returned)
-     *       └─ dispose spawn            ← a moment later
+     *       └─ dispose task → the spawn's onReject queued in REJECTS
+     *       └─ dispose spawn
+     *       deliver REJECTS → the spawn is disposed → skipped
+     *     → seen = []
      *
-     * The user's onReject runs halfway through tearing down its own
-     * owner. Some siblings are already gone, some are not, and a write
-     * from it would flush against a half-disposed tree. Decision C
-     * would move it after the teardown, where decision A skips it
-     * because the spawn is disposed by then.
+     * Before, the task's disposal called the relay at once: onReject
+     * ran inside r.dispose(), while the spawn was still alive, halfway
+     * through tearing down its own owner:
+     *     { onRejectRan: true, spawnDisposed: false }
      */
-    test("PENDING C: onReject does not run in the middle of its owner's teardown", async () => {
+    test("onReject does not run in the middle of its owner's teardown", async () => {
         const seen = [];
         const r = root((r) => {
             waitOnTask(r, false, (cx, task, me) => {
@@ -273,39 +275,32 @@ describe("an owner's teardown and the waiters inside it", () => {
         await wait();
         r.dispose();
         await wait();
-        pending("C", seen.length === 0 ? "onReject did not run" : seen);
+        expect(seen).toEqual([]);
     });
 
     /**
-     * PENDING C. Is a root's recover asked about an error its own
-     * teardown created?
+     * Rule C. A root's recover is not asked about an error its own
+     * teardown created.
      *
-     * Same as above, but without onReject. A callback waiter without
-     * onReject fails its node, as a throwing await would, so the error
-     * travels up the owner chain:
+     * A callback waiter without onReject fails its node, as a throwing
+     * await would, and the error travels up the owner chain. During a
+     * teardown that chain is being torn down: r's handlers stay live
+     * until all its children are gone.
      *
      *     r.dispose()
-     *       └─ dispose task
-     *            resolveWaiters → relay → no onReject:
-     *              spawn._error(Error("Awaited task was disposed"))
-     *                tryRecover: the spawn has no handler of its own,
-     *                so r's recover is asked. r is being disposed, but
-     *                its handlers stay live until all its children are
-     *                gone. It returns true.
-     *                → "root recover: Awaited task was disposed"
-     *              The owner handled it, so the spawn is disposed on
-     *              the spot (internal _dispose, not queued). That sets
-     *              spawn._chan = null.
-     *            resolveWaiters continues with this waiter: it clears
-     *            the spawn's link back to the task, which reads
-     *            spawn._chan → TypeError
-     *       → the TypeError leaves r.dispose(), wrapped as a FATAL
-     *         Defect: "root.dispose() threw: TypeError: ..."
+     *       └─ dispose task → the spawn's (missing) onReject queued
+     *       └─ dispose spawn
+     *       deliver REJECTS → the spawn is disposed → skipped
+     *     → no handler runs, nothing is thrown
      *
-     * Two things are printed: the root's handler was consulted about
-     * its own teardown (decision C), and the crash (the next test).
+     * Before, the rejection ran during the task's disposal:
+     *     relay → no onReject → spawn._error(...) → r's recover asked
+     *       → "root recover: Awaited task was disposed"
+     *     the owner handled it, so the spawn was disposed on the spot,
+     *     inside the waiter loop, which then read its cleared channel
+     *       → "root.dispose() threw: TypeError: ..."
      */
-    test("PENDING C: a root's recover is not asked about its own teardown", async () => {
+    test("a root's recover is not asked about its own teardown", async () => {
         const seen = [];
         const r = root((r) => {
             r.recover((err) => {
@@ -323,28 +318,27 @@ describe("an owner's teardown and the waiters inside it", () => {
             seen.push("root.dispose() threw: " + (err instanceof Defect ? err.error : err));
         }
         await wait();
-        pending("C", seen.length === 0 ? "no recover handler ran" : seen);
+        expect(seen).toEqual([]);
     });
 
     /**
-     * BUG. root.dispose() throws a TypeError when a callback waiter's
-     * error disposes it inside the waiter loop.
+     * Fixed (rule B). root.dispose() threw a TypeError when a callback
+     * waiter's error disposed it inside the waiter loop.
      *
      * The spawn's own recover declines (returns false), so the error
      * goes to the root, which handles it. Either way the spawn does not
-     * keep the error, so it is disposed:
+     * keep the error, so it is disposed. The old loop did, per waiter:
      *
-     *     resolveWaiters, waiter = spawn
      *       1. deliver → relay → spawn._error(...)
      *            spawn recover: false → root recover: true
      *            → spawn disposed on the spot, spawn._chan = null
      *       2. clear the spawn's link back to the task
      *            reads spawn._chan._res1 → TypeError
      *
-     * The loop calls the waiter first and cleans up its link second, so
-     * any waiter that is disposed by its own callback breaks step 2.
-     * The fix is to clear every link before calling anything, as the
-     * settle path does now. Expected: dispose() returns normally.
+     * The loop called the waiter first and cleaned up its link second.
+     * Now every link is cleared before anything is called (rule B). In
+     * this test rule C also applies: the rejection waits for the end of
+     * the teardown, where the disposed spawn is skipped.
      */
     test("root.dispose() does not throw when a callback waiter's recover declines", async () => {
         const r = root((r) => {
@@ -362,6 +356,101 @@ describe("an owner's teardown and the waiters inside it", () => {
             thrown = err;
         }
         expect(thrown).toBe(null);
+    });
+
+    /**
+     * Rule A, locked nodes. A locked waiter is still rejected, and its
+     * activation runs to the end.
+     *
+     * c.lock() promises that the activation completes. A dispose that
+     * arrives while locked only marks the node (FLAG_DISPOSED, with
+     * FLAG_LOCKED still set) and is replayed when the activation ends.
+     * Until then the node counts as alive.
+     *
+     *     r.dispose()
+     *       └─ dispose task → reject queued in REJECTS
+     *       └─ dispose spawn → locked: only marked disposed
+     *       deliver REJECTS → disposed but locked → delivered
+     *     r.dispose() returns
+     *     ── microtask ──
+     *     the guard lets a locked node through: the await throws, the
+     *     catch runs, the body finishes
+     *     the activation settles → the deferred dispose runs now, and
+     *     the cleanup with it
+     *
+     * Expected order: catch, body finished, cleanup.
+     */
+    test("a locked waiter is rejected, finishes its activation, then is disposed", async () => {
+        const seen = [];
+        let spawn;
+        const r = root((r) => {
+            ({ spawn } = waitOnTask(r, false, async (cx, task) => {
+                cx.lock();
+                cx.cleanup(() => seen.push("cleanup"));
+                try {
+                    await cx.suspend(task);
+                } catch (err) {
+                    seen.push("catch: " + err.message);
+                }
+                seen.push("body finished");
+            }));
+        });
+        await wait();
+        r.dispose();
+        await wait();
+        expect(seen).toEqual(["catch: Awaited task was disposed", "body finished", "cleanup"]);
+        expect(spawn.disposed).toBe(true);
+    });
+
+    /**
+     * Rule C, waiters outside the teardown. A waiter that survives the
+     * teardown is told, once the teardown has finished.
+     *
+     * The task lives in its own root, next to a sentinel compute created
+     * before it. Owners dispose in reverse order, so the sentinel is the
+     * last node the teardown disposes: once it is disposed, the teardown
+     * is complete. Two spawns in another root wait on the task.
+     *
+     *     taskRoot.dispose()
+     *       └─ dispose task → both rejections queued
+     *       └─ dispose sentinel        ← teardown complete
+     *       deliver REJECTS:
+     *         callback spawn → onReject runs now (sentinel disposed)
+     *         promise spawn  → reject called, the catch runs later
+     *     taskRoot.dispose() returns
+     *     ── microtask ──
+     *     promise spawn's catch runs (sentinel disposed)
+     */
+    test("a waiter outside the teardown is rejected once the teardown has finished", async () => {
+        const seen = [];
+        let taskRoot;
+        let sentinel;
+        let task;
+        const r = root((r) => {
+            taskRoot = root((rt) => {
+                sentinel = rt.compute(() => 1);
+                task = rt.task((cx) => cx.suspend(never()));
+            });
+            r.spawn((cx) => cx.suspend(task, () => { }, () => {
+                seen.push("onReject, teardown finished: " + sentinel.disposed);
+            }));
+            r.spawn(async (cx) => {
+                try {
+                    await cx.suspend(task);
+                } catch (err) {
+                    seen.push("catch, teardown finished: " + sentinel.disposed);
+                }
+            });
+        });
+        taskRoot.dispose();
+        seen.push("dispose returned");
+        await wait();
+        expect(seen).toEqual([
+            "onReject, teardown finished: true",
+            "dispose returned",
+            "catch, teardown finished: true",
+        ]);
+        r.dispose();
     });
 });
 
@@ -401,8 +490,8 @@ describe("a waiter disposed while a settle delivers to it", () => {
     }
 
     /**
-     * BUG. A callback waiter disposed by an earlier waiter still has its
-     * onResolve called.
+     * Fixed (rule A). A callback waiter disposed by an earlier waiter
+     * had its onResolve called anyway.
      *
      *     resolve(1)
      *       task settles; its waiter list is detached:
@@ -411,14 +500,12 @@ describe("a waiter disposed while a settle delivers to it", () => {
      *         other().dispose()   ← anod is idle, so this runs now
      *           waiter 2 is disposed. Disposal resets its flags to
      *           FLAG_DISPOSED alone, so FLAG_RELAY is gone.
-     *       pass 4, waiter 2:
-     *         no FLAG_RELAY → treated as a plain function waiter
-     *         → its onResolve(1) is called on a disposed spawn
-     *         → seen = [1]
+     *       pass 4, waiter 2: disposed → skipped
+     *     → seen = []
      *
-     * The README says a dispose before the task settles drops the
-     * callbacks. From waiter 2's point of view this dispose did happen
-     * before its result arrived. Expected: seen = [].
+     * Before, the loop did not check: with FLAG_RELAY gone, waiter 2
+     * looked like a plain function waiter, and its onResolve(1) was
+     * called on a disposed spawn (seen = [1]).
      */
     test("a callback waiter disposed by an earlier waiter's callback never runs", async () => {
         const seen = [];
@@ -433,18 +520,18 @@ describe("a waiter disposed while a settle delivers to it", () => {
     });
 
     /**
-     * BUG. As above, but the task fails and waiter 2 has no onReject.
+     * Fixed (rule A). As above, but the task fails and waiter 2 has no
+     * onReject.
      *
      *     rejectTask("bad")
      *       task fails; pass 4 walks [ waiter1, waiter2 ] with the error
      *       waiter 1 → relay → its onReject disposes `other` (now)
-     *       waiter 2 → FLAG_RELAY is gone, so it is treated as a plain
-     *         function waiter and its stored reject is called. But
-     *         waiter 2 never gave an onReject: the stored value is null.
-     *         → TypeError: fn is not a function
-     *       The TypeError escapes the task's settle and is thrown
-     *       from rejectTask() into this test. The rest of the settle
-     *       (the flush that follows it) never runs.
+     *       waiter 2 → disposed → skipped
+     *
+     * Before, waiter 2 was treated as a plain function waiter and its
+     * stored reject was called. It never gave an onReject, so the stored
+     * value was null: "TypeError: fn is not a function", thrown out of
+     * the task's settle, out of rejectTask(), into this test.
      *
      * The recover handlers keep the errors anod is supposed to deliver
      * from leaking out of the spawns, so that anything that escapes
@@ -480,24 +567,21 @@ describe("a waiter disposed while a settle delivers to it", () => {
     });
 
     /**
-     * PENDING A. A promise waiter disposed by an earlier waiter still
-     * resumes.
+     * Rule A. A promise waiter disposed by an earlier waiter does not
+     * resume.
      *
      *     resolveTask(1)
      *       pass 4 walks [ waiter1, spawn2 ]
      *       waiter 1 → relay → onResolve disposes `other` (now),
      *         spawn2 included
-     *       spawn2 → plain function waiter: its Promise resolve(1) is
-     *         called, which queues the continuation
-     *     ── microtask (inside `await wait()`) ──
-     *     spawn2's `await` returns 1, on a disposed spawn
-     *     → { resumed: 1, spawnDisposed: true }
+     *       spawn2 → disposed → skipped: its resolve is never called
+     *     → seen = []
      *
-     * Same root cause as the teardown test above: the task-path Promise
-     * has no guard. Decision A would skip a disposed waiter at delivery
-     * time, for every waiter kind.
+     * Before, spawn2's resolve(1) was called, and a microtask later its
+     * await returned 1 on a disposed spawn:
+     *     { resumed: 1, spawnDisposed: true }
      */
-    test("PENDING A: a promise waiter disposed by an earlier waiter does not resume", async () => {
+    test("a promise waiter disposed by an earlier waiter does not resume", async () => {
         const seen = [];
         let spawn2;
         let resolveTask;
@@ -516,34 +600,30 @@ describe("a waiter disposed while a settle delivers to it", () => {
         });
         resolveTask(1);
         await wait();
+        expect(seen).toEqual([]);
         r.dispose();
-        pending("A", seen.length === 0 ? "the continuation did not run" : seen);
     });
 
     /**
-     * PENDING A. An array waiter disposed by an earlier waiter still
-     * resumes, and is subscribed to the task again.
+     * Rule A. An array waiter disposed by an earlier waiter does not
+     * resume, and is not subscribed to the task again.
      *
-     * spawn2 awaits [task]. While the task loads, spawn2 carries
-     * FLAG_BLOCKED and its waiter entry holds the internal re-scan:
+     * spawn2 awaits [task]. While the task loads, its waiter entry holds
+     * the internal re-scan:
      *
      *     task._waiters = [ waiter1, onResolve, null,  spawn2, step, step ]
      *
      *     resolveTask(1)
-     *       pass 4, waiter 1 → onResolve disposes `other` (now): spawn2's
-     *         flags reset to FLAG_DISPOSED, so FLAG_BLOCKED is gone
-     *       pass 4, spawn2 → step(1) runs the re-scan for a disposed node:
-     *         every member has settled, so it subscribes spawn2 to the
-     *         task again (a dead node in the task's subscriber list) and
-     *         resolves the Promise
-     *     ── microtask ──
-     *     spawn2's `await` returns [1] on a disposed spawn
-     *     → { resumed: 1, spawnDisposed: true }
+     *       pass 4, waiter 1 → onResolve disposes `other` (now)
+     *       pass 4, spawn2 → disposed → skipped: the re-scan never runs
+     *     → seen = []
      *
-     * Decision A covers this too: skipping a disposed waiter before its
-     * function is called also skips the re-scan and its subscription.
+     * Before, step(1) ran the re-scan for the disposed node: it found
+     * every member settled, subscribed spawn2 to the task again (a dead
+     * node in the task's subscriber list), and resolved the Promise, so
+     * the await returned [1] on a disposed spawn.
      */
-    test("PENDING A: an array waiter disposed by an earlier waiter does not resume", async () => {
+    test("an array waiter disposed by an earlier waiter does not resume", async () => {
         const seen = [];
         let spawn2;
         let resolveTask;
@@ -562,8 +642,60 @@ describe("a waiter disposed while a settle delivers to it", () => {
         });
         resolveTask(1);
         await wait();
+        expect(seen).toEqual([]);
         r.dispose();
-        pending("A", seen.length === 0 ? "the continuation did not run" : seen);
+    });
+
+    /**
+     * Rule A, the guard at resume. A waiter disposed after its result
+     * was delivered, but before its await resumed, does not resume.
+     *
+     * The order of the waiters is swapped compared to the tests above:
+     * spawn2 is created first, so it is delivered to first, and only
+     * then disposed by the callback waiter after it.
+     *
+     *     task._waiters = [ spawn2, waiter1 ]
+     *
+     *     resolveTask(1)
+     *       pass 4, spawn2 → alive → its resolve(1) is called, which
+     *         only queues the continuation
+     *       pass 4, waiter 1 → onResolve disposes `other` (now),
+     *         spawn2 included
+     *     ── microtask ──
+     *     the guard on spawn2's await runs: spawn2 is disposed → REGRET,
+     *     so the await never resumes
+     *     → seen = []
+     *
+     * The skip at delivery cannot catch this, since spawn2 was alive
+     * then. Both the task form and the array form are checked.
+     */
+    test("a waiter disposed after its result was delivered does not resume", async () => {
+        const observed = {};
+        for (const form of ["task", "array"]) {
+            const seen = [];
+            let resolveTask;
+            let other;
+            let spawn2;
+            const r = root((r) => {
+                const task = r.task((cx) => cx.suspend((resolve) => {
+                    resolveTask = resolve;
+                }));
+                other = root((r2) => {
+                    spawn2 = r2.spawn(async (cx) => {
+                        const v = form === "task"
+                            ? await cx.suspend(task)
+                            : (await cx.suspend([task]))[0];
+                        seen.push({ resumed: v, spawnDisposed: spawn2.disposed });
+                    });
+                });
+                r.spawn((cx) => cx.suspend(task, () => other.dispose()));
+            });
+            resolveTask(1);
+            await wait();
+            observed[form] = seen;
+            r.dispose();
+        }
+        expect(observed).toEqual({ task: [], array: [] });
     });
 
     /**
@@ -590,7 +722,7 @@ describe("a waiter disposed while a settle delivers to it", () => {
      *         task = 1. dep is stale, so it is refreshed: dep runs with
      *         1, disposes `other` (w2), returns 1
      *         → snapshot [1, 1], w1's Promise resolves
-     *       pass 4, w2 → resolved (it is disposed; see decision A above)
+     *       pass 4, w2 → disposed → skipped (rule A)
      *       pass 4, w3 → resolved
      *     ── microtasks ──
      *     w1 resumes once, with [1, 1]. w3 resumes once.
@@ -643,8 +775,8 @@ describe("a waiter disposed while a settle delivers to it", () => {
 
 describe("a waiter that fails while a task's disposal delivers to it", () => {
     /**
-     * BUG. When one waiter is disposed by its own error during a task's
-     * disposal, the waiters after it are never told.
+     * Fixed (rule B). When one waiter was disposed by its own error
+     * during a task's disposal, the waiters after it were never told.
      *
      * Three spawns in root r wait on a task that lives in another root:
      *
@@ -654,23 +786,28 @@ describe("a waiter that fails while a task's disposal delivers to it", () => {
      *     w2, w3: callback waiters with onReject
      *     r's recover handles everything
      *
+     * Now (rules B and C):
+     *
      *     taskRoot.dispose()
-     *       └─ dispose task → resolveWaiters walks [ w1, w2, w3 ]
+     *       └─ dispose task → rejectWaiters: list detached, every link
+     *          cleared, all three rejections queued
+     *       teardown finished → deliver REJECTS:
      *            w1 → relay → no onReject → w1._error(...)
-     *                 w1 declines, r handles → w1 is disposed on the
-     *                 spot, w1._chan = null
-     *            clearing w1's link back to the task reads w1._chan
-     *            → TypeError. The loop stops here.
-     *            w2 and w3 are never told, and stay loading forever.
-     *     → taskRoot.dispose() throws
+     *                 w1 declines, r handles → w1 is disposed (its own
+     *                 teardown; nothing is left pointing at it)
+     *            w2 → onReject
+     *            w3 → onReject
+     *     → dispose returns, calls = ["w2", "w3"]
      *
-     * (A dispose() called from inside a callback here would not show
-     * this: while anod drains a dispose, a dispose() is queued and runs
-     * after the loop. Only the internal, on-the-spot disposal of a
-     * failing node happens mid-loop.)
+     * Before, the loop delivered to w1 first and cleared its link
+     * second. w1's disposal had set w1._chan = null, so clearing the
+     * link threw a TypeError, the loop stopped, and w2 and w3 were never
+     * told: they stayed loading forever, and taskRoot.dispose() threw.
      *
-     * Expected: taskRoot.dispose() returns normally, and w2 and w3 each
-     * get their onReject once.
+     * (A dispose() called from inside a callback would not show this:
+     * while anod drains a dispose, a dispose() is queued and runs after
+     * the loop. Only the internal, on-the-spot disposal of a failing
+     * node happened mid-loop.)
      */
     test("one waiter failing does not stop the others from being told", async () => {
         const calls = [];

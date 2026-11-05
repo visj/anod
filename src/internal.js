@@ -208,6 +208,24 @@ var DISPOSES = [];
 var DISPOSER_COUNT = 0;
 
 /**
+ * Rejections of the waiters of disposed tasks and resources, held
+ * until the teardown that disposed them has finished, as triples
+ * [awaiter, reject, error, ...]. A waiter that the same teardown
+ * disposed is skipped then, whatever order the nodes went in.
+ * @const @type {Array<AsyncReceiver | Function | null | Error>}
+ */
+var REJECTS = [];
+
+var REJECT_COUNT = 0;
+
+/**
+ * True while teardown() disposes a node outside a flush, or delivers
+ * the rejections it collected: a disposal nested inside defers to it.
+ * @type {boolean}
+ */
+var TEARING = false;
+
+/**
  * Writable senders (Signal + writable Compute) pending an assignment
  * during a batch. Paired with PAYLOADS — both are indexed by a shared
  * tail pointer and cleared back to null on drain. Sized to the longest
@@ -1532,9 +1550,46 @@ function root(fn) {
 			send(node, taskNode, resolve, reject);
 			return REGRET;
 		}
-		return new Promise(function (resolve, reject) {
+		return guardAwait(node, new Promise(function (resolve, reject) {
 			send(node, taskNode, resolve, reject);
-		});
+		}));
+	}
+
+	/**
+	 * Guards the Promise a task await returns, as suspend() guards a
+	 * promise. A waiter that is disposed or re-run is not resolved, but a
+	 * node can be disposed or re-run after it was resolved and before the
+	 * await resumes, one microtask later. The guard runs at that point,
+	 * and resolves to REGRET instead, so the await never resumes.
+	 * @template T
+	 * @param {AsyncReceiver} node
+	 * @param {Promise<T>} promise
+	 * @returns {Promise<T>}
+	 */
+	function guardAwait(node, promise) {
+		let time = node._time;
+		return promise.then(
+			/** @param {T} val */
+			function (val) {
+				if (
+					node._time === time &&
+					(!(node._flag & FLAG_DISPOSED) || node._flag & FLAG_LOCKED)
+				) {
+					return val;
+				}
+				return REGRET;
+			},
+			/** @param {*} error */
+			function (error) {
+				if (
+					node._time === time &&
+					(!(node._flag & FLAG_DISPOSED) || node._flag & FLAG_LOCKED)
+				) {
+					throw error;
+				}
+				return REGRET;
+			}
+		);
 	}
 
 	/**
@@ -1601,9 +1656,9 @@ function root(fn) {
 		/** At least one is loading — allocate one Promise.
 		 *  _stepArray re-scans from scratch on each wake-up,
 		 *  guaranteeing a consistent snapshot when it resolves. */
-		return new Promise(function (resolve, reject) {
+		return guardAwait(node, new Promise(function (resolve, reject) {
 			_stepArray(node, tasks, results, resolve, reject);
-		});
+		}));
 	}
 
 	/**
@@ -1772,7 +1827,7 @@ function root(fn) {
 		} else if (flag & FLAG_LOCKED && !(flag & FLAG_LOADING)) {
 			this._flag = flag & ~FLAG_LOCKED;
 			if (flag & FLAG_DISPOSED) {
-				this._dispose();
+				teardown(this);
 			} else {
 				this._receive();
 				if (IDLE) {
@@ -2211,7 +2266,7 @@ function root(fn) {
 		if (flag & FLAG_WAITER) {
 			let ch = this._chan;
 			if (ch._waiters !== null) {
-				resolveWaiters(this, ch, new Error("Awaited resource was disposed"), true, true);
+				rejectWaiters(this, ch, new Error("Awaited resource was disposed"));
 			}
 		}
 		clearSubs(this);
@@ -2481,7 +2536,7 @@ function root(fn) {
 		/** Deferred dispose: owner disposed while we were locked.
 		 *  FLAG_LOCKED was cleared above, so _dispose runs full cleanup. */
 		if (flag & FLAG_DISPOSED) {
-			this._dispose();
+			teardown(this);
 			return;
 		}
 
@@ -2579,15 +2634,9 @@ function root(fn) {
 			if (chan._controller !== null) {
 				abortControllers(chan._controller);
 			}
-			/** Panic any nodes awaiting this task. */
+			/** Reject any nodes awaiting this task. */
 			if (chan._waiters !== null) {
-				resolveWaiters(
-					this,
-					chan,
-					new Error("Awaited task was disposed"),
-					true,
-					true
-				);
+				rejectWaiters(this, chan, new Error("Awaited task was disposed"));
 			}
 			/** Remove ourselves from any responders we were awaiting. */
 			if (chan._res1 !== null || chan._responds !== null) {
@@ -3060,7 +3109,7 @@ function root(fn) {
 		/** Deferred dispose: owner disposed while we were locked.
 		 *  FLAG_LOCKED was cleared above, so _dispose runs full cleanup. */
 		if (flag & FLAG_DISPOSED) {
-			this._dispose();
+			teardown(this);
 			return;
 		}
 
@@ -3071,7 +3120,7 @@ function root(fn) {
 			}
 			let result = tryRecover(this, err);
 			if (result !== RECOVER_SELF) {
-				this._dispose();
+				teardown(this);
 			}
 			return;
 		}
@@ -4528,7 +4577,8 @@ function settleNotify(node, value, isError, waiters, waiterCount, quiet) {
 }
 
 /**
- * Hands a settled value to one waiter's callback. A node waiting
+ * Hands a settled value to one waiter's callback, unless the waiter
+ * has been disposed. A node waiting
  * through c.suspend(task, onResolve, onReject) is relayed: its own
  * callback runs, and the node settles with what it returns. During an
  * array await (FLAG_BLOCKED) the callback is the internal re-scan.
@@ -4539,6 +4589,10 @@ function settleNotify(node, value, isError, waiters, waiterCount, quiet) {
  * @returns {void}
  */
 function deliver(awaiter, fn, value, isError) {
+	/** A disposed node never resumes. A locked one runs to the end. */
+	if ((awaiter._flag & (FLAG_DISPOSED | FLAG_LOCKED)) === FLAG_DISPOSED) {
+		return;
+	}
 	if ((awaiter._flag & (FLAG_RELAY | FLAG_BLOCKED)) === FLAG_RELAY) {
 		relay(awaiter, fn, value, isError);
 	} else {
@@ -4559,9 +4613,6 @@ function deliver(awaiter, fn, value, isError) {
  */
 function relay(node, fn, value, isError) {
 	node._flag &= ~FLAG_RELAY;
-	if (node._flag & FLAG_DISPOSED && !(node._flag & FLAG_LOCKED)) {
-		return;
-	}
 	if (fn === null) {
 		node._error(value);
 		return;
@@ -4873,31 +4924,97 @@ function clearRespond(awaiter, responder) {
 }
 
 /**
- * Resolves (or rejects) all waiters of a responder and clears their
- * channel references. When panic is false, subscribes each awaiter as
- * a dep of the responder. When panic is true (responder is disposing),
- * skips subscription since the responder is dead.
- * @template T
- * @param {AsyncSender<T>} responder
+ * Rejects every waiter of a responder that is being disposed. The list
+ * is detached and every waiter's link back to the responder cleared
+ * first, so nothing a reject does can reach the list. Inside a flush or
+ * a teardown, the rejections are held until it has finished (see
+ * REJECTS); otherwise they are delivered now.
+ * @param {AsyncSender} responder
  * @param {Resolver} responderCh
- * @param {T} value
- * @param {boolean} isError
- * @param {boolean} panic
+ * @param {Error} error
  * @returns {void}
  */
-function resolveWaiters(responder, responderCh, value, isError, panic) {
+function rejectWaiters(responder, responderCh, error) {
 	let waiters = responderCh._waiters;
 	let count = waiters.length;
-	for (let i = 0; i < count; i += 3) {
-		let awaiter = /** @type {AsyncReceiver} */(waiters[i]);
-		deliver(awaiter, /** @type {Function} */(waiters[isError ? i + 2 : i + 1]), value, isError);
-		if (!panic && !(awaiter._flag & FLAG_BLOCKED)) {
-			subscribe(awaiter, responder);
-		}
-		clearRespond(awaiter, responder);
-	}
 	responderCh._waiters = null;
 	responder._flag &= ~FLAG_WAITER;
+	for (let i = 0; i < count; i += 3) {
+		clearRespond(/** @type {AsyncReceiver} */(waiters[i]), responder);
+	}
+	if (FLUSHING || TEARING) {
+		for (let i = 0; i < count; i += 3) {
+			REJECTS[REJECT_COUNT++] = waiters[i];
+			REJECTS[REJECT_COUNT++] = waiters[i + 2];
+			REJECTS[REJECT_COUNT++] = error;
+		}
+	} else {
+		for (let i = 0; i < count; i += 3) {
+			deliver(
+				/** @type {AsyncReceiver} */(waiters[i]),
+				/** @type {Function} */(waiters[i + 2]),
+				error,
+				true
+			);
+		}
+	}
+}
+
+/**
+ * Delivers the rejections held in REJECTS. A rejection that causes a
+ * further disposal appends to the queue, and is delivered in the same
+ * walk once that disposal has finished.
+ * @returns {void}
+ */
+function deliverRejects() {
+	/** @type {*} */
+	let error = null;
+	let thrown = false;
+	for (let i = 0; i < REJECT_COUNT; i += 3) {
+		let awaiter = /** @type {AsyncReceiver} */(REJECTS[i]);
+		let reject = /** @type {Function} */(REJECTS[i + 1]);
+		let value = REJECTS[i + 2];
+		REJECTS[i] = REJECTS[i + 1] = REJECTS[i + 2] = null;
+		try {
+			deliver(awaiter, reject, value, true);
+		} catch (err) {
+			if (!thrown) {
+				error = err;
+				thrown = true;
+			}
+		}
+	}
+	REJECT_COUNT = 0;
+	if (thrown) {
+		throw error;
+	}
+}
+
+/**
+ * Disposes a node from outside the dispose queue: a deferred dispose
+ * replayed on settle or unlock, or a node its error disposes. Outside
+ * a flush, the rejections the teardown collects are delivered once it
+ * has finished; inside one, the flush delivers them.
+ * @param {Disposer} node
+ * @returns {void}
+ */
+function teardown(node) {
+	if (FLUSHING || TEARING) {
+		node._dispose();
+		return;
+	}
+	TEARING = true;
+	try {
+		node._dispose();
+	} finally {
+		try {
+			if (REJECT_COUNT > 0) {
+				deliverRejects();
+			}
+		} finally {
+			TEARING = false;
+		}
+	}
 }
 
 /**
@@ -5014,7 +5131,7 @@ function failStart(node, error) {
 	let err = defect(error);
 	let result = tryRecover(node, err);
 	if (result !== RECOVER_SELF) {
-		node._dispose();
+		teardown(node);
 	}
 	if (result === RECOVER_NONE) {
 		UNHANDLED = err;
@@ -5155,6 +5272,19 @@ function flush() {
 				} while (DISPOSER_COUNT > count && ++cycle < 1e5);
 				DISPOSER_COUNT = 0;
 			}
+			/** The rejections a disposal collected, now that it has finished:
+			 *  the waiters it disposed too are skipped. Rejections collected
+			 *  later in the pass come back here on the next one. */
+			if (REJECT_COUNT > 0) {
+				try {
+					deliverRejects();
+				} catch (err) {
+					if (!thrown) {
+						error = new Defect(err, FATAL);
+						thrown = true;
+					}
+				}
+			}
 			if (SENDER_COUNT > 0) {
 				let count = 0;
 				let i = 0;
@@ -5242,6 +5372,7 @@ function flush() {
 		} while (
 			SENDER_COUNT > 0 ||
 			DISPOSER_COUNT > 0 ||
+			REJECT_COUNT > 0 ||
 			COMPUTE_COUNT > 0 ||
 			SCOPE_COUNT > 0 ||
 			RECEIVER_COUNT > 0
