@@ -45,7 +45,7 @@ Run with `bun test --conditions=src test/explore/async.test.js test/explore/grap
 
 ## Fix
 
-9 of the 10 tests pass. `c.suspend(task, onResolve)` is left for a maintainer decision (see below). Each sub-issue is a separate, self-contained change.
+All 10 tests pass. `c.suspend(task, onResolve)` was restored after a maintainer decision (see below). Each sub-issue is a separate, self-contained change.
 
 ### unlock
 
@@ -87,16 +87,12 @@ Behavior decisions:
 
 - **`suspend()` and `CellProto.suspend()`** now return `Promise.resolve(thenable).then(guards)`. `Promise.resolve` returns a native promise as is, so nothing changes for promises. A thenable is adopted, so `await c.suspend(thenable)` yields its value.
 - **`_suspendTask`** throws `ILLEGAL_READ` when awaiting itself, like `val()`. Array awaits do the same (see above).
-- **`c.suspend(task, onResolve)` is not implemented. Proposal: drop the declaration.** The `suspend(sender, onResolve, onReject?)` and `suspend(senders, onResolve, onReject?)` overloads of `TaskContext` and `SpawnContext` (`types/internal.d.ts`, re-exported by `types/index.d.ts`) are not in README.md, which describes three delivery paths: `c.pending()`, awaiting `c.suspend()`, and `c.suspend(setupFn)`. Doing it properly is a design change, not a small fix:
-  - For a loading task the callbacks would run from `settleNotify`'s waiter loop, synchronously in the middle of the task's settle and before its other subscribers are notified. A callback that writes a signal or awaits the same task re-enters the engine mid-settle. For example, a waiter added there goes into the array being iterated and is lost when the settle clears it. Promise waiters avoid this by resuming in a microtask.
-  - Also undefined: whether the caller is loading while it waits (it is with the setup form), what a task that uses it settles to, and where an error goes without `onReject`.
-
-  Options:
-  1. Drop the two overloads from the types (recommended), and rewrite or remove the test, which then asks for an API anod doesn't have.
-  2. Build it on the promise path: call `onResolve(value)` synchronously when settled, otherwise `.then(onResolve, onReject)` on the waiter promise. Small and safe, but it allocates the promise a callback form would exist to avoid, the caller isn't loading meanwhile, and a rejection without `onReject` must be routed to the node's error handling rather than left unhandled.
-  3. A real callback path: invoke the callbacks after the settle completes, with loading and error semantics like the setup form.
-
-  The test `c.suspend() inputs` › "c.suspend(task, onResolve) calls onResolve as the public types declare" stays failing until this is decided.
+- **`c.suspend(task, onResolve, onReject)` is restored.** It existed in `ed91691` and was dropped in `50cd012` when the setup-function form came in, but the types kept the overloads. It now works like `.then(onResolve, onReject)` without the Promise:
+  - A settled task (or array of tasks) calls the callback before `suspend()` returns, inside the run, so its reads are tracked normally. A task settles with what the callback returns, through the same `FLAG_CALLBACK` path a synchronous setup-form `resolve` uses.
+  - A loading task stores the user's callbacks directly as its waiter (no Promise, no closures) and marks the node loading. `FLAG_RELAY` (bit 21, free since bug 07) tells the waiter loop that the node settles with what the callback returns (`relay()`), or fails with what it throws. `deliver()` picks between that and a plain call; an array walk (`FLAG_BLOCKED`) relays only when its snapshot is complete.
+  - An error without `onReject` fails the node (`node._error`), as a throwing await would. A re-run (`resetChannel` clears `FLAG_RELAY`) or dispose drops the waiter.
+  - A callback suspend can't start while another suspend is pending (`FLAG_SUSPEND | FLAG_LOADING`), which also rules it out after an `await`.
+- **Waiters resume after the settle has notified.** The reason the callback form was unsafe to call from the waiter loop was the loop's position: `settleNotify` called waiter callbacks in pass 2, before pass 3 marked the task's other subscribers stale, and the callers cleared `_waiters` only afterwards. The array await's internal re-scan was already exposed to this: an array over a task and a task depending on it resolved with a mixed snapshot (`[2, 10]` instead of `[2, 20]`). Pass 2 now only subscribes and stamps, pass 4 calls the callbacks, and every caller detaches `_waiters` before `settleNotify`, so a waiter added from a callback goes into a fresh list. `test/suspend-callback.test.js` › settle order covers both forms.
 
 ### post-await reads
 
@@ -108,7 +104,7 @@ A related gap that predates this change: when `c.suspend([...])` takes the fast 
 
 ### Tests
 
-- 9 of 10 pass. Still failing: "c.suspend(task, onResolve) calls onResolve as the public types declare" (decision above).
+- 10 of 10 pass. "c.suspend(task, onResolve) calls onResolve as the public types declare" passes since the callback form was restored (below). `test/suspend-callback.test.js` covers it in full.
 - One test expectation changed: the unlock test, explained above.
 - No other group's tests changed state. The original suite is unchanged: 510 passing tests, 1624 `expect()` calls.
 

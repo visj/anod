@@ -44,10 +44,11 @@ anod is a reactive state management library. It has built-in support for both sy
 	- [Error recovery in depth](#error-recovery-in-depth)
 		- [Recovery](#recovery)
 - [Async reactivity in depth](#async-reactivity-in-depth)
-	- [The three delivery paths](#the-three-delivery-paths)
+	- [The four delivery paths](#the-four-delivery-paths)
 		- [1. Sync check with `c.pending()`](#1-sync-check-with-cpending)
 		- [2. Await with `c.suspend()`](#2-await-with-csuspend)
 		- [3. Callback (resolve, reject)](#3-callback-resolve-reject)
+		- [4. Task callbacks with `c.suspend(task, onResolve, onReject)`](#4-task-callbacks-with-csuspendtask-onresolve-onreject)
 	- [Deferred dependencies with `c.defer()`](#deferred-dependencies-with-cdefer)
 	- [Abort controller with `c.controller()`](#abort-controller-with-ccontroller)
 	- [Async transactions with `c.lock()` / `c.unlock()`](#async-transactions-with-clock--cunlock)
@@ -928,9 +929,9 @@ root((c) => {
 
 ## Async reactivity in depth
 
-anod provides three ways to consume async values, each suited to a different use case.
+anod provides four ways to consume async values, each suited to a different use case.
 
-### The three delivery paths
+### The four delivery paths
 
 #### 1. Sync check with `c.pending()`
 
@@ -978,7 +979,7 @@ root((c) => {
 });
 ```
 
-**Task**: if the task is already settled, returns the value synchronously. If the task is loading, creates a two-way channel binding: the spawn suspends until the task settles, then resumes with the value.
+**Task**: if the task is already settled, returns the value synchronously. If the task is loading, creates a two-way channel binding: the spawn suspends until the task settles, then resumes with the value. To skip the promise and the microtask, pass callbacks instead (see [task callbacks](#4-task-callbacks-with-csuspendtask-onresolve-onreject)).
 
 ```ts
 import { root, signal } from "anod";
@@ -1058,6 +1059,45 @@ root((c) => {
 Note the spawn body is sync — no `async` keyword, no promise allocation. The setup function controls when the node settles. If `url` changes, the spawn re-runs: `cleanup` closes the old websocket, the child effect is disposed, and the old `resolve` becomes stale and is silently ignored.
 
 You can only call `c.suspend()` with a setup function once per activation. Calling it again throws an error. This prevents ambiguous double-settlement.
+
+#### 4. Task callbacks with `c.suspend(task, onResolve, onReject)`
+
+`c.suspend(task, onResolve, onReject)` reads a task, or an array of tasks, through callbacks instead of `await`. It works like `.then(onResolve, onReject)`, without the promise:
+
+* **Settled task**: `onResolve(value)` is called right away, before `c.suspend()` returns. There is no microtask: the value is there, so you get it. Reads inside the callback are tracked like any other read in the run.
+* **Loading task**: the callbacks are stored on the task, and the node is loading until one of them runs. When the task settles, the callback runs synchronously, in the same tick, after everything that depends on the task has been marked stale. So a read inside the callback sees the graph as it is after the settle.
+* **Tasks settle with the result**: in a task, what the callback returns becomes the task's value, and what it throws becomes its error. In a spawn, the return value is ignored.
+* **Errors**: a failing task calls `onReject(error)` with the anod error (a `Defect`). If `onReject` returns, a task settles with that value, as with `.then`. Without `onReject`, the error fails the node, as a throwing `await` would, so it reaches `c.recover()`.
+* **Staleness**: if the node re-runs or is disposed before the task settles, the callbacks are dropped and never run.
+
+```ts
+import { root, signal } from "anod";
+root((c) => {
+	const id = signal(1);
+	const user = c.task(id, async (id, c) => {
+		const res = await c.suspend(fetch(`/api/users/${id}`));
+		return await c.suspend(res.json());
+	});
+
+	/** A task built from another task: settles with what onResolve returns. */
+	const greeting = c.task((c) => {
+		c.suspend(user, (u) => "Hello, " + u.name, () => "Hello, guest");
+	});
+
+	/** A sync spawn: no async keyword, no promise, no microtask. */
+	c.spawn((c) => {
+		c.suspend([user, greeting], ([u, text]) => {
+			console.log(u.id, text);
+		});
+	});
+});
+```
+
+Whether the callback runs now or later depends on whether the task has settled, so don't rely on code after `c.suspend()` running before or after it.
+
+The node subscribes to the task, the same as with `await`. When the task settles again, the node re-runs and calls `c.suspend()` again.
+
+Use one suspend per activation. A callback suspend can't be added while another suspend is pending, so an async spawn can't use it after an `await`. Either case throws.
 
 ### Deferred dependencies with `c.defer()`
 

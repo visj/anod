@@ -78,7 +78,7 @@ Why not the other options:
 
 ### FLAG_PANIC is retired
 
-With provenance carried by the object, the engine needs no per-node panic state. `cx.panic()` just throws `new Defect(val, PANIC)`. Nothing sets or reads `FLAG_PANIC` any more, and it is gone from `ComputeProto._update`'s reset mask. So "panic state is per run" holds trivially: a panic caught in one run cannot change how a later run's throw is classified. The constant stays exported so `anod/internal` importers don't break, but the bit is now free.
+With provenance carried by the object, the engine needs no per-node panic state. `cx.panic()` just throws `new Defect(val, PANIC)`. Nothing sets or reads `FLAG_PANIC` any more, and it is gone from `ComputeProto._update`'s reset mask. So "panic state is per run" holds trivially: a panic caught in one run cannot change how a later run's throw is classified. The bit has since been reused as `FLAG_RELAY` (see bug 19's callback suspend).
 
 ### The double `tryRecover` and double wrap in `startEffect`
 

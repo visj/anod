@@ -47,7 +47,7 @@ export declare const FLAG_CHANNEL: number;
 export declare const FLAG_BLOCKED: number;
 export declare const FLAG_LOCKED: number;
 export declare const FLAG_SUSPEND: number;
-export declare const FLAG_PANIC: number;
+export declare const FLAG_RELAY: number;
 export declare const FLAG_SINGLE: number;
 export declare const FLAG_EAGER: number;
 export declare const FLAG_PURGE: number;

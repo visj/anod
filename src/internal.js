@@ -39,7 +39,9 @@ const FLAG_CHANNEL = 1 << 17;
 const FLAG_BLOCKED = 1 << 18;
 const FLAG_LOCKED = 1 << 19;
 const FLAG_SUSPEND = 1 << 20;
-const FLAG_PANIC = 1 << 21;
+/** Waiting on a task through c.suspend(task, onResolve, onReject): the
+ *  callback that resumes it also settles it. */
+const FLAG_RELAY = 1 << 21;
 const FLAG_SINGLE = 1 << 22;
 const FLAG_EAGER = 1 << 23;
 const FLAG_PURGE = 1 << 24;
@@ -1373,12 +1375,21 @@ function root(fn) {
 	 * If stale or disposed, resolves to REGRET — a thenable whose
 	 * `.then()` is a no-op, so `await` never resumes and the closure
 	 * becomes eligible for GC.
+	 *
+	 * With onResolve, a task or an array of tasks is waited on through
+	 * callbacks instead (see suspendTo).
 	 * @template T
 	 * @this {AsyncReceiver}
 	 * @param {IThenable<T> | AsyncSender<T> | Array<AsyncSender> | (function(Function, Function))} promiseOrTask
+	 * @param {function(*): *=} onResolve
+	 * @param {function(*): *=} onReject
 	 * @returns {T | Array<T> | Promise<T | Array<T>> | void}
 	 */
-	function suspend(promiseOrTask) {
+	function suspend(promiseOrTask, onResolve, onReject) {
+		if (onResolve !== undefined) {
+			suspendTo(this, promiseOrTask, onResolve, onReject === undefined ? null : onReject);
+			return;
+		}
 		/** Branch: setup function → callback constructor path.
 		 *  Sets FLAG_SUSPEND so _update knows the node is waiting
 		 *  for a callback-driven settlement, not a returned promise.
@@ -1488,7 +1499,7 @@ function root(fn) {
 	 * @param {AsyncSender<T>} taskNode
 	 * @returns {T | Promise<T>}
 	 */
-	function _suspendTask(node, taskNode) {
+	function _suspendTask(node, taskNode, resolve, reject) {
 		if (taskNode._flag & FLAG_DISPOSED || taskNode === node) {
 			throw new Error(ILLEGAL_READ);
 		}
@@ -1514,7 +1525,13 @@ function root(fn) {
 
 		/** Task is loading — create channel binding and return a Promise.
 		 *  Staleness is handled by resetChannel: if the node re-runs,
-		 *  the old waiter is removed and this Promise never resolves. */
+		 *  the old waiter is removed and this Promise never resolves.
+		 *  With callbacks, they are the waiter, and no Promise is made. */
+		if (resolve !== undefined) {
+			node._flag |= FLAG_SUSPEND | FLAG_LOADING | FLAG_CALLBACK | FLAG_RELAY;
+			send(node, taskNode, resolve, reject);
+			return REGRET;
+		}
 		return new Promise(function (resolve, reject) {
 			send(node, taskNode, resolve, reject);
 		});
@@ -1532,11 +1549,15 @@ function root(fn) {
 	 * member fails, we subscribe to every task in one pass and
 	 * resolve or reject the Promise.
 	 *
+	 * With callbacks, they receive the snapshot and no Promise is made.
+	 *
 	 * @param {AsyncReceiver} node
 	 * @param {Array<Compute>} tasks
+	 * @param {function(Array): *=} resolve
+	 * @param {(function(*): *)|null=} reject
 	 * @returns {Array | Promise<Array>}
 	 */
-	function _suspendArray(node, tasks) {
+	function _suspendArray(node, tasks, resolve, reject) {
 		let count = tasks.length;
 		if (count === 0) {
 			return [];
@@ -1571,6 +1592,11 @@ function root(fn) {
 			return results;
 		}
 		node._flag |= FLAG_BLOCKED;
+		if (resolve !== undefined) {
+			node._flag |= FLAG_SUSPEND | FLAG_LOADING | FLAG_CALLBACK | FLAG_RELAY;
+			_stepArray(node, tasks, results, resolve, reject);
+			return REGRET;
+		}
 
 		/** At least one is loading — allocate one Promise.
 		 *  _stepArray re-scans from scratch on each wake-up,
@@ -1628,9 +1654,9 @@ function root(fn) {
 			node._flag &= ~FLAG_BLOCKED;
 			subscribeArray(node, tasks, false);
 			if (failed) {
-				reject(error);
+				deliver(node, reject, error, true);
 			} else {
-				resolve(results);
+				deliver(node, resolve, results, false);
 			}
 			return;
 		}
@@ -1672,6 +1698,56 @@ function root(fn) {
 					subscribe(node, task);
 				}
 			}
+		}
+	}
+
+	/**
+	 * c.suspend(task, onResolve, onReject) and the array form. Works like
+	 * `.then(onResolve, onReject)` without the Promise:
+	 *
+	 * - Settled: the callback runs now, inside the run, so its reads are
+	 *   tracked like any other. A task settles with what it returns.
+	 * - Loading: the callbacks are stored as the task's waiter, and the
+	 *   node is loading until one runs. It runs synchronously when the
+	 *   task settles, after the task's subscribers are marked stale, and
+	 *   the node settles with what it returns (see relay).
+	 *
+	 * An error with no onReject fails the node, as a throwing await
+	 * would. A re-run or dispose before the task settles drops the
+	 * waiter, so a stale callback never runs.
+	 * @param {AsyncReceiver} node
+	 * @param {AsyncSender | Array<AsyncSender>} input
+	 * @param {function(*): *} onResolve
+	 * @param {(function(*): *) | null} onReject
+	 * @returns {void}
+	 */
+	function suspendTo(node, input, onResolve, onReject) {
+		if ((node._flag & (FLAG_SUSPEND | FLAG_LOADING)) === (FLAG_SUSPEND | FLAG_LOADING)) {
+			throw new Error(
+				"Cannot call suspend() with callbacks after a previous suspend()"
+			);
+		}
+		let value;
+		let failed = false;
+		try {
+			value = Array.isArray(input)
+				? _suspendArray(node, input, onResolve, onReject)
+				: _suspendTask(node, /** @type {AsyncSender} */(input), onResolve, onReject);
+		} catch (err) {
+			if (onReject === null) {
+				throw err;
+			}
+			value = err;
+			failed = true;
+		}
+		if (value === REGRET) {
+			return;
+		}
+		let result = failed ? onReject(value) : onResolve(value);
+		/** A task settles with the callback's result, as part of this run. */
+		if (node._flag & FLAG_ASYNC && node instanceof Compute) {
+			node._flag |= FLAG_CALLBACK;
+			node._settle(result);
 		}
 	}
 
@@ -1965,10 +2041,10 @@ function root(fn) {
 			let ch = this._chan;
 			let waiters = ch._waiters;
 			let waiterCount = waiters.length;
-			/** Notifies every subscriber that is not a resolved waiter. */
-			settleNotify(this, value, !!(this._flag & FLAG_ERROR), waiters, waiterCount);
 			ch._waiters = null;
 			this._flag &= ~FLAG_WAITER;
+			/** Notifies every subscriber that is not a resolved waiter. */
+			settleNotify(this, value, !!(this._flag & FLAG_ERROR), waiters, waiterCount);
 		} else {
 			notify(this, FLAG_STALE);
 		}
@@ -2445,9 +2521,9 @@ function root(fn) {
 			if (ch !== null && ch._waiters !== null) {
 				waiters = ch._waiters;
 				let waiterCount = waiters.length;
-				settleNotify(this, value, !!isError, waiters, waiterCount, !changed);
 				ch._waiters = null;
 				this._flag &= ~FLAG_WAITER;
+				settleNotify(this, value, !!isError, waiters, waiterCount, !changed);
 			}
 		}
 		if (changed) {
@@ -2708,9 +2784,9 @@ function root(fn) {
 					let waiters = chan._waiters;
 					if (waiters !== null) {
 						let isError = !!(this._flag & FLAG_ERROR);
-						settleNotify(this, this._value, isError, waiters, waiters.length, true);
 						chan._waiters = null;
 						this._flag &= ~FLAG_WAITER;
+						settleNotify(this, this._value, isError, waiters, waiters.length, true);
 					}
 				}
 				return;
@@ -4363,16 +4439,20 @@ function resolveIterator(node, iterable, time) {
 }
 
 /**
- * Three-pass settle notification. Resolves waiters without triggering
+ * Four-pass settle notification. Resolves waiters without triggering
  * redundant stale notifications on nodes that appear in both the sync
  * subscriber list and the async waiter list.
  *
  * Pass 1: Stamp all sync subs with `version - 1` ("belongs to us").
- * Pass 2: Walk waiters — resolve callback, skip subscribe if already
- *         a sync sub (version - 1), stamp with `version` ("notified").
+ * Pass 2: Walk waiters — skip subscribe if already a sync sub
+ *         (version - 1), stamp with `version` ("notified").
  * Pass 3: Inline notify — OR FLAG_STALE on all subs, but only call
  *         _receive() on subs not stamped `version` (not a waiter).
  *         Skipped when quiet.
+ * Pass 4: Call the waiters' callbacks. They run last, so a callback
+ *         that reads the graph sees every subscriber marked stale,
+ *         and the caller has already detached `waiters`, so a waiter
+ *         added by a callback goes into a fresh list.
  * @template T
  * @param {AsyncSender<T>} node
  * @param {T} value
@@ -4398,14 +4478,9 @@ function settleNotify(node, value, isError, waiters, waiterCount, quiet) {
 		}
 	}
 
-	/** Pass 2: resolve waiters, skip subscribe if already a sync sub. */
+	/** Pass 2: subscribe waiters, skip if already a sync sub. */
 	for (let i = 0; i < waiterCount; i += 3) {
 		let awaiter = /** @type {AsyncReceiver} */(waiters[i]);
-		if (isError) {
-			/** @type {Function} */(waiters[i + 2])(value);
-		} else {
-			/** @type {Function} */(waiters[i + 1])(value);
-		}
 		if (!(awaiter._flag & FLAG_BLOCKED)) {
 			if (awaiter._stamp !== version - 1) {
 				subscribe(awaiter, node);
@@ -4415,33 +4490,90 @@ function settleNotify(node, value, isError, waiters, waiterCount, quiet) {
 		clearRespond(awaiter, node);
 	}
 
-	if (quiet) {
-		return;
-	}
-
 	/** Pass 3: inline notify — skip subs that were resolved as waiters. */
-	if (sub !== null && sub._stamp !== version) {
-		let flags = sub._flag;
-		sub._flag |= FLAG_STALE;
-		if (!(flags & (FLAG_PENDING | FLAG_STALE | FLAG_BLOCKED | FLAG_DISPOSED))) {
-			sub._receive();
+	if (!quiet) {
+		if (sub !== null && sub._stamp !== version) {
+			let flags = sub._flag;
+			sub._flag |= FLAG_STALE;
+			if (!(flags & (FLAG_PENDING | FLAG_STALE | FLAG_BLOCKED | FLAG_DISPOSED))) {
+				sub._receive();
+			}
 		}
-	}
-	if (subs !== null) {
-		let count = subs.length;
-		for (let i = 0; i < count; i += 2) {
-			sub = subs[i];
-			if (sub._stamp !== version) {
-				let flags = sub._flag;
-				sub._flag |= FLAG_STALE;
-				if (
-					!(flags & (FLAG_PENDING | FLAG_STALE | FLAG_BLOCKED | FLAG_DISPOSED))
-				) {
-					sub._receive();
+		if (subs !== null) {
+			let count = subs.length;
+			for (let i = 0; i < count; i += 2) {
+				sub = subs[i];
+				if (sub._stamp !== version) {
+					let flags = sub._flag;
+					sub._flag |= FLAG_STALE;
+					if (
+						!(flags & (FLAG_PENDING | FLAG_STALE | FLAG_BLOCKED | FLAG_DISPOSED))
+					) {
+						sub._receive();
+					}
 				}
 			}
 		}
 	}
+
+	/** Pass 4: resume the waiters. */
+	for (let i = 0; i < waiterCount; i += 3) {
+		deliver(
+			/** @type {AsyncReceiver} */(waiters[i]),
+			/** @type {Function} */(waiters[isError ? i + 2 : i + 1]),
+			value,
+			isError
+		);
+	}
+}
+
+/**
+ * Hands a settled value to one waiter's callback. A node waiting
+ * through c.suspend(task, onResolve, onReject) is relayed: its own
+ * callback runs, and the node settles with what it returns. During an
+ * array await (FLAG_BLOCKED) the callback is the internal re-scan.
+ * @param {AsyncReceiver} awaiter
+ * @param {Function | null} fn
+ * @param {*} value
+ * @param {boolean} isError
+ * @returns {void}
+ */
+function deliver(awaiter, fn, value, isError) {
+	if ((awaiter._flag & (FLAG_RELAY | FLAG_BLOCKED)) === FLAG_RELAY) {
+		relay(awaiter, fn, value, isError);
+	} else {
+		/** @type {Function} */(fn)(value);
+	}
+}
+
+/**
+ * Resumes a node waiting through c.suspend(task, onResolve, onReject),
+ * like a `.then(onResolve, onReject)`: the node settles with what the
+ * callback returns, or fails with what it throws. An error with no
+ * onReject fails the node.
+ * @param {AsyncReceiver} node
+ * @param {Function | null} fn
+ * @param {*} value
+ * @param {boolean} isError
+ * @returns {void}
+ */
+function relay(node, fn, value, isError) {
+	node._flag &= ~FLAG_RELAY;
+	if (node._flag & FLAG_DISPOSED && !(node._flag & FLAG_LOCKED)) {
+		return;
+	}
+	if (fn === null) {
+		node._error(value);
+		return;
+	}
+	let result;
+	try {
+		result = fn(value);
+	} catch (err) {
+		node._error(err);
+		return;
+	}
+	node._settle(result);
 }
 
 /**
@@ -4612,7 +4744,7 @@ function resetChannel(node) {
 	if (chan._res1 !== null || chan._responds !== null) {
 		clearChannel(chan, node);
 	}
-	node._flag &= ~FLAG_BLOCKED;
+	node._flag &= ~(FLAG_BLOCKED | FLAG_RELAY);
 }
 
 /**
@@ -4758,11 +4890,7 @@ function resolveWaiters(responder, responderCh, value, isError, panic) {
 	let count = waiters.length;
 	for (let i = 0; i < count; i += 3) {
 		let awaiter = /** @type {AsyncReceiver} */(waiters[i]);
-		if (isError) {
-			/** @type {Function} */(waiters[i + 2])(value);
-		} else {
-			/** @type {Function} */(waiters[i + 1])(value);
-		}
+		deliver(awaiter, /** @type {Function} */(waiters[isError ? i + 2 : i + 1]), value, isError);
 		if (!panic && !(awaiter._flag & FLAG_BLOCKED)) {
 			subscribe(awaiter, responder);
 		}
@@ -5189,7 +5317,7 @@ export {
 	FLAG_BLOCKED,
 	FLAG_LOCKED,
 	FLAG_SUSPEND,
-	FLAG_PANIC,
+	FLAG_RELAY,
 	FLAG_SINGLE,
 	FLAG_EAGER,
 	FLAG_PURGE,
