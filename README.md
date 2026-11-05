@@ -57,11 +57,6 @@ anod is a reactive state management library. It has built-in support for both sy
 - [Benchmarks](#benchmarks)
 	- [anod vs alien-signals by Stackblitz (Vue-js internal engine)](#anod-vs-alien-signals-by-stackblitz-vue-js-internal-engine)
 	- [anod vs @solidjs/signals (Solid 2.0 beta)](#anod-vs-solidjssignals-solid-20-beta)
-	- [anod vs @preact/signals-core](#anod-vs-preactsignals-core)
-	- [Chromium (browser)](#chromium-browser)
-		- [anod vs alien-signals (Chromium)](#anod-vs-alien-signals-chromium)
-		- [anod vs solid (Chromium)](#anod-vs-solid-chromium)
-	- [anod with bound-dep optimization vs alien-signals](#anod-with-bound-dep-optimization-vs-alien-signals)
 - [Acknowledgements](#acknowledgements)
 - [Contributing](#contributing)
 - [License](#license)
@@ -1189,248 +1184,54 @@ anod has chosen to drop the O(1) two-way slot binding that S.js uses. This rests
 
 ## Benchmarks
 
-The benchmarks used here are copied from [Milo M's](https://github.com/milomg) repository [JS Reactivity Benchmark](https://github.com/milomg/js-reactivity-benchmark), with some inspiration from [Cause Effect](https://github.com/zeixcom/cause-effect) by Zeix, who modified them to use [mitata](https://github.com/evanwashere/mitata).
+Most reactivity benchmarks measure deep chains and synthetic propagation patterns that rarely occur in real apps. This benchmark (`bench/app`) instead models a typical list view: 1,000 rows, each with its own state signals, computes derived from them, and effects that write DOM values. It is the shape most application code has: many signals feeding many computes, with effects mostly writing to the DOM.
 
-Running fair benchmarks against other frameworks is no easy task. Therefore, I want to preface these benchmarks with a disclaimer: performance of a UI library will be completely different depending on which runtime environment it runs in. I have ran these benchmarks both on Node, Bun, and in different browser environments (Chrome, Safari, Firefox, Linux, Mac, Windows). Each environment has its own quirks, and frameworks perform differently depending on which environment they run in. The JS Reactivity Benchmark run all frameworks at the same time. This can introduce noise and garbage collection, where one framework affects another. anod took the tedious and maybe not so clean approach to just copy every benchmark file, and spend some evenings going through them together with AI to make sure there are no inconsistencies in any way that would favour one framework over the other.
+Per row, three signals (`label`, `count`, `done`) feed four computes: a text from label and count, a filter check, an "is selected" check against one id every row shares, and a class name from selection and theme. Five DOM writes follow, four with a single dependency and one with two. At app level, a count over all 1,000 rows feeds a footer, and one side effect persists the filter. DOM elements are plain objects, so the numbers measure the reactive engine, not a DOM.
+
+Every suite builds the same graph, and checks at startup that each scenario runs exactly the same number of computes and effects. anod uses the bound API for single-dependency nodes, as a compiler like katode emits; alien-signals uses `computed` and `effect` with one `effectScope` per row; Solid uses `createMemo`, `createRenderEffect` for DOM writes and one `createRoot` per row, ending each scenario with `flush()` as its renderer does.
+
+| Scenario | What happens | Work per iteration |
+| :-- | :-- | :-- |
+| Mount + unmount 1k rows | build every row and the app, then dispose them | 4,001 computes, 5,002 effects |
+| Edit one row | change one row's label | 1 compute, 2 effects |
+| Toggle one row | flip one row's `done` | 1 compute (the 1,000-dep count), 2 effects |
+| Select a row | change the selected id | 1,002 computes, 4 effects |
+| Edit 10 rows in a batch | bump 10 rows' counts in one batch | 10 computes, 20 effects |
+| Change filter | cycle all → done → open | 1,000 computes, up to 1,001 effects |
+| Change theme | toggle light/dark | 1,000 computes, 1,000 effects |
+| Remount 100 rows | dispose and rebuild 100 row components | 400 computes, 500 effects |
+
+Time is the average per iteration, the median of 8 rounds run in rotated order. Heap is what one iteration allocates, as measured by mitata. Negative Δ = anod is faster / allocates less. Ran on Apple M1 Pro, Node v26.11.1, macOS 26.6.
 
 ### anod vs [alien-signals](https://github.com/stackblitz/alien-signals) by Stackblitz (Vue-js internal engine)
 
-Compared using the unbound API ( `c.compute(fn)` , `c.effect(fn)` ) which is the equivalent of alien-signals' `computed(fn)` , `effect(fn)` . Both use dynamic dependency tracking with full reconciliation — no bound-dep fast paths.
-
-| Benchmark | alien | anod | Δ time | alien | anod | Δ heap ⚠️ |
+| Scenario | alien | anod | Δ time | alien | anod | Δ heap |
 | :-- | --: | --: | --: | --: | --: | --: |
 | | **Time** | **Time** | | **Heap** | **Heap** | |
-| **Kairo** | | | | | | |
-| Deep propagation | 991 ns | 923 ns | -7% | 17 B | 18 B | +6% |
-| Broad propagation | 2, 951 ns | 2, 698 ns | -9% | 800 B | 800 B | 0% |
-| Diamond 💬 | 169 ns | 184 ns | +9% | 73 B | 113 B | +55% |
-| Triangle 💬 | 299 ns | 311 ns | +4% | 393 B | 113 B | -71% |
-| Mux | 4, 787 ns | 3, 465 ns | -28% | 1.0 kB | 961 B | -4% |
-| Unstable | 390 ns | 195 ns | -50% | 256 B | 17 B | -93% |
-| Avoidable | 66 ns | 60 ns | -9% | 1 B | 1 B | 0% |
-| Repeated observers | 196 ns | 115 ns | -41% | 17 B | 17 B | 0% |
-| **CellX** | | | | | | |
-| 10 layers | 2, 983 ns | 3, 347 ns | +12% | 3.0 kB | 1.3 kB | -56% |
-| **$mol_wire** | 30.9 µs | 31.5 µs | +2% | 1.7 kB | 869 B | -49% |
-| **Creation** | | | | | | |
-| 1k signals | 10.9 µs | 8.6 µs | -21% | 10.2 kB | 2.6 kB | -75% |
-| 1k computations | 43.5 µs | 53.6 µs | +23% | 529 kB | 472 kB | -11% |
-| **Dynamic graph** | | | | | | |
-| Build: simple | 2.4 µs | 2.6 µs | +8% | 4.7 kB | 2.8 kB | -40% |
-| Build: large web app | 996 µs | 1, 166 µs | +17% | 7.4 MB | 7.2 MB | -3% |
-| Build: wide dense | 1, 442 µs | 1, 380 µs | -4% | 10.2 MB | 5.5 MB | -46% |
-| Update: simple | 230 ns | 218 ns | -5% | 329 B | 33 B | -90% |
-| Update: dynamic | 6.2 µs | 6.3 µs | +2% | 4.1 kB | 733 B | -82% |
-| Update: large web app | 23.0 µs | 17.4 µs | -24% | 8.7 kB | 1.3 kB | -85% |
-| Update: wide dense | 80.4 µs | 50.7 µs | -37% | 23.4 kB | 2.5 kB | -89% |
-| Update: deep | 115 µs | 134 µs | +17% | 159 kB | 39.9 kB | -75% |
-| Update: very dynamic | 57.7 µs | 53.3 µs | -8% | 40.1 kB | 20.4 kB | -49% |
-
-Negative Δ = anod is faster / uses less. Benchmarks ran on Intel i7-14700, Node v25.9.0, Linux 6.19.13.
-
-In general, anod performs better than alien-signals on wide graphs (Signal -> Many Receivers), whereas alien-signals outperforms anod on deep graphs (Signal -> Compute -> Compute .... -> Effect). The key architectural difference is how dependency links are stored. alien-signals uses a doubly-linked list of Link nodes. Every dependency relationship allocates a Link object. anod stores deps and subs in flat arrays, with the first dep/sub inlined directly on the node.
-
-This means anod's `notify()` iterates sequential memory when walking subscribers, which is cache-line friendly and scales well on wide graphs. alien's propagation walks `link.nextSub` pointers, which is pointer chasing and incurs more cache misses as graphs widen.
-
-On deep chains, alien's `checkDirty()` is a stack-based walk that descends through dep links. anod's `needsUpdate()` does similar work but the array-based dep storage involves more index arithmetic per step, which adds up across long chains. alien's `checkDirty` is in general a much more elegant solution; the node is the stack. anod has to actually pop/push to a real stack to maintain the same concept, which inherently is inferior to alien's linked list stack traversal.
-
-⚠️ The memory benchmarks here must be taken with a grain of salt. The 1k signals, which just creates 1000 signals, adds them to an array and returns, reports ~10kb for alien, 2.6kb for anod. I've experimented with this a lot, and my theory is possibly V8 reuses allocations from existing registry. So even though in theory, since a Signal has 6 fields, making it about 36 byte, the benchmark should show 36kb, but instead shows 2.55 kb. The weird thing is, if I add a 7th field to the Signal class, the memory spikes, from 2.55 to 11kb. My theory is this might have to do something with how V8 allocate structs into capacity categories. Going from field 6 -> 7 bumps the class from one size class to the next, which makes each region of memory allocate more space. I'm not 100% this is how it works, but benchmarks with mitata consistently shows this, so the Signal class is deliberately frozen at 6 fields in anod to maintain this memory profile.
-
-💬 Second, regarding diamond/triangle. The benchmark runs this code for anod:
-
-```js
-const sum = c.compute(c => {
-	counter++;
-	return branches.reduce((a, b) => a + c.val(b), 0);
-});
-```
-
-Compared to this code for alien:
-```js
-const sum = computed(() => {
-	counter++;
-	return branches.reduce((a, b) => a + b(), 0);
-});
-```
-
-This is a limitation in V8 optimization of the contextual approach. When experimenting back and forth between context/global, a clear win was the triangle/diamond benchmark where most of the work is the .reduce(). V8 can likely better inline the function that only operates on the array items themself, than if the function leaks variables from the outer scope. The contextual prototype that only access this.val(sender) generally outperforms the global pattern for the actual access. So some tests, notably these two, performed better with globals. Many other regressed significantly. In the end, context was chosen for its async capabilities, not performance.
+| Mount + unmount 1k rows | 984 µs | 822 µs | -16% | 4.0 MB | 3.3 MB | -16% |
+| Edit one row | 177 ns | 149 ns | -16% | 176 B | 96 B | -45% |
+| Toggle one row | 15.1 µs | 6,476 ns | -57% | 25 B | 24 B | -1% |
+| Select a row | 108 µs | 61.3 µs | -43% | 40.8 kB | 570 B | -99% |
+| Edit 10 rows in a batch | 2,033 ns | 1,837 ns | -10% | 2.1 kB | 1.4 kB | -34% |
+| Change filter | 95.9 µs | 65.3 µs | -32% | 27.5 kB | 21.8 kB | -21% |
+| Change theme | 105 µs | 70.5 µs | -33% | 28.6 kB | 28.4 kB | -1% |
+| Remount 100 rows | 88.6 µs | 74.4 µs | -16% | 336.6 kB | 272.3 kB | -19% |
 
 ### anod vs [@solidjs/signals](https://github.com/solidjs/solid) (Solid 2.0 beta)
 
-Both use deferred writes: anod uses `.post()` + `flush()` , Solid uses `setSignal()` + `flush()` . Both run inside owned roots. Solid's unstable and molWire counters differ slightly (4 vs 3 and 14 vs 13) due to dynamic dep handling differences.
-
-| Benchmark | solid | anod | Δ time | solid | anod | Δ heap |
+| Scenario | solid | anod | Δ time | solid | anod | Δ heap |
 | :-- | --: | --: | --: | --: | --: | --: |
 | | **Time** | **Time** | | **Heap** | **Heap** | |
-| **Kairo** | | | | | | |
-| Deep propagation | 6, 016 ns | 936 ns | -84% | 7.7 kB | 21 B | -100% |
-| Broad propagation | 18.7 µs | 2, 717 ns | -85% | 10.3 kB | 800 B | -92% |
-| Diamond | 1, 258 ns | 201 ns | -84% | 1.3 kB | 113 B | -91% |
-| Triangle | 1, 790 ns | 345 ns | -81% | 1.8 kB | 114 B | -94% |
-| Mux | 13.5 µs | 3, 485 ns | -74% | 8.2 kB | 961 B | -88% |
-| Unstable | 1, 698 ns | 212 ns | -88% | 1.1 kB | 18 B | -98% |
-| Avoidable | 449 ns | 69 ns | -85% | 425 B | 1 B | -100% |
-| Repeated observers | 1, 029 ns | 124 ns | -88% | 672 B | 17 B | -97% |
-| **CellX** | | | | | | |
-| 10 layers | 18.4 µs | 3, 349 ns | -82% | 6.8 kB | 1.3 kB | -81% |
-| **$mol_wire** | 40.1 µs | 31.4 µs | -22% | 3.9 kB | 756 B | -81% |
-| **Creation** | | | | | | |
-| 1k signals | 46.8 µs | 8, 151 ns | -83% | 90.4 kB | 2.6 kB | -97% |
-| 1k computations | 776 µs | 282 µs | -64% | 2.1 MB | 542 kB | -74% |
-| **Dynamic graph** | | | | | | |
-| Build: simple | 17.3 µs | 10.5 µs | -39% | 27.3 kB | 18.0 kB | -34% |
-| Build: large web app | 5, 888 µs | 4, 235 µs | -28% | 12.9 MB | 6.9 MB | -47% |
-| Build: wide dense | 5, 490 µs | 3, 594 µs | -35% | 10.9 MB | 5.4 MB | -50% |
-| Update: simple | 2, 470 ns | 262 ns | -89% | 1.9 kB | 33 B | -98% |
-| Update: dynamic | 23.9 µs | 6, 586 ns | -72% | 13.4 kB | 719 B | -95% |
-| Update: large web app | 64.7 µs | 19.7 µs | -70% | 13.9 kB | 1.7 kB | -88% |
-| Update: wide dense | 184 µs | 52.9 µs | -71% | 53.7 kB | 1.9 kB | -96% |
-| Update: deep | 490 µs | 146 µs | -70% | 407 kB | 39.9 kB | -90% |
-| Update: very dynamic | 155 µs | 59.3 µs | -62% | 96.6 kB | 20.4 kB | -79% |
+| Mount + unmount 1k rows | 4.04 ms | 822 µs | -80% | 10.9 MB | 3.3 MB | -69% |
+| Edit one row | 971 ns | 149 ns | -85% | 1.1 kB | 96 B | -91% |
+| Toggle one row | 32.8 µs | 6,476 ns | -80% | 1.0 kB | 24 B | -98% |
+| Select a row | 140 µs | 61.3 µs | -56% | 151.6 kB | 570 B | -100% |
+| Edit 10 rows in a batch | 8,181 ns | 1,837 ns | -78% | 686 B | 1.4 kB | +97% |
+| Change filter | 320 µs | 65.3 µs | -80% | 389.1 kB | 21.8 kB | -94% |
+| Change theme | 432 µs | 70.5 µs | -84% | 520.7 kB | 28.4 kB | -95% |
+| Remount 100 rows | 396 µs | 74.4 µs | -81% | 1.0 MB | 272.3 kB | -73% |
 
-Negative Δ = anod is faster / uses less. Benchmarks ran on Intel i7-14700, Node v25.9.0, Linux 6.19.13.
-
-Earlier, I think (?) solid was largely built upon [S.js](https://github.com/adamhaile/S), like anod. The libraries have since diverged, where solid has adopted the linked list approach used by alien-signals. anod has instead refined the array-based approach from S.
-
-### anod vs [@preact/signals-core](https://github.com/preactjs/signals)
-
-| Benchmark | preact | anod | Δ time | preact | anod | Δ heap |
-| :-- | --: | --: | --: | --: | --: | --: |
-| | **Time** | **Time** | | **Heap** | **Heap** | |
-| **Kairo** | | | | | | |
-| Deep propagation | 1, 439 ns | 923 ns | -36% | 148 B | 18 B | -88% |
-| Broad propagation | 3, 844 ns | 2, 698 ns | -30% | 928 B | 800 B | -14% |
-| Diamond | 232 ns | 184 ns | -21% | 201 B | 113 B | -44% |
-| Triangle | 430 ns | 311 ns | -28% | 202 B | 113 B | -44% |
-| Mux | 4, 355 ns | 3, 465 ns | -20% | 1.0 kB | 961 B | -4% |
-| Unstable | 300 ns | 195 ns | -35% | 234 B | 17 B | -93% |
-| Avoidable | 78 ns | 60 ns | -23% | 128 B | 1 B | -99% |
-| Repeated observers | 128 ns | 115 ns | -10% | 144 B | 17 B | -88% |
-| **CellX** | | | | | | |
-| 10 layers | 4, 182 ns | 3, 347 ns | -20% | 1.9 kB | 1.3 kB | -29% |
-| **$mol_wire** | 31.0 µs | 31.5 µs | +2% | 1.5 kB | 869 B | -42% |
-| **Creation** | | | | | | |
-| 1k signals | 10.1 µs | 8.6 µs | -15% | 2.2 kB | 2.6 kB | +18% |
-| 1k computations | 78.0 µs | 53.6 µs | -31% | 602 kB | 472 kB | -22% |
-| **Dynamic graph** | | | | | | |
-| Build: simple | 2.9 µs | 2.6 µs | -10% | 4.9 kB | 2.8 kB | -43% |
-| Build: large web app | 1, 199 µs | 1, 166 µs | -3% | 7.7 MB | 7.2 MB | -6% |
-| Build: wide dense | 1, 502 µs | 1, 380 µs | -8% | 10.9 MB | 5.5 MB | -50% |
-| Update: simple | 375 ns | 218 ns | -42% | 161 B | 33 B | -80% |
-| Update: dynamic | 8.4 µs | 6.3 µs | -25% | 813 B | 733 B | -10% |
-| Update: large web app | 298 µs | 17.4 µs | -94% | 18.4 kB | 1.3 kB | -93% |
-| Update: wide dense | 426 µs | 50.7 µs | -88% | 16.6 kB | 2.5 kB | -85% |
-| Update: deep | 140 µs | 134 µs | -4% | 40.1 kB | 39.9 kB | 0% |
-| Update: very dynamic | 88.6 µs | 53.3 µs | -40% | 20.1 kB | 20.4 kB | +1% |
-
-preact-signals perform well on tight graphs, and decent on deep graphs, but struggle on wide graphs.
-
-### Chromium (browser)
-
-Same benchmarks run in Chromium with `--disable-hang-monitor` . No memory counters available in the browser. Some creation/deep benchmarks show high variance.
-
-#### anod vs alien-signals (Chromium)
-
-| Benchmark | alien | anod | Δ |
-| :-- | --: | --: | --: |
-| **Kairo** | | | |
-| Deep propagation | 1, 015 ns | 974 ns | -4% |
-| Broad propagation | 2, 936 ns | 2, 899 ns | -1% |
-| Diamond | 174 ns | 205 ns | +18% |
-| Triangle | 296 ns | 341 ns | +15% |
-| Mux | 3, 657 ns | 3, 525 ns | -4% |
-| Unstable | 381 ns | 197 ns | -48% |
-| Avoidable | 89 ns | 67 ns | -25% |
-| Repeated observers | 205 ns | 117 ns | -43% |
-| **CellX** | | | |
-| 10 layers | 2, 984 ns | 3, 452 ns | +16% |
-| **$mol_wire** | 28.7 µs | 28.8 µs | 0% |
-| **Creation** | | | |
-| 1k signals | 5, 972 ns | 4, 185 ns | -30% |
-| 1k computations* | 135 µs | 43 µs | -68% |
-| **Dynamic graph** | | | |
-| Build: simple | 6.2 µs | 2.5 µs | -60% |
-| Build: large web app* | 2, 336 µs | 1, 148 µs | -51% |
-| Build: wide dense* | 2, 885 µs | 1, 492 µs | -48% |
-| Update: simple | 235 ns | 224 ns | -5% |
-| Update: dynamic | 6, 130 ns | 6, 288 ns | +3% |
-| Update: large web app | 22.6 µs | 18.7 µs | -17% |
-| Update: wide dense | 72.4 µs | 51.1 µs | -29% |
-| Update: deep* | 110 µs | 135 µs | +23% |
-| Update: very dynamic | 54.8 µs | 54.0 µs | -1% |
-
-\* High variance
-
-#### anod vs solid (Chromium)
-
-Both use deferred writes ( `post()` + `flush()` / `setSignal()` + `flush()` ).
-
-| Benchmark | solid | anod | Δ |
-| :-- | --: | --: | --: |
-| **Kairo** | | | |
-| Deep propagation* | 6, 393 ns | 948 ns | -85% |
-| Broad propagation | 19.0 µs | 2, 799 ns | -85% |
-| Diamond | 1, 623 ns | 211 ns | -87% |
-| Triangle | 2, 113 ns | 333 ns | -84% |
-| Mux* | 13.1 µs | 3, 473 ns | -74% |
-| Unstable | 1, 805 ns | 212 ns | -88% |
-| Avoidable | 738 ns | 75 ns | -90% |
-| Repeated observers | 1, 283 ns | 121 ns | -91% |
-| **CellX** | | | |
-| 10 layers | 17.9 µs | 3, 390 ns | -81% |
-| **$mol_wire** | 37.5 µs | 28.2 µs | -25% |
-| **Creation** | | | |
-| 1k signals | 23.5 µs | 4, 057 ns | -83% |
-| 1k computations* | 496 µs | 198 µs | -60% |
-| **Dynamic graph** | | | |
-| Build: simple | 13.5 µs | 7.9 µs | -41% |
-| Build: large web app* | 4, 634 µs | 3, 946 µs | -15% |
-| Build: wide dense* | 4, 594 µs | 3, 984 µs | -13% |
-| Update: simple | 2, 676 ns | 314 ns | -88% |
-| Update: dynamic | 23.4 µs | 8.7 µs | -63% |
-| Update: large web app | 58.4 µs | 25.5 µs | -56% |
-| Update: wide dense* | 170 µs | 58.4 µs | -66% |
-| Update: deep* | 447 µs | 286 µs | -36% |
-| Update: very dynamic* | 148 µs | 82.8 µs | -44% |
-
-\* High variance
-
-These benchmarks are mostly here to supplement the general findings, which they confirm. alien performs well on deep graphs, anod on wide graphs. This is expected from the internal architecture of both libraries. Solid is an established, feature rich library. anod is a small reactive core. So they are not fully comparable. One of the reasons behind building anod was to offer a fast, feature-complete async native signals implementation that matches what solid has. The position for anod is not to write yet another javascript library to compete with Solid, but to offer a strong reactive core for those who don't need the entire framework.
-
-### anod with bound-dep optimization vs alien-signals
-
-The benchmarks above use the unbound API for fair comparison. But anod also supports a bound single-dep signature `compute(dep, fn)` that skips all dependency tracking and reconciliation. This is not an apples-to-apples comparison, alien-signals has no equivalent fast path, but it shows anod's maximum throughput when the graph structure is known at creation time. alien-signals has been chosen here as baseline, because based on my own measurement, it seems to be the fastest signal implementation out there to date.
-
-| Benchmark | alien | anod (bound) | Δ time | alien | anod (bound) | Δ heap |
-| :-- | --: | --: | --: | --: | --: | --: |
-| | **Time** | **Time** | | **Heap** | **Heap** | |
-| **Kairo** | | | | | | |
-| Deep propagation | 991 ns | 624 ns | -37% | 17 B | 18 B | +6% |
-| Broad propagation | 2, 951 ns | 1, 813 ns | -39% | 800 B | 800 B | 0% |
-| Diamond | 169 ns | 137 ns | -19% | 73 B | 113 B | +55% |
-| Triangle | 299 ns | 218 ns | -27% | 393 B | 113 B | -71% |
-| Mux | 4, 787 ns | 2, 815 ns | -41% | 1.0 kB | 961 B | -4% |
-| Unstable | 390 ns | 164 ns | -58% | 256 B | 17 B | -93% |
-| Avoidable | 66 ns | 48 ns | -27% | 1 B | 0 B | — |
-| Repeated observers | 196 ns | 43 ns | -78% | 17 B | 16 B | -6% |
-| **CellX** | | | | | | |
-| 10 layers | 2, 983 ns | 2, 529 ns | -15% | 3.0 kB | 1.3 kB | -57% |
-| **$mol_wire** | 30.9 µs | 30.2 µs | -2% | 1.7 kB | 868 B | -49% |
-| **Creation** | | | | | | |
-| 1k signals | 10.9 µs | 7.8 µs | -28% | 10.2 kB | 2.6 kB | -75% |
-| 1k computations | 43.5 µs | 44.3 µs | +2% | 529 kB | 431 kB | -19% |
-| **Dynamic graph** | | | | | | |
-| Build: simple | 2.4 µs | 2.5 µs | +4% | 4.7 kB | 2.7 kB | -43% |
-| Build: large web app | 996 µs | 1, 073 µs | +8% | 7.4 MB | 7.2 MB | -3% |
-| Build: wide dense | 1, 442 µs | 1, 326 µs | -8% | 10.2 MB | 5.5 MB | -46% |
-| Update: simple | 230 ns | 221 ns | -4% | 329 B | 33 B | -90% |
-| Update: dynamic | 6.2 µs | 6.1 µs | -2% | 4.1 kB | 738 B | -82% |
-| Update: large web app | 23.0 µs | 17.5 µs | -24% | 8.7 kB | 1.3 kB | -85% |
-| Update: wide dense | 80.4 µs | 48.6 µs | -40% | 23.4 kB | 2.5 kB | -89% |
-| Update: deep | 115 µs | 135 µs | +17% | 159 kB | 39.9 kB | -75% |
-| Update: very dynamic | 57.7 µs | 53.0 µs | -8% | 40.1 kB | 20.4 kB | -49% |
-
-The single dep is pretty much useless in contexts where you cannot control the input. You'd have to build a dedicated layer on top of anod that exposes that overload to the end user. But, consider a typical web app. Almost every reactive binding with signals is sender -> dom.
+Run them with `node bench/app/anod.js`, `node bench/app/alien-signals.js` and `node bench/app/solid.js` after `npm run make`. `ANOD_API=unbound node bench/app/anod.js` builds every node with the unbound API (`c.compute(fn)`, `c.effect(fn)`) instead. See [bench/app/README.md](bench/app/README.md) for the full graph.
 
 ## Acknowledgements
 
