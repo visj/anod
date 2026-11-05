@@ -248,16 +248,16 @@ var PURGES = [];
 var PURGE_COUNT = 0;
 
 /**
- * An error in the signal graph: a value that jumped out of a compute,
- * effect or task, tagged REFUSE, PANIC or FATAL. A Spark keeps its
+ * An error in the signal graph: a value that failed a compute, effect
+ * or task, tagged REFUSE, PANIC or FATAL. A Defect keeps its
  * identity as it travels through reads, awaits and owner chains, so a
- * caught Spark passes on unchanged. Anything else was thrown by user
+ * caught Defect passes on unchanged. Anything else was thrown by user
  * code and is wrapped as FATAL, exactly once.
  * @constructor
  * @param {*} error
  * @param {number} type
  */
-function Spark(error, type) {
+function Defect(error, type) {
 	this.error = error;
 	this.type = type;
 }
@@ -1167,7 +1167,7 @@ function root(fn) {
 
 	/**
 	 * Signals an expected error from a compute. Sets FLAG_ERROR and
-	 * returns a REFUSE Spark. The caller returns this
+	 * returns a REFUSE Defect. The caller returns this
 	 * from their fn — _update sees FLAG_ERROR and stores it as the
 	 * compute's error value without hitting the catch path.
 	 * Named `fail` to avoid collision with the `.error` getter.
@@ -1178,19 +1178,19 @@ function root(fn) {
 	 */
 	ComputeProto.refuse = function (val) {
 		this._flag |= FLAG_ERROR;
-		return new Spark(val, REFUSE);
+		return new Defect(val, REFUSE);
 	};
 
 	/**
 	 * Signals an expected panic from a compute or effect. Throws a
-	 * PANIC Spark, which every catch passes on unchanged, in this run
+	 * PANIC Defect, which every catch passes on unchanged, in this run
 	 * or after an await.
 	 * @this {Receiver}
 	 * @param {*} val
 	 * @returns {void}
 	 */
 	ComputeProto.panic = EffectProto.panic = function (val) {
-		throw new Spark(val, PANIC);
+		throw new Defect(val, PANIC);
 	};
 
 	/**
@@ -1983,7 +1983,7 @@ function root(fn) {
 	 */
 	CellProto._error = function (err) {
 		this._flag |= FLAG_ERROR;
-		this._settle(spark(err));
+		this._settle(defect(err));
 	};
 
 	/**
@@ -2174,7 +2174,7 @@ function root(fn) {
 			(this._dep1 === null || this._dep1._flag & FLAG_DISPOSED)
 		) {
 			this._flag |= FLAG_ERROR;
-			this._value = new Spark(ILLEGAL_READ, FATAL);
+			this._value = new Defect(ILLEGAL_READ, FATAL);
 		}
 		return this._value;
 	};
@@ -2485,7 +2485,7 @@ function root(fn) {
 	 */
 	ComputeProto._error = function (err) {
 		this._flag |= FLAG_ERROR;
-		this._settle(spark(err));
+		this._settle(defect(err));
 	};
 
 	/** @this {Compute} */
@@ -2560,7 +2560,7 @@ function root(fn) {
 					resetChannel(this);
 				}
 				this._flag = (this._flag | FLAG_ERROR) & ~FLAG_PENDING;
-				this._value = new Spark(error, FATAL);
+				this._value = new Defect(error, FATAL);
 				this._ctime = time;
 				return;
 			}
@@ -2592,7 +2592,7 @@ function root(fn) {
 					value = this._fn(this, this._value, args);
 				}
 			} catch (error) {
-				value = spark(error);
+				value = defect(error);
 				/** A throw wins over a callback that already settled. */
 				this._flag = (this._flag | FLAG_ERROR) & ~FLAG_CALLBACK;
 			}
@@ -2638,7 +2638,7 @@ function root(fn) {
 					value = this._fn(this, this._value, args);
 				}
 			} catch (error) {
-				value = spark(error);
+				value = defect(error);
 				/** A throw wins over a callback that already settled. */
 				this._flag = (this._flag | FLAG_ERROR) & ~FLAG_CALLBACK;
 			}
@@ -3031,7 +3031,7 @@ function root(fn) {
 	 */
 	EffectProto._error = function (err) {
 		this._flag |= FLAG_ERROR;
-		this._settle(spark(err));
+		this._settle(defect(err));
 	};
 
 	/**
@@ -3594,42 +3594,42 @@ function clearOwned(owner) {
 }
 
 /**
- * Classifies a caught value. A Spark travels on unchanged; a value
+ * Classifies a caught value. A Defect travels on unchanged; a value
  * thrown by user code is wrapped as FATAL.
  * @param {*} error
- * @returns {Spark}
+ * @returns {Defect}
  */
-function spark(error) {
-	return error instanceof Spark ? error : new Spark(error, FATAL);
+function defect(error) {
+	return error instanceof Defect ? error : new Defect(error, FATAL);
 }
 
 /**
  * Creates an expected error. Throw it from any compute or task, or
  * from code it calls, and it settles the node as REFUSE.
  * @param {*} error
- * @returns {Spark}
+ * @returns {Defect}
  */
 function refuse(error) {
-	return new Spark(error, REFUSE);
+	return new Defect(error, REFUSE);
 }
 
 /**
  * Creates a panic. Throw it to abort the node; owners see it as PANIC.
  * @param {*} error
- * @returns {Spark}
+ * @returns {Defect}
  */
 function panic(error) {
-	return new Spark(error, PANIC);
+	return new Defect(error, PANIC);
 }
 
 /**
  * Creates a fatal error. Throwing a value wraps it as FATAL anyway;
  * fatal() is for passing one on without a throw.
  * @param {*} error
- * @returns {Spark}
+ * @returns {Defect}
  */
 function fatal(error) {
-	return new Spark(error, FATAL);
+	return new Defect(error, FATAL);
 }
 
 /**
@@ -4883,7 +4883,7 @@ function failStart(node, error) {
 	if (node._finalize !== null) {
 		clearFinalize(node);
 	}
-	let err = spark(error);
+	let err = defect(error);
 	let result = tryRecover(node, err);
 	if (result !== RECOVER_SELF) {
 		node._dispose();
@@ -4954,7 +4954,7 @@ function flushEffects(queue, count, time) {
 				if (node._finalize !== null) {
 					clearFinalize(node);
 				}
-				let err = spark(error);
+				let err = defect(error);
 				let result = tryRecover(node, err);
 				if (thrown === null && result === RECOVER_NONE) {
 					thrown = err;
@@ -4964,7 +4964,7 @@ function flushEffects(queue, count, time) {
 						node._dispose();
 					} catch (cleanupError) {
 						if (thrown === null) {
-							thrown = new Spark(cleanupError, FATAL);
+							thrown = new Defect(cleanupError, FATAL);
 						}
 					}
 				}
@@ -5016,7 +5016,7 @@ function flush() {
 						} catch (err) {
 							/** The node is disposed, but one of its cleanups threw. */
 							if (!thrown) {
-								error = new Spark(err, FATAL);
+								error = new Defect(err, FATAL);
 								thrown = true;
 							}
 						}
@@ -5201,7 +5201,7 @@ export {
 	REFUSE,
 	PANIC,
 	FATAL,
-	Spark,
+	Defect,
 	refuse,
 	panic,
 	fatal,

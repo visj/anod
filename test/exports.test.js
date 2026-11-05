@@ -86,9 +86,9 @@ describe("declarations", () => {
 
     test("rejected() is typed as returning the error", () => {
         const { diagnostics } = compile(`
-            import type { Context, Spark } from "./index.js";
+            import type { Context, Defect } from "./index.js";
             type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B ? 1 : 2) ? true : false;
-            const ok: Equal<ReturnType<Context["rejected"]>, Spark | null> = true;
+            const ok: Equal<ReturnType<Context["rejected"]>, Defect | null> = true;
         `);
         expect(diagnostics).toEqual([]);
     });

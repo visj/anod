@@ -2,7 +2,7 @@ export {
 	REFUSE,
 	PANIC,
 	FATAL,
-	Spark,
+	Defect,
 	refuse,
 	panic,
 	fatal,

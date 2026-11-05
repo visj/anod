@@ -446,13 +446,13 @@ root((c) => {
 
 #### c.recover(), REFUSE, PANIC, FATAL
 
-Every error in anod is a `Spark`: an object with an `error` field (the value) and a `type` field, one of three constants: `REFUSE` , `PANIC` , and `FATAL` . This lets you cleanly separate expected errors from unexpected crashes.
+Every error in anod is a `Defect`: an object with an `error` field (the value) and a `type` field, one of three constants: `REFUSE` , `PANIC` , and `FATAL` . This lets you cleanly separate expected errors from unexpected crashes.
 
 * **`c.refuse(val)`** — non-throwing expected error for computes. Usage: `return c.refuse("invalid")`.
 * **`c.panic(val)`** — throwing expected error for computes and effects. Aborts the current run.
-* **`FATAL`** — any unexpected throw is automatically wrapped as a `Spark` with `type: FATAL`.
+* **`FATAL`** — any unexpected throw is automatically wrapped as a `Defect` with `type: FATAL`.
 
-Effects and spawns support `c.recover()` to intercept errors. The handler receives the `Spark` and can branch on the type. Return `true` to swallow, `false` to propagate.
+Effects and spawns support `c.recover()` to intercept errors. The handler receives the `Defect` and can branch on the type. Return `true` to swallow, `false` to propagate.
 
 ```ts
 import { root, signal, REFUSE, PANIC, FATAL } from "anod";
@@ -845,7 +845,7 @@ batch(() => {
 
 ### Error recovery in depth
 
-anod provides a structured error model where every error is a `Spark`, with the value in `error` and the category in `type`:
+anod provides a structured error model where every error is a `Defect`, with the value in `error` and the category in `type`:
 
 | Constant | Value | Meaning                      | How it's created       |
 | -------- | ----- | ---------------------------- | ---------------------- |
@@ -857,12 +857,12 @@ anod provides a structured error model where every error is a `Spark`, with the 
 
 **`c.panic(val)`** is available on computes and effects. It throws, aborting the current run, but anod marks it as an expected error so recover handlers can distinguish it from crashes.
 
-**`FATAL`** is what you get when something throws unexpectedly, meaning, any thrown value that is not a `Spark`. anod wraps it once as a `Spark` with `type: FATAL`. A `Spark` keeps its type wherever it travels: through reads, awaits, owner chains, and your own `try/catch` that rethrows it.
+**`FATAL`** is what you get when something throws unexpectedly, meaning, any thrown value that is not a `Defect`. anod wraps it once as a `Defect` with `type: FATAL`. A `Defect` keeps its type wherever it travels: through reads, awaits, owner chains, and your own `try/catch` that rethrows it.
 
-**`refuse(val)`, `panic(val)` and `fatal(val)`** are exported factories that create a `Spark` without a context, so helpers and library code can join anod's error model. Throw the result from anywhere inside a compute, effect or task:
+**`refuse(val)`, `panic(val)` and `fatal(val)`** are exported factories that create a `Defect` without a context, so helpers and library code can join anod's error model. Throw the result from anywhere inside a compute, effect or task:
 
 ```ts
-import { c, signal, refuse, panic, Spark } from "anod";
+import { c, signal, refuse, panic, Defect } from "anod";
 
 function parseAge(text: string): number {
 	const age = Number(text);
@@ -873,14 +873,14 @@ function parseAge(text: string): number {
 
 const input = signal("42");
 const age = c.compute((c) => parseAge(c.val(input)));
-// age.get() is 42, or a Spark with type REFUSE or PANIC
+// age.get() is 42, or a Defect with type REFUSE or PANIC
 ```
 
-Use `err instanceof Spark` to tell an anod error from any other value.
+Use `err instanceof Defect` to tell an anod error from any other value.
 
 #### Recovery
 
-`c.recover()` intercepts errors before they dispose the node. The handler receives the `Spark` and returns `true` to swallow or `false` to propagate. If you register multiple recover hooks, they run forward, breaking at the first hook that returns true, or bubbles to next owner if none. A root's `recover()` is the last line of defense.
+`c.recover()` intercepts errors before they dispose the node. The handler receives the `Defect` and returns `true` to swallow or `false` to propagate. If you register multiple recover hooks, they run forward, breaking at the first hook that returns true, or bubbles to next owner if none. A root's `recover()` is the last line of defense.
 
 This lets you build layered error handling: effects handle their own expected errors, and the root catches anything truly unexpected.
 

@@ -62,18 +62,18 @@ export declare const PANIC: 2;
 export declare const FATAL: 3;
 
 /** An error in the signal graph, tagged REFUSE, PANIC or FATAL. */
-export declare class Spark<T = unknown> {
+export declare class Defect<T = unknown> {
 	constructor(error: T, type: typeof REFUSE | typeof PANIC | typeof FATAL);
 	type: typeof REFUSE | typeof PANIC | typeof FATAL;
 	error: T;
 }
 
-/** Creates a REFUSE Spark. Throw it to settle a node as refused. */
-export declare function refuse<E>(error: E): Spark<E>;
-/** Creates a PANIC Spark. Throw it to abort a node. */
-export declare function panic<E>(error: E): Spark<E>;
-/** Creates a FATAL Spark. */
-export declare function fatal<E>(error: E): Spark<E>;
+/** Creates a REFUSE Defect. Throw it to settle a node as refused. */
+export declare function refuse<E>(error: E): Defect<E>;
+/** Creates a PANIC Defect. Throw it to abort a node. */
+export declare function panic<E>(error: E): Defect<E>;
+/** Creates a FATAL Defect. */
+export declare function fatal<E>(error: E): Defect<E>;
 
 export declare const OPT_DEFER: number;
 export declare const OPT_STABLE: number;
@@ -215,7 +215,7 @@ export interface Task<T = any> extends Compute<T> {}
 
 export interface Root {
 	readonly disposed: boolean;
-	recover(fn: (error: Spark) => boolean): void;
+	recover(fn: (error: Defect) => boolean): void;
 	cleanup(fn: () => void): void;
 	dispose(): void;
 	pause(): void;
@@ -319,7 +319,7 @@ export interface Context {
 		fn: (c: ResourceContext, optimistic: T) => T | Promise<T>
 	): void;
 	pending(senders: Sender | Sender[]): boolean;
-	rejected(sender: Sender): Spark | null;
+	rejected(sender: Sender): Defect | null;
 	version(): number;
 	controller(): AbortController;
 	defer<R>(sender: Sender<R>): R;
@@ -336,7 +336,7 @@ export interface Reader {
 /** Bound compute callback context. */
 export interface ComputeContext extends Context {
 	equal(equal?: boolean): void;
-	refuse<E>(val: E): Spark<E>;
+	refuse<E>(val: E): Defect<E>;
 	panic(val: unknown): never;
 	suspend(
 		fn: (resolve: (value?: any) => void, reject: (error?: any) => void) => void
@@ -349,7 +349,7 @@ export interface ComputeReader extends ComputeContext, Reader {}
 /** Root callback context — owned factories + lifecycle. */
 export interface RootContext extends Factory {
 	cleanup(fn: () => void): void;
-	recover(fn: (error: Spark) => boolean): void;
+	recover(fn: (error: Defect) => boolean): void;
 }
 
 /** Bound effect callback context. */

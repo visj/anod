@@ -55,19 +55,19 @@ Run with `bun test --conditions=src test/explore/async.test.js test/explore/owne
 
 ### Telling anod's errors from user values
 
-Every anod error is now an instance of a small ES5 class, `Spark(error, type)`, with own `error` and `type` fields. `cx.refuse()`, `cx.panic()`, the ILLEGAL_READ value in `ComputeProto.get()` and every FATAL wrap create one. Helpers sit next to `tryRecover`:
+Every anod error is now an instance of a small ES5 class, `Defect(error, type)`, with own `error` and `type` fields. `cx.refuse()`, `cx.panic()`, the ILLEGAL_READ value in `ComputeProto.get()` and every FATAL wrap create one. Helpers sit next to `tryRecover`:
 
-- `spark(error)` (internal) classifies a caught value. A `Spark` is returned unchanged; anything else is wrapped once as `new Spark(error, FATAL)`.
-- `refuse(error)`, `panic(error)` and `fatal(error)` are exported factories, so user and library code can create anod errors without a context (`throw refuse("bad input")` from a helper). `Spark` is exported too, for `instanceof` checks. Every catch that used to wrap now calls it: both catch blocks in `ComputeProto._update`, `CellProto._error`, `ComputeProto._error`, `EffectProto._error`, `startEffect` and `flushEffects`.
+- `defect(error)` (internal) classifies a caught value. A `Defect` is returned unchanged; anything else is wrapped once as `new Defect(error, FATAL)`.
+- `refuse(error)`, `panic(error)` and `fatal(error)` are exported factories, so user and library code can create anod errors without a context (`throw refuse("bad input")` from a helper). `Defect` is exported too, for `instanceof` checks. Every catch that used to wrap now calls it: both catch blocks in `ComputeProto._update`, `CellProto._error`, `ComputeProto._error`, `EffectProto._error`, `startEffect` and `flushEffects`.
 
-Because the check is `instanceof Spark`, an anod error keeps its type however it travels:
+Because the check is `instanceof Defect`, an anod error keeps its type however it travels:
 
 - through a `val()` rethrow, a bound dependency, `_readAsync`, `defer()`, or a task await (fast path, waiter rejection, array await);
 - out of a child effect;
 - through a promise rejection after an `await`;
 - through a user `try/catch` that rethrows it, or a user `throw c.rejected(x)`.
 
-A user value is wrapped exactly once, because the wrapper is itself a `Spark`. A hand-made object shaped like `{ error, type: PANIC }` is a user value and is wrapped as FATAL; code that wants anod's classification calls `panic()` instead.
+A user value is wrapped exactly once, because the wrapper is itself a `Defect`. A hand-made object shaped like `{ error, type: PANIC }` is a user value and is wrapped as FATAL; code that wants anod's classification calls `panic()` instead.
 
 Why not the other options:
 
@@ -78,7 +78,7 @@ Why not the other options:
 
 ### FLAG_PANIC is retired
 
-With provenance carried by the object, the engine needs no per-node panic state. `cx.panic()` just throws `new Spark(val, PANIC)`. Nothing sets or reads `FLAG_PANIC` any more, and it is gone from `ComputeProto._update`'s reset mask. So "panic state is per run" holds trivially: a panic caught in one run cannot change how a later run's throw is classified. The constant stays exported so `anod/internal` importers don't break, but the bit is now free.
+With provenance carried by the object, the engine needs no per-node panic state. `cx.panic()` just throws `new Defect(val, PANIC)`. Nothing sets or reads `FLAG_PANIC` any more, and it is gone from `ComputeProto._update`'s reset mask. So "panic state is per run" holds trivially: a panic caught in one run cannot change how a later run's throw is classified. The constant stays exported so `anod/internal` importers don't break, but the bit is now free.
 
 ### The double `tryRecover` and double wrap in `startEffect`
 
@@ -110,10 +110,10 @@ None.
 
 - `val()`, `_read`, `set`, `notify`, `checkRun`/`needsUpdate`, `EffectProto._update` and the flush loops are unchanged.
 - `startEffect` (effect creation): the idle branch nests a `try/catch` around `node._update(TIME)` inside its `try/finally`. Both catch bodies moved out to `failStart`, so `startEffect` itself is smaller.
-- `ComputeProto._update`: only the catch bodies changed, now a `spark(error)` call. `FLAG_PANIC` left the reset mask, which is a compile-time constant with no runtime cost.
+- `ComputeProto._update`: only the catch bodies changed, now a `defect(error)` call. `FLAG_PANIC` left the reset mask, which is a compile-time constant with no runtime cost.
 - `flushEffects`: one line in its catch.
 - `tryRecover`: one identity check up front. Error path only.
 - **Memory:** no new fields on any node constructor. The module gains two slots.
-  - A `Spark` is a two-field object, the same size as the old `{ error, type }` literal. Classifying a caught value is one `instanceof`, on error paths only.
+  - A `Defect` is a two-field object, the same size as the old `{ error, type }` literal. Classifying a caught value is one `instanceof`, on error paths only.
   - The `UNHANDLED` slot holds the last unhandled creation error, and its disposed effect, until it is consumed or overwritten.
-- `UNHANDLED` and `spark` are not exported. `Spark`, `refuse`, `panic` and `fatal` are exported from both `anod` and `anod/internal`. The build reserves the name `Spark`, so errors print as `Spark { error, type }` from `dist/`.
+- `UNHANDLED` and `defect` are not exported. `Defect`, `refuse`, `panic` and `fatal` are exported from both `anod` and `anod/internal`. The build reserves the name `Defect`, so errors print as `Defect { error, type }` from `dist/`.

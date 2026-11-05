@@ -70,8 +70,8 @@ async function build() {
                     reduce_funcs: false,
                 },
                 mangle: {
-                    /** Errors print as Spark { error, type }. */
-                    reserved: ["Spark"],
+                    /** Errors print as Defect { error, type }. */
+                    reserved: ["Defect"],
                     properties: {
                         regex: /^_/
                     }
