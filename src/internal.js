@@ -42,7 +42,6 @@ const FLAG_SUSPEND = 1 << 20;
 const FLAG_PANIC = 1 << 21;
 const FLAG_SINGLE = 1 << 22;
 const FLAG_EAGER = 1 << 23;
-const FLAG_PURGE = 1 << 24;
 const FLAG_PAUSED = 1 << 25;
 const FLAG_OWNER = 1 << 26;
 
@@ -118,8 +117,9 @@ var CTOP = 0;
 
 /**
  * Pre-allocated stack for batching deps during setup execution.
- * During FLAG_SETUP _update, deps are written here as flat [sender, ...]
- * entries. After the fn returns, _deps is created via slice() with
+ * During FLAG_SETUP _update, deps are written here as [sender, subslot]
+ * pairs. Senders point at the pair's absolute index while the run is
+ * in progress. After the fn returns, _deps is created via slice() with
  * exact capacity — avoiding V8's push-based over-allocation.
  * This allows the growth factor problem that arises when going from
  * dep2 -> dep3.
@@ -224,13 +224,6 @@ var RECEIVERS = [];
 var RECEIVER_COUNT = 0;
 
 /**
- * @const
- * @type {Array<Sender>}
- */
-var PURGES = [];
-var PURGE_COUNT = 0;
-
-/**
  * Minimal factory-only context with no ownership. Nodes created
  * through Clock are unowned — they live until GC or manual dispose.
  * Extensible via Clock.prototype for user-defined context methods.
@@ -273,10 +266,10 @@ function Signal(value) {
 	this._stamp = -1;
 	/** @type {Receiver | null} */
 	this._sub1 = null;
-	/** @type {Array<Receiver> | null} */
-	this._subs = null;
 	/** @type {number} */
-	this._tombstones = 0;
+	this._sub1slot = 0;
+	/** @type {Array<Receiver | number> | null} */
+	this._subs = null;
 }
 
 /**
@@ -301,10 +294,10 @@ function Cell(value, flag, equal) {
 	this._stamp = -1;
 	/** @type {Receiver | null} */
 	this._sub1 = null;
-	/** @type {Array<Receiver> | null} */
-	this._subs = null;
 	/** @type {number} */
-	this._tombstones = 0;
+	this._sub1slot = 0;
+	/** @type {Array<Receiver | number> | null} */
+	this._subs = null;
 	/** @type {number} */
 	this._time = 0;
 	/** @type {(function(T,T): boolean) | null} */
@@ -333,15 +326,17 @@ function Compute(fn, opts, dep1, seed, args) {
 	this._stamp = -1;
 	/** @type {Receiver | null} */
 	this._sub1 = null;
-	/** @type {Array<Receiver> | null} */
-	this._subs = null;
 	/** @type {number} */
-	this._tombstones = 0;
+	this._sub1slot = 0;
+	/** @type {Array<Receiver | number> | null} */
+	this._subs = null;
 	/** @type {(function(U, T, W): T) | (function(T, W): T) | null} */
 	this._fn = fn;
 	/** @type {Sender<U> | null} */
 	this._dep1 = dep1;
-	/** @type {Array<Sender> | null} */
+	/** @type {number} */
+	this._dep1slot = -1;
+	/** @type {Array<Sender | number> | null} */
 	this._deps = null;
 	/** @type {number} */
 	this._time = 0;
@@ -372,7 +367,9 @@ function Effect(opts, fn, dep1, owner, args) {
 	this._fn = fn;
 	/** @type {Sender<U> | null} */
 	this._dep1 = dep1;
-	/** @type {Array<Sender> | null} */
+	/** @type {number} */
+	this._dep1slot = -1;
+	/** @type {Array<Sender | number> | null} */
 	this._deps = null;
 	/** @type {number} */
 	this._time = 0;
@@ -739,17 +736,19 @@ function _read(sender, stamp) {
 	if (this._flag & FLAG_SETUP) {
 		/** Setup path: first run, push deps to DSTACK. */
 		if (this._dep1 === null) {
-			connect(sender, this);
 			this._dep1 = sender;
+			this._dep1slot = connect(sender, this, -1);
 		} else {
-			connect(sender, this);
+			let subslot = connect(sender, this, DCOUNT);
 			DSTACK[DCOUNT++] = sender;
+			DSTACK[DCOUNT++] = subslot;
 		}
 	} else if (this._deps === null) {
-		this._deps = [sender];
+		/** New deps are connected by patchDeps after the run. */
+		this._deps = [sender, 0];
 		this._flag &= ~FLAG_SINGLE;
 	} else {
-		this._deps.push(sender);
+		this._deps.push(sender, 0);
 	}
 }
 
@@ -866,52 +865,6 @@ function root(fn) {
 		this._value = null;
 		if (this._cleanup !== null) {
 			clearCleanup(this);
-		}
-	};
-
-	/**
-	 * Compacts _subs by removing FLAG_DISPOSED entries.
-	 * Pop-from-back for low churn, forward scan for high churn.
-	 * @this {Sender}
-	 */
-	SignalProto._purge = ComputeProto._purge = function () {
-		let subs = this._subs;
-		let disposed = this._tombstones;
-		this._flag &= ~FLAG_PURGE;
-		if (subs === null) {
-			return;
-		}
-		if (disposed >= subs.length) {
-			this._subs = null;
-			this._tombstones = 0;
-			return;
-		}
-		this._tombstones = 0;
-		if (disposed > subs.length >> 2) {
-			let write = 0;
-			let count = subs.length;
-			for (let read = 0; read < count; read++) {
-				let node = subs[read];
-				if (!(node._flag & FLAG_DISPOSED)) {
-					subs[write++] = node;
-				}
-			}
-			subs.length = write;
-			return;
-		}
-		let i = 0;
-		while (i < subs.length) {
-			if (subs[i]._flag & FLAG_DISPOSED) {
-				let tail;
-				do {
-					tail = subs.pop();
-					if (i >= subs.length) {
-						return;
-					}
-				} while (tail._flag & FLAG_DISPOSED);
-				subs[i] = tail;
-			}
-			i++;
 		}
 	};
 
@@ -1380,15 +1333,8 @@ function root(fn) {
 		if (!(taskNode._flag & FLAG_LOADING)) {
 			if (node._flag & FLAG_LOADING) {
 				subscribe(node, taskNode);
-			} else if (!(node._flag & FLAG_LOADING)) {
-				let version = STAMP;
-				let stamp = taskNode._stamp;
-				taskNode._stamp = version;
-				if (stamp !== version - 1) {
-					node._read(taskNode, stamp);
-				} else {
-					REUSED++;
-				}
+			} else {
+				track(node, taskNode);
 			}
 			if (taskNode._flag & FLAG_ERROR) {
 				throw taskNode._value;
@@ -1445,7 +1391,11 @@ function root(fn) {
 
 		if (allSettled) {
 			for (let i = 0; i < count; i++) {
-				subscribe(node, tasks[i]);
+				if (node._flag & FLAG_LOADING) {
+					subscribe(node, tasks[i]);
+				} else {
+					track(node, tasks[i]);
+				}
 			}
 			return results;
 		}
@@ -2210,7 +2160,7 @@ function root(fn) {
 		if (
 			this._flag & FLAG_WEAK &&
 			this._sub1 === null &&
-			(this._subs === null || this._tombstones >= this._subs.length)
+			(this._subs === null || this._subs.length === 0)
 		) {
 			this._drop();
 		}
@@ -2378,9 +2328,12 @@ function root(fn) {
 			if (flag & FLAG_SETUP) {
 				if (DCOUNT > DBASE) {
 					let stack = DSTACK;
-					this._deps = stack.slice(DBASE, DCOUNT);
+					let deps = (this._deps = stack.slice(DBASE, DCOUNT));
 					for (let i = DBASE; i < DCOUNT; i++) {
 						stack[i] = null;
+					}
+					if (DBASE !== 0) {
+						rebaseDeps(deps);
 					}
 					DCOUNT = DBASE;
 				} else if (this._dep1 !== null) {
@@ -2594,9 +2547,12 @@ function root(fn) {
 				if (flag & FLAG_SETUP) {
 					if (DCOUNT > DBASE) {
 						let stack = DSTACK;
-						this._deps = stack.slice(DBASE, DCOUNT);
+						let deps = (this._deps = stack.slice(DBASE, DCOUNT));
 						for (let i = DBASE; i < DCOUNT; i++) {
 							stack[i] = null;
+						}
+						if (DBASE !== 0) {
+							rebaseDeps(deps);
 						}
 						DCOUNT = DBASE;
 					} else if (this._dep1 !== null) {
@@ -2801,7 +2757,7 @@ function root(fn) {
 			flag =
 				FLAG_STABLE | FLAG_BOUND | FLAG_SINGLE | ((0 | argsOrOpts) & OPTIONS);
 			node = new Compute(/** @type {!Function} */(fnOrSeed), flag, depOrFn, optsOrSeed, args);
-			connect(depOrFn, node);
+			node._dep1slot = connect(depOrFn, node, -1);
 		}
 		if (this._flag & FLAG_OWNER) {
 			addOwned(this, node);
@@ -2841,7 +2797,7 @@ function root(fn) {
 				FLAG_SINGLE |
 				((0 | argsOrOpts) & OPTIONS);
 			node = new Compute(fnOrSeed, flag, depOrFn, optsOrSeed, args);
-			connect(depOrFn, node);
+			node._dep1slot = connect(depOrFn, node, -1);
 		}
 		if (this._flag & FLAG_OWNER) {
 			addOwned(this, node);
@@ -2876,7 +2832,7 @@ function root(fn) {
 			flag =
 				FLAG_STABLE | FLAG_BOUND | FLAG_SINGLE | ((0 | optsOrArgs) & OPTIONS);
 			node = new Effect(flag, /** @type {!Function} */(fnOrOpts), depOrFn, this, args);
-			connect(depOrFn, node);
+			node._dep1slot = connect(depOrFn, node, -1);
 		}
 		let level = this._level + 1;
 		if (this._level > 2 && level >= LEVELS.length) {
@@ -2919,7 +2875,7 @@ function root(fn) {
 				FLAG_SINGLE |
 				((0 | optsOrArgs) & OPTIONS);
 			node = new Effect(flag, /** @type {!Function} */(fnOrOpts), depOrFn, this, args);
-			connect(depOrFn, node);
+			node._dep1slot = connect(depOrFn, node, -1);
 		}
 		let level = this._level + 1;
 		if (this._level > 2 && level >= LEVELS.length) {
@@ -2943,21 +2899,47 @@ function root(fn) {
 }
 
 /**
+ * Tracks sender as a dep of node from inside node's sync run, the
+ * same way val() does: patchDeps or the setup slice links it after
+ * the run. Stable nodes past setup track nothing.
+ * @param {Receiver} node
+ * @param {Sender} sender
+ */
+function track(node, sender) {
+	if ((node._flag & (FLAG_STABLE | FLAG_SETUP)) === FLAG_STABLE) {
+		return;
+	}
+	let version = STAMP;
+	let stamp = sender._stamp;
+	if (stamp === version) {
+		return;
+	}
+	sender._stamp = version;
+	if (stamp === version - 1) {
+		REUSED++;
+	} else {
+		node._read(sender, stamp);
+	}
+}
+
+/**
+ * Links sender to receiver outside receiver's sync run (after an
+ * await, or when a waiter settles).
  * @param {Receiver} receiver
  * @param {Sender} sender
  */
 function subscribe(receiver, sender) {
 	if (receiver._dep1 === null) {
 		receiver._dep1 = sender;
-		connect(sender, receiver);
+		receiver._dep1slot = connect(sender, receiver, -1);
 	} else {
 		let deps = receiver._deps;
 		if (deps === null) {
-			receiver._deps = [sender];
+			receiver._deps = [sender, connect(sender, receiver, 0)];
 		} else {
-			deps.push(sender);
+			let depslot = deps.length;
+			deps.push(sender, connect(sender, receiver, depslot));
 		}
-		connect(sender, receiver);
 	}
 }
 
@@ -2978,51 +2960,122 @@ function subscribe(receiver, sender) {
  * not so much more expensive. But right now, going from 2 to 3 subs
  * will cause a sudden big spike in memory. Since most senders have a few subs,
  * this is a real concern.
+ *
+ * Links are two-way. _subs holds [receiver, depslot] pairs and _deps
+ * holds [sender, subslot] pairs, each slot being the index of the
+ * matching pair on the other side, or -1 for _sub1/_dep1. Either side
+ * can then unlink in O(1) by swapping its last pair into the hole.
  * @param {Sender} send
  * @param {Receiver} receiver
- * @returns {void}
+ * @param {number} depslot - index of the pair in receiver's _deps, -1 for _dep1
+ * @returns {number} subslot - index of the pair in send's _subs, -1 for _sub1
  */
-function connect(send, receiver) {
+function connect(send, receiver, depslot) {
 	if (send._sub1 === null) {
 		send._sub1 = receiver;
-	} else if (send._subs === null) {
-		send._subs = [receiver];
-	} else {
-		send._subs.push(receiver);
+		send._sub1slot = depslot;
+		return -1;
 	}
+	let subs = send._subs;
+	if (subs === null) {
+		send._subs = [receiver, depslot];
+		return 0;
+	}
+	let subslot = subs.length;
+	subs.push(receiver, depslot);
+	return subslot;
 }
 
 /**
- * Marks receiver as removed from sender's subscriber list.
- * For _sub1, clears immediately. For _subs array entries,
- * defers compaction via _tombstones and purge heuristic.
+ * Removes the receiver at subslot from send's subscriber list.
+ * Swap-with-last O(1), then points the moved receiver's dep pair at
+ * its new index. A receiver in its setup run keeps its pairs in DSTACK.
+ * Disposed senders have already dropped their subscribers.
  * @param {Sender} send
- * @param {Receiver} receiver
+ * @param {number} subslot
  * @returns {void}
  */
-function clearReceiver(send, receiver) {
-	if (send._sub1 === receiver) {
+function clearReceiver(send, subslot) {
+	if (send._flag & FLAG_DISPOSED) {
+		return;
+	}
+	if (subslot === -1) {
 		send._sub1 = null;
 	} else {
-		let disposed = ++send._tombstones;
 		let subs = send._subs;
-		if (subs !== null) {
-			if (disposed >= subs.length) {
-				/** All subs are dead — release the array immediately. */
-				send._subs = null;
-				send._tombstones = 0;
-			} else if (!(send._flag & FLAG_PURGE) && disposed >= subs.length >> 2) {
-				send._flag |= FLAG_PURGE;
-				PURGES[PURGE_COUNT++] = send;
+		let lastSlot = /** @type {number} */ (subs.pop());
+		let lastNode = /** @type {Receiver} */ (subs.pop());
+		if (subslot !== subs.length) {
+			subs[subslot] = lastNode;
+			subs[subslot + 1] = lastSlot;
+			if (lastSlot === -1) {
+				lastNode._dep1slot = subslot;
+			} else if (lastNode._deps !== null) {
+				lastNode._deps[lastSlot + 1] = subslot;
+			} else {
+				DSTACK[lastSlot + 1] = subslot;
 			}
 		}
 	}
 	if (
 		send._flag & FLAG_WEAK &&
 		send._sub1 === null &&
-		(send._subs === null || send._tombstones >= send._subs.length)
+		(send._subs === null || send._subs.length === 0)
 	) {
 		send._drop();
+	}
+}
+
+/**
+ * Points sender's pair for a dep that moved to depslot in its
+ * receiver's _deps (or to _dep1, for -1).
+ * @param {Sender} send
+ * @param {number} subslot
+ * @param {number} depslot
+ * @returns {void}
+ */
+function moveDep(send, subslot, depslot) {
+	if (subslot === -1) {
+		send._sub1slot = depslot;
+	} else if (send._subs !== null) {
+		send._subs[subslot + 1] = depslot;
+	}
+}
+
+/**
+ * After a nested setup run, the senders point at absolute DSTACK
+ * indices. Points them at the pairs' indices in the sliced _deps.
+ * @param {Array<Sender | number>} deps
+ * @returns {void}
+ */
+function rebaseDeps(deps) {
+	let count = deps.length;
+	for (let i = 0; i < count; i += 2) {
+		moveDep(
+			/** @type {Sender} */ (deps[i]),
+			/** @type {number} */ (deps[i + 1]),
+			i
+		);
+	}
+}
+
+/**
+ * Removes the dep pair at i from node's _deps. Swap-with-last O(1).
+ * @param {Array<Sender | number>} deps
+ * @param {number} i
+ * @returns {void}
+ */
+function removeDep(deps, i) {
+	clearReceiver(
+		/** @type {Sender} */ (deps[i]),
+		/** @type {number} */ (deps[i + 1])
+	);
+	let lastSlot = /** @type {number} */ (deps.pop());
+	let lastDep = /** @type {Sender} */ (deps.pop());
+	if (i !== deps.length) {
+		deps[i] = lastDep;
+		deps[i + 1] = lastSlot;
+		moveDep(lastDep, lastSlot, i);
 	}
 }
 
@@ -3033,14 +3086,17 @@ function clearReceiver(send, receiver) {
  */
 function clearDeps(receive) {
 	if (receive._dep1 !== null) {
-		clearReceiver(receive._dep1, receive);
+		clearReceiver(receive._dep1, receive._dep1slot);
 		receive._dep1 = null;
 	}
 	let deps = receive._deps;
 	if (deps !== null) {
 		let count = deps.length;
-		for (let i = 0; i < count; i++) {
-			clearReceiver(deps[i], receive);
+		for (let i = 0; i < count; i += 2) {
+			clearReceiver(
+				/** @type {Sender} */ (deps[i]),
+				/** @type {number} */ (deps[i + 1])
+			);
 		}
 		receive._deps = null;
 	}
@@ -3050,14 +3106,14 @@ function clearDeps(receive) {
  * Nulls out sender's subscriber list on disposal.
  * Receivers self-heal: dynamic nodes remove stale deps via
  * patchDeps on next re-run; stable bound nodes detect disposed
- * dep1 in _update via refreshDep1.
+ * dep1 in _update via refreshDep1. clearReceiver skips disposed
+ * senders, so their pairs need no unlinking.
  * @param {Sender} send
  * @returns {void}
  */
 function clearSubs(send) {
 	send._sub1 = null;
 	send._subs = null;
-	send._tombstones = 0;
 }
 
 /**
@@ -3213,7 +3269,7 @@ function tryRecover(node, error) {
  */
 function patchDeps(node, version, depCount, newLen) {
 	let deps = node._deps;
-	let existingLen = depCount > 1 ? depCount - 1 : 0;
+	let existingLen = depCount > 1 ? (depCount - 1) * 2 : 0;
 	let newidx = existingLen;
 
 	/** Check dep1 - always exists when depCount >= 1, and _read never
@@ -3222,12 +3278,12 @@ function patchDeps(node, version, depCount, newLen) {
 	let dep1 = node._dep1;
 	if (dep1 !== null) {
 		if (dep1._stamp !== version) {
-			clearReceiver(dep1, node);
+			clearReceiver(dep1, node._dep1slot);
 			if (newidx < newLen) {
-				let newDep = deps[newidx];
+				let newDep = /** @type {Sender} */ (deps[newidx]);
 				node._dep1 = newDep;
-				connect(newDep, node);
-				newidx++;
+				node._dep1slot = connect(newDep, node, -1);
+				newidx += 2;
 			} else {
 				node._dep1 = null;
 			}
@@ -3237,12 +3293,14 @@ function patchDeps(node, version, depCount, newLen) {
 	if (deps === null) {
 		if (node._dep1 !== null) {
 			node._flag |= FLAG_SINGLE;
+		} else {
+			node._flag &= ~FLAG_SINGLE;
 		}
 		return;
 	}
 
 	/**
-	 * Three-pointer scan:
+	 * Three-pointer scan over [sender, subslot] pairs:
 	 *   i 			-	forward through existing region
 	 *   newidx -	next new dep to consume (unsubscribed, in new region)
 	 *   tail 	-	end of live region, shrinks when we pop reused deps from the back
@@ -3250,34 +3308,37 @@ function patchDeps(node, version, depCount, newLen) {
 	let i = 0;
 	let tail = existingLen;
 	while (i < tail) {
-		let dep = deps[i];
+		let dep = /** @type {Sender} */ (deps[i]);
 		if (dep._stamp === version) {
-			i++;
+			i += 2;
 			continue;
 		}
 		/** Dropped — unbind */
-		clearReceiver(dep, node);
+		clearReceiver(dep, /** @type {number} */ (deps[i + 1]));
 		if (newidx < newLen) {
-			let newDep = deps[newidx];
-			connect(newDep, node);
+			let newDep = /** @type {Sender} */ (deps[newidx]);
 			deps[i] = newDep;
-			newidx++;
-			i++;
+			deps[i + 1] = connect(newDep, node, i);
+			newidx += 2;
+			i += 2;
 		} else {
 			let found = 0;
-			while (tail > i + 1) {
-				tail--;
-				let tDep = deps[tail];
+			while (tail > i + 2) {
+				tail -= 2;
+				let tDep = /** @type {Sender} */ (deps[tail]);
+				let tSlot = /** @type {number} */ (deps[tail + 1]);
 				if (tDep._stamp === version) {
 					deps[i] = tDep;
+					deps[i + 1] = tSlot;
+					moveDep(tDep, tSlot, i);
 					found = 1;
 					break;
 				} else {
-					clearReceiver(tDep, node);
+					clearReceiver(tDep, tSlot);
 				}
 			}
 			if (found) {
-				i++;
+				i += 2;
 			} else {
 				tail = i;
 			}
@@ -3285,24 +3346,29 @@ function patchDeps(node, version, depCount, newLen) {
 	}
 	if (newidx < newLen) {
 		if (node._dep1 === null) {
-			let newDep = deps[newidx];
-			connect(newDep, node);
-			deps[i] = newDep;
-			newidx++;
+			/** No deps before this run: the first new dep becomes dep1. */
+			let newDep = /** @type {Sender} */ (deps[newidx]);
+			node._dep1 = newDep;
+			node._dep1slot = connect(newDep, node, -1);
+			newidx += 2;
 		}
 		while (newidx < newLen) {
-			let dep = deps[newidx];
-			connect(dep, node);
+			let dep = /** @type {Sender} */ (deps[newidx]);
 			deps[tail] = dep;
-			tail++;
-			newidx++;
+			deps[tail + 1] = connect(dep, node, tail);
+			tail += 2;
+			newidx += 2;
 		}
 	}
 
 	/** Promote last array entry to dep1 when dep1 is empty. */
 	if (node._dep1 === null && tail > 0) {
-		tail--;
-		node._dep1 = deps[tail];
+		tail -= 2;
+		let dep = /** @type {Sender} */ (deps[tail]);
+		let slot = /** @type {number} */ (deps[tail + 1]);
+		node._dep1 = dep;
+		node._dep1slot = slot;
+		moveDep(dep, slot, -1);
 	}
 
 	/** Trim or null out, update FLAG_SINGLE */
@@ -3352,7 +3418,7 @@ function sweepDeps(stamp, dep1, deps) {
 	}
 	if (deps !== null) {
 		let count = deps.length;
-		for (let i = 0; i < count; i++) {
+		for (let i = 0; i < count; i += 2) {
 			let dep = deps[i];
 			let depver = dep._stamp;
 			if (depver > transaction) {
@@ -3361,7 +3427,7 @@ function sweepDeps(stamp, dep1, deps) {
 			}
 			dep._stamp = stamp;
 		}
-		depCount += count;
+		depCount += count >> 1;
 	}
 	VCOUNT = vcount;
 	return depCount;
@@ -3383,7 +3449,7 @@ function notify(node, flag) {
 	let subs = node._subs;
 	if (subs !== null) {
 		let count = subs.length;
-		for (let i = 0; i < count; i++) {
+		for (let i = 0; i < count; i += 2) {
 			sub = subs[i];
 			let flags = sub._flag;
 			sub._flag |= flag;
@@ -3426,7 +3492,7 @@ function needsUpdate(node, time) {
 	let deps = node._deps;
 	if (deps !== null) {
 		let len = deps.length;
-		for (let i = 0; i < len; i++) {
+		for (let i = 0; i < len; i += 2) {
 			dep = deps[i];
 			let flag = dep._flag;
 			if (flag & FLAG_STALE) {
@@ -3547,13 +3613,13 @@ function checkRun(node, time) {
 					node._update(time);
 					break scan;
 				}
-				i = resumeFrom + 1;
+				i = resumeFrom + 2;
 			}
 
 			let deps = node._deps;
 			if (deps !== null) {
 				let count = deps.length;
-				for (; i < count; i++) {
+				for (; i < count; i += 2) {
 					dep = deps[i];
 					let flag = dep._flag;
 					if (flag & FLAG_STALE) {
@@ -3616,7 +3682,7 @@ function checkRun(node, time) {
 					resumeFrom = -1;
 					continue outer;
 				}
-			} else if (idx + 1 < parent._deps.length) {
+			} else if (idx + 2 < parent._deps.length) {
 				/** More entries in deps array — resume scanning */
 				node = parent;
 				resumeFrom = idx;
@@ -3801,7 +3867,7 @@ function settleNotify(node, value, isError, waiters, waiterCount) {
 	let subs = node._subs;
 	if (subs !== null) {
 		let count = subs.length;
-		for (let i = 0; i < count; i++) {
+		for (let i = 0; i < count; i += 2) {
 			subs[i]._stamp = version - 1;
 		}
 	}
@@ -3833,7 +3899,7 @@ function settleNotify(node, value, isError, waiters, waiterCount) {
 	}
 	if (subs !== null) {
 		let count = subs.length;
-		for (let i = 0; i < count; i++) {
+		for (let i = 0; i < count; i += 2) {
 			sub = subs[i];
 			if (sub._stamp !== version) {
 				let flags = sub._flag;
@@ -3884,34 +3950,17 @@ function settleDeps(node) {
 		dep1._stamp = stamp;
 	}
 
-	/** Dedup scan of _deps — remove duplicates via swap-with-last. */
+	/** Dedup scan of _deps — remove duplicates via swap-with-last.
+	 *  Walks back to front, so the pair swapped in is already seen. */
 	let hasDefers = defer1 !== null || deferLen > 0;
 	if (deps !== null) {
-		let i = deps.length - 1;
-		let write = deps.length;
-		while (i >= 0) {
-			let dep = deps[i];
+		for (let i = deps.length - 2; i >= 0; i -= 2) {
+			let dep = /** @type {Sender} */ (deps[i]);
 			if (dep._stamp === stamp) {
-				clearReceiver(dep, node);
-				write--;
-				if (i !== write) {
-					let lastDep;
-					if (hasDefers) {
-						lastDep = deps[write];
-					} else {
-						lastDep = deps.pop();
-					}
-					deps[i] = lastDep;
-				} else if (!hasDefers) {
-					deps.pop();
-				}
+				removeDep(deps, i);
 			} else {
 				dep._stamp = stamp;
 			}
-			i--;
-		}
-		if (hasDefers && write < deps.length) {
-			deps.length = write;
 		}
 	}
 
@@ -4342,14 +4391,6 @@ function flush() {
 				}
 				RECEIVER_COUNT = 0;
 			}
-			if (PURGE_COUNT > 0) {
-				let count = PURGE_COUNT;
-				for (let i = 0; i < count; i++) {
-					PURGES[i]._purge();
-					PURGES[i] = null;
-				}
-				PURGE_COUNT = 0;
-			}
 			if (cycle++ === 1e5) {
 				error = new Error("Runaway cycle");
 				thrown = true;
@@ -4362,7 +4403,6 @@ function flush() {
 			SENDER_COUNT =
 			SCOPE_COUNT =
 			RECEIVER_COUNT =
-			PURGE_COUNT =
 			0;
 		if (thrown) {
 			throw error;
@@ -4422,7 +4462,6 @@ export {
 	FLAG_PANIC,
 	FLAG_SINGLE,
 	FLAG_EAGER,
-	FLAG_PURGE,
 	FLAG_PAUSED,
 	FLAG_OWNER,
 	REFUSE,
@@ -4473,8 +4512,6 @@ export {
 	SCOPE_COUNT,
 	RECEIVERS,
 	RECEIVER_COUNT,
-	PURGES,
-	PURGE_COUNT,
 
 	Clock,
 	Root,

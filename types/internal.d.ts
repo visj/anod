@@ -50,7 +50,6 @@ export declare const FLAG_SUSPEND: number;
 export declare const FLAG_PANIC: number;
 export declare const FLAG_SINGLE: number;
 export declare const FLAG_EAGER: number;
-export declare const FLAG_PURGE: number;
 export declare const FLAG_PAUSED: number;
 export declare const FLAG_OWNER: number;
 
@@ -533,8 +532,6 @@ export declare const SCOPES: Array<Array<Effect>>;
 export declare var SCOPE_COUNT: number;
 export declare const RECEIVERS: Array<Effect>;
 export declare var RECEIVER_COUNT: number;
-export declare const PURGES: Array<Sender>;
-export declare var PURGE_COUNT: number;
 
 /* What the factories do once a node is constructed: connect() a bound
  * node to its dep, addOwned() it to an owning root or effect, then run it

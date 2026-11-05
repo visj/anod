@@ -25,7 +25,7 @@ function collectDeps(node) {
         deps.push(node._dep1);
     }
     if (node._deps !== null) {
-        for (let i = 0; i < node._deps.length; i++) {
+        for (let i = 0; i < node._deps.length; i += 2) {
             deps.push(node._deps[i]);
         }
     }
@@ -52,7 +52,7 @@ function verifyIntegrity(node) {
             count++;
         }
         if (dep._subs !== null) {
-            for (let i = 0; i < dep._subs.length; i++) {
+            for (let i = 0; i < dep._subs.length; i += 2) {
                 if (dep._subs[i] === node) {
                     count++;
                 }
@@ -75,7 +75,7 @@ function verifyDropped(node, droppedSenders) {
     for (const sender of droppedSenders) {
         expect(sender._sub1).not.toBe(node);
         if (sender._subs !== null) {
-            for (let i = 0; i < sender._subs.length; i++) {
+            for (let i = 0; i < sender._subs.length; i += 2) {
                 if (!(sender._subs[i]._flag & 8)) {
                     expect(sender._subs[i]).not.toBe(node);
                 }
