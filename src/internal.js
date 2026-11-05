@@ -1737,7 +1737,7 @@ function root(fn) {
 			if (onReject === null) {
 				throw err;
 			}
-			value = err;
+			value = defect(err);
 			failed = true;
 		}
 		if (value === REGRET) {
@@ -4549,8 +4549,8 @@ function deliver(awaiter, fn, value, isError) {
 /**
  * Resumes a node waiting through c.suspend(task, onResolve, onReject),
  * like a `.then(onResolve, onReject)`: the node settles with what the
- * callback returns, or fails with what it throws. An error with no
- * onReject fails the node.
+ * callback returns, or fails with what it throws. onReject always
+ * gets a Defect. An error with no onReject fails the node.
  * @param {AsyncReceiver} node
  * @param {Function | null} fn
  * @param {*} value
@@ -4568,7 +4568,7 @@ function relay(node, fn, value, isError) {
 	}
 	let result;
 	try {
-		result = fn(value);
+		result = fn(isError ? defect(value) : value);
 	} catch (err) {
 		node._error(err);
 		return;

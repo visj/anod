@@ -273,6 +273,25 @@ describe("c.suspend(task, onResolve, onReject)", () => {
 		r.dispose();
 	});
 
+	test("disposing the awaited task calls onReject with a Defect", async () => {
+		const errors = [];
+		let inner, task;
+		const r = root((r) => {
+			inner = root((r2) => {
+				task = r2.task((cx) => cx.suspend(new Promise(() => {})));
+			});
+			r.spawn((cx) => {
+				cx.suspend(task, () => {}, (err) => {
+					errors.push([err.type, err.error.message]);
+				});
+			});
+		});
+		inner.dispose();
+		await settle();
+		expect(errors).toEqual([[FATAL, "Awaited task was disposed"]]);
+		r.dispose();
+	});
+
 	test("reads in a deferred callback are tracked", async () => {
 		const s = signal(1);
 		const got = [];
