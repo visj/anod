@@ -122,8 +122,6 @@ class Sender extends Disposer {
 		/** @type {Array<Receiver | number> | null} */
 		this._subs;
 		/** @type {number} */
-		this._wtime;
-		/** @type {number} */
 		this._ctime;
 		/** @type {number} */
 		this._time;

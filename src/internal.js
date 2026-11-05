@@ -221,16 +221,7 @@ var SENDERS = [];
 var PAYLOADS = [];
 /** @const @type {Array<(function(Sender, *, number): void) | null>} */
 var UPDATES = [];
-/**
- * WRITES[i] is the write stamp of the queued write in SENDERS[i]. A
- * write drains only if it was queued after the sender's last immediate
- * write (_wtime), so set() supersedes earlier posts without a scan.
- * @const @type {Array<number>}
- */
-var WRITES = [];
 var SENDER_COUNT = 0;
-/** Orders queued and immediate writes; bumped by each of them. */
-var WSEQ = 0;
 
 /** @const @type {Array<Compute>} */
 var COMPUTES = [];
@@ -337,8 +328,6 @@ function Signal(value) {
 	this._sub1 = null;
 	/** @type {Array<Receiver | number> | null} */
 	this._subs = null;
-	/** @type {number} */
-	this._wtime = 0;
 }
 
 /**
@@ -365,8 +354,6 @@ function Cell(value, flag, equal) {
 	this._sub1 = null;
 	/** @type {Array<Receiver | number> | null} */
 	this._subs = null;
-	/** @type {number} */
-	this._wtime = 0;
 	/** @type {number} */
 	this._time = 0;
 	/** @type {(function(T,T): boolean) | null} */
@@ -808,20 +795,24 @@ function schedule(node, payload, fn) {
 	SENDERS[index] = node;
 	PAYLOADS[index] = payload;
 	UPDATES[index] = fn;
-	WRITES[index] = ++WSEQ;
 }
 
 /**
  * Cancels the queued writes to a sender, so that an immediate write
- * takes precedence over the writes posted before it. Stamps the sender
- * past them: the entries keep their place and drain as no-ops, leaving
- * other senders untouched.
+ * takes precedence over the writes posted before it. The entries keep
+ * their place and drain as no-ops, leaving other senders untouched.
+ * Only reached when a sender with queued writes is written directly,
+ * so the scan costs no field on the sender.
  * @param {Sender} node
  * @returns {void}
  */
 function supersede(node) {
 	node._flag &= ~FLAG_SCHEDULED;
-	node._wtime = ++WSEQ;
+	for (let i = 0; i < SENDER_COUNT; i++) {
+		if (SENDERS[i] === node) {
+			UPDATES[i] = NOOP;
+		}
+	}
 }
 
 /**
@@ -949,8 +940,6 @@ function root(fn) {
 	RootProto._level = -1;
 
 	SignalProto._ctime = 0;
-	/** Computes take no immediate writes, so their queued notify() always drains. */
-	ComputeProto._wtime = 0;
 	SignalProto._time = 0;
 	SignalProto._equal = null;
 
@@ -5029,9 +5018,8 @@ function flush() {
 					count = SENDER_COUNT;
 					for (; i < count; i++) {
 						let node = SENDERS[i];
-						/** A sender disposed after its write was queued takes no
-						 *  writes, nor one superseded by an immediate write. */
-						if (!(node._flag & FLAG_DISPOSED) && WRITES[i] > node._wtime) {
+						/** A sender disposed after its write was queued takes no writes. */
+						if (!(node._flag & FLAG_DISPOSED)) {
 							try {
 								UPDATES[i](node, PAYLOADS[i], time);
 							} catch (err) {
