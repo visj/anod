@@ -13,7 +13,10 @@ import {
     OPT_STABLE,
     OPT_SETUP,
     OPT_WEAK,
-    OPT_EAGER
+    OPT_EAGER,
+    refuse,
+    panic,
+    fatal,
 } from "#anod";
 
 const tick = () => Promise.resolve();
@@ -560,7 +563,7 @@ describe("callback suspend", () => {
             });
         });
         expect(t.error).toBe(true);
-        expect(t.get()).toEqual({ error: "bad", type: FATAL });
+        expect(t.get()).toEqual(fatal("bad"));
         r.dispose();
     });
 
@@ -1069,7 +1072,7 @@ describe("errors across await", () => {
         });
         await settle();
         expect(t.error).toBe(true);
-        expect(t.get()).toEqual({ error: "bad", type: PANIC });
+        expect(t.get()).toEqual(panic("bad"));
         r.dispose();
     });
 
@@ -1091,7 +1094,7 @@ describe("errors across await", () => {
             });
         });
         await settle();
-        expect(errors).toEqual([{ error: "bad", type: PANIC }]);
+        expect(errors).toEqual([panic("bad")]);
         r.dispose();
     });
 
@@ -1105,7 +1108,7 @@ describe("errors across await", () => {
         });
         await settle();
         expect(t.error).toBe(true);
-        expect(t.get()).toEqual({ error: "nope", type: REFUSE });
+        expect(t.get()).toEqual(refuse("nope"));
         r.dispose();
     });
 

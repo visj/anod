@@ -248,14 +248,19 @@ var PURGES = [];
 var PURGE_COUNT = 0;
 
 /**
- * Every { error, type } object anod creates. An error keeps its
+ * An error in the signal graph: a value that jumped out of a compute,
+ * effect or task, tagged REFUSE, PANIC or FATAL. A Spark keeps its
  * identity as it travels through reads, awaits and owner chains, so a
- * caught value found here passes on unchanged. Anything else was
- * thrown by user code and is wrapped as FATAL, exactly once.
- * @const
- * @type {WeakSet<Object>}
+ * caught Spark passes on unchanged. Anything else was thrown by user
+ * code and is wrapped as FATAL, exactly once.
+ * @constructor
+ * @param {*} error
+ * @param {number} type
  */
-var FAULTS = new WeakSet();
+function Spark(error, type) {
+	this.error = error;
+	this.type = type;
+}
 
 /**
  * The error startEffect last rethrew to a creator after the new
@@ -1162,7 +1167,7 @@ function root(fn) {
 
 	/**
 	 * Signals an expected error from a compute. Sets FLAG_ERROR and
-	 * returns a { error, type: ERROR } POJO. The caller returns this
+	 * returns a REFUSE Spark. The caller returns this
 	 * from their fn — _update sees FLAG_ERROR and stores it as the
 	 * compute's error value without hitting the catch path.
 	 * Named `fail` to avoid collision with the `.error` getter.
@@ -1173,23 +1178,20 @@ function root(fn) {
 	 */
 	ComputeProto.refuse = function (val) {
 		this._flag |= FLAG_ERROR;
-		return fault(val, REFUSE);
+		return new Spark(val, REFUSE);
 	};
 
 	/**
 	 * Signals an expected panic from a compute or effect. Throws a
-	 * { error, type: PANIC } POJO. anod created it, so every catch
-	 * passes it on as PANIC instead of wrapping it as FATAL, in this
-	 * run or after an await.
+	 * PANIC Spark, which every catch passes on unchanged, in this run
+	 * or after an await.
 	 * @this {Receiver}
 	 * @param {*} val
 	 * @returns {void}
 	 */
-	function panic(val) {
-		throw fault(val, PANIC);
-	}
-
-	ComputeProto.panic = EffectProto.panic = panic;
+	ComputeProto.panic = EffectProto.panic = function (val) {
+		throw new Spark(val, PANIC);
+	};
 
 	/**
 	 * Marks this compute as eager (push-based). Once set, the node
@@ -1981,7 +1983,7 @@ function root(fn) {
 	 */
 	CellProto._error = function (err) {
 		this._flag |= FLAG_ERROR;
-		this._settle(fatal(err));
+		this._settle(spark(err));
 	};
 
 	/**
@@ -2172,7 +2174,7 @@ function root(fn) {
 			(this._dep1 === null || this._dep1._flag & FLAG_DISPOSED)
 		) {
 			this._flag |= FLAG_ERROR;
-			this._value = fault(ILLEGAL_READ, FATAL);
+			this._value = new Spark(ILLEGAL_READ, FATAL);
 		}
 		return this._value;
 	};
@@ -2483,7 +2485,7 @@ function root(fn) {
 	 */
 	ComputeProto._error = function (err) {
 		this._flag |= FLAG_ERROR;
-		this._settle(fatal(err));
+		this._settle(spark(err));
 	};
 
 	/** @this {Compute} */
@@ -2558,7 +2560,7 @@ function root(fn) {
 					resetChannel(this);
 				}
 				this._flag = (this._flag | FLAG_ERROR) & ~FLAG_PENDING;
-				this._value = fault(error, FATAL);
+				this._value = new Spark(error, FATAL);
 				this._ctime = time;
 				return;
 			}
@@ -2590,7 +2592,7 @@ function root(fn) {
 					value = this._fn(this, this._value, args);
 				}
 			} catch (error) {
-				value = fatal(error);
+				value = spark(error);
 				/** A throw wins over a callback that already settled. */
 				this._flag = (this._flag | FLAG_ERROR) & ~FLAG_CALLBACK;
 			}
@@ -2636,7 +2638,7 @@ function root(fn) {
 					value = this._fn(this, this._value, args);
 				}
 			} catch (error) {
-				value = fatal(error);
+				value = spark(error);
 				/** A throw wins over a callback that already settled. */
 				this._flag = (this._flag | FLAG_ERROR) & ~FLAG_CALLBACK;
 			}
@@ -3029,7 +3031,7 @@ function root(fn) {
 	 */
 	EffectProto._error = function (err) {
 		this._flag |= FLAG_ERROR;
-		this._settle(fatal(err));
+		this._settle(spark(err));
 	};
 
 	/**
@@ -3592,26 +3594,42 @@ function clearOwned(owner) {
 }
 
 /**
- * Creates a { error, type } object and records it in FAULTS, so it
- * passes through every later catch unchanged.
+ * Classifies a caught value. A Spark travels on unchanged; a value
+ * thrown by user code is wrapped as FATAL.
  * @param {*} error
- * @param {number} type
- * @returns {{ error: *, type: number }}
+ * @returns {Spark}
  */
-function fault(error, type) {
-	let err = { error, type };
-	FAULTS.add(err);
-	return err;
+function spark(error) {
+	return error instanceof Spark ? error : new Spark(error, FATAL);
 }
 
 /**
- * Classifies a caught value. An error anod created travels on
- * unchanged; a value thrown by user code is wrapped as FATAL.
+ * Creates an expected error. Throw it from any compute or task, or
+ * from code it calls, and it settles the node as REFUSE.
  * @param {*} error
- * @returns {{ error: *, type: number }}
+ * @returns {Spark}
+ */
+function refuse(error) {
+	return new Spark(error, REFUSE);
+}
+
+/**
+ * Creates a panic. Throw it to abort the node; owners see it as PANIC.
+ * @param {*} error
+ * @returns {Spark}
+ */
+function panic(error) {
+	return new Spark(error, PANIC);
+}
+
+/**
+ * Creates a fatal error. Throwing a value wraps it as FATAL anyway;
+ * fatal() is for passing one on without a throw.
+ * @param {*} error
+ * @returns {Spark}
  */
 function fatal(error) {
-	return FAULTS.has(error) ? error : fault(error, FATAL);
+	return new Spark(error, FATAL);
 }
 
 /**
@@ -4865,7 +4883,7 @@ function failStart(node, error) {
 	if (node._finalize !== null) {
 		clearFinalize(node);
 	}
-	let err = fatal(error);
+	let err = spark(error);
 	let result = tryRecover(node, err);
 	if (result !== RECOVER_SELF) {
 		node._dispose();
@@ -4936,7 +4954,7 @@ function flushEffects(queue, count, time) {
 				if (node._finalize !== null) {
 					clearFinalize(node);
 				}
-				let err = fatal(error);
+				let err = spark(error);
 				let result = tryRecover(node, err);
 				if (thrown === null && result === RECOVER_NONE) {
 					thrown = err;
@@ -4946,7 +4964,7 @@ function flushEffects(queue, count, time) {
 						node._dispose();
 					} catch (cleanupError) {
 						if (thrown === null) {
-							thrown = fault(cleanupError, FATAL);
+							thrown = new Spark(cleanupError, FATAL);
 						}
 					}
 				}
@@ -4998,7 +5016,7 @@ function flush() {
 						} catch (err) {
 							/** The node is disposed, but one of its cleanups threw. */
 							if (!thrown) {
-								error = fault(err, FATAL);
+								error = new Spark(err, FATAL);
 								thrown = true;
 							}
 						}
@@ -5183,6 +5201,10 @@ export {
 	REFUSE,
 	PANIC,
 	FATAL,
+	Spark,
+	refuse,
+	panic,
+	fatal,
 	OPT_DEFER,
 	OPT_STABLE,
 	OPT_SETUP,

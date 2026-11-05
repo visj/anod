@@ -2,6 +2,10 @@ export {
 	REFUSE,
 	PANIC,
 	FATAL,
+	Spark,
+	refuse,
+	panic,
+	fatal,
 	OPT_DEFER,
 	OPT_STABLE,
 	OPT_SETUP,
@@ -17,7 +21,6 @@ export {
 
 export type {
 	Resolve,
-	Err,
 	ReadonlySignal,
 	Signal,
 	MutableSignal,

@@ -1,5 +1,5 @@
 import { describe, test, expect } from "#test-runner";
-import { signal, resource, root, batch, flush, c, REFUSE, PANIC, FATAL, OPT_DEFER, OPT_STABLE, OPT_SETUP, OPT_WEAK, OPT_EAGER } from "#anod-src";
+import { signal, resource, root, batch, flush, c, REFUSE, PANIC, FATAL, refuse, panic, OPT_DEFER, OPT_STABLE, OPT_SETUP, OPT_WEAK, OPT_EAGER } from "#anod-src";
 
 /**
  * Exploratory tests: ownership, disposal, cleanup/finalize and error
@@ -542,7 +542,7 @@ describe("error propagation", () => {
         } catch (e) {
             caught = e;
         }
-        expect(caught).toEqual({ error: "nope", type: PANIC });
+        expect(caught).toEqual(panic("nope"));
     });
 
     /**
@@ -565,8 +565,8 @@ describe("error propagation", () => {
         });
         const bound = c.compute(a, (v) => v * 2);
         const unbound = c.compute((cx) => cx.val(a) * 2);
-        expect(bound.get()).toEqual({ error: "neg", type: REFUSE });
-        expect(unbound.get()).toEqual({ error: "neg", type: REFUSE });
+        expect(bound.get()).toEqual(refuse("neg"));
+        expect(unbound.get()).toEqual(refuse("neg"));
     });
 
     /**
@@ -605,8 +605,8 @@ describe("error propagation", () => {
                 cx.effect(a, () => { });
             });
         });
-        expect(unbound).toEqual({ error: "neg", type: REFUSE });
-        expect(bound).toEqual({ error: "neg", type: REFUSE });
+        expect(unbound).toEqual(refuse("neg"));
+        expect(bound).toEqual(refuse("neg"));
     });
 
     /**

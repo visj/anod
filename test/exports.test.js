@@ -1,7 +1,7 @@
 import { describe, test, expect } from "#test-runner";
 import * as anod from "#anod";
 import * as internal from "#anod-internal";
-import { signal, c, REFUSE } from "#anod";
+import { signal, c, refuse } from "#anod";
 import path from "node:path";
 import ts from "typescript";
 
@@ -86,9 +86,9 @@ describe("declarations", () => {
 
     test("rejected() is typed as returning the error", () => {
         const { diagnostics } = compile(`
-            import type { Context, Err } from "./index.js";
+            import type { Context, Spark } from "./index.js";
             type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B ? 1 : 2) ? true : false;
-            const ok: Equal<ReturnType<Context["rejected"]>, Err | null> = true;
+            const ok: Equal<ReturnType<Context["rejected"]>, Spark | null> = true;
         `);
         expect(diagnostics).toEqual([]);
     });
@@ -108,6 +108,6 @@ describe("declarations", () => {
         expect(err).toBe(null);
         s1.set(20);
         c2.get();
-        expect(err).toEqual({ error: "too large", type: REFUSE });
+        expect(err).toEqual(refuse("too large"));
     });
 });
