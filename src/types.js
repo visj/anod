@@ -119,10 +119,10 @@ class Sender extends Disposer {
 		this._stamp;
 		/** @type {Receiver | null} */
 		this._sub1;
-		/** @type {number} */
-		this._sub1slot;
 		/** @type {Array<Receiver | number> | null} */
 		this._subs;
+		/** @type {number} */
+		this._wtime;
 		/** @type {number} */
 		this._ctime;
 		/** @type {number} */

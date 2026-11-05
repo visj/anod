@@ -48,6 +48,8 @@ const FLAG_OWNER = 1 << 26;
 const FLAG_CALLBACK = 1 << 27;
 /** stable() was called during a run: its reads stay tracked until it ends. */
 const FLAG_FREEZE = 1 << 28;
+/** Set on the nodes of a checkRun stack only while checkCycle scans it. */
+const FLAG_VISIT = 1 << 29;
 
 /** Error type constants for { error, type } POJOs. */
 const REFUSE = 1;
@@ -219,7 +221,16 @@ var SENDERS = [];
 var PAYLOADS = [];
 /** @const @type {Array<(function(Sender, *, number): void) | null>} */
 var UPDATES = [];
+/**
+ * WRITES[i] is the write stamp of the queued write in SENDERS[i]. A
+ * write drains only if it was queued after the sender's last immediate
+ * write (_wtime), so set() supersedes earlier posts without a scan.
+ * @const @type {Array<number>}
+ */
+var WRITES = [];
 var SENDER_COUNT = 0;
+/** Orders queued and immediate writes; bumped by each of them. */
+var WSEQ = 0;
 
 /** @const @type {Array<Compute>} */
 var COMPUTES = [];
@@ -324,10 +335,10 @@ function Signal(value) {
 	this._stamp = -1;
 	/** @type {Receiver | null} */
 	this._sub1 = null;
-	/** @type {number} */
-	this._sub1slot = 0;
 	/** @type {Array<Receiver | number> | null} */
 	this._subs = null;
+	/** @type {number} */
+	this._wtime = 0;
 }
 
 /**
@@ -352,10 +363,10 @@ function Cell(value, flag, equal) {
 	this._stamp = -1;
 	/** @type {Receiver | null} */
 	this._sub1 = null;
-	/** @type {number} */
-	this._sub1slot = 0;
 	/** @type {Array<Receiver | number> | null} */
 	this._subs = null;
+	/** @type {number} */
+	this._wtime = 0;
 	/** @type {number} */
 	this._time = 0;
 	/** @type {(function(T,T): boolean) | null} */
@@ -384,8 +395,6 @@ function Compute(fn, opts, dep1, seed, args) {
 	this._stamp = -1;
 	/** @type {Receiver | null} */
 	this._sub1 = null;
-	/** @type {number} */
-	this._sub1slot = 0;
 	/** @type {Array<Receiver | number> | null} */
 	this._subs = null;
 	/** @type {(function(U, T, W): T) | (function(T, W): T) | null} */
@@ -799,22 +808,20 @@ function schedule(node, payload, fn) {
 	SENDERS[index] = node;
 	PAYLOADS[index] = payload;
 	UPDATES[index] = fn;
+	WRITES[index] = ++WSEQ;
 }
 
 /**
  * Cancels the queued writes to a sender, so that an immediate write
- * takes precedence over the writes posted before it. The entries keep
- * their place and drain as no-ops, leaving other senders untouched.
+ * takes precedence over the writes posted before it. Stamps the sender
+ * past them: the entries keep their place and drain as no-ops, leaving
+ * other senders untouched.
  * @param {Sender} node
  * @returns {void}
  */
 function supersede(node) {
 	node._flag &= ~FLAG_SCHEDULED;
-	for (let i = 0; i < SENDER_COUNT; i++) {
-		if (SENDERS[i] === node) {
-			UPDATES[i] = NOOP;
-		}
-	}
+	node._wtime = ++WSEQ;
 }
 
 /**
@@ -942,6 +949,8 @@ function root(fn) {
 	RootProto._level = -1;
 
 	SignalProto._ctime = 0;
+	/** Computes take no immediate writes, so their queued notify() always drains. */
+	ComputeProto._wtime = 0;
 	SignalProto._time = 0;
 	SignalProto._equal = null;
 
@@ -3346,6 +3355,7 @@ function subscribe(receiver, sender) {
  * holds [sender, subslot] pairs, each slot being the index of the
  * matching pair on the other side, or -1 for _sub1/_dep1. Either side
  * can then unlink in O(1) by swapping its last pair into the hole.
+ * _sub1 needs no slot: it never moves, and unlinking it only clears it.
  * @param {Sender} send
  * @param {Receiver} receiver
  * @param {number} depslot - index of the pair in receiver's _deps, -1 for _dep1
@@ -3354,7 +3364,6 @@ function subscribe(receiver, sender) {
 function connect(send, receiver, depslot) {
 	if (send._sub1 === null) {
 		send._sub1 = receiver;
-		send._sub1slot = depslot;
 		return -1;
 	}
 	let subs = send._subs;
@@ -3409,16 +3418,15 @@ function clearReceiver(send, subslot) {
 
 /**
  * Points sender's pair for a dep that moved to depslot in its
- * receiver's _deps (or to _dep1, for -1).
+ * receiver's _deps (or to _dep1, for -1). A receiver in _sub1 has no
+ * pair to update.
  * @param {Sender} send
  * @param {number} subslot
  * @param {number} depslot
  * @returns {void}
  */
 function moveDep(send, subslot, depslot) {
-	if (subslot === -1) {
-		send._sub1slot = depslot;
-	} else if (send._subs !== null) {
+	if (subslot !== -1 && send._subs !== null) {
 		send._subs[subslot + 1] = depslot;
 	}
 }
@@ -4161,24 +4169,34 @@ function checkRun(node, time) {
  * Called by checkRun when its stack reaches CMARK, which only happens
  * on a walk deeper than any before it or on a cycle. An acyclic walk
  * never has a node on the stack twice, so a repeat means the descent
- * has looped: unwinds the stack and throws instead of descending
- * forever. Otherwise doubles CMARK and returns it, so deep graphs pay
+ * has looped: it unwinds the stack and throws instead of descending
+ * forever. Repeats are found by marking each node with FLAG_VISIT and
+ * clearing the marks again, so the scan allocates nothing. Otherwise
+ * doubles CMARK and returns it, so deep graphs pay
  * this scan once per doubling of the deepest walk, not per pull.
  * @param {number} base
  * @returns {number}
  */
 function checkCycle(base) {
-	let seen = new Set();
-	for (let i = base; i < CTOP; i++) {
+	let top = CTOP;
+	let i = base;
+	for (; i < top; i++) {
 		let node = CSTACK[i];
-		if (seen.has(node)) {
-			for (let j = base; j < CTOP; j++) {
-				CSTACK[j] = null;
-			}
-			CTOP = base;
-			throw new Error("Cycle detected");
+		if (node._flag & FLAG_VISIT) {
+			break;
 		}
-		seen.add(node);
+		node._flag |= FLAG_VISIT;
+	}
+	/** Clear the marks set so far; a repeat stopped the walk at i. */
+	for (let j = base; j < i; j++) {
+		CSTACK[j]._flag &= ~FLAG_VISIT;
+	}
+	if (i < top) {
+		for (let j = base; j < top; j++) {
+			CSTACK[j] = null;
+		}
+		CTOP = base;
+		throw new Error("Cycle detected");
 	}
 	/** A nested checkRun may already have raised it past this depth. */
 	if (CTOP >= CMARK) {
@@ -5011,8 +5029,9 @@ function flush() {
 					count = SENDER_COUNT;
 					for (; i < count; i++) {
 						let node = SENDERS[i];
-						/** A sender disposed after its write was queued takes no writes. */
-						if (!(node._flag & FLAG_DISPOSED)) {
+						/** A sender disposed after its write was queued takes no
+						 *  writes, nor one superseded by an immediate write. */
+						if (!(node._flag & FLAG_DISPOSED) && WRITES[i] > node._wtime) {
 							try {
 								UPDATES[i](node, PAYLOADS[i], time);
 							} catch (err) {
@@ -5172,6 +5191,7 @@ export {
 	FLAG_OWNER,
 	FLAG_CALLBACK,
 	FLAG_FREEZE,
+	FLAG_VISIT,
 	REFUSE,
 	PANIC,
 	FATAL,

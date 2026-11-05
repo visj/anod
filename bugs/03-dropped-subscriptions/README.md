@@ -36,11 +36,11 @@ Run with `bun test --conditions=src test/explore/graph.test.js`.
 
 ## Fix
 
-Tombstones are gone. Links are two-way, as before `132554b`: `_subs` holds `[receiver, depslot]` pairs, `_deps` holds `[sender, subslot]` pairs, and `_sub1slot`/`_dep1slot` hold the slots of `_sub1`/`_dep1`. Each slot is the index of the matching pair on the other side, or -1 for `_sub1`/`_dep1`. Either side unlinks in O(1) by swapping its last pair into the hole and repointing the moved pair's partner.
+Tombstones are gone. Links are two-way, as before `132554b`: `_subs` holds `[receiver, depslot]` pairs, `_deps` holds `[sender, subslot]` pairs, and `_dep1slot` holds the slot of `_dep1`. Each slot is the index of the matching pair on the other side, or -1 for `_sub1`/`_dep1`. Either side unlinks in O(1) by swapping its last pair into the hole and repointing the moved pair's partner. `_sub1` keeps no slot: it never moves, and unlinking it only clears it.
 
 ### What changed
 
-- Removed `_tombstones`, `_purge`, `PURGES`, `PURGE_COUNT`, `FLAG_PURGE` and the purge pass in `flush`. `_sub1slot` takes `_tombstones`' place; receivers gain `_dep1slot`.
+- Removed `_tombstones`, `_purge`, `PURGES`, `PURGE_COUNT`, `FLAG_PURGE` and the purge pass in `flush`. Senders lose `_tombstones`; receivers gain `_dep1slot`. (An earlier version also kept a write-only `_sub1slot` on senders; that slot now holds Signal's `_wtime`, see `supersede`.)
 - `connect(send, receiver, depslot)` returns the subslot. `clearReceiver(send, subslot)` swap-removes and repoints the moved receiver. `moveDep` repoints a sender after a receiver moved a pair; `removeDep` swap-removes a receiver's pair (used by the `settleDeps` dedup).
 - Every loop over `_subs`/`_deps` steps by 2 (`notify`, `settleNotify`, `needsUpdate`, `checkRun`, `sweepDeps`, `clearDeps`). `checkRun`'s `CINDEX` holds pair indices.
 - Setup runs push pairs to `DSTACK`. While the run is in progress, senders point at the pair's absolute `DSTACK` index, so `clearReceiver` can repoint a receiver that is mid-setup (its `_deps` is still null). After a nested setup (`DBASE !== 0`), `rebaseDeps` points the senders at the sliced indices.
@@ -68,7 +68,7 @@ None. Test helpers that walk `_subs`/`_deps` (`test/patch.test.js`, `test/explor
 Min time, median of 6 rotated rounds, vs `fix/base` (unbound / bound):
 
 - Kairo, $mol_wire, 1k signals: within ±1%. CellX 10 layers +1.5% / +2.1%.
-- 1k computations: +2.9% / +4.3%, heap +10.7% / +8.9% (`_sub1slot` + `_dep1slot`).
+- 1k computations: +2.9% / +4.3%, heap +10.7% / +8.9% (measured with `_sub1slot` + `_dep1slot`; Compute has since dropped `_sub1slot`).
 - Build: simple +2.7% / +3.2%, large web app +5.4% / +4.9%, wide dense +11.9% / +12.3%. Heap +34% / +10% / +20%.
 - Update rows: within +3.3%; very dynamic −5.0% / −4.6% (dropped receivers stop being woken).
 - Fan-out flip (N dynamic effects drop and re-read one signal): N=10,000 1.29 ms (base 1.19 ms, scan version 206 ms).

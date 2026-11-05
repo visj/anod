@@ -33,7 +33,7 @@ Run with `bun test --conditions=src test/explore/graph.test.js`.
 
 - **`checkRun`**: each of its three push sites (fast descent, dep1 descent, `_deps[i]` descent) now reads `if (++CTOP === mark) { mark = checkCycle(base); }` instead of `CTOP++`. `mark` is a local, loaded once per call from `CMARK`.
 - **`CMARK`** (new module-level number, starts at 1024): the stack depth at which the next cycle check runs. It is a high-water mark: after an acyclic check it doubles past the depth reached, so only a walk deeper than any before it, or a cycle, ever reaches it.
-- **`checkCycle(base)`** (new, rare path): an acyclic walk never has a node on `CSTACK[base..CTOP)` twice, because that would be a path from the node back to itself. The function looks for such a repeat with a `Set`:
+- **`checkCycle(base)`** (new, rare path): an acyclic walk never has a node on `CSTACK[base..CTOP)` twice, because that would be a path from the node back to itself. The function marks each node in that region with `FLAG_VISIT` (bit 29) and stops at the first node already marked, then clears the marks it set. It allocates nothing.
   - On a repeat, it nulls the stack region, restores `CTOP = base` and throws `new Error("Cycle detected")`.
   - Otherwise it raises `CMARK` to twice the current depth and returns it.
   - A walk that descends forever must reach the mark: it runs out of nodes it can finalize, so it only pushes. The marks double, so the region eventually holds more entries than there are distinct nodes, and a repeat is certain. Cycles longer than the first mark are therefore found too, at a later mark.
@@ -66,4 +66,4 @@ No other group's tests changed state. `test/explore` goes from 83 to 82 failures
 
 - **`checkRun`**: one module-variable load (`CMARK`) per call, and `CTOP++` became `++CTOP === mark` at the three push sites: a compare of a register-held local per push, no extra memory write. `checkCycle` runs only when a walk is deeper than any walk before it (O(max depth) in total over the program's life) or on a cycle.
 - `checkSingle`, `needsUpdate`, `notify`, `_update` and the flush loops are untouched.
-- **Memory:** no node fields were added.
+- **Memory:** no node fields were added, and the scan allocates nothing. `FLAG_VISIT` is set only during a scan.

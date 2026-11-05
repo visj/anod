@@ -55,6 +55,7 @@ export declare const FLAG_PAUSED: number;
 export declare const FLAG_OWNER: number;
 export declare const FLAG_CALLBACK: number;
 export declare const FLAG_FREEZE: number;
+export declare const FLAG_VISIT: number;
 
 export declare const REFUSE: 1;
 export declare const PANIC: 2;
