@@ -46,6 +46,8 @@ const FLAG_PURGE = 1 << 24;
 const FLAG_PAUSED = 1 << 25;
 const FLAG_OWNER = 1 << 26;
 const FLAG_CALLBACK = 1 << 27;
+/** stable() was called during a run: its reads stay tracked until it ends. */
+const FLAG_FREEZE = 1 << 28;
 
 /** Error type constants for { error, type } POJOs. */
 const REFUSE = 1;
@@ -116,11 +118,20 @@ var CINDEX = [];
  * @type {number}
  */
 var CTOP = 0;
+/**
+ * Stack depth at which checkRun next makes sure it is not walking a
+ * cycle. Raised past every acyclic depth reached, so only a walk deeper
+ * than any before it, or a cycle, ever reaches it.
+ * @see {checkCycle}
+ * @type {number}
+ */
+var CMARK = 1024;
 
 /**
  * Pre-allocated stack for batching deps during setup execution.
- * During FLAG_SETUP _update, deps are written here as flat [sender, ...]
- * entries. After the fn returns, _deps is created via slice() with
+ * During FLAG_SETUP _update, deps are written here as [sender, subslot]
+ * pairs. Senders point at the pair's absolute index while the run is
+ * in progress. After the fn returns, _deps is created via slice() with
  * exact capacity — avoiding V8's push-based over-allocation.
  * This allows the growth factor problem that arises when going from
  * dep2 -> dep3.
@@ -229,7 +240,7 @@ var RECEIVER_COUNT = 0;
 
 /**
  * @const
- * @type {Array<Sender>}
+ * @type {Array<Owner>}
  */
 var PURGES = [];
 var PURGE_COUNT = 0;
@@ -254,6 +265,15 @@ var FAULTS = new WeakSet();
 var UNHANDLED = null;
 /** @type {Effect | null} */
 var UNHANDLED_NODE = null;
+
+/**
+ * Seeds of weak computes created with one. A released weak compute
+ * goes back to its seed, so its next run receives it as prev, as on
+ * the very first run. Kept off the node so other computes pay nothing.
+ * @const
+ * @type {WeakMap<Compute, *>}
+ */
+var SEEDS = new WeakMap();
 
 /**
  * Minimal factory-only context with no ownership. Nodes created
@@ -304,10 +324,10 @@ function Signal(value) {
 	this._stamp = -1;
 	/** @type {Receiver | null} */
 	this._sub1 = null;
-	/** @type {Array<Receiver> | null} */
-	this._subs = null;
 	/** @type {number} */
-	this._tombstones = 0;
+	this._sub1slot = 0;
+	/** @type {Array<Receiver | number> | null} */
+	this._subs = null;
 }
 
 /**
@@ -332,10 +352,10 @@ function Cell(value, flag, equal) {
 	this._stamp = -1;
 	/** @type {Receiver | null} */
 	this._sub1 = null;
-	/** @type {Array<Receiver> | null} */
-	this._subs = null;
 	/** @type {number} */
-	this._tombstones = 0;
+	this._sub1slot = 0;
+	/** @type {Array<Receiver | number> | null} */
+	this._subs = null;
 	/** @type {number} */
 	this._time = 0;
 	/** @type {(function(T,T): boolean) | null} */
@@ -364,15 +384,17 @@ function Compute(fn, opts, dep1, seed, args) {
 	this._stamp = -1;
 	/** @type {Receiver | null} */
 	this._sub1 = null;
-	/** @type {Array<Receiver> | null} */
-	this._subs = null;
 	/** @type {number} */
-	this._tombstones = 0;
+	this._sub1slot = 0;
+	/** @type {Array<Receiver | number> | null} */
+	this._subs = null;
 	/** @type {(function(U, T, W): T) | (function(T, W): T) | null} */
 	this._fn = fn;
 	/** @type {Sender<U> | null} */
 	this._dep1 = dep1;
-	/** @type {Array<Sender> | null} */
+	/** @type {number} */
+	this._dep1slot = -1;
+	/** @type {Array<Sender | number> | null} */
 	this._deps = null;
 	/** @type {number} */
 	this._time = 0;
@@ -403,7 +425,9 @@ function Effect(opts, fn, dep1, owner, args) {
 	this._fn = fn;
 	/** @type {Sender<U> | null} */
 	this._dep1 = dep1;
-	/** @type {Array<Sender> | null} */
+	/** @type {number} */
+	this._dep1slot = -1;
+	/** @type {Array<Sender | number> | null} */
 	this._deps = null;
 	/** @type {number} */
 	this._time = 0;
@@ -497,7 +521,7 @@ function val(sender) {
 	if (sender._flag & (FLAG_STALE | FLAG_PENDING)) {
 		sender._refresh();
 	}
-	if ((flag & (FLAG_STABLE | FLAG_SETUP)) === FLAG_STABLE) {
+	if ((flag & (FLAG_STABLE | FLAG_SETUP | FLAG_FREEZE)) === FLAG_STABLE) {
 		if (sender._flag & FLAG_ERROR) {
 			throw sender._value;
 		}
@@ -814,17 +838,19 @@ function _read(sender, stamp) {
 	if (this._flag & FLAG_SETUP) {
 		/** Setup path: first run, push deps to DSTACK. */
 		if (this._dep1 === null) {
-			connect(sender, this);
 			this._dep1 = sender;
+			this._dep1slot = connect(sender, this, -1);
 		} else {
-			connect(sender, this);
+			let subslot = connect(sender, this, DCOUNT);
 			DSTACK[DCOUNT++] = sender;
+			DSTACK[DCOUNT++] = subslot;
 		}
 	} else if (this._deps === null) {
-		this._deps = [sender];
+		/** New deps are connected by patchDeps after the run. */
+		this._deps = [sender, 0];
 		this._flag &= ~FLAG_SINGLE;
 	} else {
-		this._deps.push(sender);
+		this._deps.push(sender, 0);
 	}
 }
 
@@ -936,7 +962,8 @@ function root(fn) {
 	/**
 	 * Compute._drop: releases cached value and marks STALE. Called
 	 * from clearReceiver when FLAG_WEAK is set and no subscribers
-	 * remain. Loading nodes keep their value — active channel
+	 * remain. The value goes back to the seed, or null without one.
+	 * Loading nodes keep their value — active channel
 	 * waiters re-subscribe on settle.
 	 * @this {Compute}
 	 */
@@ -945,55 +972,10 @@ function root(fn) {
 			return;
 		}
 		this._flag |= FLAG_STALE;
-		this._value = null;
+		let seed = SEEDS.get(this);
+		this._value = seed !== undefined ? seed : null;
 		if (this._cleanup !== null) {
 			clearCleanup(this);
-		}
-	};
-
-	/**
-	 * Compacts _subs by removing FLAG_DISPOSED entries.
-	 * Pop-from-back for low churn, forward scan for high churn.
-	 * @this {Sender}
-	 */
-	SignalProto._purge = ComputeProto._purge = function () {
-		let subs = this._subs;
-		let disposed = this._tombstones;
-		this._flag &= ~FLAG_PURGE;
-		if (subs === null) {
-			return;
-		}
-		if (disposed >= subs.length) {
-			this._subs = null;
-			this._tombstones = 0;
-			return;
-		}
-		this._tombstones = 0;
-		if (disposed > subs.length >> 2) {
-			let write = 0;
-			let count = subs.length;
-			for (let read = 0; read < count; read++) {
-				let node = subs[read];
-				if (!(node._flag & FLAG_DISPOSED)) {
-					subs[write++] = node;
-				}
-			}
-			subs.length = write;
-			return;
-		}
-		let i = 0;
-		while (i < subs.length) {
-			if (subs[i]._flag & FLAG_DISPOSED) {
-				let tail;
-				do {
-					tail = subs.pop();
-					if (i >= subs.length) {
-						return;
-					}
-				} while (tail._flag & FLAG_DISPOSED);
-				subs[i] = tail;
-			}
-			i++;
 		}
 	};
 
@@ -1125,16 +1107,34 @@ function root(fn) {
 
 	/**
 	 * Marks the node stable — no dynamic dep tracking on subsequent runs.
-	 * For async nodes, also clears FLAG_SETUP so the stable short-circuit
-	 * in val() fires immediately (SETUP persists across awaits). For sync
-	 * nodes, SETUP is left in place — the natural cleanup at the end of
-	 * _update clears it, and during setup, deps must still be tracked via
-	 * the DSTACK mechanism.
-	 * @this {Receiver}
+	 * The deps are frozen as they are at the end of the run stable() is
+	 * called in: FLAG_FREEZE keeps val() tracking until that run ends, so
+	 * patchDeps does not drop the deps read after the call. Between runs,
+	 * the deps are frozen as they are. A compute clears FLAG_FREEZE at the
+	 * start and the end of every run, so it is always safe to set.
+	 * @this {Compute}
 	 * @returns {void}
 	 */
 	function stable() {
-		this._flag |= FLAG_STABLE;
+		if (!(this._flag & FLAG_STABLE)) {
+			this._flag |= FLAG_STABLE | FLAG_FREEZE;
+		}
+	}
+
+	/**
+	 * Effect version of stable(). An effect clears FLAG_FREEZE only when
+	 * a run ends, so it is set only while the effect is stale or pending:
+	 * running, or queued or paused with a run to come, which then still
+	 * tracks its reads. Otherwise the deps are frozen as they are.
+	 * @this {Effect}
+	 * @returns {void}
+	 */
+	function stableEffect() {
+		let flag = this._flag;
+		if (!(flag & FLAG_STABLE)) {
+			this._flag =
+				flag | FLAG_STABLE | (flag & (FLAG_STALE | FLAG_PENDING) ? FLAG_FREEZE : 0);
+		}
 	}
 
 	/** IOwner: cleanup/recover exposed on Root + Effect prototypes */
@@ -1159,7 +1159,8 @@ function root(fn) {
 	};
 
 	ComputeProto.equal = EffectProto.equal = equal;
-	ComputeProto.stable = EffectProto.stable = stable;
+	ComputeProto.stable = stable;
+	EffectProto.stable = stableEffect;
 
 	/**
 	 * Signals an expected error from a compute. Sets FLAG_ERROR and
@@ -1199,6 +1200,21 @@ function root(fn) {
 	 */
 	ComputeProto.eager = function () {
 		this._flag |= FLAG_EAGER;
+	};
+
+	/**
+	 * Marks this compute as weak, like OPT_WEAK: once it loses its last
+	 * subscriber, it releases its value and runs its cleanups. Called
+	 * before the first run, it keeps the seed for the recompute, as
+	 * OPT_WEAK does. After the first run the seed is gone, so the
+	 * recompute gets null as prev.
+	 * @this {Compute}
+	 */
+	ComputeProto.weak = function () {
+		if (this._flag & FLAG_INIT && this._value !== undefined) {
+			SEEDS.set(this, this._value);
+		}
+		this._flag |= FLAG_WEAK;
 	};
 
 	/**
@@ -1487,15 +1503,8 @@ function root(fn) {
 		if (!(taskNode._flag & FLAG_LOADING)) {
 			if (node._flag & FLAG_LOADING) {
 				subscribe(node, taskNode);
-			} else if (!(node._flag & FLAG_LOADING)) {
-				let version = STAMP;
-				let stamp = taskNode._stamp;
-				taskNode._stamp = version;
-				if (stamp !== version - 1) {
-					node._read(taskNode, stamp);
-				} else {
-					REUSED++;
-				}
+			} else {
+				track(node, taskNode);
 			}
 			if (taskNode._flag & FLAG_ERROR) {
 				throw taskNode._value;
@@ -1540,7 +1549,7 @@ function root(fn) {
 		for (let i = 0; i < count; i++) {
 			let task = tasks[i];
 			if (task._flag & FLAG_DISPOSED || task === node) {
-				subscribeArray(node, tasks);
+				subscribeArray(node, tasks, !(node._flag & FLAG_LOADING));
 				throw new Error(ILLEGAL_READ);
 			}
 			if (task._flag & (FLAG_STALE | FLAG_PENDING)) {
@@ -1551,14 +1560,14 @@ function root(fn) {
 				break;
 			}
 			if (task._flag & FLAG_ERROR) {
-				subscribeArray(node, tasks);
+				subscribeArray(node, tasks, !(node._flag & FLAG_LOADING));
 				throw task._value;
 			}
 			results[i] = task._value;
 		}
 
 		if (allSettled) {
-			subscribeArray(node, tasks);
+			subscribeArray(node, tasks, !(node._flag & FLAG_LOADING));
 			return results;
 		}
 		node._flag |= FLAG_BLOCKED;
@@ -1617,7 +1626,7 @@ function root(fn) {
 		 *  the await with a consistent snapshot. */
 		if (blocked === -1) {
 			node._flag &= ~FLAG_BLOCKED;
-			subscribeArray(node, tasks);
+			subscribeArray(node, tasks, false);
 			if (failed) {
 				reject(error);
 			} else {
@@ -1650,13 +1659,18 @@ function root(fn) {
 	 * or failed.
 	 * @param {AsyncReceiver} node
 	 * @param {Array<Compute>} tasks
+	 * @param {boolean} sync - inside node's sync run: track like val()
 	 */
-	function subscribeArray(node, tasks) {
+	function subscribeArray(node, tasks, sync) {
 		let count = tasks.length;
 		for (let i = 0; i < count; i++) {
 			let task = tasks[i];
 			if (!(task._flag & FLAG_DISPOSED) && task !== node) {
-				subscribe(node, task);
+				if (sync) {
+					track(node, task);
+				} else {
+					subscribe(node, task);
+				}
 			}
 		}
 	}
@@ -1829,7 +1843,7 @@ function root(fn) {
 			if (sender._flag & (FLAG_STALE | FLAG_PENDING)) {
 				sender._refresh();
 			}
-			if ((flag & (FLAG_STABLE | FLAG_SETUP)) !== FLAG_STABLE) {
+			if ((flag & (FLAG_STABLE | FLAG_SETUP | FLAG_FREEZE)) !== FLAG_STABLE) {
 				if (sender._stamp !== version) {
 					let stamp = sender._stamp;
 					sender._stamp = version;
@@ -2198,7 +2212,7 @@ function root(fn) {
 			let deps = receiver._deps;
 			if (deps !== null) {
 				let count = deps.length;
-				for (let i = 0; i < count; i++) {
+				for (let i = 0; i < count; i += 2) {
 					dep = deps[i];
 					if (dep._flag & (FLAG_STALE | FLAG_PENDING)) {
 						FENCE = SEED;
@@ -2457,7 +2471,7 @@ function root(fn) {
 		if (
 			this._flag & FLAG_WEAK &&
 			this._sub1 === null &&
-			(this._subs === null || this._tombstones >= this._subs.length)
+			(this._subs === null || this._subs.length === 0)
 		) {
 			this._drop();
 		}
@@ -2532,7 +2546,8 @@ function root(fn) {
 				FLAG_ERROR |
 				FLAG_EQUAL |
 				FLAG_NOTEQUAL |
-				FLAG_SUSPEND
+				FLAG_SUSPEND |
+				FLAG_FREEZE
 			);
 
 		if (!(flag & FLAG_INIT) && this._cleanup !== null) {
@@ -2631,11 +2646,16 @@ function root(fn) {
 			if (flag & FLAG_SETUP) {
 				if (DCOUNT > DBASE) {
 					let stack = DSTACK;
-					this._deps = stack.slice(DBASE, DCOUNT);
+					let deps = (this._deps = stack.slice(DBASE, DCOUNT));
 					for (let i = DBASE; i < DCOUNT; i++) {
 						stack[i] = null;
 					}
+					if (DBASE !== 0) {
+						rebaseDeps(deps);
+					}
 					DCOUNT = DBASE;
+					/** A bound node starts single. */
+					this._flag &= ~FLAG_SINGLE;
 				} else if (this._dep1 !== null) {
 					this._flag |= FLAG_SINGLE;
 				}
@@ -2660,7 +2680,7 @@ function root(fn) {
 			STAMP = prevRVer;
 		}
 
-		this._flag &= ~(FLAG_STALE | FLAG_PENDING | FLAG_SETUP);
+		this._flag &= ~(FLAG_STALE | FLAG_PENDING | FLAG_SETUP | FLAG_FREEZE);
 		flag = this._flag;
 
 		/** Async: if fn used callback suspend, the node is already
@@ -2739,7 +2759,8 @@ function root(fn) {
 	 * 1. Default: propagate PENDING downstream (pure pull).
 	 * 2. FLAG_WAITER: enqueue to COMPUTES + notify PENDING.
 	 * 3. FLAG_EAGER + FLAG_ASYNC: enqueue to COMPUTES for eager re-run.
-	 * 4. FLAG_EAGER + sync: notify FLAG_STALE directly (pure push).
+	 * 4. FLAG_EAGER + sync: enqueue to COMPUTES + notify PENDING, so
+	 *    subscribers only re-run if the eager re-run changes the value.
 	 * @this {Compute}
 	 * @returns {void}
 	 */
@@ -2760,11 +2781,8 @@ function root(fn) {
 			return;
 		} else {
 			COMPUTES[COMPUTE_COUNT++] = this;
-			if (flag & FLAG_EAGER) {
-				if (!(flag & FLAG_ASYNC)) {
-					notify(this, FLAG_STALE);
-				}
-			} else {
+			/** An eager task notifies its subscribers when it settles. */
+			if (!(flag & FLAG_EAGER && flag & FLAG_ASYNC)) {
 				notify(this, FLAG_PENDING);
 			}
 		}
@@ -2826,7 +2844,8 @@ function root(fn) {
 		let value;
 		let args = this._args;
 
-		if ((flag & (FLAG_STABLE | FLAG_SETUP)) === FLAG_STABLE) {
+		/** FLAG_FREEZE: stable() was called while queued, so this run still tracks. */
+		if ((flag & (FLAG_STABLE | FLAG_SETUP | FLAG_FREEZE)) === FLAG_STABLE) {
 			try {
 				if (flag & FLAG_BOUND) {
 					let dep = this._dep1;
@@ -2883,11 +2902,16 @@ function root(fn) {
 				if (flag & FLAG_SETUP) {
 					if (DCOUNT > DBASE) {
 						let stack = DSTACK;
-						this._deps = stack.slice(DBASE, DCOUNT);
+						let deps = (this._deps = stack.slice(DBASE, DCOUNT));
 						for (let i = DBASE; i < DCOUNT; i++) {
 							stack[i] = null;
 						}
+						if (DBASE !== 0) {
+							rebaseDeps(deps);
+						}
 						DCOUNT = DBASE;
+						/** A bound node starts single. */
+						this._flag &= ~FLAG_SINGLE;
 					} else if (this._dep1 !== null) {
 						this._flag |= FLAG_SINGLE;
 					}
@@ -2909,7 +2933,7 @@ function root(fn) {
 					VCOUNT = saveStart;
 				}
 				STAMP = current;
-				this._flag &= ~(FLAG_SETUP | FLAG_STALE | FLAG_PENDING);
+				this._flag &= ~(FLAG_SETUP | FLAG_STALE | FLAG_PENDING | FLAG_FREEZE);
 			}
 		}
 
@@ -3098,7 +3122,10 @@ function root(fn) {
 			flag =
 				FLAG_STABLE | FLAG_BOUND | FLAG_SINGLE | ((0 | argsOrOpts) & OPTIONS);
 			node = new Compute(/** @type {!Function} */(fnOrSeed), flag, depOrFn, optsOrSeed, args);
-			connect(depOrFn, node);
+			node._dep1slot = connect(depOrFn, node, -1);
+		}
+		if (flag & FLAG_WEAK && node._value !== undefined) {
+			SEEDS.set(node, node._value);
 		}
 		if (this._flag & FLAG_OWNER) {
 			addOwned(this, node);
@@ -3138,7 +3165,10 @@ function root(fn) {
 				FLAG_SINGLE |
 				((0 | argsOrOpts) & OPTIONS);
 			node = new Compute(fnOrSeed, flag, depOrFn, optsOrSeed, args);
-			connect(depOrFn, node);
+			node._dep1slot = connect(depOrFn, node, -1);
+		}
+		if (flag & FLAG_WEAK && node._value !== undefined) {
+			SEEDS.set(node, node._value);
 		}
 		if (this._flag & FLAG_OWNER) {
 			addOwned(this, node);
@@ -3173,7 +3203,7 @@ function root(fn) {
 			flag =
 				FLAG_STABLE | FLAG_BOUND | FLAG_SINGLE | ((0 | optsOrArgs) & OPTIONS);
 			node = new Effect(flag, /** @type {!Function} */(fnOrOpts), depOrFn, this, args);
-			connect(depOrFn, node);
+			node._dep1slot = connect(depOrFn, node, -1);
 		}
 		let level = this._level + 1;
 		if (this._level > 2 && level >= LEVELS.length) {
@@ -3184,7 +3214,11 @@ function root(fn) {
 		if (this._flag & FLAG_OWNER) {
 			addOwned(this, node);
 		}
-		startEffect(node);
+		if ((flag & (FLAG_DEFER | FLAG_BOUND)) === (FLAG_DEFER | FLAG_BOUND)) {
+			deferEffect(node);
+		} else {
+			startEffect(node);
+		}
 		return node;
 	}
 
@@ -3216,7 +3250,7 @@ function root(fn) {
 				FLAG_SINGLE |
 				((0 | optsOrArgs) & OPTIONS);
 			node = new Effect(flag, /** @type {!Function} */(fnOrOpts), depOrFn, this, args);
-			connect(depOrFn, node);
+			node._dep1slot = connect(depOrFn, node, -1);
 		}
 		let level = this._level + 1;
 		if (this._level > 2 && level >= LEVELS.length) {
@@ -3227,7 +3261,11 @@ function root(fn) {
 		if (this._flag & FLAG_OWNER) {
 			addOwned(this, node);
 		}
-		startEffect(node);
+		if ((flag & (FLAG_DEFER | FLAG_BOUND)) === (FLAG_DEFER | FLAG_BOUND)) {
+			deferEffect(node);
+		} else {
+			startEffect(node);
+		}
 		return node;
 	}
 
@@ -3240,25 +3278,49 @@ function root(fn) {
 }
 
 /**
- * Adds a dependency outside the version-tracked sync scope (reads
- * after an await, settled waiters, deferred deps). Like _read, a
- * second dependency clears FLAG_SINGLE.
+ * Tracks sender as a dep of node from inside node's sync run, the
+ * same way val() does: patchDeps or the setup slice links it after
+ * the run. Stable nodes past setup track nothing.
+ * @param {Receiver} node
+ * @param {Sender} sender
+ */
+function track(node, sender) {
+	if ((node._flag & (FLAG_STABLE | FLAG_SETUP)) === FLAG_STABLE) {
+		return;
+	}
+	let version = STAMP;
+	let stamp = sender._stamp;
+	if (stamp === version) {
+		return;
+	}
+	sender._stamp = version;
+	if (stamp === version - 1) {
+		REUSED++;
+	} else {
+		node._read(sender, stamp);
+	}
+}
+
+/**
+ * Links sender to receiver outside receiver's sync run (reads after
+ * an await, settled waiters, deferred deps). Like _read, a second
+ * dependency clears FLAG_SINGLE.
  * @param {Receiver} receiver
  * @param {Sender} sender
  */
 function subscribe(receiver, sender) {
 	if (receiver._dep1 === null) {
 		receiver._dep1 = sender;
-		connect(sender, receiver);
+		receiver._dep1slot = connect(sender, receiver, -1);
 	} else {
 		let deps = receiver._deps;
 		if (deps === null) {
-			receiver._deps = [sender];
+			receiver._deps = [sender, connect(sender, receiver, 0)];
 			receiver._flag &= ~FLAG_SINGLE;
 		} else {
-			deps.push(sender);
+			let depslot = deps.length;
+			deps.push(sender, connect(sender, receiver, depslot));
 		}
-		connect(sender, receiver);
 	}
 }
 
@@ -3279,51 +3341,122 @@ function subscribe(receiver, sender) {
  * not so much more expensive. But right now, going from 2 to 3 subs
  * will cause a sudden big spike in memory. Since most senders have a few subs,
  * this is a real concern.
+ *
+ * Links are two-way. _subs holds [receiver, depslot] pairs and _deps
+ * holds [sender, subslot] pairs, each slot being the index of the
+ * matching pair on the other side, or -1 for _sub1/_dep1. Either side
+ * can then unlink in O(1) by swapping its last pair into the hole.
  * @param {Sender} send
  * @param {Receiver} receiver
- * @returns {void}
+ * @param {number} depslot - index of the pair in receiver's _deps, -1 for _dep1
+ * @returns {number} subslot - index of the pair in send's _subs, -1 for _sub1
  */
-function connect(send, receiver) {
+function connect(send, receiver, depslot) {
 	if (send._sub1 === null) {
 		send._sub1 = receiver;
-	} else if (send._subs === null) {
-		send._subs = [receiver];
-	} else {
-		send._subs.push(receiver);
+		send._sub1slot = depslot;
+		return -1;
 	}
+	let subs = send._subs;
+	if (subs === null) {
+		send._subs = [receiver, depslot];
+		return 0;
+	}
+	let subslot = subs.length;
+	subs.push(receiver, depslot);
+	return subslot;
 }
 
 /**
- * Marks receiver as removed from sender's subscriber list.
- * For _sub1, clears immediately. For _subs array entries,
- * defers compaction via _tombstones and purge heuristic.
+ * Removes the receiver at subslot from send's subscriber list.
+ * Swap-with-last O(1), then points the moved receiver's dep pair at
+ * its new index. A receiver in its setup run keeps its pairs in DSTACK.
+ * Disposed senders have already dropped their subscribers.
  * @param {Sender} send
- * @param {Receiver} receiver
+ * @param {number} subslot
  * @returns {void}
  */
-function clearReceiver(send, receiver) {
-	if (send._sub1 === receiver) {
+function clearReceiver(send, subslot) {
+	if (send._flag & FLAG_DISPOSED) {
+		return;
+	}
+	if (subslot === -1) {
 		send._sub1 = null;
 	} else {
-		let disposed = ++send._tombstones;
 		let subs = send._subs;
-		if (subs !== null) {
-			if (disposed >= subs.length) {
-				/** All subs are dead — release the array immediately. */
-				send._subs = null;
-				send._tombstones = 0;
-			} else if (!(send._flag & FLAG_PURGE) && disposed >= subs.length >> 2) {
-				send._flag |= FLAG_PURGE;
-				PURGES[PURGE_COUNT++] = send;
+		let lastSlot = /** @type {number} */ (subs.pop());
+		let lastNode = /** @type {Receiver} */ (subs.pop());
+		if (subslot !== subs.length) {
+			subs[subslot] = lastNode;
+			subs[subslot + 1] = lastSlot;
+			if (lastSlot === -1) {
+				lastNode._dep1slot = subslot;
+			} else if (lastNode._deps !== null) {
+				lastNode._deps[lastSlot + 1] = subslot;
+			} else {
+				DSTACK[lastSlot + 1] = subslot;
 			}
 		}
 	}
 	if (
 		send._flag & FLAG_WEAK &&
 		send._sub1 === null &&
-		(send._subs === null || send._tombstones >= send._subs.length)
+		(send._subs === null || send._subs.length === 0)
 	) {
 		send._drop();
+	}
+}
+
+/**
+ * Points sender's pair for a dep that moved to depslot in its
+ * receiver's _deps (or to _dep1, for -1).
+ * @param {Sender} send
+ * @param {number} subslot
+ * @param {number} depslot
+ * @returns {void}
+ */
+function moveDep(send, subslot, depslot) {
+	if (subslot === -1) {
+		send._sub1slot = depslot;
+	} else if (send._subs !== null) {
+		send._subs[subslot + 1] = depslot;
+	}
+}
+
+/**
+ * After a nested setup run, the senders point at absolute DSTACK
+ * indices. Points them at the pairs' indices in the sliced _deps.
+ * @param {Array<Sender | number>} deps
+ * @returns {void}
+ */
+function rebaseDeps(deps) {
+	let count = deps.length;
+	for (let i = 0; i < count; i += 2) {
+		moveDep(
+			/** @type {Sender} */ (deps[i]),
+			/** @type {number} */ (deps[i + 1]),
+			i
+		);
+	}
+}
+
+/**
+ * Removes the dep pair at i from node's _deps. Swap-with-last O(1).
+ * @param {Array<Sender | number>} deps
+ * @param {number} i
+ * @returns {void}
+ */
+function removeDep(deps, i) {
+	clearReceiver(
+		/** @type {Sender} */ (deps[i]),
+		/** @type {number} */ (deps[i + 1])
+	);
+	let lastSlot = /** @type {number} */ (deps.pop());
+	let lastDep = /** @type {Sender} */ (deps.pop());
+	if (i !== deps.length) {
+		deps[i] = lastDep;
+		deps[i + 1] = lastSlot;
+		moveDep(lastDep, lastSlot, i);
 	}
 }
 
@@ -3334,14 +3467,17 @@ function clearReceiver(send, receiver) {
  */
 function clearDeps(receive) {
 	if (receive._dep1 !== null) {
-		clearReceiver(receive._dep1, receive);
+		clearReceiver(receive._dep1, receive._dep1slot);
 		receive._dep1 = null;
 	}
 	let deps = receive._deps;
 	if (deps !== null) {
 		let count = deps.length;
-		for (let i = 0; i < count; i++) {
-			clearReceiver(deps[i], receive);
+		for (let i = 0; i < count; i += 2) {
+			clearReceiver(
+				/** @type {Sender} */ (deps[i]),
+				/** @type {number} */ (deps[i + 1])
+			);
 		}
 		receive._deps = null;
 	}
@@ -3351,14 +3487,14 @@ function clearDeps(receive) {
  * Nulls out sender's subscriber list on disposal.
  * Receivers self-heal: dynamic nodes remove stale deps via
  * patchDeps on next re-run; stable bound nodes detect disposed
- * dep1 in _update via refreshDep1.
+ * dep1 in _update via refreshDep1. clearReceiver skips disposed
+ * senders, so their pairs need no unlinking.
  * @param {Sender} send
  * @returns {void}
  */
 function clearSubs(send) {
 	send._sub1 = null;
 	send._subs = null;
-	send._tombstones = 0;
 }
 
 /**
@@ -3588,7 +3724,7 @@ function tryRecover(node, error) {
  */
 function patchDeps(node, version, depCount, newLen) {
 	let deps = node._deps;
-	let existingLen = depCount > 1 ? depCount - 1 : 0;
+	let existingLen = depCount > 1 ? (depCount - 1) * 2 : 0;
 	let newidx = existingLen;
 
 	/** Check dep1 - always exists when depCount >= 1, and _read never
@@ -3597,12 +3733,12 @@ function patchDeps(node, version, depCount, newLen) {
 	let dep1 = node._dep1;
 	if (dep1 !== null) {
 		if (dep1._stamp !== version) {
-			clearReceiver(dep1, node);
+			clearReceiver(dep1, node._dep1slot);
 			if (newidx < newLen) {
-				let newDep = deps[newidx];
+				let newDep = /** @type {Sender} */ (deps[newidx]);
 				node._dep1 = newDep;
-				connect(newDep, node);
-				newidx++;
+				node._dep1slot = connect(newDep, node, -1);
+				newidx += 2;
 			} else {
 				node._dep1 = null;
 			}
@@ -3612,12 +3748,14 @@ function patchDeps(node, version, depCount, newLen) {
 	if (deps === null) {
 		if (node._dep1 !== null) {
 			node._flag |= FLAG_SINGLE;
+		} else {
+			node._flag &= ~FLAG_SINGLE;
 		}
 		return;
 	}
 
 	/**
-	 * Three-pointer scan:
+	 * Three-pointer scan over [sender, subslot] pairs:
 	 *   i 			-	forward through existing region
 	 *   newidx -	next new dep to consume (unsubscribed, in new region)
 	 *   tail 	-	end of live region, shrinks when we pop reused deps from the back
@@ -3625,34 +3763,37 @@ function patchDeps(node, version, depCount, newLen) {
 	let i = 0;
 	let tail = existingLen;
 	while (i < tail) {
-		let dep = deps[i];
+		let dep = /** @type {Sender} */ (deps[i]);
 		if (dep._stamp === version) {
-			i++;
+			i += 2;
 			continue;
 		}
 		/** Dropped — unbind */
-		clearReceiver(dep, node);
+		clearReceiver(dep, /** @type {number} */ (deps[i + 1]));
 		if (newidx < newLen) {
-			let newDep = deps[newidx];
-			connect(newDep, node);
+			let newDep = /** @type {Sender} */ (deps[newidx]);
 			deps[i] = newDep;
-			newidx++;
-			i++;
+			deps[i + 1] = connect(newDep, node, i);
+			newidx += 2;
+			i += 2;
 		} else {
 			let found = 0;
-			while (tail > i + 1) {
-				tail--;
-				let tDep = deps[tail];
+			while (tail > i + 2) {
+				tail -= 2;
+				let tDep = /** @type {Sender} */ (deps[tail]);
+				let tSlot = /** @type {number} */ (deps[tail + 1]);
 				if (tDep._stamp === version) {
 					deps[i] = tDep;
+					deps[i + 1] = tSlot;
+					moveDep(tDep, tSlot, i);
 					found = 1;
 					break;
 				} else {
-					clearReceiver(tDep, node);
+					clearReceiver(tDep, tSlot);
 				}
 			}
 			if (found) {
-				i++;
+				i += 2;
 			} else {
 				tail = i;
 			}
@@ -3660,24 +3801,29 @@ function patchDeps(node, version, depCount, newLen) {
 	}
 	if (newidx < newLen) {
 		if (node._dep1 === null) {
-			let newDep = deps[newidx];
-			connect(newDep, node);
-			deps[i] = newDep;
-			newidx++;
+			/** No deps before this run: the first new dep becomes dep1. */
+			let newDep = /** @type {Sender} */ (deps[newidx]);
+			node._dep1 = newDep;
+			node._dep1slot = connect(newDep, node, -1);
+			newidx += 2;
 		}
 		while (newidx < newLen) {
-			let dep = deps[newidx];
-			connect(dep, node);
+			let dep = /** @type {Sender} */ (deps[newidx]);
 			deps[tail] = dep;
-			tail++;
-			newidx++;
+			deps[tail + 1] = connect(dep, node, tail);
+			tail += 2;
+			newidx += 2;
 		}
 	}
 
 	/** Promote last array entry to dep1 when dep1 is empty. */
 	if (node._dep1 === null && tail > 0) {
-		tail--;
-		node._dep1 = deps[tail];
+		tail -= 2;
+		let dep = /** @type {Sender} */ (deps[tail]);
+		let slot = /** @type {number} */ (deps[tail + 1]);
+		node._dep1 = dep;
+		node._dep1slot = slot;
+		moveDep(dep, slot, -1);
 	}
 
 	/** Trim or null out, update FLAG_SINGLE */
@@ -3727,7 +3873,7 @@ function sweepDeps(stamp, dep1, deps) {
 	}
 	if (deps !== null) {
 		let count = deps.length;
-		for (let i = 0; i < count; i++) {
+		for (let i = 0; i < count; i += 2) {
 			let dep = deps[i];
 			let depver = dep._stamp;
 			if (depver > transaction) {
@@ -3736,7 +3882,7 @@ function sweepDeps(stamp, dep1, deps) {
 			}
 			dep._stamp = stamp;
 		}
-		depCount += count;
+		depCount += count >> 1;
 	}
 	VCOUNT = vcount;
 	return depCount;
@@ -3758,7 +3904,7 @@ function notify(node, flag) {
 	let subs = node._subs;
 	if (subs !== null) {
 		let count = subs.length;
-		for (let i = 0; i < count; i++) {
+		for (let i = 0; i < count; i += 2) {
 			sub = subs[i];
 			let flags = sub._flag;
 			sub._flag |= flag;
@@ -3801,7 +3947,7 @@ function needsUpdate(node, time) {
 	let deps = node._deps;
 	if (deps !== null) {
 		let len = deps.length;
-		for (let i = 0; i < len; i++) {
+		for (let i = 0; i < len; i += 2) {
 			dep = deps[i];
 			let flag = dep._flag;
 			if (flag & FLAG_STALE) {
@@ -3855,6 +4001,7 @@ function checkSingle(node, time) {
 function checkRun(node, time) {
 	let base = CTOP;
 	let dep = node._dep1;
+	let mark = CMARK;
 
 	/**
 	 * Fast descent: walk single-dep PENDING chains without the overhead
@@ -3865,7 +4012,9 @@ function checkRun(node, time) {
 		do {
 			CSTACK[CTOP] = node;
 			CINDEX[CTOP] = -1;
-			CTOP++;
+			if (++CTOP === mark) {
+				mark = checkCycle(base);
+			}
 			node = dep;
 			dep = node._dep1;
 		} while (
@@ -3898,7 +4047,9 @@ function checkRun(node, time) {
 						/** Descend into dep1 — push current node, resume later */
 						CSTACK[CTOP] = node;
 						CINDEX[CTOP] = -1;
-						CTOP++;
+						if (++CTOP === mark) {
+							mark = checkCycle(base);
+						}
 						node = dep;
 						continue outer;
 					}
@@ -3921,13 +4072,13 @@ function checkRun(node, time) {
 					node._update(time);
 					break scan;
 				}
-				i = resumeFrom + 1;
+				i = resumeFrom + 2;
 			}
 
 			let deps = node._deps;
 			if (deps !== null) {
 				let count = deps.length;
-				for (; i < count; i++) {
+				for (; i < count; i += 2) {
 					dep = deps[i];
 					let flag = dep._flag;
 					if (flag & FLAG_STALE) {
@@ -3936,7 +4087,9 @@ function checkRun(node, time) {
 						/** Descend into deps[i] — push current node */
 						CSTACK[CTOP] = node;
 						CINDEX[CTOP] = i;
-						CTOP++;
+						if (++CTOP === mark) {
+							mark = checkCycle(base);
+						}
 						node = dep;
 						resumeFrom = -2;
 						continue outer;
@@ -3990,7 +4143,7 @@ function checkRun(node, time) {
 					resumeFrom = -1;
 					continue outer;
 				}
-			} else if (idx + 1 < parent._deps.length) {
+			} else if (idx + 2 < parent._deps.length) {
 				/** More entries in deps array — resume scanning */
 				node = parent;
 				resumeFrom = idx;
@@ -4002,6 +4155,36 @@ function checkRun(node, time) {
 		}
 		return;
 	}
+}
+
+/**
+ * Called by checkRun when its stack reaches CMARK, which only happens
+ * on a walk deeper than any before it or on a cycle. An acyclic walk
+ * never has a node on the stack twice, so a repeat means the descent
+ * has looped: unwinds the stack and throws instead of descending
+ * forever. Otherwise doubles CMARK and returns it, so deep graphs pay
+ * this scan once per doubling of the deepest walk, not per pull.
+ * @param {number} base
+ * @returns {number}
+ */
+function checkCycle(base) {
+	let seen = new Set();
+	for (let i = base; i < CTOP; i++) {
+		let node = CSTACK[i];
+		if (seen.has(node)) {
+			for (let j = base; j < CTOP; j++) {
+				CSTACK[j] = null;
+			}
+			CTOP = base;
+			throw new Error("Cycle detected");
+		}
+		seen.add(node);
+	}
+	/** A nested checkRun may already have raised it past this depth. */
+	if (CTOP >= CMARK) {
+		CMARK = CTOP << 1;
+	}
+	return CMARK;
 }
 
 /**
@@ -4185,7 +4368,7 @@ function settleNotify(node, value, isError, waiters, waiterCount, quiet) {
 	let subs = node._subs;
 	if (subs !== null) {
 		let count = subs.length;
-		for (let i = 0; i < count; i++) {
+		for (let i = 0; i < count; i += 2) {
 			subs[i]._stamp = version - 1;
 		}
 	}
@@ -4221,7 +4404,7 @@ function settleNotify(node, value, isError, waiters, waiterCount, quiet) {
 	}
 	if (subs !== null) {
 		let count = subs.length;
-		for (let i = 0; i < count; i++) {
+		for (let i = 0; i < count; i += 2) {
 			sub = subs[i];
 			if (sub._stamp !== version) {
 				let flags = sub._flag;
@@ -4272,34 +4455,17 @@ function settleDeps(node) {
 		dep1._stamp = stamp;
 	}
 
-	/** Dedup scan of _deps — remove duplicates via swap-with-last. */
+	/** Dedup scan of _deps — remove duplicates via swap-with-last.
+	 *  Walks back to front, so the pair swapped in is already seen. */
 	let hasDefers = defer1 !== null || deferLen > 0;
 	if (deps !== null) {
-		let i = deps.length - 1;
-		let write = deps.length;
-		while (i >= 0) {
-			let dep = deps[i];
+		for (let i = deps.length - 2; i >= 0; i -= 2) {
+			let dep = /** @type {Sender} */ (deps[i]);
 			if (dep._stamp === stamp) {
-				clearReceiver(dep, node);
-				write--;
-				if (i !== write) {
-					let lastDep;
-					if (hasDefers) {
-						lastDep = deps[write];
-					} else {
-						lastDep = deps.pop();
-					}
-					deps[i] = lastDep;
-				} else if (!hasDefers) {
-					deps.pop();
-				}
+				removeDep(deps, i);
 			} else {
 				dep._stamp = stamp;
 			}
-			i--;
-		}
-		if (hasDefers && write < deps.length) {
-			deps.length = write;
 		}
 	}
 
@@ -4705,6 +4871,36 @@ function failStart(node, error) {
 }
 
 /**
+ * Starts a bound effect created with OPT_DEFER without running it.
+ * A stale or pending compute does not pass notifications on, so the
+ * dep is brought up to date first: its next change then reaches the
+ * effect. The effect counts as having run now, so a dep that does not
+ * change after this does not run it either.
+ * @param {Effect} node
+ * @returns {void}
+ */
+function deferEffect(node) {
+	let dep = node._dep1;
+	node._time = TIME;
+	if (dep._flag & (FLAG_STALE | FLAG_PENDING)) {
+		if (IDLE) {
+			IDLE = false;
+			try {
+				FENCE = SEED;
+				dep._refresh();
+				if (SENDER_COUNT > 0 || DISPOSER_COUNT > 0) {
+					flush();
+				}
+			} finally {
+				IDLE = true;
+			}
+		} else {
+			dep._refresh();
+		}
+	}
+}
+
+/**
  * Drains a queue of effect nodes: checks staleness, updates,
  * handles errors with finalize/recover/dispose. Returns the
  * first unrecoverable error POJO, or null if all succeeded.
@@ -4718,9 +4914,11 @@ function flushEffects(queue, count, time) {
 	for (let i = 0; i < count; i++) {
 		let node = queue[i];
 		queue[i] = null;
+		/** A node paused after it was queued keeps its flags for resume(). */
 		if (
-			node._flag & FLAG_STALE ||
-			(node._flag & FLAG_PENDING && needsUpdate(node, time))
+			(node._flag & (FLAG_STALE | FLAG_PAUSED)) === FLAG_STALE ||
+			((node._flag & (FLAG_PENDING | FLAG_PAUSED)) === FLAG_PENDING &&
+				needsUpdate(node, time))
 		) {
 			FENCE = SEED;
 			try {
@@ -4746,7 +4944,7 @@ function flushEffects(queue, count, time) {
 					}
 				}
 			}
-		} else {
+		} else if (!(node._flag & FLAG_PAUSED)) {
 			node._flag &= ~(FLAG_STALE | FLAG_PENDING);
 		}
 	}
@@ -4973,6 +5171,7 @@ export {
 	FLAG_PAUSED,
 	FLAG_OWNER,
 	FLAG_CALLBACK,
+	FLAG_FREEZE,
 	REFUSE,
 	PANIC,
 	FATAL,

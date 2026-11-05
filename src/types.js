@@ -119,10 +119,10 @@ class Sender extends Disposer {
 		this._stamp;
 		/** @type {Receiver | null} */
 		this._sub1;
-		/** @type {Array<Receiver> | null} */
-		this._subs;
 		/** @type {number} */
-		this._tombstones;
+		this._sub1slot;
+		/** @type {Array<Receiver | number> | null} */
+		this._subs;
 		/** @type {number} */
 		this._ctime;
 		/** @type {number} */
@@ -132,8 +132,6 @@ class Sender extends Disposer {
 	}
 	/** @returns {void} */
 	_drop() { }
-	/** @returns {void} */
-	_purge() { }
 	/**
 	 * @param {T} value
 	 * @returns {boolean}
@@ -177,7 +175,9 @@ class Receiver extends Disposer {
 		super();
 		/** @type {Sender | null} */
 		this._dep1;
-		/** @type {Array<Sender> | null} */
+		/** @type {number} */
+		this._dep1slot;
+		/** @type {Array<Sender | number> | null} */
 		this._deps;
 		/** @type {number} */
 		this._time;
@@ -270,7 +270,9 @@ class ICompute extends Sender {
 		/* Receiver properties */
 		/** @type {Sender | null} */
 		this._dep1 = null;
-		/** @type {Array<Sender> | null} */
+		/** @type {number} */
+		this._dep1slot = -1;
+		/** @type {Array<Sender | number> | null} */
 		this._deps = null;
 		/** @type {Function | null} */
 		this._fn = null;
@@ -326,7 +328,9 @@ class IEffect extends Owner {
 		/* Receiver properties */
 		/** @type {Sender | null} */
 		this._dep1 = null;
-		/** @type {Array<Sender> | null} */
+		/** @type {number} */
+		this._dep1slot = -1;
+		/** @type {Array<Sender | number> | null} */
 		this._deps = null;
 		/** @type {number} */
 		this._time = 0;

@@ -54,6 +54,7 @@ export declare const FLAG_PURGE: number;
 export declare const FLAG_PAUSED: number;
 export declare const FLAG_OWNER: number;
 export declare const FLAG_CALLBACK: number;
+export declare const FLAG_FREEZE: number;
 
 export declare const REFUSE: 1;
 export declare const PANIC: 2;
@@ -535,7 +536,7 @@ export declare const SCOPES: Array<Array<Effect>>;
 export declare var SCOPE_COUNT: number;
 export declare const RECEIVERS: Array<Effect>;
 export declare var RECEIVER_COUNT: number;
-export declare const PURGES: Array<Sender | Owner>;
+export declare const PURGES: Array<Owner>;
 export declare var PURGE_COUNT: number;
 
 /* What the factories do once a node is constructed: connect() a bound

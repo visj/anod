@@ -33,7 +33,7 @@ function subCount(sender, node) {
         count++;
     }
     if (sender._subs !== null) {
-        for (let i = 0; i < sender._subs.length; i++) {
+        for (let i = 0; i < sender._subs.length; i += 2) {
             if (sender._subs[i] === node) {
                 count++;
             }
@@ -49,7 +49,7 @@ function depsOf(node) {
         out.push(node._dep1);
     }
     if (node._deps !== null) {
-        for (let i = 0; i < node._deps.length; i++) {
+        for (let i = 0; i < node._deps.length; i += 2) {
             out.push(node._deps[i]);
         }
     }
@@ -1327,13 +1327,14 @@ describe("subscriber bookkeeping", () => {
             expect(runs[i]).toBe(i % 5 === 0 ? 2 : 1);
         }
         let live = s._sub1 !== null ? 1 : 0;
-        for (const sub of s._subs || []) {
-            if (!(sub._flag & FLAG_DISPOSED)) {
+        const subs = s._subs || [];
+        for (let i = 0; i < subs.length; i += 2) {
+            if (!(subs[i]._flag & FLAG_DISPOSED)) {
                 live++;
             }
         }
         expect(live).toBe(10);
-        expect((s._subs || []).length + (s._sub1 !== null ? 1 : 0)).toBe(10);
+        expect(subs.length / 2 + (s._sub1 !== null ? 1 : 0)).toBe(10);
     });
 
     test("an effect disposing a sibling of the same signal: the sibling stops by the next write", () => {
