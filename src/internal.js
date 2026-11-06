@@ -466,7 +466,7 @@ function Effect(opts, fn, dep1, owner, args) {
 /**
  * Unified async context for task/spawn nodes. Created lazily on first
  * async utility call (controller(), defer(), suspend(task)). Stored
- * in the node's dedicated _channel field.
+ * in the node's dedicated _chan field.
  * @constructor
  * @implements {IChannel}
  */
@@ -477,7 +477,7 @@ function Channel() {
 	this._responds = null;
 	/** @type {Array<AsyncReceiver | (function(*): void)> | null} 3-stride: [awaiter, resolve, reject]. */
 	this._waiters = null;
-	/** @type {AbortController | Array<AbortController> | null} */
+	/** @type {AbortController | null} */
 	this._controller = null;
 	/** @type {Sender | null} First deferred dep (inline fast path). */
 	this._defer1 = null;
@@ -1823,9 +1823,9 @@ function root(fn) {
 	};
 
 	/**
-	 * Lazily allocates the Channel for this node. Lifts _args into
-	 * the Channel so the original args are preserved but the node's
-	 * _args slot points directly to the Channel.
+	 * Returns this node's Channel, allocating it into _chan and setting
+	 * FLAG_CHANNEL on first use. Nodes that never use an async utility
+	 * keep _chan null.
 	 * @this {AsyncReceiver}
 	 * @returns {IChannel}
 	 */
@@ -1842,23 +1842,18 @@ function root(fn) {
 	ComputeProto._channel = EffectProto._channel = _channel;
 
 	/**
-	 * Creates a fresh AbortController for this async activation.
-	 * The controller is automatically aborted on re-run or dispose.
-	 * Stored compactly: _controller holds a single controller for
-	 * count=1, graduating to an array on the second.
+	 * Returns the AbortController of this async activation, which is
+	 * aborted on re-run or dispose. Every call in one activation gets
+	 * the same controller, since they would all be aborted together.
+	 * A controller the user aborted is replaced with a fresh one.
 	 * @this {AsyncReceiver}
 	 * @returns {AbortController}
 	 */
 	function controller() {
 		let channel = this._channel();
-		let ctrl = new AbortController();
-		let current = channel._controller;
-		if (current === null) {
-			channel._controller = ctrl;
-		} else if (Array.isArray(current)) {
-			current.push(ctrl);
-		} else {
-			channel._controller = [current, ctrl];
+		let ctrl = channel._controller;
+		if (ctrl === null || ctrl.signal.aborted) {
+			ctrl = channel._controller = new AbortController();
 		}
 		return ctrl;
 	}
@@ -2617,7 +2612,7 @@ function root(fn) {
 		if (flag & FLAG_CHANNEL) {
 			let chan = this._chan;
 			if (chan._controller !== null) {
-				abortControllers(chan._controller);
+				chan._controller.abort();
 			}
 			/** Reject any nodes awaiting this task. */
 			if (chan._waiters !== null) {
@@ -2919,9 +2914,9 @@ function root(fn) {
 			if (flag & FLAG_LOCKED) {
 				return;
 			}
-			/** A completed activation's controllers are released, not
+			/** A completed activation's controller is released, not
 			 *  aborted: only an activation in flight is aborted on re-run,
-			 *  below. This keeps them from piling up. */
+			 *  below. The next activation gets a fresh one. */
 			if (!(flag & FLAG_LOADING)) {
 				this._chan._controller = null;
 			}
@@ -3173,7 +3168,7 @@ function root(fn) {
 				if (flag & FLAG_CHANNEL) {
 					let chan = this._chan;
 					if (chan._controller !== null) {
-						abortControllers(chan._controller);
+						chan._controller.abort();
 					}
 					if (chan._res1 !== null || chan._responds !== null) {
 						clearChannel(chan, this);
@@ -4741,23 +4736,8 @@ function hasDep(node, sender) {
 }
 
 /**
- * Aborts the controllers handed out by c.controller() in one activation.
- * @param {AbortController | Array<AbortController>} controller
- * @returns {void}
- */
-function abortControllers(controller) {
-	if (Array.isArray(controller)) {
-		for (let i = 0; i < controller.length; i++) {
-			controller[i].abort();
-		}
-	} else {
-		controller.abort();
-	}
-}
-
-/**
  * Resets async fiber state before re-execution. Aborts the previous
- * controllers, clears stale defers, and removes channel bindings,
+ * controller, clears stale defers, and removes channel bindings,
  * abandoning an array await (FLAG_BLOCKED) along with them.
  * Shared between Compute and Effect _update paths.
  * @param {AsyncReceiver} node
@@ -4766,7 +4746,7 @@ function abortControllers(controller) {
 function resetChannel(node) {
 	let chan = node._chan;
 	if (chan._controller !== null) {
-		abortControllers(chan._controller);
+		chan._controller.abort();
 		chan._controller = null;
 	}
 	chan._defer1 = null;

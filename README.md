@@ -1137,6 +1137,8 @@ root((c) => {
 
 `c.controller()` returns an `AbortController` that is automatically aborted when the node re-runs or is disposed. Useful for cancelling fetch requests or other abortable operations.
 
+Every call within one activation returns the same controller, so several requests can share its signal. If you abort it yourself, the next call returns a fresh one.
+
 ```ts
 import { root, signal, FATAL } from "anod";
 root((c) => {
