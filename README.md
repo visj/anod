@@ -1247,50 +1247,55 @@ anod has chosen to drop the O(1) two-way slot binding that S.js uses. This rests
 
 Most reactivity benchmarks measure deep chains and synthetic propagation patterns that rarely occur in real apps. This benchmark (`bench/app`) instead models a typical list view: 1,000 rows, each with its own state signals, computes derived from them, and effects that write DOM values. It is the shape most application code has: many signals feeding many computes, with effects mostly writing to the DOM.
 
-Per row, three signals (`label`, `count`, `done`) feed four computes: a text from label and count, a filter check, an "is selected" check against one id every row shares, and a class name from selection and theme. Five DOM writes follow, four with a single dependency and one with two. At app level, a count over all 1,000 rows feeds a footer, and one side effect persists the filter. DOM elements are plain objects, so the numbers measure the reactive engine, not a DOM.
+Per row, three signals (`label`, `count`, `done`) feed three computes: a text from label and count, a filter check, and a class name from selection and theme. Selection goes through each library's selector, which flips only the previous and the next row: Solid's `createProjection`, and the same small hand-written keyed selector in anod and alien-signals, which have no built-in one. Five DOM writes follow, four with a single dependency and one with two. At app level, a count over all 1,000 rows feeds a footer, and one side effect persists the filter. DOM elements are plain objects, so the numbers measure the reactive engine, not a DOM.
 
-Every suite builds the same graph, and checks at startup that each scenario runs exactly the same number of computes and effects. anod uses the bound API for single-dependency nodes, as a compiler like katode emits; alien-signals uses `computed` and `effect` with one `effectScope` per row; Solid uses `createMemo`, `createRenderEffect` for DOM writes and one `createRoot` per row, ending each scenario with `flush()` as its renderer does.
+Every suite builds the same graph, and checks at startup that each scenario runs exactly the same number of computes and effects. Each uses its library as documented, with every tool it offers for this graph. anod uses the bound API for single-dependency nodes, as a compiler like katode emits, and marks the 1,000-signal count `stable()`. alien-signals uses `computed` and `effect` with one `effectScope` per row. Solid uses `createMemo`, `createRenderEffect` for DOM writes and one `createRoot` per row, ending each scenario with `flush()` as its renderer does.
 
 | Scenario | What happens | Work per iteration |
 | :-- | :-- | :-- |
-| Mount + unmount 1k rows | build every row and the app, then dispose them | 4,001 computes, 5,002 effects |
+| Mount + unmount 1k rows | build every row and the app, then dispose them | 3,001 computes, 5,002 effects |
 | Edit one row | change one row's label | 1 compute, 2 effects |
 | Toggle one row | flip one row's `done` | 1 compute (the 1,000-dep count), 2 effects |
-| Select a row | change the selected id | 1,002 computes, 4 effects |
+| Select a row | change the selected id | 2 computes, 4 effects |
+| Select a row, no selector | the same, with a compute per row over the selected id | 1,002 computes, 4 effects |
 | Edit 10 rows in a batch | bump 10 rows' counts in one batch | 10 computes, 20 effects |
 | Change filter | cycle all → done → open | 1,000 computes, up to 1,001 effects |
 | Change theme | toggle light/dark | 1,000 computes, 1,000 effects |
-| Remount 100 rows | dispose and rebuild 100 row components | 400 computes, 500 effects |
+| Remount 100 rows | dispose and rebuild 100 row components | 300 computes, 500 effects |
 
-Time is the average per iteration, the median of 8 rounds run in rotated order. Heap is what one iteration allocates, as measured by mitata. Negative Δ = anod is faster / allocates less. Ran on Apple M1 Pro, Node v26.11.1, macOS 26.6.
+Time is the average per iteration, the median of 8 rounds run in rotated order. Alloc is the bytes one iteration allocates, the median across rounds, measured with V8's sampling heap profiler. It counts objects already collected, unlike mitata's heap column, which under-reports libraries that allocate a lot. Part of it is the benchmark's own strings, the same in every suite. Negative Δ = anod is faster / allocates less. Ran on Apple M1 Pro, Node v26.11.1, macOS 26.6.
 
 ### anod vs [alien-signals](https://github.com/stackblitz/alien-signals) by Stackblitz (Vue-js internal engine)
 
-| Scenario | alien | anod | Δ time | alien | anod | Δ heap |
+| Scenario | alien | anod | Δ time | alien | anod | Δ alloc |
 | :-- | --: | --: | --: | --: | --: | --: |
-| | **Time** | **Time** | | **Heap** | **Heap** | |
-| Mount + unmount 1k rows | 984 µs | 822 µs | -16% | 4.0 MB | 3.3 MB | -16% |
-| Edit one row | 177 ns | 149 ns | -16% | 176 B | 96 B | -45% |
-| Toggle one row | 15.1 µs | 6,476 ns | -57% | 25 B | 24 B | -1% |
-| Select a row | 108 µs | 61.3 µs | -43% | 40.8 kB | 570 B | -99% |
-| Edit 10 rows in a batch | 2,033 ns | 1,837 ns | -10% | 2.1 kB | 1.4 kB | -34% |
-| Change filter | 95.9 µs | 65.3 µs | -32% | 27.5 kB | 21.8 kB | -21% |
-| Change theme | 105 µs | 70.5 µs | -33% | 28.6 kB | 28.4 kB | -1% |
-| Remount 100 rows | 88.6 µs | 74.4 µs | -16% | 336.6 kB | 272.3 kB | -19% |
+| | **Time** | **Time** | | **Alloc** | **Alloc** | |
+| Mount + unmount 1k rows | 1.25 ms | 1.06 ms | -15% | 3.9 MB | 3.2 MB | -16% |
+| Edit one row | 237 ns | 194 ns | -18% | 177 B | 96 B | -45% |
+| Toggle one row | 23.5 µs | 4,975 ns | -79% | 25 B | 25 B | +1% |
+| Select a row | 567 ns | 482 ns | -15% | 97 B | 97 B | 0% |
+| Select a row, no selector | 126 µs | 79.9 µs | -37% | 40.4 kB | 97 B | -100% |
+| Edit 10 rows in a batch | 2,824 ns | 2,460 ns | -13% | 2.1 kB | 1.4 kB | -34% |
+| Change filter | 131 µs | 90.8 µs | -31% | 26.7 kB | 21.5 kB | -20% |
+| Change theme | 141 µs | 82.8 µs | -41% | 28.2 kB | 28.1 kB | 0% |
+| Remount 100 rows | 111 µs | 95.9 µs | -14% | 310.3 kB | 253.6 kB | -18% |
 
 ### anod vs [@solidjs/signals](https://github.com/solidjs/solid) (Solid 2.0 beta)
 
-| Scenario | solid | anod | Δ time | solid | anod | Δ heap |
+| Scenario | solid | anod | Δ time | solid | anod | Δ alloc |
 | :-- | --: | --: | --: | --: | --: | --: |
-| | **Time** | **Time** | | **Heap** | **Heap** | |
-| Mount + unmount 1k rows | 4.04 ms | 822 µs | -80% | 10.9 MB | 3.3 MB | -69% |
-| Edit one row | 971 ns | 149 ns | -85% | 1.1 kB | 96 B | -91% |
-| Toggle one row | 32.8 µs | 6,476 ns | -80% | 1.0 kB | 24 B | -98% |
-| Select a row | 140 µs | 61.3 µs | -56% | 151.6 kB | 570 B | -100% |
-| Edit 10 rows in a batch | 8,181 ns | 1,837 ns | -78% | 686 B | 1.4 kB | +97% |
-| Change filter | 320 µs | 65.3 µs | -80% | 389.1 kB | 21.8 kB | -94% |
-| Change theme | 432 µs | 70.5 µs | -84% | 520.7 kB | 28.4 kB | -95% |
-| Remount 100 rows | 396 µs | 74.4 µs | -81% | 1.0 MB | 272.3 kB | -73% |
+| | **Time** | **Time** | | **Alloc** | **Alloc** | |
+| Mount + unmount 1k rows | 7.06 ms | 1.06 ms | -85% | 11.2 MB | 3.2 MB | -71% |
+| Edit one row | 2,023 ns | 194 ns | -90% | 1.1 kB | 96 B | -91% |
+| Toggle one row | 63.7 µs | 4,975 ns | -92% | 1.0 kB | 25 B | -98% |
+| Select a row | 6,670 ns | 482 ns | -93% | 3.5 kB | 97 B | -97% |
+| Select a row, no selector | 282 µs | 79.9 µs | -72% | 151.1 kB | 97 B | -100% |
+| Edit 10 rows in a batch | 18.3 µs | 2,460 ns | -87% | 8.9 kB | 1.4 kB | -84% |
+| Change filter | 668 µs | 90.8 µs | -86% | 391.3 kB | 21.5 kB | -95% |
+| Change theme | 1.08 ms | 82.8 µs | -92% | 512.6 kB | 28.1 kB | -95% |
+| Remount 100 rows | 726 µs | 95.9 µs | -87% | 990.3 kB | 253.6 kB | -74% |
+
+Solid's projection also slows its scenarios that never touch the selection: a toggle takes about 43 µs without it, 62 µs with it. Real Solid apps use stores throughout, so the suite keeps it; see [bench/app/README.md](bench/app/README.md).
 
 Run them with `node bench/app/anod.js`, `node bench/app/alien-signals.js` and `node bench/app/solid.js` after `npm run make`. `ANOD_API=unbound node bench/app/anod.js` builds every node with the unbound API (`c.compute(fn)`, `c.effect(fn)`) instead. See [bench/app/README.md](bench/app/README.md) for the full graph.
 
