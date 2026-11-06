@@ -25,8 +25,44 @@ function createStore(n) {
     };
 }
 
-/** One row component: its computeds and DOM writes. */
-function mountRow(store, row, el) {
+/**
+ * A keyed selector, like Solid 1's createSelector: one signal per id, and
+ * one effect that flips the previous and the next id's signal. A select
+ * then reruns two rows instead of every row. alien-signals has no
+ * built-in one; this is the helper an app would write.
+ * @returns {function(number): function(): boolean}
+ */
+function createSelector(source) {
+    const keys = new Map();
+    let prev = source();
+    effect(() => {
+        const id = source();
+        const old = keys.get(prev);
+        if (old !== undefined) {
+            old(false);
+        }
+        const next = keys.get(id);
+        if (next !== undefined) {
+            next(true);
+        }
+        prev = id;
+    });
+    return (id) => {
+        let s = keys.get(id);
+        if (s === undefined) {
+            s = signal(id === prev);
+            keys.set(id, s);
+        }
+        return s;
+    };
+}
+
+/**
+ * One row component: its computeds and DOM writes. With a selector,
+ * `selected` is the row's selector signal; without one, a computed per
+ * row compares the selected id.
+ */
+function mountRow(store, row, el, isSelected) {
     const text = computed(() => {
         computes++;
         return row.label() + ' (' + row.count() + ')';
@@ -37,10 +73,12 @@ function mountRow(store, row, el) {
         return f === 'all' || (f === 'done') === row.done();
     });
     const id = row.id;
-    const selected = computed(() => {
-        computes++;
-        return store.selected() === id;
-    });
+    const selected = isSelected !== null
+        ? isSelected(id)
+        : computed(() => {
+            computes++;
+            return store.selected() === id;
+        });
     const cls = computed(() => {
         computes++;
         return (selected() ? 'row selected ' : 'row ') + store.theme();
@@ -72,19 +110,30 @@ function mountApp(store, footer) {
     effect(() => { effects++; storage = store.filter(); });
 }
 
-/** Builds store, row components (one scope each) and app nodes. */
-function createApp(n) {
+/**
+ * Builds store, app nodes and row components (one scope each). The app
+ * owns the selector, so it is built before the rows that read it.
+ * `naive` builds the rows without a selector.
+ */
+function createApp(n, naive = false) {
     const store = createStore(n);
     const els = makeEls(n);
     const views = new Array(n);
+    let isSelected = null;
+    const app = effectScope(() => {
+        if (!naive) {
+            isSelected = createSelector(store.selected);
+        }
+        mountApp(store, makeEl());
+    });
     for (let i = 0; i < n; i++) {
-        views[i] = effectScope(() => mountRow(store, store.rows[i], els[i]));
+        views[i] = effectScope(() => mountRow(store, store.rows[i], els[i], isSelected));
     }
-    const app = effectScope(() => mountApp(store, makeEl()));
     return {
         store,
         els,
         views,
+        isSelected,
         dispose() {
             for (let i = 0; i < n; i++) {
                 views[i]();
@@ -122,6 +171,13 @@ const scenarios = {
             store.selected((iter++ * 13) % ROWS);
         };
     })(),
+    'Select a row, no selector': (() => {
+        const { store } = createApp(ROWS, true);
+        let iter = 0;
+        return () => {
+            store.selected((iter++ * 13) % ROWS);
+        };
+    })(),
     'Edit 10 rows in a batch': (() => {
         const { store } = createApp(ROWS);
         let iter = 0;
@@ -149,13 +205,13 @@ const scenarios = {
         };
     })(),
     'Remount 100 rows': (() => {
-        const { store, els, views } = createApp(ROWS);
+        const { store, els, views, isSelected } = createApp(ROWS);
         let iter = 0;
         return () => {
             const base = (iter++ * REMOUNT) % ROWS;
             for (let k = base; k < base + REMOUNT; k++) {
                 views[k]();
-                views[k] = effectScope(() => mountRow(store, store.rows[k], els[k]));
+                views[k] = effectScope(() => mountRow(store, store.rows[k], els[k], isSelected));
             }
         };
     })(),

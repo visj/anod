@@ -5,7 +5,7 @@
  * renderer does.
  */
 import { bench, run } from 'mitata';
-import { createSignal, createMemo, createRoot, createEffect, createRenderEffect, flush } from '@solidjs/signals';
+import { createSignal, createMemo, createRoot, createEffect, createRenderEffect, createProjection, flush } from '@solidjs/signals';
 import { ROWS, REMOUNT, BATCH, FILTERS, LABELS_A, LABELS_B, makeEls, makeEl, initialDone, validate } from './shared.js';
 import { saveRun } from '../reactivity/save-run.js';
 
@@ -29,8 +29,28 @@ function createStore(n) {
     return { rows, theme, setTheme, filter, setFilter, selected, setSelected };
 }
 
-/** One row component: its memos and DOM writes. */
-function mountRow(store, row, el) {
+/**
+ * Solid 2.0's replacement for createSelector: a projection holding `true`
+ * under the selected id. Each row reads its own key, so a select reruns
+ * the previous and the next row only.
+ * @returns {Object<number, boolean>}
+ */
+function createSelection(source) {
+    let prev = source();
+    return createProjection((draft) => {
+        const id = source();
+        delete draft[prev];
+        draft[id] = true;
+        prev = id;
+    }, {});
+}
+
+/**
+ * One row component: its memos and DOM writes. With a selection, rows
+ * read their key in it; without one, a memo per row compares the
+ * selected id.
+ */
+function mountRow(store, row, el, selection) {
     const text = createMemo(() => {
         computes++;
         return row.label() + ' (' + row.count() + ')';
@@ -41,10 +61,12 @@ function mountRow(store, row, el) {
         return f === 'all' || (f === 'done') === row.done();
     });
     const id = row.id;
-    const selected = createMemo(() => {
-        computes++;
-        return store.selected() === id;
-    });
+    const selected = selection !== null
+        ? () => selection[id] === true
+        : createMemo(() => {
+            computes++;
+            return store.selected() === id;
+        });
     const cls = createMemo(() => {
         computes++;
         return (selected() ? 'row selected ' : 'row ') + store.theme();
@@ -76,26 +98,35 @@ function mountApp(store, footer) {
     createEffect(store.filter, (v) => { effects++; storage = v; });
 }
 
-/** Builds store, row components (one root each) and app nodes. */
-function createApp(n) {
+/**
+ * Builds store, app nodes and row components (one root each). The app
+ * owns the selection, so it is built before the rows that read it.
+ * `naive` builds the rows without a selection.
+ */
+function createApp(n, naive = false) {
     const store = createStore(n);
     const els = makeEls(n);
     const views = new Array(n);
-    for (let i = 0; i < n; i++) {
-        views[i] = createRoot((dispose) => {
-            mountRow(store, store.rows[i], els[i]);
-            return dispose;
-        });
-    }
+    let selection = null;
     const app = createRoot((dispose) => {
+        if (!naive) {
+            selection = createSelection(store.selected);
+        }
         mountApp(store, makeEl());
         return dispose;
     });
+    for (let i = 0; i < n; i++) {
+        views[i] = createRoot((dispose) => {
+            mountRow(store, store.rows[i], els[i], selection);
+            return dispose;
+        });
+    }
     flush();
     return {
         store,
         els,
         views,
+        selection,
         dispose() {
             for (let i = 0; i < n; i++) {
                 views[i]();
@@ -136,6 +167,14 @@ const scenarios = {
             flush();
         };
     })(),
+    'Select a row, no selector': (() => {
+        const { store } = createApp(ROWS, true);
+        let iter = 0;
+        return () => {
+            store.setSelected((iter++ * 13) % ROWS);
+            flush();
+        };
+    })(),
     'Edit 10 rows in a batch': (() => {
         const { store } = createApp(ROWS);
         let iter = 0;
@@ -164,14 +203,14 @@ const scenarios = {
         };
     })(),
     'Remount 100 rows': (() => {
-        const { store, els, views } = createApp(ROWS);
+        const { store, els, views, selection } = createApp(ROWS);
         let iter = 0;
         return () => {
             const base = (iter++ * REMOUNT) % ROWS;
             for (let k = base; k < base + REMOUNT; k++) {
                 views[k]();
                 views[k] = createRoot((dispose) => {
-                    mountRow(store, store.rows[k], els[k]);
+                    mountRow(store, store.rows[k], els[k], selection);
                     return dispose;
                 });
             }

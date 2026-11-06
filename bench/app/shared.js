@@ -7,7 +7,11 @@
  * Per row (view, owned by the row component):
  *   text     = label + count       compute, 2 deps
  *   visible  = filter, done        compute, 1-2 deps (done is read only when filtered)
- *   selected = selectedId === id   compute, 1 dep on a signal shared by every row
+ *   selected = is this row selected: the library's selector (Solid's
+ *              createProjection, a hand-written keyed selector in anod
+ *              and alien-signals), so a select reruns two rows. The
+ *              "no selector" scenario uses a compute per row instead:
+ *              selectedId === id, 1 dep on a signal every row shares
  *   cls      = selected + theme    compute, 2 deps
  *   DOM writes: textContent <- text, hidden <- visible, className <- cls,
  *   checked <- done (single dep each), title <- text + selected (2 deps)
@@ -17,7 +21,9 @@
  *   persist <- filter             app side effect
  *
  * Every suite builds this exact graph and must report the same number of
- * compute and effect runs per scenario (see EXPECTED).
+ * compute and effect runs per scenario (see EXPECTED). The selector's own
+ * run is not counted: it is a projection in Solid and an effect in the
+ * others.
  */
 export const ROWS = 1000;
 export const REMOUNT = 100;
@@ -53,14 +59,15 @@ export function initialDone(i) {
  * different work fails its validation.
  */
 export const EXPECTED = {
-    'Mount + unmount 1k rows': { computes: 4001, effects: 5002 },
+    'Mount + unmount 1k rows': { computes: 3001, effects: 5002 },
     'Edit one row': { computes: 1, effects: 2 },
     'Toggle one row': { computes: 1, effects: 2 },
-    'Select a row': { computes: 1002, effects: 4 },
+    'Select a row': { computes: 2, effects: 4 },
+    'Select a row, no selector': { computes: 1002, effects: 4 },
     'Edit 10 rows in a batch': { computes: 10, effects: 20 },
     'Change filter': { computes: 1000, effects: 1001 },
     'Change theme': { computes: 1000, effects: 1000 },
-    'Remount 100 rows': { computes: 400, effects: 500 },
+    'Remount 100 rows': { computes: 300, effects: 500 },
 };
 
 /**

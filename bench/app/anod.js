@@ -28,8 +28,43 @@ function createStore(n) {
     };
 }
 
-/** One row component: its computes and DOM writes, owned by r. */
-function mountRow(r, store, row, el) {
+/**
+ * A keyed selector, like Solid 1's createSelector: one signal per id, and
+ * one effect that flips the previous and the next id's signal. A select
+ * then reruns two rows instead of every row. anod has no built-in one;
+ * this is the helper an app would write.
+ * @returns {function(number): Signal<boolean>}
+ */
+function createSelector(r, source) {
+    const keys = new Map();
+    let prev = source.get();
+    r.effect(source, (id) => {
+        const old = keys.get(prev);
+        if (old !== undefined) {
+            old.set(false);
+        }
+        const next = keys.get(id);
+        if (next !== undefined) {
+            next.set(true);
+        }
+        prev = id;
+    });
+    return (id) => {
+        let s = keys.get(id);
+        if (s === undefined) {
+            s = signal(id === prev);
+            keys.set(id, s);
+        }
+        return s;
+    };
+}
+
+/**
+ * One row component: its computes and DOM writes, owned by r. With a
+ * selector, `selected` is the row's selector signal; without one, a
+ * compute per row compares the selected id.
+ */
+function mountRow(r, store, row, el, isSelected) {
     const text = r.compute((cx) => {
         computes++;
         return cx.val(row.label) + ' (' + cx.val(row.count) + ')';
@@ -40,15 +75,17 @@ function mountRow(r, store, row, el) {
         return f === 'all' || (f === 'done') === cx.val(row.done);
     });
     const id = row.id;
-    const selected = BOUND
-        ? r.compute(store.selected, (sel) => {
-            computes++;
-            return sel === id;
-        })
-        : r.compute((cx) => {
-            computes++;
-            return cx.val(store.selected) === id;
-        });
+    const selected = isSelected !== null
+        ? isSelected(id)
+        : BOUND
+            ? r.compute(store.selected, (sel) => {
+                computes++;
+                return sel === id;
+            })
+            : r.compute((cx) => {
+                computes++;
+                return cx.val(store.selected) === id;
+            });
     const cls = r.compute((cx) => {
         computes++;
         return (cx.val(selected) ? 'row selected ' : 'row ') + cx.val(store.theme);
@@ -83,6 +120,8 @@ function mountApp(r, store, footer) {
         }
         return n;
     });
+    /** Always the same ROWS signals: skip dep reconciliation. */
+    doneCount.stable();
     if (BOUND) {
         r.effect(doneCount, (v) => { effects++; footer.textContent = v + ' done'; });
         r.effect(store.filter, (v) => { effects++; storage = v; });
@@ -92,19 +131,30 @@ function mountApp(r, store, footer) {
     }
 }
 
-/** Builds store, row components (one owner each) and app nodes. */
-function createApp(n) {
+/**
+ * Builds store, app nodes and row components (one owner each). The app
+ * owns the selector, so it is built before the rows that read it.
+ * `naive` builds the rows without a selector.
+ */
+function createApp(n, naive = false) {
     const store = createStore(n);
     const els = makeEls(n);
     const views = new Array(n);
+    let isSelected = null;
+    const app = root((r) => {
+        if (!naive) {
+            isSelected = createSelector(r, store.selected);
+        }
+        mountApp(r, store, makeEl());
+    });
     for (let i = 0; i < n; i++) {
-        views[i] = root((r) => mountRow(r, store, store.rows[i], els[i]));
+        views[i] = root((r) => mountRow(r, store, store.rows[i], els[i], isSelected));
     }
-    const app = root((r) => mountApp(r, store, makeEl()));
     return {
         store,
         els,
         views,
+        isSelected,
         dispose() {
             for (let i = 0; i < n; i++) {
                 views[i].dispose();
@@ -142,6 +192,13 @@ const scenarios = {
             store.selected.set((iter++ * 13) % ROWS);
         };
     })(),
+    'Select a row, no selector': (() => {
+        const { store } = createApp(ROWS, true);
+        let iter = 0;
+        return () => {
+            store.selected.set((iter++ * 13) % ROWS);
+        };
+    })(),
     'Edit 10 rows in a batch': (() => {
         const { store } = createApp(ROWS);
         let iter = 0;
@@ -169,13 +226,13 @@ const scenarios = {
         };
     })(),
     'Remount 100 rows': (() => {
-        const { store, els, views } = createApp(ROWS);
+        const { store, els, views, isSelected } = createApp(ROWS);
         let iter = 0;
         return () => {
             const base = (iter++ * REMOUNT) % ROWS;
             for (let k = base; k < base + REMOUNT; k++) {
                 views[k].dispose();
-                views[k] = root((r) => mountRow(r, store, store.rows[k], els[k]));
+                views[k] = root((r) => mountRow(r, store, store.rows[k], els[k], isSelected));
             }
         };
     })(),
