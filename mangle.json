@@ -131,7 +131,39 @@
       "$ASYNC_ITERATOR": "ki",
       "$ASYNC_SYNC": "Ei",
       "$NOOP": "ji",
-      "$supersede": "ft"
+      "$supersede": "ft",
+      "$fatal": "rr",
+      "$panic": "or",
+      "$refuse": "tr",
+      "$FLAG_RELAY": "mi",
+      "$FLAG_CALLBACK": "Ai",
+      "$FLAG_FREEZE": "gi",
+      "$FLAG_VISIT": "Ci",
+      "$CMARK": "Oi",
+      "$FLUSHING": "Pi",
+      "$REJECTS": "qi",
+      "$REJECT_COUNT": "Mi",
+      "$TEARING": "Si",
+      "$UNHANDLED": "xi",
+      "$UNHANDLED_NODE": "Ri",
+      "$asyncRun": "zi",
+      "$track": "Bi",
+      "$moveDep": "Di",
+      "$rebaseDeps": "Fi",
+      "$removeDep": "Gi",
+      "$defect": "Hi",
+      "$purgeOwned": "Ii",
+      "$checkCycle": "Ji",
+      "$deliver": "Ki",
+      "$relay": "Li",
+      "$settleDefers": "Ni",
+      "$hasDep": "Qi",
+      "$rejectWaiters": "Ti",
+      "$deliverRejects": "Ui",
+      "$teardown": "Vi",
+      "$requeue": "Wi",
+      "$failStart": "Xi",
+      "$deferEffect": "Yi"
     }
   },
   "props": {
@@ -175,7 +207,8 @@
       "$_recv": "Z",
       "$_changed": "$",
       "$_update": "tt",
-      "$_receive": "it"
+      "$_receive": "it",
+      "$_dep1slot": "lt"
     }
   }
 }
