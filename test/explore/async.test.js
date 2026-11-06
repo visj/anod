@@ -511,7 +511,7 @@ describe("resource", () => {
         expect(r.loading).toBe(false);
     });
 
-    test("disposing a resource rejects a task awaiting it with a FATAL error", async () => {
+    test("disposing a resource rejects a task awaiting it with a PANIC error", async () => {
         const r = resource(0);
         r.set(async (c) => await c.suspend(new Promise(() => {})));
         let t;
@@ -523,7 +523,7 @@ describe("resource", () => {
         await settle();
         expect(t.loading).toBe(false);
         expect(t.error).toBe(true);
-        expect(t.get().type).toBe(FATAL);
+        expect(t.get().type).toBe(PANIC);
         expect(t.get().error.message).toBe("Awaited resource was disposed");
         rt.dispose();
     });
@@ -1112,7 +1112,7 @@ describe("errors across await", () => {
         r.dispose();
     });
 
-    test("disposing an awaited task delivers a FATAL error to the awaiting spawn", async () => {
+    test("disposing an awaited task delivers a PANIC error to the awaiting spawn", async () => {
         const errors = [];
         let after = false;
         let t;
@@ -1130,7 +1130,7 @@ describe("errors across await", () => {
         t.dispose();
         await settle();
         expect(errors.length).toBe(1);
-        expect(errors[0].type).toBe(FATAL);
+        expect(errors[0].type).toBe(PANIC);
         expect(errors[0].error.message).toBe("Awaited task was disposed");
         expect(after).toBe(false);
         r.dispose();

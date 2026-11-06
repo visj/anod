@@ -1,5 +1,5 @@
 import { describe, test, expect } from "#test-runner";
-import { signal, root, c, REFUSE, FATAL, refuse } from "#anod";
+import { signal, root, c, REFUSE, PANIC, FATAL, refuse } from "#anod";
 
 const tick = () => Promise.resolve();
 const settle = async (n = 10) => {
@@ -273,7 +273,7 @@ describe("c.suspend(task, onResolve, onReject)", () => {
 		r.dispose();
 	});
 
-	test("disposing the awaited task calls onReject with a Defect", async () => {
+	test("disposing the awaited task calls onReject with a PANIC Defect", async () => {
 		const errors = [];
 		let inner, task;
 		const r = root((r) => {
@@ -288,7 +288,7 @@ describe("c.suspend(task, onResolve, onReject)", () => {
 		});
 		inner.dispose();
 		await settle();
-		expect(errors).toEqual([[FATAL, "Awaited task was disposed"]]);
+		expect(errors).toEqual([[PANIC, "Awaited task was disposed"]]);
 		r.dispose();
 	});
 

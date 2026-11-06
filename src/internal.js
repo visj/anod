@@ -2266,7 +2266,7 @@ function root(fn) {
 		if (flag & FLAG_WAITER) {
 			let ch = this._chan;
 			if (ch._waiters !== null) {
-				rejectWaiters(this, ch, new Error("Awaited resource was disposed"));
+				rejectWaiters(this, ch, new Defect(new Error("Awaited resource was disposed"), PANIC));
 			}
 		}
 		clearSubs(this);
@@ -2636,7 +2636,7 @@ function root(fn) {
 			}
 			/** Reject any nodes awaiting this task. */
 			if (chan._waiters !== null) {
-				rejectWaiters(this, chan, new Error("Awaited task was disposed"));
+				rejectWaiters(this, chan, new Defect(new Error("Awaited task was disposed"), PANIC));
 			}
 			/** Remove ourselves from any responders we were awaiting. */
 			if (chan._res1 !== null || chan._responds !== null) {

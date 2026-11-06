@@ -1,5 +1,5 @@
 import { describe, test, expect } from "#test-runner";
-import { signal, resource, root, Defect } from "#anod";
+import { signal, resource, root, Defect, PANIC } from "#anod";
 
 /**
  * Disposal and the nodes waiting on a task.
@@ -48,11 +48,11 @@ import { signal, resource, root, Defect } from "#anod";
  *
  *   - The task is disposed (rejectWaiters, from ComputeProto._dispose).
  *     The list is detached and every link back to the task cleared.
- *     Then every waiter's `reject` gets
- *     `new Error("Awaited task was disposed")`. If the disposal is part
- *     of a teardown (inside a flush, or inside teardown()), the
- *     rejections are not called yet: they go into a queue (REJECTS),
- *     which is delivered once the teardown has finished.
+ *     Then every waiter's `reject` gets one shared PANIC Defect,
+ *     "Awaited task was disposed".
+ *     If the disposal is part of a teardown (inside a flush, or inside
+ *     teardown()), the rejections are not called yet: they go into a
+ *     queue (REJECTS), which is delivered once the teardown has finished.
  *
  * Whoever calls a stored function first checks the waiter: a disposed
  * waiter is skipped, unless it is locked (c.lock() promises to run to
@@ -80,15 +80,9 @@ import { signal, resource, root, Defect } from "#anod";
  *   C. A task disposed in a teardown rejects its waiters after the
  *      teardown, so the outcome does not depend on creation order, and
  *      only waiters that survive the teardown are told.
- *
- * Tests marked PENDING wait on a design decision. They print a line
- *
- *     [PENDING X] anod today: ...
- *
- * with what anod does today, and fail until the decision is made:
- *
- *   D. What the "Awaited task was disposed" error is: a Defect, and of
- *      which type (FATAL or PANIC).
+ *   D. The error a disposed task or resource hands its waiters is a
+ *      Defect of type PANIC, created once per disposal and shared by
+ *      every waiter, so await and onReject see the same value.
  */
 
 /** Resolves after `ms` milliseconds: long enough for every pending
@@ -97,17 +91,6 @@ const wait = (ms = 5) => new Promise((r) => setTimeout(r, ms));
 
 /** A promise that never settles. A task suspended on it loads forever. */
 const never = () => new Promise(() => { });
-
-/**
- * Prints what anod does today and fails the test.
- * @param {string} decision
- * @param {*} observed
- */
-function pending(decision, observed) {
-    const today = JSON.stringify(observed);
-    console.log(`[PENDING ${decision}] anod today: ${today}`);
-    throw new Error(`Waiting on design decision ${decision}. anod today: ${today}`);
-}
 
 /**
  * Builds, in root r, a spawn that waits on a task that loads forever.
@@ -390,7 +373,7 @@ describe("an owner's teardown and the waiters inside it", () => {
                 try {
                     await cx.suspend(task);
                 } catch (err) {
-                    seen.push("catch: " + err.message);
+                    seen.push("catch: " + err.error.message);
                 }
                 seen.push("body finished");
             }));
@@ -840,7 +823,7 @@ describe("a waiter that fails while a task's disposal delivers to it", () => {
 
 describe("the error a disposed task hands its waiters", () => {
     /**
-     * PENDING D. What error does a waiter get when the task it waits on
+     * Decision D. What error does a waiter get when the task it waits on
      * is disposed?
      *
      * This is the intended case: the task lives in its own root and is
@@ -848,24 +831,31 @@ describe("the error a disposed task hands its waiters", () => {
      * on it.
      *
      *     taskRoot.dispose()
-     *       └─ dispose task → resolveWaiters, with
-     *          new Error("Awaited task was disposed")
-     *            spawn 1 (promise waiter): reject(Error), queued
-     *            spawn 2 (callback waiter): relay wraps the error, so
-     *              onReject(Defect) runs now
+     *       └─ dispose task → rejectWaiters, with one error for all:
+     *          new Defect(new Error("Awaited task was disposed"), PANIC)
+     *            spawn 1 (promise waiter): reject(defect), queued
+     *            spawn 2 (callback waiter): relay → onReject(defect) now
      *     ── microtask ──
-     *     spawn 1's catch receives the plain Error
+     *     spawn 1's catch receives the same Defect
      *
-     * Today:
-     *     await    → a plain Error, outside the Defect model
-     *     onReject → a Defect with type FATAL (wrapped by the relay)
+     * Why a PANIC Defect:
+     *   - Nothing threw, so it is not FATAL (an unexpected crash). The
+     *     task's owner ended its lifetime, which is a normal event.
+     *   - It is not REFUSE either: REFUSE is a task's answer, and a
+     *     disposed task never answers.
+     *   - PANIC is a deliberate abort that unwinds the body, which is
+     *     what the waiter has to do. Like an AbortError from fetch, it
+     *     is an expected error that callers can check for:
+     *         err instanceof Defect && err.type === PANIC
      *
-     * Decision D: should the error be a Defect from the start, so both
-     * paths see the same value? And is a task disposed under its waiter
-     * a crash (FATAL), or an expected abort (PANIC)?
+     * Created as a Defect, so await and onReject see the identical
+     * value: the relay's defect() passes a Defect through untouched.
+     *
+     * Before: await got a plain Error, outside the Defect model, while
+     * onReject got a FATAL Defect that the relay had wrapped around it.
      */
-    test("PENDING D: a disposed task rejects its waiters with a Defect of a decided type", async () => {
-        const observed = {};
+    test("a disposed task rejects every waiter with the same PANIC Defect", async () => {
+        const seen = [];
         let taskRoot;
         let task;
         const r = root((r) => {
@@ -876,19 +866,51 @@ describe("the error a disposed task hands its waiters", () => {
                 try {
                     await cx.suspend(task);
                 } catch (err) {
-                    observed.await = err instanceof Defect
-                        ? { Defect: true, type: err.type }
-                        : { Defect: false, value: String(err) };
+                    seen.push(err);
                 }
             });
             r.spawn((cx) => cx.suspend(task, () => { }, (err) => {
-                observed.onReject = { Defect: err instanceof Defect, type: err.type };
+                seen.push(err);
             }));
         });
         taskRoot.dispose();
         await wait();
+        expect(seen.length).toBe(2);
+        expect(seen[0]).toBe(seen[1]);
+        expect(seen[0]).toBeInstanceOf(Defect);
+        expect(seen[0].type).toBe(PANIC);
+        expect(seen[0].error.message).toBe("Awaited task was disposed");
         r.dispose();
-        pending("D", observed);
+    });
+
+    /**
+     * Decision D, unhandled. A waiter that does not catch the disposal
+     * error settles with it, as with any other panic it does not catch.
+     *
+     *     taskRoot.dispose()
+     *       └─ dispose task → reject the waiting task (queued)
+     *     ── microtask ──
+     *     the await throws the Defect, nothing catches it
+     *     → the waiting task settles in error, with that Defect as its
+     *       value, type PANIC (not rewrapped as FATAL)
+     */
+    test("a waiter that does not catch it settles with the PANIC Defect", async () => {
+        let taskRoot;
+        let task;
+        let waiter;
+        const r = root((r) => {
+            taskRoot = root((rt) => {
+                task = rt.task((cx) => cx.suspend(never()));
+            });
+            waiter = r.task(async (cx) => await cx.suspend(task));
+        });
+        taskRoot.dispose();
+        await wait();
+        expect(waiter.error).toBe(true);
+        expect(waiter.get()).toBeInstanceOf(Defect);
+        expect(waiter.get().type).toBe(PANIC);
+        expect(waiter.get().error.message).toBe("Awaited task was disposed");
+        r.dispose();
     });
 });
 
@@ -902,7 +924,7 @@ describe("a disposed resource and its waiters", () => {
      *
      *     res.dispose()
      *       └─ CellProto._dispose marks res disposed first, then rejects
-     *          its waiters with Error("Awaited resource was disposed")
+     *          its waiters with a PANIC Defect ("Awaited resource was disposed")
      *          (queued)
      *     ── microtask ──
      *     the spawn, which is alive (its root is untouched), catches it
@@ -920,7 +942,9 @@ describe("a disposed resource and its waiters", () => {
                 try {
                     await cx.suspend(res);
                 } catch (err) {
-                    seen.push(err.message);
+                    expect(err).toBeInstanceOf(Defect);
+                    expect(err.type).toBe(PANIC);
+                    seen.push(err.error.message);
                 }
             });
         });
