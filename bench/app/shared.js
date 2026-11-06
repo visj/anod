@@ -25,6 +25,8 @@
  * run is not counted: it is a projection in Solid and an effect in the
  * others.
  */
+import { Session } from 'inspector/promises';
+
 export const ROWS = 1000;
 export const REMOUNT = 100;
 export const BATCH = 10;
@@ -98,5 +100,70 @@ export function validate(lib, scenarios, take) {
     console.log(`COUNTS ${lib} ${JSON.stringify(seen)}`);
     if (failed) {
         throw new Error(`${lib}: work differs from the spec`);
+    }
+}
+
+/**
+ * Bytes allocated per iteration of each scenario, from V8's sampling heap
+ * profiler. Unlike mitata's heap column, which diffs heapUsed around each
+ * sample, it counts objects that a garbage collection has already freed,
+ * so a collection inside the measurement does not hide what a library
+ * allocates. A short first pass estimates the rate, then each scenario
+ * runs for about TARGET bytes, so the sample count is similar for heavy
+ * and light scenarios.
+ * @param {Object<string, function(): void>} scenarios
+ * @returns {Promise<Object<string, number>>}
+ */
+export async function measureAlloc(scenarios) {
+    const TARGET = 8 * 1024 * 1024;
+    const INTERVAL = 128;
+    const session = new Session();
+    session.connect();
+    await session.post('HeapProfiler.enable');
+    const sample = async (run, iterations, interval) => {
+        await session.post('HeapProfiler.startSampling', {
+            samplingInterval: interval,
+            includeObjectsCollectedByMajorGC: true,
+            includeObjectsCollectedByMinorGC: true,
+        });
+        for (let i = 0; i < iterations; i++) {
+            run();
+        }
+        const { profile } = await session.post('HeapProfiler.stopSampling');
+        /** selfSize is scaled up for the sampling rate; sample sizes are not. */
+        let bytes = 0;
+        const stack = [profile.head];
+        while (stack.length > 0) {
+            const node = stack.pop();
+            bytes += node.selfSize;
+            for (const child of node.children) {
+                stack.push(child);
+            }
+        }
+        return bytes / iterations;
+    };
+    const alloc = {};
+    for (const name in scenarios) {
+        const run = scenarios[name];
+        const estimate = await sample(run, 20, 4096);
+        const iterations = Math.max(20, Math.min(20000, Math.round(TARGET / Math.max(estimate, 1))));
+        alloc[name] = await sample(run, iterations, INTERVAL);
+    }
+    await session.post('HeapProfiler.disable');
+    session.disconnect();
+    return alloc;
+}
+
+/**
+ * Prints the bytes allocated per iteration of each scenario.
+ * @param {string} lib
+ * @param {Object<string, number>} alloc
+ */
+export function printAlloc(lib, alloc) {
+    console.log(`\nallocated per iteration (${lib}):`);
+    for (const name in alloc) {
+        const b = alloc[name];
+        const text = b >= 1024 * 1024 ? (b / 1024 / 1024).toFixed(2) + ' MB' : b >= 1024 ? (b / 1024).toFixed(1) + ' KB' : b.toFixed(0) + ' B';
+        console.log(`  ${name.padEnd(28)} ${text.padStart(10)}`);
     }
 }

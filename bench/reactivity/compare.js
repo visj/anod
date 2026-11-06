@@ -94,6 +94,9 @@ function rpad(str, width) {
 }
 
 const hasCounters = Object.values(baseline.benchmarks).some(b => b.cycles != null);
+/** Bytes allocated per iteration, when both runs measured it; otherwise mitata's heap. */
+const hasAlloc = [baseline, current].every(r => Object.values(r.benchmarks).some(b => b.alloc != null));
+const mem = hasAlloc ? 'alloc' : 'heap';
 
 console.log();
 console.log(`\x1b[1mBaseline:\x1b[0m ${baseline.name} (${baseline.date}) — ${baseline.cpu}`);
@@ -107,7 +110,7 @@ const diffW = 10;
 
 let header = pad('Benchmark', nameW)
     + rpad('avg (B)', colW) + rpad('avg (C)', colW) + rpad('diff', diffW)
-    + rpad('heap (B)', colW) + rpad('heap (C)', colW) + rpad('diff', diffW);
+    + rpad(mem + ' (B)', colW) + rpad(mem + ' (C)', colW) + rpad('diff', diffW);
 if (hasCounters) {
     header += rpad('instr (B)', colW) + rpad('instr (C)', colW) + rpad('diff', diffW);
     header += rpad('cycles (B)', colW) + rpad('cycles (C)', colW) + rpad('diff', diffW);
@@ -130,7 +133,7 @@ for (const name of allNames) {
     }
     let line = pad(name, nameW)
         + rpad(fmtTime(b.avg), colW) + rpad(fmtTime(c.avg), colW) + rpad(fmtDiff(b.avg, c.avg), diffW)
-        + rpad(fmtBytes(b.heap), colW) + rpad(fmtBytes(c.heap), colW) + rpad(fmtDiff(b.heap, c.heap), diffW);
+        + rpad(fmtBytes(b[mem]), colW) + rpad(fmtBytes(c[mem]), colW) + rpad(fmtDiff(b[mem], c[mem]), diffW);
     if (hasCounters) {
         line += rpad(fmtCount(b.instructions), colW) + rpad(fmtCount(c.instructions), colW) + rpad(fmtDiff(b.instructions, c.instructions), diffW);
         line += rpad(fmtCount(b.cycles), colW) + rpad(fmtCount(c.cycles), colW) + rpad(fmtDiff(b.cycles, c.cycles), diffW);

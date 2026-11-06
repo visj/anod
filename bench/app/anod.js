@@ -5,7 +5,7 @@
  */
 import { bench, run } from 'mitata';
 import { signal, root, batch } from '../../dist/index.js';
-import { ROWS, REMOUNT, BATCH, FILTERS, LABELS_A, LABELS_B, makeEls, makeEl, initialDone, validate } from './shared.js';
+import { ROWS, REMOUNT, BATCH, FILTERS, LABELS_A, LABELS_B, makeEls, makeEl, initialDone, validate, measureAlloc, printAlloc } from './shared.js';
 import { saveRun } from '../reactivity/save-run.js';
 
 const BOUND = process.env.ANOD_API !== 'unbound';
@@ -249,7 +249,9 @@ for (const name in scenarios) {
 }
 
 const results = await run();
-saveRun('app-' + LIB, results);
+const alloc = await measureAlloc(scenarios);
+printAlloc(LIB, alloc);
+saveRun('app-' + LIB, results, alloc);
 if (storage === null) {
     console.log(storage);
 }

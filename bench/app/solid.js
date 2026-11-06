@@ -6,7 +6,7 @@
  */
 import { bench, run } from 'mitata';
 import { createSignal, createMemo, createRoot, createEffect, createRenderEffect, createProjection, flush } from '@solidjs/signals';
-import { ROWS, REMOUNT, BATCH, FILTERS, LABELS_A, LABELS_B, makeEls, makeEl, initialDone, validate } from './shared.js';
+import { ROWS, REMOUNT, BATCH, FILTERS, LABELS_A, LABELS_B, makeEls, makeEl, initialDone, validate, measureAlloc, printAlloc } from './shared.js';
 import { saveRun } from '../reactivity/save-run.js';
 
 const LIB = 'solid';
@@ -230,7 +230,9 @@ for (const name in scenarios) {
 }
 
 const results = await run();
-saveRun('app-' + LIB, results);
+const alloc = await measureAlloc(scenarios);
+printAlloc(LIB, alloc);
+saveRun('app-' + LIB, results, alloc);
 if (storage === null) {
     console.log(storage);
 }
