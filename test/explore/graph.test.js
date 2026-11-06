@@ -969,7 +969,7 @@ describe("options", () => {
         });
         e1.dispose();
         expect(cleanups).toBe(1);
-        expect(w._value).toBeNull();
+        expect(w._value).toBeUndefined();
         s.set(2);
         expect(runs).toBe(1);
         const seen = [];
@@ -985,22 +985,72 @@ describe("options", () => {
     });
 
     /**
-     * BUG (medium). Expected: after release, "the next read triggers a
-     * fresh recompute" (README weak()), so a reducer-style compute gets
-     * its seed (100) as prev again and yields 101. Actual: prev is null,
-     * so it yields 1. Root cause: Compute._drop sets `_value = null`
-     * (src/internal.js:866) and the seed is not kept anywhere, so _update
-     * passes null as prev (src/internal.js:2364).
+     * A released weak compute keeps nothing from its previous life, not
+     * even its seed: the seed is the first prev, and releasing drops
+     * prev. The recompute gets undefined as prev, so a default
+     * parameter reapplies on every fresh activation.
      */
-    test("OPT_WEAK: recompute after release gets the seed as prev, not null", () => {
+    test("OPT_WEAK: recompute after release gets undefined as prev, not the seed", () => {
         const s = signal(1);
-        const w = c.compute((cx, prev) => prev + cx.val(s), 100, OPT_WEAK);
+        const prevs = [];
+        const w = c.compute((cx, prev) => {
+            prevs.push(prev);
+            return cx.val(s);
+        }, 100, OPT_WEAK);
+        const e = c.effect((cx) => {
+            cx.val(w);
+        });
+        e.dispose();
+        expect(w._value).toBeUndefined();
+        w.get();
+        expect(prevs).toEqual([100, undefined]);
+    });
+
+    test("OPT_WEAK: a default parameter reapplies after release", () => {
+        const s = signal(1);
+        const w = c.compute((cx, prev = 100) => prev + cx.val(s), undefined, OPT_WEAK);
         const e = c.effect((cx) => {
             cx.val(w);
         });
         expect(w.get()).toBe(101);
         e.dispose();
         expect(w.get()).toBe(101);
+    });
+
+    test("OPT_WEAK: a seed mutated in place is not retained after release", () => {
+        const s = signal(1);
+        const seed = [];
+        const w = c.compute((cx, prev) => {
+            prev = prev || [];
+            prev.push(cx.val(s));
+            return prev;
+        }, seed, OPT_WEAK);
+        const e = c.effect((cx) => {
+            cx.val(w);
+        });
+        s.set(2);
+        expect(w.get()).toBe(seed);
+        e.dispose();
+        expect(w._value).toBeUndefined();
+        const next = w.get();
+        expect(next).not.toBe(seed);
+        expect(next).toEqual([2]);
+    });
+
+    test("weak(): recompute after release gets undefined as prev", () => {
+        const s = signal(1);
+        const prevs = [];
+        const w = c.compute((cx, prev) => {
+            prevs.push(prev);
+            return cx.val(s);
+        }, 100);
+        w.weak();
+        const e = c.effect((cx) => {
+            cx.val(w);
+        });
+        e.dispose();
+        w.get();
+        expect(prevs).toEqual([100, undefined]);
     });
 
     /**

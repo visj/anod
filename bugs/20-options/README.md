@@ -48,7 +48,7 @@ Run with `bun test --conditions=src test/explore/graph.test.js`.
 - **OPT_DEFER:** `effect()` and `spawn()` call the new `deferEffect(node)` instead of `startEffect` when both `FLAG_DEFER` and `FLAG_BOUND` are set. `deferEffect` does not run the fn:
   - It sets `_time = TIME`, so the effect counts as having run now.
   - If the dep is a stale or pending compute, it refreshes it, wrapped in the same `IDLE`/flush handling as `startEffect`.
-- **`weak()`:** new `ComputeProto.weak`, next to `eager()`. It sets `FLAG_WEAK`. Called before the first run (`FLAG_INIT`), it also stores the seed in `SEEDS`, as `OPT_WEAK` does since bug 04.
+- **`weak()`:** new `ComputeProto.weak`, next to `eager()`. It sets `FLAG_WEAK`. (It first also stored the seed in `SEEDS` when called before the first run. `SEEDS` was later removed, see bug 04, "Seed after release".)
 - **OPT_EAGER:** the eager branch of `ComputeProto._receive` notifies subscribers with `FLAG_PENDING` instead of `FLAG_STALE`. Both branches then notified `PENDING`, so they are merged into one test (`!(EAGER && ASYNC)`). An eager task still notifies only when it settles. Doc item 5 is updated.
 - **`stable()`:** new flag `FLAG_FREEZE` (`1 << 27`), exported from `anod/internal` and declared in `types/internal.d.ts` like the other flags.
   - `stable()` on a compute sets `FLAG_STABLE | FLAG_FREEZE`, if not already stable.
@@ -63,7 +63,7 @@ Run with `bun test --conditions=src test/explore/graph.test.js`.
 
 - **OPT_DEFER is for bound effects only.** Unbound effects still ignore it: `test/defer.test.js` pins "unbound effect ignores OPT_DEFER -- always runs initially", and an unbound effect has no deps until it runs. Bound `spawn()` defers too.
 - **A deferred effect brings a stale or pending compute dep up to date at creation**, which runs that compute's fn if needed. A stale or pending compute does not pass notifications on, so without this the effect could miss changes indefinitely. The effect then first runs on the first change after creation, and a recompute to the same value does not run it.
-- **`weak()` after the first run:** the seed has been overwritten by then, so the recompute after a release gets `null` as prev. This matches a seedless `OPT_WEAK` compute (bug 04). Like `OPT_WEAK`, `weak()` releases nothing until the compute loses a subscriber.
+- **`weak()` and the seed:** a released compute recomputes with `undefined` as prev, whether `weak()` was called before or after the first run, the same as `OPT_WEAK` (bug 04, "Seed after release"). Like `OPT_WEAK`, `weak()` releases nothing until the compute loses a subscriber.
 - **`stable()` semantics:**
   - **On the first run:** unchanged. Setup tracks every read, including those after `stable()`. `test/edge.test.js` › stable compute › "tracks deps on first run only" pins this.
   - **On a later run:** the run tracks to its end. Every dep it read, before or after the call, existing or new, is kept, and deps it did not read are dropped. The set is then frozen, as the spec says.
@@ -90,7 +90,7 @@ No other group's tests changed state. `test/explore` goes from 82 to 75 failures
 - OPT_DEFER: works on a deferred (stale) compute dep, on a compute that recomputes to the same value (no run), inside `batch()`, nested in an effect, and on a bound `spawn`.
 - OPT_EAGER: an eager → eager → effect chain runs only on a real change, and an eager compute read through a lazy one updates.
 - A bound effect with OPT_SETUP reacts to its extra deps, and a bound OPT_SETUP compute with no extra deps stays `FLAG_SINGLE`.
-- `weak()` keeps the seed when called before the first run, and gives `null` after it.
+- `weak()` gives `undefined` as prev after a release (revised with bug 04).
 
 ### Hot paths touched
 

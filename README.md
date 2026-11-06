@@ -779,12 +779,21 @@ root((c) => {
 	// parsed holds the full row array in memory
 
 	view.dispose();
-	// Since compute has no subscribers, it nulls out its value and calls
+	// Since compute has no subscribers, it releases its value and calls
 	// the cleanup hook. It stays idle until someone reads it again
 
 	parsed.get(); // re-parses the file on demand
 });
 ```
+
+Releasing keeps nothing from the compute's previous life, not even its seed. The seed is only the first `prev`, and a released compute has no `prev`, so the recompute receives `undefined`. A reducer that should restart from an initial value uses a default parameter, which applies on the first run and after every release:
+
+```ts
+const totals = c.compute((c, prev = []) => [...prev, c.val(entry)]);
+totals.weak();
+```
+
+State that must survive a release belongs in `args`, the last argument of `compute()`, which the compute keeps for its whole lifetime and passes to every run.
 
 #### `eager()`
 

@@ -294,15 +294,6 @@ var UNHANDLED = null;
 var UNHANDLED_NODE = null;
 
 /**
- * Seeds of weak computes created with one. A released weak compute
- * goes back to its seed, so its next run receives it as prev, as on
- * the very first run. Kept off the node so other computes pay nothing.
- * @const
- * @type {WeakMap<Compute, *>}
- */
-var SEEDS = new WeakMap();
-
-/**
  * Minimal factory-only context with no ownership. Nodes created
  * through Clock are unowned — they live until GC or manual dispose.
  * Extensible via Clock.prototype for user-defined context methods.
@@ -985,7 +976,8 @@ function root(fn) {
 	/**
 	 * Compute._drop: releases cached value and marks STALE. Called
 	 * from clearReceiver when FLAG_WEAK is set and no subscribers
-	 * remain. The value goes back to the seed, or null without one.
+	 * remain. The value is released to undefined, so the next run gets
+	 * undefined as prev: the seed applies to the first run only.
 	 * Loading nodes keep their value — active channel
 	 * waiters re-subscribe on settle.
 	 * @this {Compute}
@@ -995,8 +987,7 @@ function root(fn) {
 			return;
 		}
 		this._flag |= FLAG_STALE;
-		let seed = SEEDS.get(this);
-		this._value = seed !== undefined ? seed : null;
+		this._value = undefined;
 		if (this._cleanup !== null) {
 			clearCleanup(this);
 		}
@@ -1224,16 +1215,10 @@ function root(fn) {
 
 	/**
 	 * Marks this compute as weak, like OPT_WEAK: once it loses its last
-	 * subscriber, it releases its value and runs its cleanups. Called
-	 * before the first run, it keeps the seed for the recompute, as
-	 * OPT_WEAK does. After the first run the seed is gone, so the
-	 * recompute gets null as prev.
+	 * subscriber, it releases its value and runs its cleanups.
 	 * @this {Compute}
 	 */
 	ComputeProto.weak = function () {
-		if (this._flag & FLAG_INIT && this._value !== undefined) {
-			SEEDS.set(this, this._value);
-		}
 		this._flag |= FLAG_WEAK;
 	};
 
@@ -3249,9 +3234,6 @@ function root(fn) {
 			node = new Compute(/** @type {!Function} */(fnOrSeed), flag, depOrFn, optsOrSeed, args);
 			node._dep1slot = connect(depOrFn, node, -1);
 		}
-		if (flag & FLAG_WEAK && node._value !== undefined) {
-			SEEDS.set(node, node._value);
-		}
 		if (this._flag & FLAG_OWNER) {
 			addOwned(this, node);
 		}
@@ -3291,9 +3273,6 @@ function root(fn) {
 				((0 | argsOrOpts) & OPTIONS);
 			node = new Compute(fnOrSeed, flag, depOrFn, optsOrSeed, args);
 			node._dep1slot = connect(depOrFn, node, -1);
-		}
-		if (flag & FLAG_WEAK && node._value !== undefined) {
-			SEEDS.set(node, node._value);
 		}
 		if (this._flag & FLAG_OWNER) {
 			addOwned(this, node);
