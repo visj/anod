@@ -569,7 +569,7 @@ describe("resource", () => {
             });
         });
 
-        test("resource with equals=false (mutable) notifies on same-value settle", async () => {
+        test("resource with equals=false notifies on same-value settle", async () => {
             let notifyCount = 0;
             const r = resource({ count: 0 }, false);
             root((c) => {

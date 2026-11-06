@@ -1,9 +1,9 @@
 import { describe, test, expect } from "#test-runner";
-import { signal, mutable, root, c } from "#anod";
+import { signal, root, c } from "#anod";
 
-describe("mutable", () => {
+describe("signal(value, false)", () => {
   test("always notifies on set even when value is the same", () => {
-    const r = mutable(1);
+    const r = signal(1, false);
     let runs = 0;
     c.effect(r, () => { runs++; });
     expect(runs).toBe(1);
@@ -25,8 +25,8 @@ describe("mutable", () => {
     expect(runs).toBe(1);
   });
 
-  test("mutable notifies with mutable object", () => {
-    const items = mutable([]);
+  test("notifies when an object is mutated in place", () => {
+    const items = signal([], false);
     let observed = [];
     c.effect(items, (val) => {
       observed.push(val.length);
@@ -43,8 +43,8 @@ describe("mutable", () => {
     expect(observed).toEqual([0, 1, 2]);
   });
 
-  test("mutable works with updater function", () => {
-    const r = mutable(0);
+  test("notifies when an updater returns the same value", () => {
+    const r = signal(0, false);
     let runs = 0;
     c.effect(r, () => { runs++; });
     expect(runs).toBe(1);
@@ -53,9 +53,9 @@ describe("mutable", () => {
     expect(runs).toBe(2);
   });
 
-  test("mutable updater returning void keeps value and still notifies", () => {
+  test("updater returning void keeps value and still notifies", () => {
     const obj = { x: 1, y: 2 };
-    const m = mutable(obj);
+    const m = signal(obj, false);
     let runs = 0;
     let lastVal;
     c.effect(m, (val) => {
@@ -74,9 +74,9 @@ describe("mutable", () => {
     expect(m.get()).toBe(obj);
   });
 
-  test("mutable void updater works inside batch (scheduled path)", () => {
+  test("void updater works inside batch (scheduled path)", () => {
     const obj = { a: 1 };
-    const m = mutable(obj);
+    const m = signal(obj, false);
     let runs = 0;
     c.effect(m, () => { runs++; });
     expect(runs).toBe(1);
@@ -103,8 +103,8 @@ describe("mutable", () => {
     expect(s.get()).toBe(undefined);
   });
 
-  test("mutable works with post()", async () => {
-    const r = mutable(1);
+  test("post() of the same value notifies", async () => {
+    const r = signal(1, false);
     let runs = 0;
     c.effect(r, () => { runs++; });
     expect(runs).toBe(1);
@@ -114,8 +114,8 @@ describe("mutable", () => {
     expect(runs).toBe(2);
   });
 
-  test("mutable inside batch always schedules", () => {
-    const r = mutable(5);
+  test("same value inside batch always schedules", () => {
+    const r = signal(5, false);
     let observed = [];
     c.effect(r, (v) => { observed.push(v); });
     expect(observed).toEqual([5]);
@@ -130,8 +130,8 @@ describe("mutable", () => {
     expect(observed[observed.length - 1]).toBe(5);
   });
 
-  test("mutable propagates through compute chain", () => {
-    const r = mutable(1);
+  test("propagates through compute chain", () => {
+    const r = signal(1, false);
     const c1 = c.compute(r, (val) => val * 10);
     expect(c1.get()).toBe(10);
 
@@ -139,13 +139,13 @@ describe("mutable", () => {
     expect(c1.get()).toBe(10);
   });
 
-  test("mutable get() returns the value", () => {
-    const r = mutable({ x: 1 });
+  test("get() returns the value", () => {
+    const r = signal({ x: 1 }, false);
     expect(r.get().x).toBe(1);
   });
 
-  test("mutable dispose works", () => {
-    const r = mutable(1);
+  test("dispose works", () => {
+    const r = signal(1, false);
     r.dispose();
     expect(r.disposed).toBe(true);
     expect(() => r.set(2)).toThrow();

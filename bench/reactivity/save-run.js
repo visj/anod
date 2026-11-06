@@ -8,8 +8,9 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
  * Extract meaningful benchmark data from mitata's run() output and save as JSON.
  * @param {string} name - Library name (e.g. 'anod', 'alien-signals')
  * @param {object} raw - The object returned by mitata's run()
+ * @param {Object<string, number>=} alloc - bytes allocated per iteration, by benchmark name
  */
-export function saveRun(name, raw) {
+export function saveRun(name, raw, alloc) {
     const date = new Date().toISOString().slice(0, 10);
     const benchmarks = {};
     for (const b of raw.benchmarks) {
@@ -22,6 +23,9 @@ export function saveRun(name, raw) {
             p99: stats.p99,
             heap: stats.heap ? stats.heap.avg : null,
         };
+        if (alloc && alloc[b.alias] != null) {
+            entry.alloc = alloc[b.alias];
+        }
         if (stats.counters) {
             const c = stats.counters;
             entry.cycles = c.cycles ? c.cycles.avg : null;

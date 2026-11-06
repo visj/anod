@@ -1,5 +1,5 @@
 import { describe, test, expect } from "#test-runner";
-import { signal, root, c } from "#anod";
+import { signal, resource, batch, root, c } from "#anod";
 
 describe("Signal.set and Signal.post", () => {
   describe("updater callback deferral", () => {
@@ -113,7 +113,7 @@ describe("Signal.set and Signal.post", () => {
       expect(observed).toEqual(["0:100", "1:100", "1:200"]);
     });
 
-    test("post skips when value unchanged and not already posting", async () => {
+    test("post skips when value unchanged and nothing is queued", async () => {
       const s1 = signal(5);
       let runs = 0;
       c.effect(s1, () => { runs++; });
@@ -125,14 +125,182 @@ describe("Signal.set and Signal.post", () => {
       expect(runs).toBe(0);
     });
 
-    test("post schedules even if value matches current when already posting", async () => {
+    test("post schedules even if value matches current when a write is queued", async () => {
       const s1 = signal(0);
       s1.post(5);
-      /** Now posting — a second post back to 0 must still schedule,
-       *  otherwise the reset is lost. */
+      /** A write is queued — a second post back to 0 must still
+       *  schedule, otherwise the reset is lost. */
       s1.post(0);
       await Promise.resolve();
       expect(s1.get()).toBe(0);
+    });
+  });
+  describe("immediate writes supersede queued writes", () => {
+    test("set after post reads the set value, before and after the microtask", async () => {
+      const s1 = signal(0);
+      s1.post(1);
+      s1.set(2);
+      expect(s1.get()).toBe(2);
+      await Promise.resolve();
+      expect(s1.get()).toBe(2);
+    });
+
+    test("set to the current value cancels a pending post", async () => {
+      const s1 = signal(0);
+      let runs = 0;
+      c.effect(s1, () => { runs++; });
+      runs = 0;
+
+      s1.post(1);
+      expect(s1.set(0)).toBe(false);
+      await Promise.resolve();
+      expect(s1.get()).toBe(0);
+      expect(runs).toBe(0);
+    });
+
+    test("superseded updaters never run", async () => {
+      const s1 = signal(0);
+      let calls = 0;
+      s1.post((v) => (calls++, v + 1));
+      s1.post((v) => (calls++, v + 1));
+      s1.set(10);
+      await Promise.resolve();
+      expect(calls).toBe(0);
+      expect(s1.get()).toBe(10);
+    });
+
+    test("posts to other signals survive and flush with the set", async () => {
+      const s1 = signal(0);
+      const s2 = signal(0);
+      let observed = [];
+      c.effect((cx) => { observed.push(cx.val(s1) + ":" + cx.val(s2)); });
+
+      s2.post(5);
+      s1.post(1);
+      s1.set(2);
+      expect(observed).toEqual(["0:0", "2:5"]);
+      await Promise.resolve();
+      expect(observed).toEqual(["0:0", "2:5"]);
+    });
+
+    test("a post after set takes effect on the next microtask", async () => {
+      const s1 = signal(0);
+      s1.post(1);
+      s1.set(2);
+      s1.post(3);
+      expect(s1.get()).toBe(2);
+      await Promise.resolve();
+      expect(s1.get()).toBe(3);
+    });
+
+    test("set with updater sees the committed value, not the superseded post", async () => {
+      const s1 = signal(1);
+      s1.post(5);
+      s1.set((v) => v * 10);
+      await Promise.resolve();
+      expect(s1.get()).toBe(10);
+    });
+
+    test("a throwing updater leaves the queued writes in place", async () => {
+      const s1 = signal(0);
+      s1.post(1);
+      expect(() => s1.set(() => { throw new Error("boom"); })).toThrow();
+      expect(s1.get()).toBe(0);
+      await Promise.resolve();
+      expect(s1.get()).toBe(1);
+    });
+
+    test("set cancels a queued resource activation before it starts", async () => {
+      const r = resource(0);
+      let calls = 0;
+      r.post(async () => { calls++; return 1; });
+      r.set(2);
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(calls).toBe(0);
+      expect(r.get()).toBe(2);
+    });
+
+    test("contextual set after an await supersedes a pending post", async () => {
+      const s1 = signal(0);
+      let done;
+      c.spawn(async (cx) => {
+        await cx.suspend(Promise.resolve());
+        s1.post(1);
+        cx.set(s1, 2);
+        done = s1.get();
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(done).toBe(2);
+      expect(s1.get()).toBe(2);
+    });
+  });
+
+  describe("queued writes", () => {
+    test("inside batch, set queues behind an earlier post", () => {
+      const s1 = signal(0);
+      s1.post((v) => v + 1);
+      batch(() => {
+        s1.set((v) => v * 10);
+      });
+      expect(s1.get()).toBe(10);
+    });
+
+    test("inside batch, the last write wins even when it matches the current value", () => {
+      const s1 = signal(0);
+      batch(() => {
+        s1.set(1);
+        s1.set(0);
+      });
+      expect(s1.get()).toBe(0);
+
+      batch(() => {
+        s1.set(1);
+        s1.post(0);
+      });
+      expect(s1.get()).toBe(0);
+    });
+
+    test("inside batch, a set to the current value still overrides an earlier post", async () => {
+      const s1 = signal(0);
+      s1.post(1);
+      batch(() => {
+        s1.set(0);
+      });
+      expect(s1.get()).toBe(0);
+      await Promise.resolve();
+      expect(s1.get()).toBe(0);
+    });
+
+    test("an unchanged write does not hide a later change from subscribers", async () => {
+      const s1 = signal(0);
+      let runs = 0;
+      c.effect(s1, () => { runs++; });
+      runs = 0;
+
+      s1.post((v) => v);
+      s1.post((v) => v + 1);
+      await Promise.resolve();
+      expect(s1.get()).toBe(1);
+      expect(runs).toBe(1);
+    });
+
+    test("writes queued before dispose are dropped", async () => {
+      const s1 = signal({ count: 0 });
+      let calls = 0;
+      s1.post((v) => (calls++, { count: v.count + 1 }));
+      s1.dispose();
+      await Promise.resolve();
+      expect(calls).toBe(0);
+
+      const s2 = signal({ count: 0 });
+      batch(() => {
+        s2.set((v) => (calls++, { count: v.count + 1 }));
+        s2.dispose();
+      });
+      expect(calls).toBe(0);
     });
   });
 });

@@ -4,8 +4,13 @@ import { rolldown } from 'rolldown';
 import { minify } from 'terser';
 
 const outputDir = './dist';
-const nameCachePath = path.resolve(outputDir, 'mangle.json');
-const typeFiles = ['./types/index.d.ts'];
+/**
+ * Terser's name cache, kept in the repo so mangled names stay the same across
+ * builds and releases. It is shipped, so libraries that reach into anod's
+ * internals can mangle their own builds with the same names.
+ */
+const nameCachePath = path.resolve('./mangle.json');
+const typeFiles = ['./types/index.d.ts', './types/internal.d.ts'];
 
 async function build() {
     console.log('1. Bundling with Rolldown...');
@@ -13,6 +18,7 @@ async function build() {
     const bundle = await rolldown({
         input: {
             index: './src/index.js',
+            internal: './src/internal.js',
         },
         treeshake: {
             moduleSideEffects: (id) => {
@@ -64,6 +70,8 @@ async function build() {
                     reduce_funcs: false,
                 },
                 mangle: {
+                    /** Errors print as Defect { error, type }. */
+                    reserved: ["Defect"],
                     properties: {
                         regex: /^_/
                     }
@@ -76,13 +84,16 @@ async function build() {
         }
     }
 
-    fs.writeFileSync(nameCachePath, JSON.stringify(nameCache, null, 2));
+    fs.writeFileSync(nameCachePath, JSON.stringify(nameCache, null, 2) + '\n');
     for (const typeFile of typeFiles) {
         const basename = path.basename(typeFile);
         fs.copyFileSync(typeFile, path.resolve(outputDir, basename));
     }
 
-    console.log('Success! Outputs written to dist/ and stable map saved to mangle.json.');
+    console.log('Success! Outputs written to dist/, name cache saved to mangle.json.');
 }
 
-build().catch(console.error);
+build().catch((err) => {
+    console.error(err);
+    process.exit(1);
+});

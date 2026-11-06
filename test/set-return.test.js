@@ -1,5 +1,5 @@
 import { describe, test, expect } from "#test-runner";
-import { signal, mutable, root, batch, c } from "#anod";
+import { signal, root, batch, c } from "#anod";
 
 describe("signal.set() return value", () => {
     test("returns true when value changes", () => {
@@ -63,25 +63,25 @@ describe("signal.set() return value", () => {
     });
 });
 
-describe("mutable.set() return value", () => {
+describe("signal(value, false).set() return value", () => {
     test("returns true when value changes", () => {
-        const r = mutable(1);
+        const r = signal(1, false);
         expect(r.set(2)).toBe(true);
     });
 
     test("returns true even when value is the same", () => {
-        const r = mutable(5);
+        const r = signal(5, false);
         expect(r.set(5)).toBe(true);
     });
 
     test("returns true with same reference (object)", () => {
         const obj = { a: 1 };
-        const r = mutable(obj);
+        const r = signal(obj, false);
         expect(r.set(obj)).toBe(true);
     });
 
     test("returns true for same value inside batch", () => {
-        const r = mutable(5);
+        const r = signal(5, false);
         let result;
         batch(() => {
             result = r.set(5);
@@ -118,14 +118,14 @@ describe("signal.post() return value", () => {
     });
 });
 
-describe("mutable.post() return value", () => {
+describe("signal(value, false).post() return value", () => {
     test("returns true when value changes", () => {
-        const r = mutable(1);
+        const r = signal(1, false);
         expect(r.post(2)).toBe(true);
     });
 
     test("returns true even when value is the same", () => {
-        const r = mutable(5);
+        const r = signal(5, false);
         expect(r.post(5)).toBe(true);
     });
 });

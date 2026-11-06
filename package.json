@@ -9,11 +9,20 @@
       "types": "./dist/index.d.ts",
       "src": "./src/index.js",
       "import": "./dist/index.js"
-    }
+    },
+    "./internal": {
+      "types": "./dist/internal.d.ts",
+      "src": "./src/internal.js",
+      "import": "./dist/internal.js"
+    },
+    "./mangle.json": "./mangle.json"
   },
   "files": [
     "dist/index.js",
     "dist/index.d.ts",
+    "dist/internal.js",
+    "dist/internal.d.ts",
+    "mangle.json",
     "src"
   ],
   "scripts": {
@@ -42,6 +51,7 @@
     "rolldown": "^1.0.0-rc.9",
     "s-js": "^0.4.9",
     "terser": "^5.0.0",
+    "typescript": "^6.0.3",
     "usignal": "^0.10.0",
     "@solidjs/signals": "^2.0.0-beta.8"
   },
@@ -51,6 +61,10 @@
       "default": "./dist/index.js"
     },
     "#anod-src": "./src/index.js",
+    "#anod-internal": {
+      "src": "./src/internal.js",
+      "default": "./dist/internal.js"
+    },
     "#test-runner": {
       "bun": "./test/env/bun.js",
       "node": "./test/env/node.js",

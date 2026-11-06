@@ -16,7 +16,7 @@ const args = [
   '--rewrite_polyfills', 'false',
   '--js_output_file', 'dist/closure.js',
   '--externs' ,'externs/externs.js',
-  '--js', 'src/core.js',
+  '--js', 'src/internal.js',
   '--js', 'src/types.js',
   '--js', 'src/index.js'
 ];
