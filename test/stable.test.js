@@ -1,5 +1,5 @@
 import { describe, test, expect } from "#test-runner";
-import { signal, root, c } from "#anod";
+import { signal, root, c, STABLE } from "#anod";
 
 describe("stable compute", () => {
 	test("val() returns stale value for unread compute (version 0 collision)", () => {
@@ -26,12 +26,11 @@ describe("stable compute", () => {
 		let branch = false;
 		const stable = c.compute((cx) => {
 			cx.val(stableTrigger); // setup dep
-			cx.stable();
 			if (branch) {
 				return cx.val(victim); // new dep in stable mode
 			}
 			return -1;
-		});
+		}, undefined, STABLE);
 
 		// Run setup
 		expect(stable.get()).toBe(-1);
@@ -71,12 +70,11 @@ describe("stable compute", () => {
 		let readVictim = false;
 		const outer = c.compute((cx) => {
 			const base = cx.val(s2);
-			cx.stable();
 			if (readVictim) {
 				return base + cx.val(victim);
 			}
 			return base;
-		});
+		}, undefined, STABLE);
 
 		expect(outer.get()).toBe(100);
 

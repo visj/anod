@@ -10,7 +10,7 @@ import {
     effect as anodEffect,
     compute as anodCompute,
     signal as anodSignal,
-    OPT_STABLE,
+    STABLE,
 } from '../dist/index.mjs';
 
 /**
@@ -699,10 +699,10 @@ const anodStableBench = {
         for (let i = 0; i < width; i++) {
             branches.push(head.derive((_, val) => val + 1));
         }
-        /** Deps are always the same `width` branches; OPT_STABLE freezes after setup. */
+        /** Deps are always the same `width` branches; STABLE freezes after setup. */
         const sum = anodCompute(c =>
             branches.reduce((a, b) => a + c.read(b), 0),
-        0, OPT_STABLE);
+        0, STABLE);
         sum.watch((_, val) => {
             counter += val;
             sink += counter;
@@ -723,10 +723,10 @@ const anodStableBench = {
             list.push(current);
             current = prev.derive((_, val) => val + 1);
         }
-        /** Deps are always the same `width` nodes in `list`; OPT_STABLE freezes after setup. */
+        /** Deps are always the same `width` nodes in `list`; STABLE freezes after setup. */
         const sum = anodCompute(c =>
             list.reduce((a, b) => a + c.read(b), 0),
-        0, OPT_STABLE);
+        0, STABLE);
         sum.watch((_, val) => {
             counter += val;
             sink += counter;
@@ -739,8 +739,8 @@ const anodStableBench = {
 
     setupMux() {
         const heads = new Array(100).fill(null).map(() => anodSignal(0));
-        /** Deps are always the same 100 heads; OPT_STABLE freezes after setup. */
-        const mux = anodCompute(c => heads.map(h => c.read(h)), null, OPT_STABLE);
+        /** Deps are always the same 100 heads; STABLE freezes after setup. */
+        const mux = anodCompute(c => heads.map(h => c.read(h)), null, STABLE);
         const split = heads
             .map((_, index) => mux.derive((_, val) => val[index]))
             .map(x => x.derive((_, val) => val + 1));
@@ -828,9 +828,9 @@ const anodStableBench = {
             const m = layer;
             const s = {
                 prop1: m.prop2.derive((_, val) => val),
-                /** Two deps; OPT_STABLE tracks them on first run then freezes. */
-                prop2: anodCompute(c => c.read(m.prop1) - c.read(m.prop3), 0, OPT_STABLE),
-                prop3: anodCompute(c => c.read(m.prop2) + c.read(m.prop4), 0, OPT_STABLE),
+                /** Two deps; STABLE tracks them on first run then freezes. */
+                prop2: anodCompute(c => c.read(m.prop1) - c.read(m.prop3), 0, STABLE),
+                prop3: anodCompute(c => c.read(m.prop2) + c.read(m.prop4), 0, STABLE),
                 prop4: m.prop3.derive((_, val) => val),
             };
             s.prop1.watch((_, val) => { counter += val; sink += counter; });
@@ -869,12 +869,12 @@ const anodStableBench = {
         const numbers = Array.from({ length: 5 }, (_, i) => i);
         const A = anodSignal(0);
         const B = anodSignal(0);
-        /** C and E always read the same deps; OPT_STABLE freezes after setup. */
-        const C = anodCompute(c => (c.read(A) % 2) + (c.read(B) % 2), 0, OPT_STABLE);
+        /** C and E always read the same deps; STABLE freezes after setup. */
+        const C = anodCompute(c => (c.read(A) % 2) + (c.read(B) % 2), 0, STABLE);
         const D = anodCompute(c =>
             numbers.map(i => ({ x: i + (c.read(A) % 2) - (c.read(B) % 2) })),
-        null, OPT_STABLE);
-        const E = anodCompute(c => hard(c.read(C) + c.read(A) + c.read(D)[0].x, 'E'), 0, OPT_STABLE);
+        null, STABLE);
+        const E = anodCompute(c => hard(c.read(C) + c.read(A) + c.read(D)[0].x, 'E'), 0, STABLE);
         /** F and G have conditional reads; dynamic tracking required. */
         const F = anodCompute(c => hard(c.read(D)[2].x || c.read(B), 'F'));
         const G = anodCompute(c =>

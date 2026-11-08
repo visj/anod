@@ -1,5 +1,5 @@
 import { describe, test, expect } from "#test-runner";
-import { signal, root, batch, c } from "#anod";
+import { signal, root, batch, c, STABLE, LOADING, ERROR } from "#anod";
 
 const tick = () => Promise.resolve();
 
@@ -188,10 +188,9 @@ describe("edge cases", () => {
             let runs = 0;
 
             const d = c.compute(c => {
-                c.stable();
                 runs++;
                 return c.val(s1) + c.val(s2);
-            });
+            }, undefined, STABLE);
 
             expect(d.get()).toBe(11);
             expect(runs).toBe(1);
@@ -210,11 +209,10 @@ describe("edge cases", () => {
             let runs = 0;
 
             const d = c.compute(c => {
-                c.stable();
                 runs++;
                 c.val(s1);
                 return 42;
-            });
+            }, undefined, STABLE);
 
             expect(d.get()).toBe(42);
             expect(runs).toBe(1);
@@ -231,7 +229,7 @@ describe("edge cases", () => {
             const s1 = signal(1);
             let last = 0;
 
-            c.effect(c => { c.stable(); last = c.val(s1); });
+            c.effect(c => { last = c.val(s1); }, STABLE);
 
             expect(last).toBe(1);
             s1.set(2);
@@ -265,20 +263,20 @@ describe("edge cases", () => {
             }, 0);
 
             expect(runs).toBe(1);
-            expect(t.loading).toBe(true);
+            expect(t.is(LOADING)).toBe(true);
         });
 
         test("settles to resolved value", async () => {
             const t = c.task((c) => c.suspend(Promise.resolve(42)), 0);
 
             expect(t.get()).toBe(0);
-            expect(t.loading).toBe(true);
+            expect(t.is(LOADING)).toBe(true);
 
             await tick();
             await tick();
 
             expect(t.get()).toBe(42);
-            expect(t.loading).toBe(false);
+            expect(t.is(LOADING)).toBe(false);
         });
 
         test("notifies downstream on settle", async () => {
@@ -299,7 +297,7 @@ describe("edge cases", () => {
             await tick();
             await tick();
 
-            expect(t.error).toBe(true);
+            expect(t.is(ERROR)).toBe(true);
             expect(t.get().type).toBe(3);
             expect(t.get().error).toBeInstanceOf(Error);
             expect(t.get().error.message).toBe("fail");
@@ -504,7 +502,7 @@ describe("edge cases", () => {
             const s1 = signal(1);
             const left = c.compute(s1, val => val * 2);
             const right = c.compute(s1, val => val * 3);
-            const sum = c.compute(c => { c.stable(); return c.val(left) + c.val(right); });
+            const sum = c.compute(c => { return c.val(left) + c.val(right); }, undefined, STABLE);
 
             expect(sum.get()).toBe(5);
             s1.set(2);
@@ -517,7 +515,7 @@ describe("edge cases", () => {
             const s1 = signal(0);
             const a = c.compute(s1, val => val + 1);
             const b = c.compute(a, val => val + 1);
-            const c1 = c.compute(c => { c.stable(); return c.val(a) + c.val(b); });
+            const c1 = c.compute(c => { return c.val(a) + c.val(b); }, undefined, STABLE);
             let runs = 0;
 
             c.effect(c => {
@@ -750,7 +748,7 @@ describe("edge cases", () => {
 
             c.effect(c => {
                 const v = c.val(c1);
-                if (!c1.loading) {
+                if (!c1.is(LOADING)) {
                     values.push(v);
                 }
             });
@@ -780,10 +778,9 @@ describe("edge cases", () => {
         test("stable compute receives seed", () => {
             let received;
             const d = c.compute((c, prev) => {
-                c.stable();
                 received = prev;
                 return 42;
-            }, 99);
+            }, 99, STABLE);
 
             expect(d.get()).toBe(42);
             expect(received).toBe(99);
@@ -835,12 +832,12 @@ describe("edge cases", () => {
 
         test("compute.error() returns true after throw", () => {
             const c1 = c.compute(() => { throw new Error("fail"); });
-            expect(c1.error).toBe(true);
+            expect(c1.is(ERROR)).toBe(true);
         });
 
         test("compute.get() returns error POJO", () => {
             const c1 = c.compute(() => { throw new Error("rethrow me"); });
-            expect(c1.error).toBe(true);
+            expect(c1.is(ERROR)).toBe(true);
             expect(c1.get().type).toBe(3);
             expect(c1.get().error.message).toBe("rethrow me");
         });
@@ -882,9 +879,9 @@ describe("edge cases", () => {
             const s1 = signal(1);
             const s2 = signal(2);
 
-            const c1 = c.compute(c => { c.stable(); return c.val(s1) + c.val(s2); });
+            const c1 = c.compute(c => { return c.val(s1) + c.val(s2); }, undefined, STABLE);
             const c2 = c.compute(c1, val => val * 2);
-            const c3 = c.compute(c => { c.stable(); return c.val(c1) + c.val(c2); });
+            const c3 = c.compute(c => { return c.val(c1) + c.val(c2); }, undefined, STABLE);
 
             expect(c3.get()).toBe(9);
             s1.set(3);

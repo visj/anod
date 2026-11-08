@@ -1,5 +1,5 @@
 import { describe, test, expect } from "#test-runner";
-import { signal, root, c } from "#anod";
+import { signal, root, c, DISPOSED, LOADING } from "#anod";
 
 const tick = () => Promise.resolve();
 const settle = () => tick().then(tick).then(tick);
@@ -278,11 +278,11 @@ describe("shield", () => {
       });
       r1.dispose();
       expect(order).toEqual(["start"]);
-      expect(r1.disposed).toBe(false);
+      expect(r1.is(DISPOSED)).toBe(false);
       d.resolve();
       await settle();
       expect(order).toEqual(["start", "end", "spawn cleanup", "root cleanup"]);
-      expect(r1.disposed).toBe(true);
+      expect(r1.is(DISPOSED)).toBe(true);
     });
 
     test("the subtree is frozen while the disposal waits", async () => {
@@ -332,11 +332,11 @@ describe("shield", () => {
       a.resolve();
       await settle();
       expect(runs).toBe(1);
-      expect(r1.disposed).toBe(false);
+      expect(r1.is(DISPOSED)).toBe(false);
       b.resolve();
       await settle();
       expect(runs).toBe(1);
-      expect(r1.disposed).toBe(true);
+      expect(r1.is(DISPOSED)).toBe(true);
     });
 
     test("the shielded continuation reads and creates children after its owner is disposed", async () => {
@@ -358,7 +358,7 @@ describe("shield", () => {
       d.resolve();
       await settle();
       expect(log).toEqual(["read:1", "child", "child cleanup"]);
-      expect(r1.disposed).toBe(true);
+      expect(r1.is(DISPOSED)).toBe(true);
     });
 
     test("disposing the shielded spawn itself waits for its activation", async () => {
@@ -373,11 +373,11 @@ describe("shield", () => {
         });
       });
       spawn.dispose();
-      expect(spawn.disposed).toBe(false);
+      expect(spawn.is(DISPOSED)).toBe(false);
       expect(cleaned).toBe(0);
       d.resolve();
       await settle();
-      expect(spawn.disposed).toBe(true);
+      expect(spawn.is(DISPOSED)).toBe(true);
       expect(cleaned).toBe(1);
       /** The root lives on, and its own teardown doesn't reach the spawn again. */
       r1.dispose();
@@ -454,10 +454,10 @@ describe("shield", () => {
       b.resolve();
       await settle();
       expect(runs).toBe(1);
-      expect(r1.disposed).toBe(false);
+      expect(r1.is(DISPOSED)).toBe(false);
       hold.resolve();
       await settle();
-      expect(r1.disposed).toBe(true);
+      expect(r1.is(DISPOSED)).toBe(true);
     });
 
     test("an effect that shields and throws on a re-run is still disposed", () => {
@@ -510,7 +510,7 @@ describe("shield", () => {
       r1.dispose(true);
       expect(ctrl.signal.aborted).toBe(true);
       expect(cleaned).toBe(true);
-      expect(r1.disposed).toBe(true);
+      expect(r1.is(DISPOSED)).toBe(true);
       d.resolve();
       await settle();
       expect(resumed).toBe(false);
@@ -553,9 +553,9 @@ describe("shield", () => {
       r1.dispose();
       expect(rootCleaned).toBe(false);
       spawn.dispose(true);
-      expect(spawn.disposed).toBe(true);
+      expect(spawn.is(DISPOSED)).toBe(true);
       expect(rootCleaned).toBe(true);
-      expect(r1.disposed).toBe(true);
+      expect(r1.is(DISPOSED)).toBe(true);
     });
 
     test("breaks a cycle through a child's cleanup", async () => {
@@ -621,7 +621,7 @@ describe("shield", () => {
 
       /** Task is still loading (old activation discarded, FLAG_STALE set).
        *  Pulling triggers re-run → new activation with new promise. */
-      expect(t1.loading).toBe(true);
+      expect(t1.is(LOADING)).toBe(true);
       t1.get();
       expect(runs).toBe(2);
 

@@ -1,5 +1,5 @@
 import { describe, test, expect } from "#test-runner";
-import { signal, resource, root, Defect, PANIC } from "#anod";
+import { signal, resource, root, Defect, PANIC, DISPOSED, ERROR } from "#anod";
 
 /**
  * Disposal and the nodes waiting on a task.
@@ -174,7 +174,7 @@ describe("an owner's teardown and the waiters inside it", () => {
                         await cx.suspend(task);
                         seen.push("resumed");
                     } catch (err) {
-                        seen.push("catch ran (spawn disposed: " + me().disposed + ")");
+                        seen.push("catch ran (spawn disposed: " + me().is(DISPOSED) + ")");
                     }
                 });
             });
@@ -217,7 +217,7 @@ describe("an owner's teardown and the waiters inside it", () => {
                 try {
                     await cx.suspend(task);
                 } catch (err) {
-                    seen.push({ catchRan: true, spawnDisposed: me().disposed });
+                    seen.push({ catchRan: true, spawnDisposed: me().is(DISPOSED) });
                 }
             });
         });
@@ -251,7 +251,7 @@ describe("an owner's teardown and the waiters inside it", () => {
         const r = root((r) => {
             waitOnTask(r, false, (cx, task, me) => {
                 cx.suspend(task, () => { }, (err) => {
-                    seen.push({ onRejectRan: true, spawnDisposed: me().disposed, error: err.error.message });
+                    seen.push({ onRejectRan: true, spawnDisposed: me().is(DISPOSED), error: err.error.message });
                 });
             });
         });
@@ -381,11 +381,11 @@ describe("an owner's teardown and the waiters inside it", () => {
         });
         await wait();
         spawnRoot.dispose();
-        expect(spawn.disposed).toBe(false);
+        expect(spawn.is(DISPOSED)).toBe(false);
         taskRoot.dispose();
         await wait();
         expect(seen).toEqual(["catch: Awaited task was disposed", "body finished", "cleanup"]);
-        expect(spawn.disposed).toBe(true);
+        expect(spawn.is(DISPOSED)).toBe(true);
     });
 
     /**
@@ -414,12 +414,12 @@ describe("an owner's teardown and the waiters inside it", () => {
         r.dispose();
         await wait();
         expect(seen).toEqual([]);
-        expect(task.disposed).toBe(false);
+        expect(task.is(DISPOSED)).toBe(false);
         r.dispose(true);
         await wait();
         expect(seen).toEqual(["cleanup"]);
-        expect(spawn.disposed).toBe(true);
-        expect(task.disposed).toBe(true);
+        expect(spawn.is(DISPOSED)).toBe(true);
+        expect(task.is(DISPOSED)).toBe(true);
     });
 
     /**
@@ -452,13 +452,13 @@ describe("an owner's teardown and the waiters inside it", () => {
                 task = rt.task((cx) => cx.suspend(never()));
             });
             r.spawn((cx) => cx.suspend(task, () => { }, () => {
-                seen.push("onReject, teardown finished: " + sentinel.disposed);
+                seen.push("onReject, teardown finished: " + sentinel.is(DISPOSED));
             }));
             r.spawn(async (cx) => {
                 try {
                     await cx.suspend(task);
                 } catch (err) {
-                    seen.push("catch, teardown finished: " + sentinel.disposed);
+                    seen.push("catch, teardown finished: " + sentinel.is(DISPOSED));
                 }
             });
         });
@@ -614,7 +614,7 @@ describe("a waiter disposed while a settle delivers to it", () => {
             other = root((r2) => {
                 spawn2 = r2.spawn(async (cx) => {
                     const v = await cx.suspend(task);
-                    seen.push({ resumed: v, spawnDisposed: spawn2.disposed });
+                    seen.push({ resumed: v, spawnDisposed: spawn2.is(DISPOSED) });
                 });
             });
         });
@@ -656,7 +656,7 @@ describe("a waiter disposed while a settle delivers to it", () => {
             other = root((r2) => {
                 spawn2 = r2.spawn(async (cx) => {
                     const [v] = await cx.suspend([task]);
-                    seen.push({ resumed: v, spawnDisposed: spawn2.disposed });
+                    seen.push({ resumed: v, spawnDisposed: spawn2.is(DISPOSED) });
                 });
             });
         });
@@ -705,7 +705,7 @@ describe("a waiter disposed while a settle delivers to it", () => {
                         const v = form === "task"
                             ? await cx.suspend(task)
                             : (await cx.suspend([task]))[0];
-                        seen.push({ resumed: v, spawnDisposed: spawn2.disposed });
+                        seen.push({ resumed: v, spawnDisposed: spawn2.is(DISPOSED) });
                     });
                 });
                 r.spawn((cx) => cx.suspend(task, () => other.dispose()));
@@ -943,7 +943,7 @@ describe("the error a disposed task hands its waiters", () => {
         });
         taskRoot.dispose();
         await wait();
-        expect(waiter.error).toBe(true);
+        expect(waiter.is(ERROR)).toBe(true);
         expect(waiter.get()).toBeInstanceOf(Defect);
         expect(waiter.get().type).toBe(PANIC);
         expect(waiter.get().error.message).toBe("Awaited task was disposed");

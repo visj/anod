@@ -37,9 +37,10 @@ anod is a reactive state management library. It has built-in support for both sy
 	- [Contextual writes: `c.set()` / `c.post()`](#contextual-writes-cset--cpost)
 	- [Async state checks: `c.pending()` / `c.rejected()`](#async-state-checks-cpending--crejected)
 	- [Evaluation helpers](#evaluation-helpers)
-		- [`stable()`](#stable)
-		- [`weak()`](#weak)
-		- [`eager()`](#eager)
+		- [`STABLE`](#stable)
+		- [`WEAK`](#weak)
+		- [`EAGER`](#eager)
+		- [`is()`](#is)
 		- [`pause()` / `resume()`](#pause--resume)
 	- [Error recovery in depth](#error-recovery-in-depth)
 		- [Recovery](#recovery)
@@ -185,7 +186,7 @@ root((c) => {
 A compute is a derived signal. It can subscribe to signals or other computes, and updates whenever any of them change.
 
 ```ts
-import { root, signal, OPT_DEFER } from "anod";
+import { root, signal, DEFER } from "anod";
 root((c) => {
 	const temp = signal(10);
 	/**
@@ -198,11 +199,11 @@ root((c) => {
 		return c.val(temp) < 0; // Warm weather today
 	});
 
-	// Create a compute node, but defer its initial run with the OPT_DEFER.
+	// Create a compute node, but defer its initial run with DEFER.
 	const shiver = c.compute(
 		(c) => (c.val(feelsCold) ? "Brr" : ""),
 		"",
-		OPT_DEFER
+		DEFER
 	);
 
 	temp.set(15); // feelsCold has no subscribers, nothing prints to the console
@@ -293,7 +294,7 @@ anod aims to bridge the gap between sync and async signal reactivity. Each sync 
 A resource is an async Signal. It supports writing changes through async functions, that later resolve to update it. There are three ways to write to a resource:
 
 ```ts
-import { root, resource } from "anod";
+import { root, resource, LOADING } from "anod";
 
 const save = (val) => new Promise((r) => setTimeout(() => r(val), 50));
 
@@ -315,16 +316,16 @@ root((c) => {
 	});
 
 	c.effect(name, (val) => {
-		console.log(val, name.loading ? "(loading)" : "");
+		console.log(val, name.is(LOADING) ? "(loading)" : "");
 	});
 });
 ```
 
-The async callback receives the resource as `c` (with `suspend` for staleness protection) and the current/optimistic value. If the callback returns a sync value, it settles immediately with no loading state. If it returns a promise, `.loading` becomes true until it resolves.
+The async callback receives the resource as `c` (with `suspend` for staleness protection) and the current/optimistic value. If the callback returns a sync value, it settles immediately with no loading state. If it returns a promise, `is(LOADING)` is true until it resolves.
 
 When a new `set()` fires while a previous async callback is still in flight, the old promise still resolves normally, but `suspend()` detects that the resource has moved on and simply doesn't yield back into the callback. The continuation after `await` never runs, so the stale result never reaches the `return` . Only the latest activation's callback gets to settle the resource.
 
-A plain write counts as a new `set()` too, however it is made: `.set()`, `.post()`, inside a batch, or `c.set()` from a node. It discards whatever the callback in flight produces later, including the next `yield` of a generator or a later `resolve`. A plain write to a resource that is loading or failed settles it with the written value, even an equal one, so `.loading` and `.error` turn false and the nodes waiting on it resume. Since every plain write ends the work in flight, `.post()` queues one even when the value is unchanged.
+A plain write counts as a new `set()` too, however it is made: `.set()`, `.post()`, inside a batch, or `c.set()` from a node. It discards whatever the callback in flight produces later, including the next `yield` of a generator or a later `resolve`. A plain write to a resource that is loading or failed settles it with the written value, even an equal one, so `is(LOADING)` and `is(ERROR)` turn false and the nodes waiting on it resume. Since every plain write ends the work in flight, `.post()` queues one even when the value is unchanged.
 
 #### Task
 
@@ -720,66 +721,83 @@ root((c) => {
 
 ### Evaluation helpers
 
-Anod allows you to modify the behaviour of nodes in different ways. These methods can be called on the context itself, but typically, it makes more sense to set it outside, once, upon creation.
-
-#### `stable()`
-
-Marks the current node as stable, and freezes the dependencies in place. This is useful if you have a compute/effect that subscribe to a long array of signals, but the signals never change. By marking the node stable(), you can skip the overhead of the reconcile machinery that handles dynamic cases.
+Options change how a node evaluates. They are passed in the `opts` argument of the factory that creates the node, and they are fixed from then on: a node cannot become stable, weak or eager later, or stop being one.
 
 ```ts
-import { root, signal } from "anod";
+c.compute(fn, seed, opts, args);
+c.task(fn, seed, opts, args);
+c.effect(fn, opts, args);
+c.spawn(fn, opts, args);
+c.compute(dep, fn, seed, opts, args); // bound
+c.effect(dep, fn, opts); // bound
+```
+
+The options are `STABLE`, `WEAK` and `EAGER` below, `DEFER`, which skips a node's first run (see [Compute](#compute)), and `SETUP`, which makes a bound node also track the `c.val()` reads of its first run. `WEAK` and `EAGER` only apply to computes and tasks. In TypeScript, `opts` takes one option, and an effect or spawn only takes `STABLE`, `DEFER` or `SETUP`. JavaScript can combine options with `|`.
+
+#### `STABLE`
+
+A stable node tracks its dependencies on its first run, and freezes them in place. Later runs read through `c.val()` without subscribing, so they skip the reconcile machinery that handles dynamic dependencies. This is useful for a compute or effect that reads a long array of signals that never changes. A bound node (`c.compute(dep, fn)`) is always stable.
+
+```ts
+import { root, signal, STABLE } from "anod";
 root((c) => {
 	const signals = [];
 	for (let i = 0; i < 100; i++) {
 		signals[i] = signal(i);
 	}
-	const formatted = c.compute((c) => {
-		return signals.map((i) => `Item: ${c.val(i)}`);
-	});
 	/**
-	 * We know this node only reads the same dependencies
-	 * It always reads the same 100 signals every time
-	 * mark it stable and avoid subscription overhead
+	 * We know this node reads the same 100 signals
+	 * every time, so we create it stable and avoid
+	 * the subscription overhead.
 	 */
-	formatted.stable();
+	const formatted = c.compute(
+		(c) => signals.map((i) => `Item: ${c.val(i)}`),
+		undefined,
+		STABLE
+	);
 
 	const first = signal(false);
 	const second = signal(2);
-	const wrong = c.compute((c) => {
-		if (c.val(first)) {
-			return c.val(second);
-		}
-	});
-	wrong.stable();
+	const wrong = c.compute(
+		(c) => {
+			if (c.val(first)) {
+				return c.val(second);
+			}
+		},
+		undefined,
+		STABLE
+	);
 
 	/**
-	 * Since we marked the node stable,
-	 * it doesn't automatically track any new
-	 * dependencies on update. Even though we
-	 * read through c.val(), because we marked the
-	 * node stable, it doesn't listen to changes from second.
+	 * Since the node is stable, it doesn't track new
+	 * dependencies on update. Even though it reads
+	 * second through c.val(), it doesn't listen to
+	 * changes from second.
 	 */
 	first.set(true);
 });
 ```
 
-#### `weak()`
+#### `WEAK`
 
 A weak compute releases its cached value and runs its cleanups when it loses all subscribers. The next read triggers a fresh recompute. When the last reader drops it during an update, the cleanups run once that update has settled the readers' dependencies, before the write returns. An error thrown by one of them is the weak compute's, not the reader's, and it is rethrown to the writer. This is useful for derived data that retains significant memory — parsed documents, decoded images, materialized query results — that can be safely dropped and recomputed on demand.
 
 ```ts
-import { root, signal } from "anod";
+import { root, signal, WEAK } from "anod";
 root((c) => {
 	const path = signal("/data/large-dataset.csv");
-	const parsed = c.compute((c) => {
-		const raw = readFileSync(c.val(path));
-		const rows = parseCSV(raw); // large allocation
-		c.cleanup(() => {
-			console.log("released parsed data");
-		});
-		return rows;
-	});
-	parsed.weak();
+	const parsed = c.compute(
+		(c) => {
+			const raw = readFileSync(c.val(path));
+			const rows = parseCSV(raw); // large allocation
+			c.cleanup(() => {
+				console.log("released parsed data");
+			});
+			return rows;
+		},
+		undefined,
+		WEAK
+	);
 
 	const view = c.effect(parsed, (rows) => render(rows));
 	// parsed holds the full row array in memory
@@ -795,15 +813,32 @@ root((c) => {
 Releasing keeps nothing from the compute's previous life, not even its seed. The seed is only the first `prev`, and a released compute has no `prev`, so the recompute receives `undefined`. A reducer that should restart from an initial value uses a default parameter, which applies on the first run and after every release:
 
 ```ts
-const totals = c.compute((c, prev = []) => [...prev, c.val(entry)]);
-totals.weak();
+const totals = c.compute((c, prev = []) => [...prev, c.val(entry)], undefined, WEAK);
 ```
 
 State that must survive a release belongs in `args`, the last argument of `compute()`, which the compute keeps for its whole lifetime and passes to every run.
 
-#### `eager()`
+#### `EAGER`
 
-Converts a compute from pull-based to push-based. An eager compute re-evaluates immediately when notified, rather than waiting to be pulled. Use sparingly: this removes the laziness optimization but guarantees the value is always fresh.
+Makes a compute push-based instead of pull-based. An eager compute re-evaluates immediately when notified, rather than waiting to be pulled. Use sparingly: this removes the laziness optimization but guarantees the value is always fresh.
+
+#### `is()`
+
+`node.is(flag)` tells whether a node has an option or a state set. The states are `DISPOSED`, `LOADING` and `ERROR`. It works on every node, and on `c` inside a node's callback.
+
+```ts
+import { root, signal, LOADING, ERROR, DISPOSED, STABLE } from "anod";
+root((c) => {
+	const user = c.task(async (c) => fetchUser(), undefined, STABLE);
+	user.is(STABLE); // true
+	user.is(LOADING); // true while the fetch is in flight
+	user.is(ERROR); // true if the fetch failed
+	user.dispose();
+	user.is(DISPOSED); // true
+});
+```
+
+Any flag that is not an option or a state reads as `false`. In TypeScript, each group of constants has its own type, so `is(REFUSE)`, or comparing `defect.type === ERROR`, is a compile error.
 
 #### `pause()` / `resume()`
 
@@ -1041,7 +1076,7 @@ The setup function runs right away, but `resolve` and `reject` never act in the 
 The callbacks are guarded with the same staleness protection as promises: if the node is disposed or re-run before `resolve` fires, the call is silently ignored. Like a promise, the pair settles once: the first call to `resolve` or `reject` wins, and later calls do nothing.
 
 ```ts
-import { root, signal, OPT_DEFER } from "anod";
+import { root, signal, DEFER } from "anod";
 root((c) => {
 	const url = signal("ws://localhost");
 	const outgoing = signal("");
@@ -1058,12 +1093,12 @@ root((c) => {
 				});
 				/**
 				 * Socket is open. Create a child effect that forwards
-				 * outgoing messages. OPT_DEFER skips the initial run,
+				 * outgoing messages. DEFER skips the initial run,
 				 * so it only fires when outgoing actually changes.
 				 * Because anod passes context explicitly, you can freely
 				 * create owned effects beyond the async boundary.
 				 */
-				c.effect(outgoing, (msg) => ws.send(msg), OPT_DEFER);
+				c.effect(outgoing, (msg) => ws.send(msg), DEFER);
 				resolve();
 			});
 			ws.addEventListener("error", reject);
@@ -1274,13 +1309,15 @@ Alternatively, library authors can extend anod and expose the global listener as
 
 anod uses the O(1) two-way slot binding that S.js uses: each link stores its index in the other node's list, so a receiver that is disposed, or that drops a dep on a re-run, is unlinked at once by moving the last entry into its slot. The cost is memory: `_subs` and `_deps` hold pairs, which doubles their length. Ownership lists are cheaper: a child disposed on its own stays in its owner's `_owned` list until the owner compacts the list, once the disposal has finished.
 
+A write marks the computes downstream of it by recursion, one level per compute in a chain. A chain of computes that each read the previous one, deeper than about 3,500, overflows the call stack under V8 (Node, Chrome) with its default stack size; Bun handles about 20,000. Reading a deep chain is iterative and has no such limit. A real graph is rarely more than a few dozen computes deep: a list modeled as one compute per item, each reading the one before (running totals, layout offsets), is better written as one compute over the array.
+
 ## Benchmarks
 
 Most reactivity benchmarks measure deep chains and synthetic propagation patterns that rarely occur in real apps. This benchmark (`bench/app`) instead models a typical list view: 1,000 rows, each with its own state signals, computes derived from them, and effects that write DOM values. It is the shape most application code has: many signals feeding many computes, with effects mostly writing to the DOM.
 
 Per row, three signals (`label`, `count`, `done`) feed three computes: a text from label and count, a filter check, and a class name from selection and theme. Selection goes through each library's selector, which flips only the previous and the next row: Solid's `createProjection`, and the same small hand-written keyed selector in anod and alien-signals, which have no built-in one. Five DOM writes follow, four with a single dependency and one with two. At app level, a count over all 1,000 rows feeds a footer, and one side effect persists the filter. DOM elements are plain objects, so the numbers measure the reactive engine, not a DOM.
 
-Every suite builds the same graph, and checks at startup that each scenario runs exactly the same number of computes and effects. Each uses its library as documented. anod builds every node with the unbound API, `c.compute(fn)` and `c.effect(fn)`, which tracks dependencies the way alien-signals and Solid do. These tables don't use the bound API for single-dependency nodes (`c.compute(dep, fn)`), which a compiler like katode emits, or `stable()`, which the other libraries have no equivalent of. alien-signals uses `computed` and `effect` with one `effectScope` per row. Solid uses `createMemo`, `createRenderEffect` for DOM writes and one `createRoot` per row, ending each scenario with `flush()` as its renderer does.
+Every suite builds the same graph, and checks at startup that each scenario runs exactly the same number of computes and effects. Each uses its library as documented. anod builds every node with the unbound API, `c.compute(fn)` and `c.effect(fn)`, which tracks dependencies the way alien-signals and Solid do. These tables don't use the bound API for single-dependency nodes (`c.compute(dep, fn)`), which a compiler like katode emits, or the `STABLE` option, which the other libraries have no equivalent of. alien-signals uses `computed` and `effect` with one `effectScope` per row. Solid uses `createMemo`, `createRenderEffect` for DOM writes and one `createRoot` per row, ending each scenario with `flush()` as its renderer does.
 
 | Scenario | What happens | Work per iteration |
 | :-- | :-- | :-- |
@@ -1328,7 +1365,7 @@ Time is the average per iteration, the median of 8 rounds run in rotated order. 
 
 Solid's projection also slows its scenarios that never touch the selection: in a run of just that scenario, a toggle takes about 34 µs without it and 44 µs with it. Real Solid apps use stores throughout, so the suite keeps it; see [bench/app/README.md](bench/app/README.md).
 
-Run them with `ANOD_API=unbound node bench/app/anod.js`, `node bench/app/alien-signals.js` and `node bench/app/solid.js` after `npm run make`. Without `ANOD_API=unbound`, `bench/app/anod.js` uses the bound API for single-dependency nodes and marks the 1,000-signal count `stable()`. See [bench/app/README.md](bench/app/README.md) for the full graph.
+Run them with `ANOD_API=unbound node bench/app/anod.js`, `node bench/app/alien-signals.js` and `node bench/app/solid.js` after `npm run make`. Without `ANOD_API=unbound`, `bench/app/anod.js` uses the bound API for single-dependency nodes and creates the 1,000-signal count with `STABLE`. See [bench/app/README.md](bench/app/README.md) for the full graph.
 
 ## Acknowledgements
 

@@ -9,11 +9,13 @@ import {
     REFUSE,
     PANIC,
     FATAL,
-    OPT_DEFER,
-    OPT_STABLE,
-    OPT_SETUP,
-    OPT_WEAK,
-    OPT_EAGER
+    DEFER,
+    STABLE,
+    SETUP,
+    WEAK,
+    EAGER,
+    DISPOSED,
+    ERROR,
 } from "#anod-src";
 import { spawnSync } from "node:child_process";
 
@@ -307,13 +309,13 @@ describe("dynamic dependencies", () => {
      * 0 the dep1 promotion (src/internal.js:3303) is skipped and the
      * `tail === 0` branch nulls `_deps`, so the node ends up with no deps
      * while `x` still lists it as a subscriber. (A dep-less node only
-     * re-runs once released by OPT_WEAK, which marks it STALE.)
+     * re-runs once released by WEAK, which marks it STALE.)
      */
     test("weak compute with no deps keeps the dep it picks up after release", () => {
         let mode = false;
         const a = signal(1);
         const x = c.compute((cx) => cx.val(a) * 2);
-        const w = c.compute((cx) => (mode ? cx.val(x) : 0), undefined, OPT_WEAK);
+        const w = c.compute((cx) => (mode ? cx.val(x) : 0), undefined, WEAK);
         const e = c.effect((cx) => {
             cx.val(w);
         });
@@ -336,7 +338,7 @@ describe("dynamic dependencies", () => {
         let mode = false;
         const a = signal(1);
         const x = c.compute((cx) => cx.val(a) * 2);
-        const w = c.compute((cx) => (mode ? cx.val(x) : 0), undefined, OPT_WEAK);
+        const w = c.compute((cx) => (mode ? cx.val(x) : 0), undefined, WEAK);
         const e = c.effect((cx) => {
             cx.val(w);
         });
@@ -521,7 +523,7 @@ describe("version stamping across nesting", () => {
         const lazy = c.compute((cx) => {
             lazyRuns++;
             return cx.val(a) + cx.val(b);
-        }, undefined, OPT_DEFER);
+        }, undefined, DEFER);
         expect(lazyRuns).toBe(0);
         const seen = [];
         const e = c.effect((cx) => {
@@ -692,10 +694,15 @@ describe("glitch freedom", () => {
         expect(topRuns).toBe(3);
     });
 
-    test("5000-deep pending chain propagates through the iterative checkRun", () => {
+    /**
+     * 2,000 deep: the pull through checkRun is iterative, but a write
+     * marks the chain by recursion, which overflows V8's default stack
+     * past about 3,500 computes (see README › Limitations).
+     */
+    test("2000-deep pending chain propagates through the iterative checkRun", () => {
         const s = signal(0);
         let prev = c.compute((cx) => cx.val(s) % 2);
-        for (let i = 0; i < 5000; i++) {
+        for (let i = 0; i < 2000; i++) {
             const up = prev;
             prev = c.compute((cx) => cx.val(up) + 1);
         }
@@ -705,9 +712,9 @@ describe("glitch freedom", () => {
             seen.push(cx.val(last));
         });
         s.set(2);
-        expect(seen).toEqual([5000]);
+        expect(seen).toEqual([2000]);
         s.set(3);
-        expect(seen).toEqual([5000, 5001]);
+        expect(seen).toEqual([2000, 2001]);
     });
 });
 
@@ -786,7 +793,7 @@ describe("cycles", () => {
         expect(self.get()).toBe(1);
         s.set(1);
         const v = self.get();
-        expect(self.error).toBe(true);
+        expect(self.is(ERROR)).toBe(true);
         expect(v.type).toBe(FATAL);
         expect(v.error.message).toBe("Cannot read a disposed node or yourself");
     });
@@ -827,14 +834,14 @@ describe("cycles", () => {
 });
 
 describe("options", () => {
-    test("OPT_STABLE: deps come from the first run only", () => {
+    test("STABLE: deps come from the first run only", () => {
         const flag = signal(false);
         const a = signal(1);
         let runs = 0;
         const x = c.compute((cx) => {
             runs++;
             return cx.val(flag) ? cx.val(a) : -1;
-        }, undefined, OPT_STABLE);
+        }, undefined, STABLE);
         const seen = [];
         c.effect((cx) => {
             seen.push(cx.val(x));
@@ -859,28 +866,9 @@ describe("options", () => {
      * their sweep stamp; patchDeps (src/internal.js:3224, 3252) then
      * treats them as unread and unsubscribes them.
      */
-    test("stable() called on a later run keeps the deps read after the call", () => {
-        const a = signal(1);
-        const b = signal(1);
-        const trig = signal(0);
-        let runs = 0;
-        c.effect((cx) => {
-            runs++;
-            cx.val(trig);
-            if (cx.val(a) === 2) {
-                cx.stable();
-            }
-            cx.val(b);
-        });
-        a.set(2);
-        expect(runs).toBe(2);
-        b.set(5);
-        expect(runs).toBe(3);
-    });
-
     /**
-     * BUG (medium, OPT_SETUP is undocumented). Expected: a bound compute
-     * created with OPT_SETUP that also reads `xc` in its setup run reacts
+     * BUG (medium, SETUP is undocumented). Expected: a bound compute
+     * created with SETUP that also reads `xc` in its setup run reacts
      * when `xc` changes, like it does when pulled with .get(). Actual:
      * the effect reading it never sees 201 (`seen` stays [101]) though
      * bound.get() is 201. Root cause: bound nodes start with FLAG_SINGLE
@@ -889,11 +877,11 @@ describe("options", () => {
      * _refresh -> checkSingle (src/internal.js:2129-2130, 3456) only
      * checks dep1 and clears the PENDING flag.
      */
-    test("bound compute with OPT_SETUP reacts to the extra deps it tracked", () => {
+    test("bound compute with SETUP reacts to the extra deps it tracked", () => {
         const a = signal(1);
         const s = signal(1);
         const xc = c.compute((cx) => cx.val(s) * 100);
-        const bound = c.compute(a, (v, cx) => v + cx.val(xc), undefined, OPT_SETUP);
+        const bound = c.compute(a, (v, cx) => v + cx.val(xc), undefined, SETUP);
         const seen = [];
         c.effect((cx) => {
             seen.push(cx.val(bound));
@@ -904,31 +892,31 @@ describe("options", () => {
 
     /**
      * BUG. Expected (README "Callback (resolve, reject)" example:
-     * `c.effect(outgoing, (msg) => ws.send(msg), OPT_DEFER)` "OPT_DEFER
+     * `c.effect(outgoing, (msg) => ws.send(msg), DEFER)` "DEFER
      * skips the initial run, so it only fires when outgoing actually
-     * changes"): a bound effect with OPT_DEFER does not run on creation.
+     * changes"): a bound effect with DEFER does not run on creation.
      * Actual: it runs immediately ([1, 2]). Root cause: effect() calls
      * startEffect(node) unconditionally (src/internal.js:2890), unlike
      * compute() which checks FLAG_DEFER (src/internal.js:2809).
      */
-    test("bound effect with OPT_DEFER skips its initial run", () => {
+    test("bound effect with DEFER skips its initial run", () => {
         const s = signal(1);
         const seen = [];
         c.effect(s, (v) => {
             seen.push(v);
-        }, OPT_DEFER);
+        }, DEFER);
         expect(seen).toEqual([]);
         s.set(2);
         expect(seen).toEqual([2]);
     });
 
-    test("OPT_DEFER compute pulled first by an effect then tracks updates", () => {
+    test("DEFER compute pulled first by an effect then tracks updates", () => {
         const s = signal(1);
         let runs = 0;
         const x = c.compute(s, (v) => {
             runs++;
             return v * 2;
-        }, undefined, OPT_DEFER);
+        }, undefined, DEFER);
         s.set(2);
         expect(runs).toBe(0);
         const seen = [];
@@ -940,20 +928,7 @@ describe("options", () => {
         expect(runs).toBe(2);
     });
 
-    /**
-     * BUG. Expected: compute.weak() exists, as documented in README
-     * "weak()" (`parsed.weak()`) and declared on Compute in
-     * types/internal.d.ts:159. Actual: TypeError, weak is not a
-     * function. Root cause: ComputeProto defines eager() and stable()
-     * (src/internal.js:1058, 1097) but no weak().
-     */
-    test("compute.weak() is available as documented", () => {
-        const s = signal(1);
-        const x = c.compute((cx) => cx.val(s));
-        expect(typeof x.weak).toBe("function");
-    });
-
-    test("OPT_WEAK: released compute re-subscribes and updates when observed again", () => {
+    test("WEAK: released compute re-subscribes and updates when observed again", () => {
         const s = signal(1);
         let runs = 0;
         let cleanups = 0;
@@ -963,7 +938,7 @@ describe("options", () => {
                 cleanups++;
             });
             return cx.val(s) * 2;
-        }, undefined, OPT_WEAK);
+        }, undefined, WEAK);
         const e1 = c.effect((cx) => {
             cx.val(w);
         });
@@ -990,13 +965,13 @@ describe("options", () => {
      * prev. The recompute gets undefined as prev, so a default
      * parameter reapplies on every fresh activation.
      */
-    test("OPT_WEAK: recompute after release gets undefined as prev, not the seed", () => {
+    test("WEAK: recompute after release gets undefined as prev, not the seed", () => {
         const s = signal(1);
         const prevs = [];
         const w = c.compute((cx, prev) => {
             prevs.push(prev);
             return cx.val(s);
-        }, 100, OPT_WEAK);
+        }, 100, WEAK);
         const e = c.effect((cx) => {
             cx.val(w);
         });
@@ -1006,9 +981,9 @@ describe("options", () => {
         expect(prevs).toEqual([100, undefined]);
     });
 
-    test("OPT_WEAK: a default parameter reapplies after release", () => {
+    test("WEAK: a default parameter reapplies after release", () => {
         const s = signal(1);
-        const w = c.compute((cx, prev = 100) => prev + cx.val(s), undefined, OPT_WEAK);
+        const w = c.compute((cx, prev = 100) => prev + cx.val(s), undefined, WEAK);
         const e = c.effect((cx) => {
             cx.val(w);
         });
@@ -1017,14 +992,14 @@ describe("options", () => {
         expect(w.get()).toBe(101);
     });
 
-    test("OPT_WEAK: a seed mutated in place is not retained after release", () => {
+    test("WEAK: a seed mutated in place is not retained after release", () => {
         const s = signal(1);
         const seed = [];
         const w = c.compute((cx, prev) => {
             prev = prev || [];
             prev.push(cx.val(s));
             return prev;
-        }, seed, OPT_WEAK);
+        }, seed, WEAK);
         const e = c.effect((cx) => {
             cx.val(w);
         });
@@ -1037,14 +1012,13 @@ describe("options", () => {
         expect(next).toEqual([2]);
     });
 
-    test("weak(): recompute after release gets undefined as prev", () => {
+    test("WEAK: recompute after release gets undefined as prev", () => {
         const s = signal(1);
         const prevs = [];
         const w = c.compute((cx, prev) => {
             prevs.push(prev);
             return cx.val(s);
-        }, 100);
-        w.weak();
+        }, 100, WEAK);
         const e = c.effect((cx) => {
             cx.val(w);
         });
@@ -1062,9 +1036,9 @@ describe("options", () => {
      * runs any STALE effect without a ctime check
      * (src/internal.js:4238-4240).
      */
-    test("OPT_EAGER: recomputing to the same value does not re-run downstream effects", () => {
+    test("EAGER: recomputing to the same value does not re-run downstream effects", () => {
         const s = signal(1);
-        const parity = c.compute((cx) => cx.val(s) % 2, undefined, OPT_EAGER);
+        const parity = c.compute((cx) => cx.val(s) % 2, undefined, EAGER);
         let runs = 0;
         c.effect((cx) => {
             cx.val(parity);
@@ -1082,14 +1056,14 @@ describe("options", () => {
      * notifies its subscribers with FLAG_STALE anyway
      * (src/internal.js:2491-2494).
      */
-    test("OPT_EAGER: upstream compute absorbs the change, downstream effect stays idle", () => {
+    test("EAGER: upstream compute absorbs the change, downstream effect stays idle", () => {
         const s = signal(1);
         const par = c.compute((cx) => cx.val(s) % 2);
         let egRuns = 0;
         const eg = c.compute((cx) => {
             egRuns++;
             return cx.val(par) * 10;
-        }, undefined, OPT_EAGER);
+        }, undefined, EAGER);
         let runs = 0;
         c.effect((cx) => {
             cx.val(eg);
@@ -1100,24 +1074,22 @@ describe("options", () => {
         expect(runs).toBe(1);
     });
 
-    test("OPT_EAGER: eager compute without subscribers recomputes on every write", () => {
+    test("EAGER: eager compute without subscribers recomputes on every write", () => {
         const s = signal(1);
         let runs = 0;
         const eg = c.compute((cx) => {
             runs++;
             return cx.val(s);
-        }, undefined, OPT_EAGER);
+        }, undefined, EAGER);
         s.set(2);
         s.set(3);
         expect(runs).toBe(3);
-        const lazy = c.compute((cx) => cx.val(s));
-        lazy.eager();
+        const lazy = c.compute((cx) => cx.val(s), undefined, EAGER);
         let runs2 = 0;
         const eg2 = c.compute((cx) => {
             runs2++;
             return cx.val(lazy) * 2;
-        });
-        eg2.eager();
+        }, undefined, EAGER);
         s.set(4);
         expect(runs).toBe(4);
         expect(runs2).toBe(2);
@@ -1239,7 +1211,7 @@ describe("nested creation and disposed deps", () => {
         });
         s.set(2);
         expect(computes.length).toBe(2);
-        expect(computes[0].disposed).toBe(true);
+        expect(computes[0].is(DISPOSED)).toBe(true);
         expect(computes[1].get()).toBe(21);
         let caught = null;
         const reader = c.compute((cx) => {
@@ -1405,7 +1377,7 @@ describe("subscriber bookkeeping", () => {
         });
         s.set(1);
         const after = victimRuns;
-        expect(victim.disposed).toBe(true);
+        expect(victim.is(DISPOSED)).toBe(true);
         s.set(2);
         expect(victimRuns).toBe(after);
     });
@@ -1423,7 +1395,7 @@ describe("subscriber bookkeeping", () => {
         s.set(1);
         s.set(2);
         expect(runs).toBe(2);
-        expect(self.disposed).toBe(true);
+        expect(self.is(DISPOSED)).toBe(true);
     });
 
     test("subscriber dropped from _sub1 by dynamic switch gets the slot back cleanly", () => {

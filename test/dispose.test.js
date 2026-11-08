@@ -1,5 +1,5 @@
 import { describe, test, expect, expectCollected } from "#test-runner";
-import { signal, root, c, OPT_SETUP } from "#anod";
+import { signal, root, c, SETUP, LOADING, ERROR } from "#anod";
 
 const tick = () => Promise.resolve();
 const settle = () => tick().then(tick).then(tick);
@@ -83,7 +83,7 @@ describe("dispose", () => {
             s1.set(2);
             // Pulling bound should propagate the error from bad
             bound.get();
-            expect(bound.error).toBe(true);
+            expect(bound.is(ERROR)).toBe(true);
         });
 
         test("bound compute keeps its value when dep1 is disposed", () => {
@@ -95,7 +95,7 @@ describe("dispose", () => {
             // D4: a disposed dep never notifies, so bound has no reason to re-run
             dep.dispose();
             expect(bound.get()).toBe(2);
-            expect(bound.error).toBe(false);
+            expect(bound.is(ERROR)).toBe(false);
         });
 
         test("bound compute fails with ILLEGAL_READ when it re-runs after dep1 is disposed", () => {
@@ -103,17 +103,17 @@ describe("dispose", () => {
             const k = signal(1);
             const dep = c.compute((cx) => cx.val(s1));
             let calls = 0;
-            // OPT_SETUP: a bound compute only tracks dep1 unless it sets up more deps
+            // SETUP: a bound compute only tracks dep1 unless it sets up more deps
             const bound = c.compute(dep, (val, cx) => {
                 calls++;
                 return val * cx.val(k);
-            }, undefined, OPT_SETUP);
+            }, undefined, SETUP);
             expect(bound.get()).toBe(1);
 
             dep.dispose();
             k.set(2);
             const v = bound.get();
-            expect(bound.error).toBe(true);
+            expect(bound.is(ERROR)).toBe(true);
             expect(v.error.message).toMatch(/disposed/);
             // the fn is skipped, so it never sees the disposed dep's null
             expect(calls).toBe(1);
@@ -161,16 +161,16 @@ describe("dispose", () => {
             });
 
             await settle();
-            expect(taskA.loading).toBe(true);
-            expect(taskB.loading).toBe(true);
+            expect(taskA.is(LOADING)).toBe(true);
+            expect(taskB.is(LOADING)).toBe(true);
 
             // Dispose taskB while taskA is awaiting it
             taskB.dispose();
             await settle();
 
             // taskA should now be in error state
-            expect(taskA.error).toBe(true);
-            expect(taskA.loading).toBe(false);
+            expect(taskA.is(ERROR)).toBe(true);
+            expect(taskA.is(LOADING)).toBe(false);
         });
 
         test("task dispose panics awaiting spawn (self-recover keeps alive)", async () => {

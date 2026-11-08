@@ -38,3 +38,5 @@ Four places decide on their own whether a read tracks or subscribes, each with a
 ## Fix
 
 `track()` and `_readAsync` test `FLAG_STABLE | FLAG_SETUP | FLAG_FREEZE`, like `val()` and `rejected()`. Both are only reached from async paths. The shared tracking helper the notes suggest is part of the hot-path group 3 and is still open.
+
+**Update (2026-11-08):** `c.stable()` was removed. `STABLE` is now a creation option and FLAG_FREEZE is gone, so a node can no longer turn stable partway through a run, and this bug can no longer happen. Its test in `test/explore/hardening.test.js` now checks that a `STABLE` task links the task it suspends on in its first run.

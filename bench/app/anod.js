@@ -1,12 +1,12 @@
 /**
  * App benchmark for anod. Single-dep computes and DOM writes use the
  * bound API (c.compute(dep, fn), c.effect(dep, fn)), as katode emits,
- * and the ROWS-wide count is stable(). ANOD_API=unbound builds every
- * node with the unbound API and leaves out stable(), which the other
+ * and the ROWS-wide count is created STABLE. ANOD_API=unbound builds every
+ * node with the unbound API and leaves out STABLE, which the other
  * libraries have no equivalent of.
  */
 import { bench, run } from 'mitata';
-import { signal, root, batch } from '../../dist/index.js';
+import { signal, root, batch, STABLE } from '../../dist/index.js';
 import { ROWS, REMOUNT, BATCH, FILTERS, LABELS_A, LABELS_B, makeEls, makeEl, initialDone, validate, measureAlloc, printAlloc } from './shared.js';
 import { saveRun } from '../reactivity/save-run.js';
 
@@ -112,6 +112,7 @@ function mountRow(r, store, row, el, isSelected) {
 /** App-level nodes: a ROWS-wide aggregate, its DOM write, and a side effect. */
 function mountApp(r, store, footer) {
     const rows = store.rows;
+    /** Bound: always the same ROWS signals, so skip dep reconciliation. */
     const doneCount = r.compute((cx) => {
         computes++;
         let n = 0;
@@ -121,10 +122,8 @@ function mountApp(r, store, footer) {
             }
         }
         return n;
-    });
+    }, undefined, BOUND ? STABLE : 0);
     if (BOUND) {
-        /** Always the same ROWS signals: skip dep reconciliation. */
-        doneCount.stable();
         r.effect(doneCount, (v) => { effects++; footer.textContent = v + ' done'; });
         r.effect(store.filter, (v) => { effects++; storage = v; });
     } else {

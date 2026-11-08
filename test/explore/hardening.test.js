@@ -7,11 +7,15 @@ import {
     c,
     REFUSE,
     PANIC,
-    OPT_WEAK,
-    OPT_SETUP,
-    OPT_DEFER,
-    OPT_EAGER,
-    Defect
+    WEAK,
+    SETUP,
+    DEFER,
+    EAGER,
+    STABLE,
+    Defect,
+    DISPOSED,
+    LOADING,
+    ERROR,
 } from "#anod-src";
 
 /**
@@ -78,16 +82,16 @@ describe("23: a plain write leaves a resource errored", () => {
     /**
      * Expected: a plain set() replaces the error with the new value, the
      * way the async form does ("error cleared on next successful set").
-     * Actual: r.error stays true and r.get() is 5.
+     * Actual: r.is(ERROR) stays true and r.get() is 5.
      */
     test("plain set() after a failed async write clears the error", () => {
         const r = resource(1);
         r.set(() => {
             throw new Error("boom");
         });
-        expect(r.error).toBe(true);
+        expect(r.is(ERROR)).toBe(true);
         r.set(5);
-        expect(r.error).toBe(false);
+        expect(r.is(ERROR)).toBe(false);
         expect(r.get()).toBe(5);
     });
 
@@ -100,7 +104,7 @@ describe("23: a plain write leaves a resource errored", () => {
         const r = resource(1);
         r.set(async (rc) => await rc.suspend(Promise.reject(new Error("net"))));
         await settle();
-        expect(r.error).toBe(true);
+        expect(r.is(ERROR)).toBe(true);
         r.set(5);
         const seen = [];
         c.effect((cx) => {
@@ -123,7 +127,7 @@ describe("23: a plain write leaves a resource errored", () => {
             r.set(7);
         });
         expect(r.get()).toBe(7);
-        expect(r.error).toBe(false);
+        expect(r.is(ERROR)).toBe(false);
     });
 
     /** Expected: false. Actual: true. */
@@ -135,7 +139,7 @@ describe("23: a plain write leaves a resource errored", () => {
         r.post(8);
         await settle();
         expect(r.get()).toBe(8);
-        expect(r.error).toBe(false);
+        expect(r.is(ERROR)).toBe(false);
     });
 
     /**
@@ -154,7 +158,7 @@ describe("23: a plain write leaves a resource errored", () => {
         });
         r.set({ id: 1 });
         expect(seen.some((v) => v instanceof Defect)).toBe(false);
-        expect(r.error).toBe(false);
+        expect(r.is(ERROR)).toBe(false);
         expect(r.get()).toEqual({ id: 1 });
     });
 });
@@ -301,7 +305,7 @@ describe("24: reads after a loading callback suspend corrupt dependency links", 
         expect(runs).toBe(1);
         s.set(2);
         expect(runs).toBe(2);
-        expect(t.loading).toBe(true);
+        expect(t.is(LOADING)).toBe(true);
     });
 
     /**
@@ -438,7 +442,7 @@ describe("26: resource last-write-wins gaps", () => {
         batch(() => {
             r.set("plain");
         });
-        expect(r.loading).toBe(false);
+        expect(r.is(LOADING)).toBe(false);
         d.resolve("server");
         await settle();
         expect(r.get()).toBe("plain");
@@ -450,7 +454,7 @@ describe("26: resource last-write-wins gaps", () => {
         r.set("b", async (rc) => await rc.suspend(d.promise));
         r.post("plain");
         await settle();
-        expect(r.loading).toBe(false);
+        expect(r.is(LOADING)).toBe(false);
         d.resolve("server");
         await settle();
         expect(r.get()).toBe("plain");
@@ -468,7 +472,7 @@ describe("26: resource last-write-wins gaps", () => {
         batch(() => {
             r.set("b");
         });
-        expect(r.loading).toBe(false);
+        expect(r.is(LOADING)).toBe(false);
     });
 
     /** Expected: "plain". Actual: the task keeps waiting, then gets "server". */
@@ -507,7 +511,7 @@ describe("26: resource last-write-wins gaps", () => {
         });
         s.set(1);
         expect(runs).toBe(2);
-        expect(r.loading).toBe(false);
+        expect(r.is(LOADING)).toBe(false);
         expect(r.get()).toBe("fx");
         d.resolve("server");
         await settle();
@@ -527,7 +531,7 @@ describe("26: resource last-write-wins gaps", () => {
         go.resolve();
         await settle();
         expect(r.get()).toBe("ctx");
-        expect(r.loading).toBe(false);
+        expect(r.is(LOADING)).toBe(false);
         d.resolve("server");
         await settle();
         expect(r.get()).toBe("ctx");
@@ -615,7 +619,7 @@ describe("27: a callback that settles synchronously ends a spawn's activation mi
         } catch (err) {
             /* whether the reject reaches the creator is a design question */
         }
-        expect(sp.disposed).toBe(true);
+        expect(sp.is(DISPOSED)).toBe(true);
         expect(subCount(b, sp)).toBe(0);
         expect(depsOf(sp)).toEqual([]);
     });
@@ -703,7 +707,7 @@ describe("28: a weak compute's throwing cleanup corrupts its reader", () => {
                 return cx.val(src);
             },
             undefined,
-            OPT_WEAK
+            WEAK
         );
         const log = [];
         c.effect((cx) => {
@@ -748,7 +752,7 @@ describe("28: a weak compute's throwing cleanup corrupts its reader", () => {
                 return cx.val(src);
             },
             undefined,
-            OPT_WEAK
+            WEAK
         );
         let runs = 0;
         const e = c.effect((cx) => {
@@ -763,7 +767,7 @@ describe("28: a weak compute's throwing cleanup corrupts its reader", () => {
         } catch (err) {
             /* may surface to the writer */
         }
-        expect(e.disposed).toBe(false);
+        expect(e.is(DISPOSED)).toBe(false);
         const before = runs;
         y.set(1);
         expect(runs).toBe(before + 1);
@@ -787,7 +791,7 @@ describe("28: a weak compute's throwing cleanup corrupts its reader", () => {
                 return cx.val(src);
             },
             undefined,
-            OPT_WEAK
+            WEAK
         );
         let runs = 0;
         const r = c.compute((cx) => {
@@ -803,7 +807,7 @@ describe("28: a weak compute's throwing cleanup corrupts its reader", () => {
         } catch (err) {
             /* the cleanup error may surface to the writer */
         }
-        expect(r.error).toBe(false);
+        expect(r.is(ERROR)).toBe(false);
         log.length = 0;
         y.set(5);
         expect(log).toEqual([5]);
@@ -828,7 +832,7 @@ describe("29: c.version() in a resource callback", () => {
             return optimistic;
         });
         await settle();
-        expect(likes.error).toBe(false);
+        expect(likes.is(ERROR)).toBe(false);
         expect(typeof version).toBe("number");
         expect(likes.get()).toBe(1);
     });
@@ -921,11 +925,11 @@ describe("31: c.refuse() in an async task exposes the previous value as its erro
         for (const err of rejected) {
             expect(err === null || err instanceof Defect).toBe(true);
         }
-        if (t.error) {
+        if (t.is(ERROR)) {
             expect(t.get() instanceof Defect).toBe(true);
         }
         await settle();
-        expect(t.error).toBe(true);
+        expect(t.is(ERROR)).toBe(true);
         expect(t.get().type).toBe(REFUSE);
     });
 });
@@ -1023,7 +1027,7 @@ describe("D4: a bound node whose dep was disposed", () => {
             r.effect(dep, (v, cx) => {
                 calls++;
                 cx.val(k);
-            }, OPT_SETUP);
+            }, SETUP);
         });
         other.dispose();
         k.set(1);
@@ -1032,7 +1036,7 @@ describe("D4: a bound node whose dep was disposed", () => {
         expect(errors[0]).toMatch(/disposed/);
     });
 
-    /** OPT_DEFER skips the first run, so deferEffect needs the check too. */
+    /** DEFER skips the first run, so deferEffect needs the check too. */
     test("a deferred bound effect over a disposed compute throws, and is not linked", () => {
         let s;
         const other = root((r) => {
@@ -1042,7 +1046,7 @@ describe("D4: a bound node whose dep was disposed", () => {
         other.dispose();
         let thrown = null;
         try {
-            c.effect(s, () => {}, OPT_DEFER);
+            c.effect(s, () => {}, DEFER);
         } catch (err) {
             thrown = err;
         }
@@ -1062,7 +1066,7 @@ describe("D4: a bound node whose dep was disposed", () => {
             calls++;
             return v;
         });
-        expect(b.error).toBe(true);
+        expect(b.is(ERROR)).toBe(true);
         expect(b.get().error.message).toMatch(/disposed/);
         expect(calls).toBe(0);
         expect(s._sub1).toBe(null);
@@ -1158,7 +1162,7 @@ describe("D2: an owner's children are disposed before its cleanups run", () => {
             s.set(1);
         } catch (err) {}
         expect(caught).toEqual(["0:child cleanup"]);
-        expect(parent.disposed).toBe(false);
+        expect(parent.is(DISPOSED)).toBe(false);
         s.set(2);
         expect(runs).toBe(2);
     });
@@ -1251,7 +1255,7 @@ describe("33: an error escaping a flush's pre-run check deafens queued effects",
                 }
             },
             undefined,
-            OPT_EAGER
+            EAGER
         );
         const log = [];
         const other = signal(0);
@@ -1461,41 +1465,32 @@ describe("35: a throwing cleanup on re-run leaves the previous run's children al
         } catch (err) {
             /* the cleanup error may surface; the child must still go */
         }
-        expect(first.disposed).toBe(true);
+        expect(first.is(DISPOSED)).toBe(true);
         log.length = 0;
         other.set(1);
         expect(log.includes("child0")).toBe(false);
     });
 });
 
-describe("36: c.suspend(task) after c.stable() drops the task", () => {
+describe("36: c.suspend(task) in a stable task drops the task", () => {
     /**
-     * c.stable() sets FLAG_FREEZE so that the rest of the run is still
-     * tracked and the deps freeze as they are at its end. track(), which
-     * c.suspend(task) uses, tests only FLAG_STABLE | FLAG_SETUP, so it
-     * skips the stamp in a dynamic run, and patchDeps drops the task.
-     * Expected: `outer` re-runs when `t` changes. Actual: `t` is no
-     * longer one of its deps.
+     * The original bug: c.stable() called mid-run set FLAG_FREEZE, and
+     * track(), which c.suspend(task) uses, ignored it, so patchDeps
+     * dropped the task. STABLE is now a creation option and FLAG_FREEZE
+     * is gone; this checks that a STABLE task still links the task it
+     * suspends on in its first run, through track().
      */
-    test("a task that calls c.stable() keeps the task it suspends on afterwards", async () => {
+    test("a STABLE task keeps the task it suspends on", async () => {
         const s = signal(1);
         const t = c.task((cx) => cx.val(s) * 10);
-        const trig = signal(0);
         let runs = 0;
         const outer = c.task(async (cx) => {
             runs++;
-            cx.val(trig);
-            if (runs > 1) {
-                cx.stable();
-            }
             return await cx.suspend(t);
-        });
+        }, undefined, STABLE);
         c.effect((cx) => {
             cx.val(outer);
         });
-        await settle();
-        trig.set(1);
-        outer.get();
         await settle();
         expect(depsOf(outer).includes(t)).toBe(true);
         const before = runs;
@@ -1529,13 +1524,13 @@ describe("37: a cleanup error that is already a Defect is wrapped again", () => 
         comp.get();
         s.set(1);
         const err = comp.get();
-        expect(comp.error).toBe(true);
+        expect(comp.is(ERROR)).toBe(true);
         expect(err.type).toBe(PANIC);
         expect(err.error).toBe("bye");
     });
 });
 
-describe("38: a bound effect with OPT_SETUP that reads its own dep is linked twice", () => {
+describe("38: a bound effect with SETUP that reads its own dep is linked twice", () => {
     /**
      * The bound call in EffectProto._update never stamps the bound dep
      * (ComputeProto._update does), so c.val(dep) inside the fn records it
@@ -1546,7 +1541,7 @@ describe("38: a bound effect with OPT_SETUP that reads its own dep is linked twi
         const d = signal(0);
         const e = c.effect(d, (v, cx) => {
             cx.val(d);
-        }, OPT_SETUP);
+        }, SETUP);
         expect(subCount(d, e)).toBe(1);
         d.set(1);
         expect(subCount(d, e)).toBe(1);
@@ -1636,10 +1631,10 @@ describe("D9: a callback suspend waits for the fn to return", () => {
             }
             cx.suspend(() => {});
         });
-        expect(t.error).toBe(true);
+        expect(t.is(ERROR)).toBe(true);
         s.set(1);
         t.get();
-        expect(t.loading).toBe(true);
+        expect(t.is(LOADING)).toBe(true);
     });
 
     test("a resource callback that resolves synchronously settles after it returns", () => {
@@ -1651,7 +1646,7 @@ describe("D9: a callback suspend waits for the fn to return", () => {
         });
         expect(seen).toEqual([0]);
         expect(r.get()).toBe(1);
-        expect(r.loading).toBe(false);
+        expect(r.is(LOADING)).toBe(false);
     });
 
     /** The write supersedes the activation, so its end does not start loading. */
@@ -1662,7 +1657,7 @@ describe("D9: a callback suspend waits for the fn to return", () => {
             r.set(5);
         });
         expect(r.get()).toBe(5);
-        expect(r.loading).toBe(false);
+        expect(r.is(LOADING)).toBe(false);
     });
 
     /**
@@ -1708,10 +1703,10 @@ describe("D10: an await that closes a wait cycle is rejected", () => {
         });
         gate.resolve();
         await settle();
-        expect(a.loading).toBe(false);
-        expect(b.loading).toBe(false);
-        expect(a.error).toBe(true);
-        expect(b.error).toBe(true);
+        expect(a.is(LOADING)).toBe(false);
+        expect(b.is(LOADING)).toBe(false);
+        expect(a.is(ERROR)).toBe(true);
+        expect(b.is(ERROR)).toBe(true);
         expect(b.get().error.message).toBe("Cycle detected");
         expect(a.get().error.message).toBe("Cycle detected");
     });
@@ -1735,8 +1730,8 @@ describe("D10: an await that closes a wait cycle is rejected", () => {
         });
         gate.resolve();
         await settle();
-        expect([a.loading, b.loading, d.loading]).toEqual([false, false, false]);
-        expect([a.error, b.error, d.error]).toEqual([true, true, true]);
+        expect([a.is(LOADING), b.is(LOADING), d.is(LOADING)]).toEqual([false, false, false]);
+        expect([a.is(ERROR), b.is(ERROR), d.is(ERROR)]).toEqual([true, true, true]);
     });
 
     test("an array await that closes a cycle fails", async () => {
@@ -1758,9 +1753,9 @@ describe("D10: an await that closes a wait cycle is rejected", () => {
         await settle();
         other.resolve(1);
         await settle();
-        expect(a.loading).toBe(false);
-        expect(b.loading).toBe(false);
-        expect(b.error).toBe(true);
+        expect(a.is(LOADING)).toBe(false);
+        expect(b.is(LOADING)).toBe(false);
+        expect(b.is(ERROR)).toBe(true);
     });
 
     /** Control: waits that share a task without a cycle still settle. */
@@ -1802,7 +1797,7 @@ describe("D10: shield bookkeeping", () => {
         expect(r1._owned.includes(spawn)).toBe(true);
         d.resolve();
         await settle();
-        expect(spawn.disposed).toBe(true);
+        expect(spawn.is(DISPOSED)).toBe(true);
         expect(r1._owned.includes(spawn)).toBe(false);
         r1.dispose();
     });

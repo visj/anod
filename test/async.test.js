@@ -1,5 +1,5 @@
 import { describe, test, expect } from "#test-runner";
-import { signal, root, c } from "#anod";
+import { signal, root, c, STABLE, LOADING, ERROR } from "#anod";
 
 const tick = () => Promise.resolve();
 /** suspend() adds one extra microtask layer; settle needs 2 ticks for
@@ -18,12 +18,12 @@ describe("async", () => {
         );
       });
 
-      expect(c1.loading).toBe(true);
+      expect(c1.is(LOADING)).toBe(true);
 
       resolve(42);
       await settle();
 
-      expect(c1.loading).toBe(false);
+      expect(c1.is(LOADING)).toBe(false);
     });
 
     test("returns seed value while loading", async () => {
@@ -37,13 +37,13 @@ describe("async", () => {
       }, 0);
 
       expect(c1.get()).toBe(0);
-      expect(c1.loading).toBe(true);
+      expect(c1.is(LOADING)).toBe(true);
 
       resolve(99);
       await settle();
 
       expect(c1.get()).toBe(99);
-      expect(c1.loading).toBe(false);
+      expect(c1.is(LOADING)).toBe(false);
     });
 
     test("settles to the resolved value", async () => {
@@ -51,12 +51,12 @@ describe("async", () => {
         return c.suspend(Promise.resolve(42));
       });
 
-      expect(c1.loading).toBe(true);
+      expect(c1.is(LOADING)).toBe(true);
       await settle();
 
       expect(c1.get()).toBe(42);
-      expect(c1.loading).toBe(false);
-      expect(c1.error).toBe(false);
+      expect(c1.is(LOADING)).toBe(false);
+      expect(c1.is(ERROR)).toBe(false);
     });
 
     test("sets error flag on rejection", async () => {
@@ -66,8 +66,8 @@ describe("async", () => {
 
       await settle();
 
-      expect(c1.error).toBe(true);
-      expect(c1.loading).toBe(false);
+      expect(c1.is(ERROR)).toBe(true);
+      expect(c1.is(LOADING)).toBe(false);
     });
 
     test("get() returns error POJO after rejection", async () => {
@@ -77,7 +77,7 @@ describe("async", () => {
 
       await settle();
 
-      expect(c1.error).toBe(true);
+      expect(c1.is(ERROR)).toBe(true);
       expect(c1.get().type).toBe(3);
       expect(c1.get().error.message).toBe("async error");
     });
@@ -91,13 +91,13 @@ describe("async", () => {
       });
 
       await settle();
-      expect(c1.error).toBe(true);
+      expect(c1.is(ERROR)).toBe(true);
 
       s1.set(false);
       c1.get(); // Pull to trigger re-evaluation
       await settle();
 
-      expect(c1.error).toBe(false);
+      expect(c1.is(ERROR)).toBe(false);
       expect(c1.get()).toBe(42);
     });
 
@@ -138,14 +138,14 @@ describe("async", () => {
       resolvers[0](100);
       await settle();
 
-      expect(c1.loading).toBe(true); // still loading; second promise not yet resolved
+      expect(c1.is(LOADING)).toBe(true); // still loading; second promise not yet resolved
 
       // Resolve the current (second) promise
       resolvers[1](200);
       await settle();
 
       expect(c1.get()).toBe(200);
-      expect(c1.loading).toBe(false);
+      expect(c1.is(LOADING)).toBe(false);
     });
   });
 
@@ -167,7 +167,7 @@ describe("async", () => {
         return iter;
       });
 
-      expect(c1.loading).toBe(true);
+      expect(c1.is(LOADING)).toBe(true);
       expect(c1.get()).toBeUndefined();
 
       // prevent unhandled-rejection noise from a never-resolved promise
@@ -195,7 +195,7 @@ describe("async", () => {
 
       c.effect((c) => {
         const v = c.val(c1);
-        if (!c1.loading) {
+        if (!c1.is(LOADING)) {
           values.push(v);
         }
       });
@@ -233,12 +233,12 @@ describe("async", () => {
         return iter;
       });
 
-      expect(c1.loading).toBe(true);
+      expect(c1.is(LOADING)).toBe(true);
 
       resolver({ value: 42, done: false });
       await tick();
 
-      expect(c1.loading).toBe(false);
+      expect(c1.is(LOADING)).toBe(false);
       expect(c1.get()).toBe(42);
     });
 
@@ -253,7 +253,7 @@ describe("async", () => {
 
       await tick();
 
-      expect(c1.error).toBe(true);
+      expect(c1.is(ERROR)).toBe(true);
       expect(c1.get().type).toBe(3);
       expect(c1.get().error.message).toBe("iterator error");
     });
@@ -492,48 +492,53 @@ describe("async", () => {
     });
   });
 
-  describe("stable context", () => {
-    test("c.stable(): post-stable reads do not register new deps", async () => {
+  describe("STABLE", () => {
+    test("a STABLE task tracks the reads of its first run", async () => {
       const s1 = signal(1);
       const s2 = signal(10);
       let runs = 0;
       const c1 = c.task(async (c) => {
         runs++;
         const v1 = c.val(s1);
-        c.stable();
         const v2 = c.val(s2);
         await c.suspend(tick());
         return v1 + v2;
-      });
+      }, undefined, STABLE);
       await settle();
       expect(c1.get()).toBe(11);
-      expect(runs).toBe(1);
 
-      s2.set(99);
-      await tick();
-      expect(runs).toBe(1);
+      s2.set(20);
+      c1.get();
+      await settle();
+      expect(c1.get()).toBe(21);
+      expect(runs).toBe(2);
     });
 
-    test("c.stable(): pre-stable reads stay tracked and trigger reruns", async () => {
+    test("a STABLE task does not track a read that starts on a later run", async () => {
       const s1 = signal(1);
       const s2 = signal(10);
       let runs = 0;
       const c1 = c.task(async (c) => {
         runs++;
         const v1 = c.val(s1);
-        c.stable();
-        const v2 = c.val(s2);
+        const v2 = v1 > 1 ? c.val(s2) : 0;
         await c.suspend(tick());
         return v1 + v2;
-      });
+      }, undefined, STABLE);
       await settle();
-      expect(c1.get()).toBe(11);
+      expect(c1.get()).toBe(1);
 
       s1.set(2);
       c1.get();
       await settle();
       expect(c1.get()).toBe(12);
       expect(runs).toBe(2);
+
+      s2.set(99);
+      c1.get();
+      await settle();
+      expect(runs).toBe(2);
+      expect(c1.get()).toBe(12);
     });
 
     test("c.equal() is callable on the context and propagates to node", async () => {
@@ -548,24 +553,22 @@ describe("async", () => {
       expect(c1.get()).toBe(0);
     });
 
-    test("c.stable() on spawn()", async () => {
+    test("STABLE on spawn()", async () => {
       const s1 = signal(1);
       const s2 = signal(100);
       const s3 = signal(1000);
       let runs = 0;
       let observed;
-      /** stable() is called on the node, not inside the body.
-       *  First run collects all deps (s1, s2). From run 2 on,
-       *  deps are frozen — s3 is read but not tracked. */
-      const sp = c.spawn(async (c) => {
+      /** The first run collects all deps (s1, s2). From run 2 on, the
+       *  deps are frozen: s3 is read but not tracked. */
+      c.spawn(async (c) => {
         runs++;
         const v1 = c.val(s1);
         const v2 = c.val(s2);
         if (v1 > 1) c.val(s3); // only read on run 2+
         await c.suspend(tick());
         observed = v1 + v2;
-      });
-      sp.stable();
+      }, STABLE);
       await settle();
       expect(observed).toBe(101);
       expect(runs).toBe(1);
@@ -583,26 +586,6 @@ describe("async", () => {
       await settle();
       expect(observed).toBe(202);
       expect(runs).toBe(3);
-    });
-
-    test("c.stable() before any reads: node goes dormant", async () => {
-      const s1 = signal(1);
-      let runs = 0;
-      const c1 = c.task(async (c) => {
-        runs++;
-        c.stable();
-        const v = c.val(s1);
-        await c.suspend(tick());
-        return v;
-      });
-      await settle();
-      expect(c1.get()).toBe(1);
-      expect(runs).toBe(1);
-
-      s1.set(2);
-      await tick();
-      expect(runs).toBe(1);
-      expect(c1.get()).toBe(1);
     });
   });
 
@@ -657,7 +640,7 @@ describe("async", () => {
         return await c.suspend(Promise.resolve(v * 10));
       });
 
-      expect(c1.loading).toBe(true);
+      expect(c1.is(LOADING)).toBe(true);
       expect(runs).toBe(1);
 
       s1.set(2);
@@ -680,7 +663,7 @@ describe("async", () => {
       });
       await settle();
 
-      expect(c1.error).toBe(true);
+      expect(c1.is(ERROR)).toBe(true);
       expect(c1.get().type).toBe(3);
       expect(c1.get().error.message).toBe("boom");
     });
@@ -947,7 +930,7 @@ describe("async", () => {
           })
         );
       });
-      expect(taskA.loading).toBe(true);
+      expect(taskA.is(LOADING)).toBe(true);
 
       let observed = null;
       c.spawn(async (c) => {
@@ -1062,7 +1045,7 @@ describe("async", () => {
         return val * 2;
       });
 
-      expect(taskB.loading).toBe(true);
+      expect(taskB.is(LOADING)).toBe(true);
 
       resolve(5);
       await settle();
@@ -1076,7 +1059,7 @@ describe("async", () => {
         return c.suspend(Promise.reject(new Error("fail")));
       });
       await settle();
-      expect(taskA.error).toBe(true);
+      expect(taskA.is(ERROR)).toBe(true);
 
       let caught = null;
       c.spawn(async (c) => {
@@ -1149,7 +1132,7 @@ describe("async", () => {
       });
 
       expect(effectRuns).toBe(1);
-      expect(c1.loading).toBe(true);
+      expect(c1.is(LOADING)).toBe(true);
       expect(taskRuns).toBe(1);
 
       /**

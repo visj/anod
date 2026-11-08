@@ -1,5 +1,5 @@
 import { describe, test, expect } from "#test-runner";
-import { signal, resource, root, batch, flush, c } from "#anod";
+import { signal, resource, root, batch, flush, c, ERROR } from "#anod";
 
 const tick = () => Promise.resolve();
 const settle = () => tick().then(tick).then(tick).then(tick);
@@ -522,7 +522,7 @@ describe("resource writes in queued paths", () => {
         batch(() => {
             r.set(1, () => { throw new Error("sync fail"); });
         });
-        expect(r.error).toBe(true);
+        expect(r.is(ERROR)).toBe(true);
     });
 
     /**
