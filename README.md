@@ -300,7 +300,7 @@ const save = (val) => new Promise((r) => setTimeout(() => r(val), 50));
 root((c) => {
 	const name = resource("alice");
 
-	// Plain set - identical to signal, no async work
+	// Plain set - writes like a signal, and ends any async work in flight
 	name.set("bob");
 
 	// Optimistic set - write immediately, confirm in background
@@ -323,6 +323,8 @@ root((c) => {
 The async callback receives the resource as `c` (with `suspend` for staleness protection) and the current/optimistic value. If the callback returns a sync value, it settles immediately with no loading state. If it returns a promise, `.loading` becomes true until it resolves.
 
 When a new `set()` fires while a previous async callback is still in flight, the old promise still resolves normally, but `suspend()` detects that the resource has moved on and simply doesn't yield back into the callback. The continuation after `await` never runs, so the stale result never reaches the `return` . Only the latest activation's callback gets to settle the resource.
+
+A plain write counts as a new `set()` too, however it is made: `.set()`, `.post()`, inside a batch, or `c.set()` from a node. It discards whatever the callback in flight produces later, including the next `yield` of a generator or a later `resolve`. A plain write to a resource that is loading or failed settles it with the written value, even an equal one, so `.loading` and `.error` turn false and the nodes waiting on it resume. Since every plain write ends the work in flight, `.post()` queues one even when the value is unchanged.
 
 #### Task
 
@@ -623,6 +625,10 @@ root((c) => {
 
 Runs a cleanup method every time the node updates, and finally when it disposes. Multiple cleanups run in reverse registration order, mirroring how destructors and `defer` statements unwind a stack — resources acquired later are released first. To get an 'on disposed' callback, register the cleanup in the scope above.
 
+The nodes an effect or root created are disposed before its own cleanups run, both on re-run and on dispose. A child was created after the parent acquired what it uses, so it lets go of it first. A cleanup that needs the value of a compute the node created keeps that value in a plain variable: by the time the cleanup runs, the compute is disposed, and reading it throws.
+
+A cleanup that throws doesn't stop the rest: every other cleanup still runs, and every child is still disposed. On re-run, the error counts as an error of the node, and goes to the `recover` handler of the run being torn down.
+
 ```ts
 import { root, signal } from "anod";
 root((c) => {
@@ -759,7 +765,7 @@ root((c) => {
 
 #### `weak()`
 
-A weak compute releases its cached value and runs its cleanups when it loses all subscribers. The next read triggers a fresh recompute. This is useful for derived data that retains significant memory — parsed documents, decoded images, materialized query results — that can be safely dropped and recomputed on demand.
+A weak compute releases its cached value and runs its cleanups when it loses all subscribers. The next read triggers a fresh recompute. When the last reader drops it during an update, the cleanups run once that update has settled the readers' dependencies, before the write returns. An error thrown by one of them is the weak compute's, not the reader's, and it is rethrown to the writer. This is useful for derived data that retains significant memory — parsed documents, decoded images, materialized query results — that can be safely dropped and recomputed on demand.
 
 ```ts
 import { root, signal } from "anod";
@@ -865,7 +871,7 @@ anod provides a structured error model where every error is a `Defect`, with the
 
 **`c.refuse(val)`** is available on computes only. It sets the compute into an error state without throwing, the caller returns the error value. This is useful for validation: the compute can't produce a valid result, but it's not a crash.
 
-**`c.panic(val)`** is available on computes and effects. It throws, aborting the current run, but anod marks it as an expected error so recover handlers can distinguish it from crashes. anod uses it too: when a task or resource is disposed while a node waits on it, the waiter is rejected with a `PANIC` (see [Stale activation safety](#stale-activation-safety)).
+**`c.panic(val)`** is available on computes and effects. It throws, aborting the current run, but anod marks it as an expected error so recover handlers can distinguish it from crashes. anod uses it too: when a task is disposed while a node waits on it, the waiter is rejected with a `PANIC` (see [Stale activation safety](#stale-activation-safety)).
 
 **`FATAL`** is what you get when something throws unexpectedly, meaning, any thrown value that is not a `Defect`. anod wraps it once as a `Defect` with `type: FATAL`. A `Defect` keeps its type wherever it travels: through reads, awaits, owner chains, and your own `try/catch` that rethrows it.
 
@@ -1026,9 +1032,11 @@ root((c) => {
 
 #### 3. Callback (resolve, reject)
 
-`c.suspend(setupFn)` accepts a setup function that receives `resolve` and `reject` callbacks. This avoids promise allocation entirely and enables natural integration with callback-based APIs like WebSockets, event emitters, and timers. The node enters a loading state and settles when `resolve` or `reject` is called.
+`c.suspend(setupFn)` accepts a setup function that receives `resolve` and `reject` callbacks. This avoids promise allocation entirely and enables natural integration with callback-based APIs like WebSockets, event emitters, and timers. The node enters a loading state when its fn returns, and settles when `resolve` or `reject` is called.
 
-The callbacks are guarded with the same staleness protection as promises: if the node is disposed or re-run before `resolve` fires, the call is silently ignored.
+The setup function runs right away, but `resolve` and `reject` never act in the middle of your fn. Called before the fn returns, from inside the setup function or anywhere else in the body, they take effect as soon as it returns, still in the same run and without a microtask. So the code after `c.suspend()` always runs first, whether the result comes at once or later, and it reads and tracks dependencies like the code before it. A `reject` before the fn returns fails the run as a throw in the body would: in the first run the error reaches the code that created the node, in a re-run `c.recover()` gets it.
+
+The callbacks are guarded with the same staleness protection as promises: if the node is disposed or re-run before `resolve` fires, the call is silently ignored. Like a promise, the pair settles once: the first call to `resolve` or `reject` wins, and later calls do nothing.
 
 ```ts
 import { root, signal, OPT_DEFER } from "anod";
@@ -1065,16 +1073,16 @@ root((c) => {
 });
 ```
 
-Note the spawn body is sync — no `async` keyword, no promise allocation. The setup function controls when the node settles. If `url` changes, the spawn re-runs: `cleanup` closes the old websocket, the child effect is disposed, and the old `resolve` becomes stale and is silently ignored.
+Note the spawn body is sync — no `async` keyword, no promise allocation. The setup function controls when the node settles. If `url` changes, the spawn re-runs: the child effect is disposed, `cleanup` closes the old websocket, and the old `resolve` becomes stale and is silently ignored.
 
-You can only call `c.suspend()` with a setup function once per activation. Calling it again throws an error. This prevents ambiguous double-settlement.
+You can only call `c.suspend()` with a setup function or with callbacks once per activation. Calling it again throws an error. This prevents ambiguous double-settlement.
 
 #### 4. Task callbacks with `c.suspend(task, onResolve, onReject)`
 
 `c.suspend(task, onResolve, onReject)` reads a task, or an array of tasks, through callbacks instead of `await`. It works like `.then(onResolve, onReject)`, without the promise:
 
-* **Settled task**: `onResolve(value)` is called right away, before `c.suspend()` returns. There is no microtask: the value is there, so you get it. Reads inside the callback are tracked like any other read in the run.
-* **Loading task**: the callbacks are stored on the task, and the node is loading until one of them runs. When the task settles, the callback runs synchronously, in the same tick, after everything that depends on the task has been marked stale. So a read inside the callback sees the graph as it is after the settle.
+* **Settled task**: `onResolve(value)` is called as soon as your fn returns, so the code after `c.suspend()` runs first, as it does for a loading task. There is still no microtask: the node finishes in the same run. Reads inside the callback are tracked like reads after an `await`.
+* **Loading task**: the callbacks are stored on the task, and the node is loading until one of them runs. When the task settles, the callback runs synchronously, in the same tick, after everything that depends on the task has been marked stale. So a read inside the callback sees the graph as it is after the settle. A task that settles while your fn is still running is treated like a settled one.
 * **Tasks settle with the result**: in a task, what the callback returns becomes the task's value, and what it throws becomes its error. In a spawn, the return value is ignored.
 * **Errors**: a failing task calls `onReject(error)` with the anod error (a `Defect`). If `onReject` returns, a task settles with that value, as with `.then`. Without `onReject`, the error fails the node, as a throwing `await` would, so it reaches `c.recover()`.
 * **Staleness**: if the node re-runs or is disposed before the task settles, the callbacks are dropped and never run.
@@ -1203,7 +1211,7 @@ Every call to `c.suspend()` captures the current activation timestamp. When the 
 
 This applies to both resolve and reject: if a promise rejects after the node was invalidated, the error is also discarded. You are never notified about errors from stale activations.
 
-The same holds for awaiting a task, and for the callback form: a node that has been disposed never resumes, whatever it waits on. When a task is disposed, the nodes waiting on it are rejected once the disposal has finished, with a `Defect` of type `PANIC` ("Awaited task was disposed"; "Awaited resource was disposed" for a resource). It is `PANIC`, not `FATAL`, because nothing crashed: what you waited on was ended by its owner, like an `AbortError` from `fetch`. Every waiter gets the same value, through `await` and `onReject` alike. A waiter that the same disposal tore down (a spawn and the task it awaits, owned by the same root) is not told; a waiter elsewhere is. A locked node (`c.lock()`) counts as alive until its activation finishes, so it is told, and is disposed once it completes.
+The same holds for awaiting a task, and for the callback form: a node that has been disposed never resumes, whatever it waits on. When a task is disposed, the nodes waiting on it are rejected once the disposal has finished, with a `Defect` of type `PANIC` ("Awaited task was disposed"). Signals and resources are not owned, so they are never disposed. It is `PANIC`, not `FATAL`, because nothing crashed: what you waited on was ended by its owner, like an `AbortError` from `fetch`. Every waiter gets the same value, through `await` and `onReject` alike. A waiter that the same disposal tore down (a spawn and the task it awaits, owned by the same root) is not told; a waiter elsewhere is. A locked node (`c.lock()`) counts as alive until its activation finishes, so it is told, and is disposed once it completes.
 
 Instead, you must rely on the builtin lifecycle helpers. If you await a promise, and create some state that needs cleaning up, use c.cleanup(). If you must run the async function to completion, run c.lock(). The idea about anod's async correctness guarantee is that we do not want promises firing all over the place, writing state in an unpredictable way. The sync reactive graph is always consistent. When you write a value, every reader is guaranteed to see a consistent state of that signal. This idea extends to async, but with a different guarantee: every async primitive is guaranteed a consistent snapshot in time, but there is no guarantee exactly which time that is. This means: if you await and suspend 10 tasks, we will block until all 10 tasks have settled at some point in time, and all produce a valid value.
 
@@ -1252,7 +1260,7 @@ I have gone back and forth between global listeners, and a dedicated context obj
 
 Alternatively, library authors can extend anod and expose the global listener as the default, sync mode, and only provide it when truly needed in the async callback.
 
-anod has chosen to drop the O(1) two-way slot binding that S.js uses. This rests on an assumption: most graphs dispose consistently. Everything is wrapped inside an Effect or Root node. When it disposes, everything inside disposes. Therefore, anod doesn't unlink the `_subs` array inside a Signal immediately when an Effect disposes, or when its dropped as a dep from a dynamic receiver. Instead, it implements a *tombstones* garbage collection concept, where it leaves disposed receivers until some certain threshold where it sweeps and compacts its subs array. The upside of this approach is faster performance and lower overall memory allocation, as the length of the `_subs` and `_deps` arrays are halved. The downside is degradation in the `notify()` path on highly dynamic graphs (where Computes/Effects constantly branch different Senders on every update), and slightly more retained memory during updates. Right now, anod uses a constant factor, but might expose a GC Sweep configuration that the end user can tweak to their needs. 
+anod uses the O(1) two-way slot binding that S.js uses: each link stores its index in the other node's list, so a receiver that is disposed, or that drops a dep on a re-run, is unlinked at once by moving the last entry into its slot. The cost is memory: `_subs` and `_deps` hold pairs, which doubles their length. Ownership lists are cheaper: a child disposed on its own stays in its owner's `_owned` list until the owner compacts the list, once the disposal has finished.
 
 ## Benchmarks
 
