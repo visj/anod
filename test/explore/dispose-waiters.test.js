@@ -55,8 +55,8 @@ import { signal, resource, root, Defect, PANIC } from "#anod";
  *     queue (REJECTS), which is delivered once the teardown has finished.
  *
  * Whoever calls a stored function first checks the waiter: a disposed
- * waiter is skipped, unless it is locked (c.lock() promises to run to
- * the end). An await on a task also re-checks when it resumes, a
+ * waiter is skipped. A shielded one (c.shield() promises to run to the
+ * end) is not disposed until its activation ends. An await on a task also re-checks when it resumes, a
  * microtask later, as an await on a promise always did.
  *
  * ─── Background: how disposal is scheduled ──────────────────────────
@@ -342,33 +342,34 @@ describe("an owner's teardown and the waiters inside it", () => {
     });
 
     /**
-     * Rule A, locked nodes. A locked waiter is still rejected, and its
+     * Rule A, shielded nodes. A shielded waiter is still rejected, and its
      * activation runs to the end.
      *
-     * c.lock() promises that the activation completes. A dispose that
-     * arrives while locked only marks the node (FLAG_DISPOSED, with
-     * FLAG_LOCKED still set) and is replayed when the activation ends.
-     * Until then the node counts as alive.
+     * c.shield() (D10) promises that the activation completes. Its
+     * owner's disposal waits for it, so the spawn is not disposed yet
+     * and counts as alive. The task lives in another root, so its
+     * disposal goes ahead.
      *
-     *     r.dispose()
-     *       └─ dispose task → reject queued in REJECTS
-     *       └─ dispose spawn → locked: only marked disposed
-     *       deliver REJECTS → disposed but locked → delivered
-     *     r.dispose() returns
+     *     spawnRoot.dispose() → waits for the shield
+     *     taskRoot.dispose()
+     *       └─ dispose task → reject delivered: the spawn is alive
      *     ── microtask ──
-     *     the guard lets a locked node through: the await throws, the
-     *     catch runs, the body finishes
-     *     the activation settles → the deferred dispose runs now, and
-     *     the cleanup with it
+     *     the await throws, the catch runs, the body finishes
+     *     the activation settles → the shield releases, and the
+     *     disposal that waited runs now, with the cleanup
      *
      * Expected order: catch, body finished, cleanup.
      */
-    test("a locked waiter is rejected, finishes its activation, then is disposed", async () => {
+    test("a shielded waiter is rejected, finishes its activation, then is disposed", async () => {
         const seen = [];
+        let task;
         let spawn;
-        const r = root((r) => {
-            ({ spawn } = waitOnTask(r, false, async (cx, task) => {
-                cx.lock();
+        const taskRoot = root((r) => {
+            task = r.task((cx) => cx.suspend(never()));
+        });
+        const spawnRoot = root((r) => {
+            spawn = r.spawn(async (cx) => {
+                cx.shield();
                 cx.cleanup(() => seen.push("cleanup"));
                 try {
                     await cx.suspend(task);
@@ -376,13 +377,49 @@ describe("an owner's teardown and the waiters inside it", () => {
                     seen.push("catch: " + err.error.message);
                 }
                 seen.push("body finished");
+            });
+        });
+        await wait();
+        spawnRoot.dispose();
+        expect(spawn.disposed).toBe(false);
+        taskRoot.dispose();
+        await wait();
+        expect(seen).toEqual(["catch: Awaited task was disposed", "body finished", "cleanup"]);
+        expect(spawn.disposed).toBe(true);
+    });
+
+    /**
+     * The same with the task in the spawn's own root. The root's
+     * disposal waits for the shield, so the task stays alive and the
+     * spawn is never rejected: an accepted deadlock (D10). dispose(true)
+     * ends it: the continuation is dropped, and the cleanup runs.
+     */
+    test("a shielded waiter on a task in its own root holds the disposal until dispose(true)", async () => {
+        const seen = [];
+        let spawn;
+        let task;
+        const r = root((r) => {
+            ({ spawn, task } = waitOnTask(r, false, async (cx, task) => {
+                cx.shield();
+                cx.cleanup(() => seen.push("cleanup"));
+                try {
+                    await cx.suspend(task);
+                } catch (err) {
+                    seen.push("catch");
+                }
+                seen.push("body finished");
             }));
         });
         await wait();
         r.dispose();
         await wait();
-        expect(seen).toEqual(["catch: Awaited task was disposed", "body finished", "cleanup"]);
+        expect(seen).toEqual([]);
+        expect(task.disposed).toBe(false);
+        r.dispose(true);
+        await wait();
+        expect(seen).toEqual(["cleanup"]);
         expect(spawn.disposed).toBe(true);
+        expect(task.disposed).toBe(true);
     });
 
     /**

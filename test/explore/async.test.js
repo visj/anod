@@ -605,46 +605,7 @@ describe("callback suspend", () => {
     });
 });
 
-describe("lock / unlock", () => {
-    /**
-     * BUG. Expected (README: lock defers the re-run "until the current
-     * activation completes (or c.unlock() is called)"): after unlocking, the
-     * dep change made during the lock re-runs the spawn, and so do later
-     * changes. Actual: runs stays [1] forever. While locked, notify() sets
-     * FLAG_STALE but skips _receive (src/internal.js:3380); unlock() only
-     * clears FLAG_LOCKED (src/internal.js:1534); at completion resolvePromise
-     * sees STALE and silently returns (src/internal.js:3672-3673). The spawn is
-     * never enqueued, and every later notify skips it because it is still STALE.
-     */
-    test("spawn that unlocks mid-flight still re-runs for a dep change made during the lock", async () => {
-        const s = signal(1);
-        const runs = [];
-        const ds = [];
-        const r = root((r) => {
-            r.spawn(async (c) => {
-                const v = c.val(s);
-                runs.push(v);
-                c.lock();
-                const d = deferred();
-                ds.push(d);
-                await c.suspend(d.promise);
-                c.unlock();
-                await c.suspend(tick());
-            });
-        });
-        s.set(2);
-        ds[0].resolve();
-        await settle();
-        s.set(3);
-        await settle();
-        /** The re-run locked again, so the change to 3 waits for its unlock. */
-        ds[ds.length - 1].resolve();
-        await settle();
-        expect(runs.length > 1).toBe(true);
-        expect(runs[runs.length - 1]).toBe(3);
-        r.dispose();
-    });
-
+describe("shield", () => {
     /**
      * BUG. Expected (README: "if the node was marked stale during the lock, it
      * automatically re-runs with the fresh values"): runs is ["a", "b"].
@@ -652,8 +613,10 @@ describe("lock / unlock", () => {
      * FLAG_STALE | FLAG_PENDING on the calling node (src/internal.js:2070), wiping
      * the stale mark that the lock had deferred, so EffectProto._settle sees no
      * staleness. guardedAssign does the same at src/internal.js:2016.
+     * c.lock() is c.shield() since D10, and the mid-flight unlock() test
+     * that stood here went with unlock().
      */
-    test("locked spawn: c.set() to an unrelated signal does not erase the deferred re-run", async () => {
+    test("shielded spawn: c.set() to an unrelated signal does not erase the deferred re-run", async () => {
         const list = signal("a");
         const status = signal("idle");
         const runs = [];
@@ -662,7 +625,7 @@ describe("lock / unlock", () => {
             r.spawn(async (c) => {
                 const v = c.val(list);
                 runs.push(v);
-                c.lock();
+                c.shield();
                 const d = deferred();
                 ds.push(d);
                 await c.suspend(d.promise);
@@ -674,7 +637,7 @@ describe("lock / unlock", () => {
         await settle();
         expect(status.get()).toBe("saved:a");
         expect(runs).toEqual(["a", "b"]);
-        r.dispose();
+        r.dispose(true);
     });
 });
 

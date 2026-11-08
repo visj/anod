@@ -1,6 +1,6 @@
 # 25: `c.lock()` is never released when an activation finishes synchronously
 
-Branch `fix/23-hardening` (tests only, no fix yet). The tests are skipped (`describe.skip`) on `fix/24-slim-cold`: the lock rework goes in its own branch.
+Branch `fix/23-hardening` (tests only). The tests were skipped (`describe.skip`) on `fix/24-slim-cold`, and the fix is on `fix/25-shield`. The fix follows [D10](../design/README.md#d10-clock-becomes-cshield-a-guarantee-that-the-activation-runs-to-completion): `c.lock()` becomes `c.shield()`, a guarantee that the activation runs to completion, for effects and spawns only, and `c.unlock()` is removed.
 
 ## What breaks
 
@@ -17,6 +17,8 @@ s.set(1);
 s.set(2);
 runs; // 1, expected 3
 ```
+
+A sync effect that locks and then throws is never disposed either. The owner's recover handler takes the error, then the teardown finds the lock and only marks the effect, so its cleanup never runs. Without the lock it runs once.
 
 ## Root cause
 
@@ -39,16 +41,19 @@ The lock lasts for one activation. When the activation ends synchronously, the e
 - `test/explore/hardening.test.js` › 25 › a spawn whose body returns synchronously after lock() re-runs
 - `test/explore/hardening.test.js` › 25 › a task that locks and returns a plain value recomputes
 
+On `fix/25-shield` the tests call `c.shield()`, and the task test is replaced by "a sync effect that locks and throws is disposed", since tasks can't shield.
+
 Run with `bun test --conditions=src test/explore/hardening.test.js`.
 
 ## Conflict to review
 
-Bug 19's `unlock` has a branch for "something deferred and the activation already finished (for example a sync node that locked)". That branch assumes the lock outlives a synchronous activation, so that a later `cx.unlock()` from outside the run releases it. That contradicts the README, which ties the lock to the activation. If the fix follows the README, that branch only matters for an `unlock()` called after the activation ended, and there it would find no lock. Decide which one is intended:
+Bug 19's `unlock` has a branch for "something deferred and the activation already finished (for example a sync node that locked)". That branch assumes the lock outlives a synchronous activation, so that a later `cx.unlock()` from outside the run releases it. That contradicts the README, which ties the lock to the activation.
 
-- **Per activation (README):** release the lock at the end of a sync `_update`. Bug 19's branch then only runs in the window between the end of the run and the release.
-- **Until `unlock()`:** keep the current behavior and change the README. A sync node that locks and never unlocks is then frozen and never disposed, which looks like a leak, not a feature.
+**Resolved (2026-11-08) by D10:** the lock lasts one activation, and `unlock()` is removed altogether, along with bug 19's branch. Releasing mid-flight had no real use case, and it let code outside the activation end it. Only `dispose(true)` ends a shield early.
 
-The tests follow the README.
+**Tests:**
+- The four tests here move to `c.shield()`. The task test is replaced by the throw case above, because tasks can't shield.
+- Bug 19's "spawn that unlocks mid-flight" test is removed with `unlock()`.
 
 ## Additional deadlock investigation (2026-11-07)
 
@@ -220,3 +225,53 @@ identify cases that implementation must cover, rather than overturning the decis
 Do not reject every long-running lock as a deadlock: a legitimate save can take an
 arbitrarily long time. Diagnostics, optional deadlines and force disposal serve different
 purposes.
+
+## Fix
+
+On `fix/25-shield`, following [D10](../design/README.md#d10-clock-becomes-cshield-a-guarantee-that-the-activation-runs-to-completion).
+
+**API:**
+- `c.lock()` is now `EffectProto.shield`, and `c.unlock()` is gone. Computes lose their lock code: the check at the top of `ComputeProto._update`, the replay in `_settle` and the deferral in `_dispose`.
+- `dispose(force)` takes a boolean. `dispose(true)` of a locked node calls `forceDispose`, which works after a plain `dispose()` too.
+
+**Holds:**
+- The module-level `HOLDS` map counts, per node: four for each shielded effect below it, two if its disposal waits (`deferDispose`), and one if it is shielded itself.
+- `shield()` walks `_owner` and locks every owner on the path. `_update`, `_receive`, `notify` and `_dispose` already defer for a locked node.
+- A waiting disposal is recorded in `HOLDS`, not in FLAG_DISPOSED. The node isn't disposed yet, so reads and child creation work (D6 a), and the dispose drain's purge keeps it in its owner's children. `deferDispose` freezes the subtree with `pauseNode`, which moved to module level, and `resume()` does nothing in a frozen subtree.
+
+**Release:** `unshield` runs where the activation ends:
+- the sync tail of `EffectProto._update` (FLAG_LOCKED joins the mask it tests: this is bug 25);
+- `EffectProto._settle`;
+- the throw paths in `flushEffects` and `failStart`, after the error handling (the throw case above).
+
+It works in two steps:
+- `countOff` takes the shield off the node and its owners. A node with no holds left is unlocked, and one whose disposal waited gets FLAG_DISPOSED.
+- `replay` then tears down the topmost of those, with `disposeHeld`, which also takes it out of a live owner's `_owned`. It queues the topmost deferred re-run above that, unless an owner further up still waits to be disposed: then it pauses the freed nodes instead.
+
+**Cycles:** `awaits(task, node)` walks the responders of a loading task before `_suspendTask` or `_stepArray` binds a wait. If the walk reaches the awaiter, the await fails with `"Cycle detected"`, the same message as a compute cycle.
+
+**Probes:** `probe-deadlocks.py` now checks the D10 behavior:
+- Each circular wait (own abort, child cleanup, root cleanup, cross-scope) stays pending on a graceful dispose, and `dispose(true)` tears it down once. Forcing one of the cross-scope pair lets the other finish.
+- A sync spawn that shields re-runs and is cleaned up.
+- Mutual task awaits fail with "Cycle detected".
+
+**Known gap:** a child created by a shielded continuation after the disposal froze its subtree starts unpaused, so it reacts until the continuation's shield releases, and then it is paused too. Closing that gap is D3 (children of a paused owner start paused), which isn't implemented.
+
+**Tests:**
+- `test/shield.test.js` replaces `test/lock.test.js`. The 11 task tests are gone. It has 28 tests:
+  - spawn, sync effect, owner and dispose cases;
+  - `dispose(true)`;
+  - the two stale-guard tests, kept.
+- In `hardening.test.js`:
+  - 25 (4);
+  - D10 wait cycles (4) and bookkeeping (1);
+  - 34's lock test now uses a shielded spawn.
+- In `dispose-waiters.test.js`, the locked-waiter test is split in two:
+  - a waiter whose task is in another root is still rejected;
+  - one whose task is in its own root holds the disposal until `dispose(true)`.
+- A mutation run removed each piece of the mechanism in turn, and every removal fails at least one test.
+- `garbage.test.js` › "should be collected when disposed" now polls with `expectCollected`, like the other GC tests.
+  - With one GC pass, it failed in 5 of 6 full Bun runs against `src` once `shield.test.js` was added.
+  - Master's engine with the new test file fails it too, and the branch's engine with master's tests doesn't.
+  - It passes in isolation and under Node's precise GC.
+

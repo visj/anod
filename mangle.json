@@ -182,7 +182,18 @@
       "$disposedDep": "yn",
       "$boundError": "an",
       "$releaseWeak": "dn",
-      "$clearRun": "wn"
+      "$clearRun": "wn",
+      "$HOLDS": "tl",
+      "$pauseNode": "nl",
+      "$deferDispose": "el",
+      "$isFrozen": "ul",
+      "$unshield": "fl",
+      "$countOff": "sl",
+      "$replay": "hl",
+      "$disposeHeld": "rl",
+      "$forceDispose": "ol",
+      "$CYCLE": "cl",
+      "$awaits": "yl"
     }
   },
   "props": {

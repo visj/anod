@@ -213,7 +213,12 @@ export interface Root {
 	readonly disposed: boolean;
 	recover(fn: (error: Defect) => boolean): void;
 	cleanup(fn: () => void): void;
-	dispose(): void;
+	/**
+	 * Disposes the root and everything it owns. A shielded effect under it
+	 * (`c.shield()`) makes the disposal wait until its activation ends;
+	 * `force` ends the shields and disposes now.
+	 */
+	dispose(force?: boolean): void;
 	pause(): void;
 	resume(): void;
 }
@@ -299,7 +304,7 @@ export type Disposer = Sender | Receiver | Root;
 
 /**
  * Base context available on all receiver callbacks.
- * Includes callback-based suspend, controller, defer, lock/unlock,
+ * Includes callback-based suspend, controller, defer,
  * pending/rejected checks, and contextual set/post.
  */
 export interface Context {
@@ -321,8 +326,6 @@ export interface Context {
 	version(): number;
 	controller(): AbortController;
 	defer<R>(sender: Sender<R>): R;
-	lock(): void;
-	unlock(): void;
 	stable(): void;
 }
 
@@ -354,6 +357,12 @@ export interface RootContext extends Factory {
 export interface EffectContext extends RootContext, Context {
 	panic(val: unknown): never;
 	finalize(fn: () => void): void;
+	/**
+	 * Lets the current activation run to completion: its re-run and
+	 * disposal, and those of every owner above it, wait until it ends.
+	 * Only `dispose(true)` ends it early.
+	 */
+	shield(): void;
 	suspend(
 		fn: (resolve: (value?: any) => void, reject: (error?: any) => void) => void
 	): void;

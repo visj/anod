@@ -2,7 +2,7 @@
 
 These are cases where anod behaves consistently, but the README either doesn't say what should happen or says something that conflicts with an existing test or with another part of the design. Each one needs a maintainer decision before it can count as a bug or as intended. Each section has a repro, the conflicting sources, the options, and a recommendation.
 
-**Status (2026-11-08):** all nine are decided (see the **Decision** paragraph in each section). D1, D4, D5, D7, D8 and D9 are implemented on `fix/24-slim-cold`, and so is D2, except waiting for locked children. D3 (start paused) is not implemented yet. D6, including how a lock holds its owners (A) and force quit (`dispose(true)`), goes with the lock rework and bug 25.
+**Status (2026-11-08):** all ten are decided (see the **Decision** paragraph in each section). D1, D4, D5, D7, D8 and D9 are implemented on `fix/24-slim-cold`, and so is D2, except waiting for locked children. D3 (start paused) is not implemented yet. D6 and D10 (`c.lock()` becomes `c.shield()`, with D2's wait for shielded children and `dispose(true)`) are implemented with bug 25 on `fix/25-shield`.
 
 The real bugs from the same round are 23–34 in the index (`bugs/README.md`), with tests in `test/explore/hardening.test.js`.
 
@@ -58,7 +58,7 @@ On re-run (`_update`) and on dispose (`_dispose`), the parent's cleanups run fir
 
 **Decision:** (a), children first. A node's cleanups run once all its children are gone. That includes locked children, whose disposal is deferred (see D6). Strict LIFO, (c) below, was rejected: it needs the relative order of cleanups and children stored per node. A cleanup that needs an owned compute's value keeps it in a plain variable. Reading the compute itself throws, since it is already disposed (D4).
 
-**Implemented** on `fix/24-slim-cold`, with bug 35. The children go first on re-run (`EffectProto._update`, through `clearRun` when a node has both) and on dispose (`EffectProto._dispose`, `RootProto._dispose`), and a throw in either step still runs the other. A teardown error on re-run reaches the recover handler of the run being torn down. **Not done:** waiting for locked children. A locked child is only marked by its parent's teardown, so the parent's cleanups still run while it finishes. That belongs to D6 and the lock work (bug 25), which are on hold.
+**Implemented** on `fix/24-slim-cold`, with bug 35. The children go first on re-run (`EffectProto._update`, through `clearRun` when a node has both) and on dispose (`EffectProto._dispose`, `RootProto._dispose`), and a throw in either step still runs the other. A teardown error on re-run reaches the recover handler of the run being torn down. **Not done:** waiting for locked children. A locked child is only marked by its parent's teardown, so the parent's cleanups still run while it finishes. That belongs to D6 and the lock work (bug 25). D10 settles it: a shield holds every owner above it, so no teardown reaches a shielded child until it releases.
 
 ### Analysis
 
@@ -177,6 +177,8 @@ The README says "a locked node counts as alive until its activation finishes". F
 
 **Decided (2026-11-07):** (A), the owners inherit the lock, and force quit is a boolean `dispose(true)`. The draft below is the agreed direction. Its storage details may still change during the fix.
 
+**Final (2026-11-08):** see [D10](#d10-clock-becomes-cshield-a-guarantee-that-the-activation-runs-to-completion). The lock becomes `c.shield()`, for effects and spawns only, and `unlock()` is removed. (A) stands, with one change: a deferred dispose freezes the owner's subtree, and a deferred re-run doesn't. Tasks can't shield, so the hold walks `_owner` and the task question in the storage bullet goes away.
+
 That decision isn't enough on its own. When the owner is disposed, its cleanups release what the locked node is still using (a database connection, say). "Run to completion" then fails exactly when it matters. The direction so far: a lock also holds the owners above it. Draft:
 
 - **Hold:** a teardown starts at an origin, a node that re-runs or is disposed. When it reaches a locked node, nothing under the origin is released until the lock releases. Only that subtree waits. Disposing the root makes the whole app wait, like an OS shutdown waiting for its processes.
@@ -254,6 +256,64 @@ The callback forms ran their callback inside the `c.suspend()` call when the sou
 Hot path: `EffectProto._update` keeps the result of the `this._flag &= ...` it already does after the fn (`flag = this._flag &= ...`). Both `_update` tails test `flag & (FLAG_ASYNC | FLAG_CALLBACK | FLAG_DISPOSED)`, one constant, where they tested `FLAG_ASYNC`. That costs no new load or branch. The sync tails drop FLAG_CALLBACK from a mask. Benchmark (`bench/reactivity/anod.js`, median of 3 interleaved runs against the branch before D9): everything within ±1.2%, except Dynamic build, which came out about 4% faster. "Dynamic update: wide dense" is bimodal (about 63k or 81k per run) for every build: in 8 alternating rounds, both builds landed in the slow mode 2 times out of 8, with medians of 62.6k (D9) and 63.7k (before).
 
 Tests: `hardening.test.js` › 24 (6) and › D9 (6). The D9 tests check that the code after a synchronous reject runs first, held task callbacks, a throw dropping a held resolve, resources, and nested runs. The last three also pass on master and guard the mechanism; a mutation run confirmed that "a throw after a synchronous resolve drops the held resolve" fails without the `unhold`. `suspend-callback.test.js`: "a settled task calls onResolve synchronously, before suspend returns" and its array twin now expect the callback after the body.
+
+## D10: `c.lock()` becomes `c.shield()`, a guarantee that the activation runs to completion
+
+Raised by bug 25 and its deadlock probes.
+
+```js
+r.spawn(async (cx) => {
+  cx.lock();
+  await cx.suspend(save());
+  cx.unlock(); // mid-flight: what is released, and who may call it?
+});
+```
+
+`c.lock()` and `c.unlock()` mixed two ideas: a lock that something releases, and a promise that the activation finishes. Several bugs came from the mix:
+- A synchronous activation never released the lock (bug 25).
+- `unlock()` mid-flight couldn't interrupt a loading activation once a change or a dispose had arrived.
+- An outside caller could release someone else's lock.
+
+**Decision (2026-11-08):**
+- **Rename and drop:** `c.lock()` is renamed `c.shield()`, and `c.unlock()` is removed. A shield means one thing: this activation runs to completion.
+- **When it ends:** it is called anywhere in the activation, and lasts until the activation ends:
+  - sync: when the fn returns or throws;
+  - async: when its promise settles or its iterator finishes;
+  - callback suspend: when the callback delivers.
+
+  Nothing outside the activation ends it, except `dispose(true)`.
+- **Only effects and spawns can shield.** A shield is for side effects that must finish. A task only produces data for a spawn to consume, and a task that is killed just aborts.
+- **A graceful `dispose()` never aborts a shielded node's controller.** A shielded activation that waits for its own controller's abort deadlocks until `dispose(true)`.
+- **A shield holds its owners,** as D6 (A) decided. No owner on the path from the shielded effect to its root can re-run or be disposed until the shield releases. The request is deferred and replayed then.
+- **Re-run vs dispose:**
+  - While a shield is active, everything around it keeps updating normally, its siblings included. A deferred re-run doesn't freeze anything.
+  - A deferred dispose freezes the owner's subtree. Nothing in it starts a new run, activations already in flight continue, and reads still work.
+  - A shielded node that releases under a frozen subtree can't resume work: its own deferred re-run is dropped.
+  - The subtree is torn down, children first, when its last shield releases. So a disposal waits only for work that was already running, and can't be put off for good.
+- **Accepted deadlocks:** a shielded node that awaits something its owner's teardown would deliver, such as a child's or the root's cleanup, or its own abort. `dispose(true)` is the escape. anod can't guard against every deadlock.
+- **Mutual task awaits are rejected:** A awaits B and B awaits A. The await that closes the cycle is rejected, instead of both staying loading for good.
+
+**Mechanism:**
+- **Taking the hold:** `shield()` sets FLAG_LOCKED on the effect and walks up `_owner`, setting FLAG_LOCKED on each owner.
+  - A module-level map, `HOLDS`, counts the shields that hold each node, and only has entries while a shield is active.
+  - A node's count is four times the number of shields below it, plus two if its disposal waits, plus one if it is shielded itself.
+  - No node gets a new field. There is no free flag bit (0–29 are taken).
+  - A waiting disposal is recorded in `HOLDS`, not with FLAG_DISPOSED, so the node isn't disposed until its teardown runs. Its reads and new children work meanwhile (D6 a).
+- **The existing lock paths handle a held owner,** because FLAG_LOCKED on an owner means "can't be interrupted now": `_update` and `_receive` return early, `notify` skips the node, and `_dispose` records the request in `HOLDS`. No teardown can reach a shielded node, since every owner above it is locked.
+- **The freeze reuses pause:** a paused effect keeps its stale flags but doesn't run. `resume()` inside a disposing subtree does nothing.
+- **The release:** when the activation completes, `unshield` walks the same path, counting down. A node that reaches zero loses FLAG_LOCKED. Of the nodes it frees, the topmost one with a deferred request replays it:
+  - a deferred dispose tears its subtree down;
+  - a deferred re-run re-runs it, unless an ancestor's dispose is still waiting, in which case the re-run is dropped.
+- **`dispose(true)`:**
+  - it releases every shield in the subtree without replaying them, takes their counts off the ancestors, and disposes the node;
+  - controllers are aborted, cleanups run children first, and continuations are dropped at their next `c.suspend()`;
+  - it works after a graceful `dispose()` too;
+  - an ancestor that it frees replays its own deferred request.
+- **Hot path:**
+  - computes lose their lock code, including the check at the top of `ComputeProto._update`;
+  - the sync release adds FLAG_LOCKED to the mask that `EffectProto._update`'s tail already tests, and that costs nothing.
+
+**Implemented** on `fix/25-shield`, with bug 25 (see its Fix section). **Known gap:** a child that a shielded continuation creates after the disposal froze the subtree starts unpaused. It reacts until the continuation's shield releases, and is paused then. D3 would close it.
 
 ## Doc note: the README still describes tombstones
 
