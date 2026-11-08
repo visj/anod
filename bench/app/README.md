@@ -50,7 +50,7 @@ The selector's own run is not counted as a compute or an effect. "Select a row, 
 
 Each suite uses its library the way it is documented, with every tool it offers for this graph, but nothing an app would not write.
 
-- **anod** (`anod.js`): single-dep computes and DOM writes use the bound API (`c.compute(dep, fn)`, `c.effect(dep, fn)`), as katode emits. `doneCount` is marked `stable()`, the documented case: it always reads the same 1,000 signals. `ANOD_API=unbound node anod.js` builds every node with `c.compute(fn)` / `c.effect(fn)`.
+- **anod** (`anod.js`): single-dep computes and DOM writes use the bound API (`c.compute(dep, fn)`, `c.effect(dep, fn)`), as katode emits. `doneCount` is marked `stable()`, the documented case: it always reads the same 1,000 signals. `ANOD_API=unbound node anod.js` builds every node with `c.compute(fn)` / `c.effect(fn)` and leaves out `stable()`, which the other libraries have no equivalent of.
 - **alien-signals** (`alien-signals.js`): `computed`, `effect`, one `effectScope` per row component, `startBatch`/`endBatch` for the batch.
 - **Solid 2.0** (`solid.js`): `createMemo`, `createRenderEffect` with a compute and an effect function for DOM writes, `createEffect` for the side effect, `createProjection` for the selection, one `createRoot` per row component. Writes are deferred, so every scenario ends with `flush()`, as Solid's renderer does. Node resolves `@solidjs/signals` to its production build.
 

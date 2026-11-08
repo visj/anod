@@ -1268,7 +1268,7 @@ Most reactivity benchmarks measure deep chains and synthetic propagation pattern
 
 Per row, three signals (`label`, `count`, `done`) feed three computes: a text from label and count, a filter check, and a class name from selection and theme. Selection goes through each library's selector, which flips only the previous and the next row: Solid's `createProjection`, and the same small hand-written keyed selector in anod and alien-signals, which have no built-in one. Five DOM writes follow, four with a single dependency and one with two. At app level, a count over all 1,000 rows feeds a footer, and one side effect persists the filter. DOM elements are plain objects, so the numbers measure the reactive engine, not a DOM.
 
-Every suite builds the same graph, and checks at startup that each scenario runs exactly the same number of computes and effects. Each uses its library as documented. anod builds every node with the unbound API, `c.compute(fn)` and `c.effect(fn)`, which tracks dependencies the way alien-signals and Solid do, and marks the 1,000-signal count `stable()`. The bound API for single-dependency nodes (`c.compute(dep, fn)`), which a compiler like katode emits, is not used in these tables. alien-signals uses `computed` and `effect` with one `effectScope` per row. Solid uses `createMemo`, `createRenderEffect` for DOM writes and one `createRoot` per row, ending each scenario with `flush()` as its renderer does.
+Every suite builds the same graph, and checks at startup that each scenario runs exactly the same number of computes and effects. Each uses its library as documented. anod builds every node with the unbound API, `c.compute(fn)` and `c.effect(fn)`, which tracks dependencies the way alien-signals and Solid do. These tables don't use the bound API for single-dependency nodes (`c.compute(dep, fn)`), which a compiler like katode emits, or `stable()`, which the other libraries have no equivalent of. alien-signals uses `computed` and `effect` with one `effectScope` per row. Solid uses `createMemo`, `createRenderEffect` for DOM writes and one `createRoot` per row, ending each scenario with `flush()` as its renderer does.
 
 | Scenario | What happens | Work per iteration |
 | :-- | :-- | :-- |
@@ -1289,36 +1289,34 @@ Time is the average per iteration, the median of 8 rounds run in rotated order. 
 | Scenario | alien | anod | Δ time | alien | anod | Δ alloc |
 | :-- | --: | --: | --: | --: | --: | --: |
 | | **Time** | **Time** | | **Alloc** | **Alloc** | |
-| Mount + unmount 1k rows | 977 µs | 755 µs | -23% | 3.9 MB | 3.2 MB | -18% |
-| Edit one row | 182 ns | 149 ns | -18% | 176 B | 97 B | -45% |
-| Toggle one row | 16.9 µs | 4,229 ns | -75% | 25 B | 25 B | +2% |
-| Select a row | 425 ns | 359 ns | -16% | 97 B | 97 B | 0% |
-| Select a row, no selector | 95.1 µs | 68.2 µs | -28% | 40.4 kB | 97 B | -100% |
-| Edit 10 rows in a batch | 2,164 ns | 1,828 ns | -16% | 2.1 kB | 1.4 kB | -34% |
-| Change filter | 98.2 µs | 73.1 µs | -26% | 26.9 kB | 21.5 kB | -20% |
-| Change theme | 106 µs | 68.6 µs | -35% | 28.2 kB | 28.3 kB | 0% |
-| Remount 100 rows | 82.7 µs | 66.4 µs | -20% | 310.6 kB | 246.9 kB | -21% |
-
-`stable()` accounts for part of the toggle result. In a run of just that scenario, anod's toggle takes about 3.7 µs with it and 6.2 µs without it, against 18 µs for alien-signals.
+| Mount + unmount 1k rows | 1.07 ms | 779 µs | -27% | 3.8 MB | 3.2 MB | -16% |
+| Edit one row | 184 ns | 154 ns | -16% | 177 B | 96 B | -46% |
+| Toggle one row | 17.8 µs | 6,260 ns | -65% | 25 B | 25 B | +1% |
+| Select a row | 425 ns | 374 ns | -12% | 97 B | 97 B | 0% |
+| Select a row, no selector | 101 µs | 70.6 µs | -30% | 40.4 kB | 97 B | -100% |
+| Edit 10 rows in a batch | 2,223 ns | 1,887 ns | -15% | 2.1 kB | 1.4 kB | -34% |
+| Change filter | 98.4 µs | 75.9 µs | -23% | 26.9 kB | 21.4 kB | -20% |
+| Change theme | 109 µs | 71.4 µs | -35% | 28.2 kB | 28.2 kB | 0% |
+| Remount 100 rows | 106 µs | 67.4 µs | -36% | 303.4 kB | 246.2 kB | -19% |
 
 ### anod vs [@solidjs/signals](https://github.com/solidjs/solid) (Solid 2.0 beta)
 
 | Scenario | solid | anod | Δ time | solid | anod | Δ alloc |
 | :-- | --: | --: | --: | --: | --: | --: |
 | | **Time** | **Time** | | **Alloc** | **Alloc** | |
-| Mount + unmount 1k rows | 5.79 ms | 755 µs | -87% | 11.2 MB | 3.2 MB | -72% |
-| Edit one row | 1,440 ns | 149 ns | -90% | 1.1 kB | 97 B | -91% |
-| Toggle one row | 46.9 µs | 4,229 ns | -91% | 1.0 kB | 25 B | -98% |
-| Select a row | 4,495 ns | 359 ns | -92% | 3.5 kB | 97 B | -97% |
-| Select a row, no selector | 206 µs | 68.2 µs | -67% | 151.2 kB | 97 B | -100% |
-| Edit 10 rows in a batch | 12.6 µs | 1,828 ns | -85% | 8.9 kB | 1.4 kB | -85% |
-| Change filter | 487 µs | 73.1 µs | -85% | 389.7 kB | 21.5 kB | -94% |
-| Change theme | 776 µs | 68.6 µs | -91% | 512.2 kB | 28.3 kB | -94% |
-| Remount 100 rows | 562 µs | 66.4 µs | -88% | 990.6 kB | 246.9 kB | -75% |
+| Mount + unmount 1k rows | 6.16 ms | 779 µs | -87% | 11.2 MB | 3.2 MB | -72% |
+| Edit one row | 1,622 ns | 154 ns | -90% | 1.1 kB | 96 B | -91% |
+| Toggle one row | 48.4 µs | 6,260 ns | -87% | 1.0 kB | 25 B | -98% |
+| Select a row | 4,990 ns | 374 ns | -93% | 3.5 kB | 97 B | -97% |
+| Select a row, no selector | 227 µs | 70.6 µs | -69% | 150.8 kB | 97 B | -100% |
+| Edit 10 rows in a batch | 14.3 µs | 1,887 ns | -87% | 8.9 kB | 1.4 kB | -85% |
+| Change filter | 548 µs | 75.9 µs | -86% | 390.6 kB | 21.4 kB | -95% |
+| Change theme | 871 µs | 71.4 µs | -92% | 511.4 kB | 28.2 kB | -94% |
+| Remount 100 rows | 599 µs | 67.4 µs | -89% | 990.5 kB | 246.2 kB | -75% |
 
 Solid's projection also slows its scenarios that never touch the selection: in a run of just that scenario, a toggle takes about 34 µs without it and 44 µs with it. Real Solid apps use stores throughout, so the suite keeps it; see [bench/app/README.md](bench/app/README.md).
 
-Run them with `ANOD_API=unbound node bench/app/anod.js`, `node bench/app/alien-signals.js` and `node bench/app/solid.js` after `npm run make`. Without `ANOD_API=unbound`, `bench/app/anod.js` uses the bound API for single-dependency nodes. See [bench/app/README.md](bench/app/README.md) for the full graph.
+Run them with `ANOD_API=unbound node bench/app/anod.js`, `node bench/app/alien-signals.js` and `node bench/app/solid.js` after `npm run make`. Without `ANOD_API=unbound`, `bench/app/anod.js` uses the bound API for single-dependency nodes and marks the 1,000-signal count `stable()`. See [bench/app/README.md](bench/app/README.md) for the full graph.
 
 ## Acknowledgements
 

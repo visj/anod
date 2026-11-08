@@ -1,7 +1,9 @@
 /**
  * App benchmark for anod. Single-dep computes and DOM writes use the
- * bound API (c.compute(dep, fn), c.effect(dep, fn)), as katode emits.
- * ANOD_API=unbound builds every node with the unbound API instead.
+ * bound API (c.compute(dep, fn), c.effect(dep, fn)), as katode emits,
+ * and the ROWS-wide count is stable(). ANOD_API=unbound builds every
+ * node with the unbound API and leaves out stable(), which the other
+ * libraries have no equivalent of.
  */
 import { bench, run } from 'mitata';
 import { signal, root, batch } from '../../dist/index.js';
@@ -120,9 +122,9 @@ function mountApp(r, store, footer) {
         }
         return n;
     });
-    /** Always the same ROWS signals: skip dep reconciliation. */
-    doneCount.stable();
     if (BOUND) {
+        /** Always the same ROWS signals: skip dep reconciliation. */
+        doneCount.stable();
         r.effect(doneCount, (v) => { effects++; footer.textContent = v + ' done'; });
         r.effect(store.filter, (v) => { effects++; storage = v; });
     } else {
