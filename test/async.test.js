@@ -778,10 +778,9 @@ describe("async", () => {
 
       s1.set(2);
       await settle();
-      /** Previous activation already completed — controller was
-       *  NOT aborted because the spawn wasn't loading when notified.
-       *  Abort only happens when the spawn is actively loading. */
-      expect(captured.signal.aborted).toBe(false);
+      /** A re-run aborts the previous activation's controller even
+       *  when that activation has completed, as for a compute (D1). */
+      expect(captured.signal.aborted).toBe(true);
     });
 
     test("each run gets a fresh controller", async () => {

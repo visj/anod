@@ -29,7 +29,7 @@ function gate(r) {
 }
 
 describe("c.suspend(task, onResolve, onReject)", () => {
-	test("a settled task calls onResolve synchronously, before suspend returns", () => {
+	test("a settled task calls onResolve once the fn returns, without a microtask", () => {
 		const got = [];
 		const r = root((r) => {
 			const task = r.task((cx) => cx.suspend((resolve) => resolve(3)));
@@ -40,7 +40,7 @@ describe("c.suspend(task, onResolve, onReject)", () => {
 				got.push("after");
 			});
 		});
-		expect(got).toEqual(["cb:3", "after"]);
+		expect(got).toEqual(["after", "cb:3"]);
 		r.dispose();
 	});
 
@@ -379,7 +379,7 @@ describe("c.suspend(task, onResolve, onReject)", () => {
 });
 
 describe("c.suspend(tasks, onResolve, onReject)", () => {
-	test("settled tasks call onResolve synchronously with every value", () => {
+	test("settled tasks call onResolve once the fn returns, with every value", () => {
 		const got = [];
 		const r = root((r) => {
 			const a = r.task((cx) => cx.suspend((resolve) => resolve(1)));
@@ -391,7 +391,7 @@ describe("c.suspend(tasks, onResolve, onReject)", () => {
 				got.push("after");
 			});
 		});
-		expect(got).toEqual([[1, 2], "after"]);
+		expect(got).toEqual(["after", [1, 2]]);
 		r.dispose();
 	});
 

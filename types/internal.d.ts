@@ -56,6 +56,7 @@ export declare const FLAG_OWNER: number;
 export declare const FLAG_CALLBACK: number;
 export declare const FLAG_FREEZE: number;
 export declare const FLAG_VISIT: number;
+export declare const FLAG_REFUSE: number;
 
 export declare const REFUSE: 1;
 export declare const PANIC: 2;
@@ -84,11 +85,6 @@ export declare const OPT_EAGER: number;
 /** Every option flag, for masking the opts a caller passes in. */
 export declare const OPTIONS: number;
 
-/* Async dispatch kinds — what a node's fn returned. */
-export declare const ASYNC_PROMISE: 1;
-export declare const ASYNC_ITERATOR: 2;
-export declare const ASYNC_SYNC: 3;
-
 /* Recovery outcomes — who, if anyone, handled an error. */
 export declare const RECOVER_NONE: 0;
 export declare const RECOVER_SELF: 1;
@@ -100,10 +96,8 @@ export declare const NOOP: () => void;
 export declare const ILLEGAL_READ: string;
 
 export interface ReadonlySignal<T = any> {
-	readonly disposed: boolean;
 	get(): T;
 	notify(): void;
-	dispose(): void;
 }
 
 export interface Signal<T = any> extends ReadonlySignal<T> {
@@ -134,13 +128,13 @@ export interface Resource<T = any> extends Signal<T> {
 	set(value: T): boolean;
 	set(fn: (c: ResourceContext, current: T) => T | Promise<T>): boolean;
 	set(
-		value: T | ((c: ResourceContext, current: T) => T),
+		value: T | ((prev: T) => T),
 		fn: (c: ResourceContext, optimistic: T) => T | Promise<T>
 	): boolean;
 	post(value: T): boolean;
 	post(fn: (c: ResourceContext, current: T) => T | Promise<T>): boolean;
 	post(
-		value: T | ((c: ResourceContext, current: T) => T),
+		value: T | ((prev: T) => T),
 		fn: (c: ResourceContext, optimistic: T) => T | Promise<T>
 	): boolean;
 }
@@ -166,6 +160,8 @@ export interface CellConstructor {
 export declare var Cell: CellConstructor;
 
 export interface Compute<T = any> extends ReadonlySignal<T> {
+	readonly disposed: boolean;
+	dispose(): void;
 	readonly error: boolean;
 	readonly loading: boolean;
 	weak(): void;
@@ -291,6 +287,8 @@ export interface ResourceContext {
 	suspend(
 		fn: (resolve: (value?: any) => void, reject: (error?: any) => void) => void
 	): void;
+	/** The current activation's sequence number; each async write bumps it. */
+	version(): number;
 }
 
 export type Sender<T = any> = Signal<T> | MutableSignal<T> | Resource<T> | Compute<T> | Task<T>;

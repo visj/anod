@@ -286,21 +286,5 @@ describe("Signal.set and Signal.post", () => {
       expect(s1.get()).toBe(1);
       expect(runs).toBe(1);
     });
-
-    test("writes queued before dispose are dropped", async () => {
-      const s1 = signal({ count: 0 });
-      let calls = 0;
-      s1.post((v) => (calls++, { count: v.count + 1 }));
-      s1.dispose();
-      await Promise.resolve();
-      expect(calls).toBe(0);
-
-      const s2 = signal({ count: 0 });
-      batch(() => {
-        s2.set((v) => (calls++, { count: v.count + 1 }));
-        s2.dispose();
-      });
-      expect(calls).toBe(0);
-    });
   });
 });

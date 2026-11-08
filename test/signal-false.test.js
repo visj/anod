@@ -143,11 +143,4 @@ describe("signal(value, false)", () => {
     const r = signal({ x: 1 }, false);
     expect(r.get().x).toBe(1);
   });
-
-  test("dispose works", () => {
-    const r = signal(1, false);
-    r.dispose();
-    expect(r.disposed).toBe(true);
-    expect(() => r.set(2)).toThrow();
-  });
 });

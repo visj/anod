@@ -38,11 +38,6 @@ describe("stack retention after disposal", () => {
 			cx.get();
 			cx.dispose();
 			r.dispose();
-			s1.dispose();
-			s2.dispose();
-			s3.dispose();
-			s4.dispose();
-			s5.dispose();
 			return [s1, s2, s3, s4, s5, cx];
 		});
 
@@ -132,8 +127,6 @@ describe("stack retention after disposal", () => {
 				s1.set(2); // effect re-runs in transaction, drives checkRun
 			});
 			r.dispose();
-			s1.dispose();
-			s2.dispose();
 			return [s1, s2, c1, c2, c3, c4, r];
 		});
 

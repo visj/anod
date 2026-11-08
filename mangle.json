@@ -163,7 +163,26 @@
       "$teardown": "Vi",
       "$requeue": "Wi",
       "$failStart": "Xi",
-      "$deferEffect": "Yi"
+      "$deferEffect": "Yi",
+      "$SUSPEND_TWICE": "Zi",
+      "$checkStale": "$i",
+      "$isCurrent": "il",
+      "$startAsync": "ll",
+      "$FLAG_REFUSE": "tn",
+      "$set": "nn",
+      "$writeResource": "ln",
+      "$HELD": "en",
+      "$HELD_COUNT": "sn",
+      "$callbackFlags": "un",
+      "$isHolding": "hn",
+      "$hold": "fn",
+      "$findHeld": "rn",
+      "$dropHeld": "on",
+      "$unhold": "cn",
+      "$disposedDep": "yn",
+      "$boundError": "an",
+      "$releaseWeak": "dn",
+      "$clearRun": "wn"
     }
   },
   "props": {

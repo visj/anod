@@ -510,23 +510,6 @@ describe("resource", () => {
         expect(r.get()).toBe("y");
         expect(r.loading).toBe(false);
     });
-
-    test("disposing a resource rejects a task awaiting it with a PANIC error", async () => {
-        const r = resource(0);
-        r.set(async (c) => await c.suspend(new Promise(() => {})));
-        let t;
-        const rt = root((rt) => {
-            t = rt.task(async (c) => await c.suspend(r));
-        });
-        expect(t.loading).toBe(true);
-        r.dispose();
-        await settle();
-        expect(t.loading).toBe(false);
-        expect(t.error).toBe(true);
-        expect(t.get().type).toBe(PANIC);
-        expect(t.get().error.message).toBe("Awaited resource was disposed");
-        rt.dispose();
-    });
 });
 
 describe("callback suspend", () => {
