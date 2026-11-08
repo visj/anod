@@ -1,5 +1,5 @@
 import { describe, test, expect, expectCollected } from "#test-runner";
-import { signal, root, c } from "#anod";
+import { signal, root, c, OPT_SETUP } from "#anod";
 
 const tick = () => Promise.resolve();
 const settle = () => tick().then(tick).then(tick);
@@ -31,7 +31,8 @@ describe("dispose", () => {
             s1.set(2);
 
             expect(count).toBe(2); // "Compute should not execute after disposal"
-            expect(c1.get()).toBeNull(); // "Disposed compute value should be null"
+            /** A disposed compute has no value: reading it throws (D4). */
+            expect(() => c1.get()).toThrow("Cannot read a disposed node or yourself");
         });
     });
 
@@ -85,16 +86,37 @@ describe("dispose", () => {
             expect(bound.error).toBe(true);
         });
 
-        test("bound compute errors when dep1 is disposed", () => {
+        test("bound compute keeps its value when dep1 is disposed", () => {
             const s1 = signal(1);
             const dep = c.compute((cx) => cx.val(s1));
             const bound = c.compute(dep, (val) => val * 2);
             expect(bound.get()).toBe(2);
 
+            // D4: a disposed dep never notifies, so bound has no reason to re-run
             dep.dispose();
-            // Reading bound returns error POJO because dep1 is disposed
-            bound.get();
+            expect(bound.get()).toBe(2);
+            expect(bound.error).toBe(false);
+        });
+
+        test("bound compute fails with ILLEGAL_READ when it re-runs after dep1 is disposed", () => {
+            const s1 = signal(1);
+            const k = signal(1);
+            const dep = c.compute((cx) => cx.val(s1));
+            let calls = 0;
+            // OPT_SETUP: a bound compute only tracks dep1 unless it sets up more deps
+            const bound = c.compute(dep, (val, cx) => {
+                calls++;
+                return val * cx.val(k);
+            }, undefined, OPT_SETUP);
+            expect(bound.get()).toBe(1);
+
+            dep.dispose();
+            k.set(2);
+            const v = bound.get();
             expect(bound.error).toBe(true);
+            expect(v.error.message).toMatch(/disposed/);
+            // the fn is skipped, so it never sees the disposed dep's null
+            expect(calls).toBe(1);
         });
     });
 

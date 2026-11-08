@@ -29,8 +29,7 @@ describe("garbage collection", () => {
 
         c1.deref()?.get();
 
-        // Severing the hard link back to c1.
-        s1.dispose();
+        // Disposing c1 unlinks it from s1, which then holds no reference to it.
         r.dispose();
 
         await new Promise((resolve) => {

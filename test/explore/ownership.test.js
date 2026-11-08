@@ -218,14 +218,6 @@ describe("disposal timing", () => {
         expect(calls).toBe(1);
     });
 
-    test("a disposed signal rejects set, post and notify", () => {
-        const s = signal(1);
-        s.dispose();
-        expect(() => s.set(2)).toThrow();
-        expect(() => s.post(2)).toThrow();
-        expect(() => s.notify()).toThrow();
-    });
-
     /**
      * BUG (medium). Expected: a write from a cleanup that runs during
      * root.dispose() does not re-run a sibling that is being torn down by
@@ -654,7 +646,12 @@ describe("error propagation", () => {
                 return 1;
             });
             comp.dispose();
-            got = comp.get();
+            /** A disposed compute has no value: get() throws (D4). */
+            try {
+                comp.get();
+            } catch (err) {
+                got = err.message;
+            }
             r.effect((cx) => {
                 cx.recover((e) => {
                     seen = e;
@@ -664,7 +661,7 @@ describe("error propagation", () => {
             });
         });
         expect(calls).toBe(1);
-        expect(got).toBeNull();
+        expect(got).toBe("Cannot read a disposed node or yourself");
         expect(seen.type).toBe(FATAL);
         expect(seen.error.message).toBe("Cannot read a disposed node or yourself");
         r1.dispose();

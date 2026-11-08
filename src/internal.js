@@ -14,8 +14,8 @@ import {
 } from "./types.js";
 
 /* Sender flags (bits 0-6) — readable on any Sender (Signal or Compute).
- * Bits 7+ on a plain Signal are free for extension (e.g. mod encoding
- * in anod-list). */
+ * The write paths also read FLAG_LOADING and FLAG_ASYNC on a signal,
+ * since a resource is a signal. */
 const FLAG_STALE = 1 << 0;
 const FLAG_PENDING = 1 << 1;
 const FLAG_SCHEDULED = 1 << 2;
@@ -52,6 +52,12 @@ const FLAG_CALLBACK = 1 << 27;
 const FLAG_FREEZE = 1 << 28;
 /** Set on the nodes of a checkRun stack only while checkCycle scans it. */
 const FLAG_VISIT = 1 << 29;
+/** c.refuse() was called in an async activation. It becomes FLAG_ERROR
+ *  when the activation settles, so readers never see the error flag next
+ *  to the previous value. It shares FLAG_PURGE's bit: only an owner is
+ *  purged, and only a compute refuses. Bit 30 is not an option, since
+ *  1 << 30 is outside V8's 31-bit Smi range under pointer compression. */
+const FLAG_REFUSE = FLAG_PURGE;
 
 /** Error type constants for { error, type } POJOs. */
 const REFUSE = 1;
@@ -66,12 +72,6 @@ const OPT_WEAK = FLAG_WEAK;
 const OPT_EAGER = FLAG_EAGER;
 
 const OPTIONS = OPT_DEFER | OPT_STABLE | OPT_SETUP | OPT_WEAK | OPT_EAGER;
-
-/* Async dispatch kinds — asyncKind() returns one of these so callers can
- * branch without re-sniffing the value. */
-const ASYNC_PROMISE = 1;
-const ASYNC_ITERATOR = 2;
-const ASYNC_SYNC = 3;
 
 /**
  * A thenable that silently swallows .then() callbacks. When an async
@@ -88,13 +88,17 @@ var REGRET = { then: function () { } };
 var NOOP = function() {};
 
 /**
- * Thrown (synchronously) when an async node's fn returns a non-sync
- * value (promise/iterator) without having called `c.suspend()`. This
- * catches the common mistake of forgetting `c.suspend()`, which would
- * let code continue executing after the node is disposed.
+ * Thrown when a node reads a disposed node, or itself.
  * @const
  */
 var ILLEGAL_READ = "Cannot read a disposed node or yourself";
+
+/**
+ * Thrown when the callback form of suspend() follows another suspend()
+ * in the same activation.
+ * @const
+ */
+var SUSPEND_TWICE = "Cannot call suspend() with callbacks after a previous suspend()";
 
 /**
  * @type {Array<Sender | number>}
@@ -219,6 +223,20 @@ var REJECTS = [];
 var REJECT_COUNT = 0;
 
 /**
+ * What a callback suspend delivered while the node's fn was still
+ * running, held until the fn returns, as triples [node, fn, value, ...].
+ * fn is undefined to settle with value, null to fail with it, or a
+ * task callback to call with it. Only nodes whose fn is on the stack
+ * have an entry: _update takes it when the fn returns, and a throw or
+ * a disposal drops it, so the stack holds one entry per nested run at
+ * most.
+ * @const @type {Array<Receiver | AsyncSender | Function | null | undefined | *>}
+ */
+var HELD = [];
+
+var HELD_COUNT = 0;
+
+/**
  * True while teardown() disposes a node outside a flush, or delivers
  * the rejections it collected: a disposal nested inside defers to it.
  * @type {boolean}
@@ -226,7 +244,7 @@ var REJECT_COUNT = 0;
 var TEARING = false;
 
 /**
- * Writable senders (Signal + writable Compute) pending an assignment
+ * Writable senders (signals and resources) pending an assignment
  * during a batch. Paired with PAYLOADS — both are indexed by a shared
  * tail pointer and cleared back to null on drain. Sized to the longest
  * queued burst the session has seen.
@@ -479,11 +497,7 @@ function Channel() {
 	this._waiters = null;
 	/** @type {AbortController | null} */
 	this._controller = null;
-	/** @type {Sender | null} First deferred dep (inline fast path). */
-	this._defer1 = null;
-	/** @type {*} Snapshot of _defer1's value at defer() time. */
-	this._defer1val = null;
-	/** @type {Array<Sender | *> | null} Paired [sender, value] entries for 2+ defers. */
+	/** @type {Array<Sender | *> | null} Paired [sender, value at defer() time] entries. */
 	this._defers = null;
 }
 
@@ -553,8 +567,8 @@ function val(sender) {
 }
 
 /**
- * Shared set implementation for Signal, Resource, and Compute. When IDLE,
- * resolves updater functions, writes via _assign, notifies and
+ * Shared set implementation for Signal and Cell. When IDLE,
+ * resolves updater functions, writes the value, notifies and
  * flushes. When not IDLE, schedules for drain. Updater functions
  * are resolved at drain time by assign() to see the latest value.
  *
@@ -564,40 +578,18 @@ function val(sender) {
  * leaves them in place. Inside a batch or a flush, set() queues
  * behind them instead, and the last write wins.
  *
- * For Resource nodes (FLAG_ASYNC), accepts an optional asyncFn as
- * second argument. The optimistic value is written immediately,
- * then asyncFn runs with the resource as context and the optimistic
- * value as prev, before the flush. On resolve, _settle writes the
- * final value. An immediate plain write settles the resource, so the
- * activation in flight is discarded.
+ * A resource writes through CellProto.set instead.
  * @template T
- * @this {Sender<T> | AsyncSender<T>}
+ * @this {Sender<T>}
  * @param {T | (function(T): T)} value
- * @param {(function(AsyncSender<T>, T): (T | Promise<T>))=} asyncFn
  * @returns {boolean}
  */
-function set(value, asyncFn) {
-	if (this._flag & FLAG_DISPOSED) {
-		throw new Error(ILLEGAL_READ);
-	}
-	let callback = typeof value === "function";
-	/** Resource: single function arg → run as (c, current), dispatch on result. */
-	if (callback && asyncFn === undefined && this._flag & FLAG_ASYNC) {
-		if (IDLE) {
-			if (this._flag & FLAG_SCHEDULED) {
-				supersede(this);
-			}
-			_runAsync(/** @type {AsyncSender<T>} */(this), value, this._value);
-		} else {
-			schedule(this, value, asyncRun);
-		}
-		return true;
-	}
+function set(value) {
 	if (IDLE) {
 		/** @type {T} */
 		let _value;
 		let write = true;
-		if (callback) {
+		if (typeof value === "function") {
 			_value = value(this._value);
 			/** Mutable updater returning void — keep current value, still notify. */
 			if (_value === undefined && this._flag & FLAG_MUTABLE) {
@@ -605,16 +597,6 @@ function set(value, asyncFn) {
 			}
 		} else {
 			_value = value;
-		}
-		/** Resource: a plain write also supersedes the activation in
-		 *  flight. The new token orphans it, and the write settles. */
-		if (this._flag & FLAG_LOADING && asyncFn === undefined) {
-			if (this._flag & FLAG_SCHEDULED) {
-				supersede(this);
-			}
-			this._time++;
-			/** @type {AsyncSender<T>} */(this)._settle(_value);
-			return true;
 		}
 		let changed =
 			this._flag & FLAG_MUTABLE ||
@@ -629,28 +611,13 @@ function set(value, asyncFn) {
 				this._value = _value;
 			}
 			notify(this, FLAG_STALE);
-			/** Resource: start the activation before flushing, so that
-			 *  subscribers see the optimistic value as loading. */
-			if (asyncFn !== undefined && this._flag & FLAG_ASYNC) {
-				_runAsync(/** @type {AsyncSender<T>} */(this), asyncFn, _value);
-			}
 			flush();
 			return true;
 		}
-		if (asyncFn === undefined) {
-			return false;
-		}
-		if (this._flag & FLAG_ASYNC) {
-			_runAsync(/** @type {AsyncSender<T>} */(this), asyncFn, _value);
-		}
-		return true;
-	}
-	if (asyncFn !== undefined && this._flag & FLAG_ASYNC) {
-		schedule(this, { _value: value, _fn: asyncFn }, asyncAssign);
-		return true;
+		return false;
 	}
 	if (
-		callback ||
+		typeof value === "function" ||
 		this._flag & (FLAG_MUTABLE | FLAG_SCHEDULED) ||
 		(this._equal !== null
 			? !this._equal(this._value, value)
@@ -660,6 +627,52 @@ function set(value, asyncFn) {
 		return true;
 	}
 	return false;
+}
+
+/**
+ * Plain write to a resource, immediate or drained. Every plain write
+ * supersedes the activation in flight, even one that is no longer
+ * loading, such as a generator past its first yield: the new token
+ * discards whatever the activation produces later. A write that ends
+ * a load or an error is a change by itself, whatever the value, so the
+ * waiters resume and the equality function never sees the Defect.
+ * When IDLE, it cancels the writes posted before it, as set() does;
+ * in the drain it runs in queue order. The caller flushes. An updater
+ * only comes from a contextual write, since r.set(fn) is async.
+ * @template T
+ * @param {AsyncSender<T>} node
+ * @param {T | (function(T): T)} value
+ * @returns {boolean} whether subscribers were notified
+ */
+function writeResource(node, value) {
+	if (typeof value === "function") {
+		value = value(node._value);
+		/** Mutable updater returning void — keep current value, still notify. */
+		if (value === undefined && node._flag & FLAG_MUTABLE) {
+			value = node._value;
+		}
+	}
+	let flag = node._flag;
+	/** Compared first, so a throwing equality function cancels no posts. */
+	let changed =
+		flag & (FLAG_MUTABLE | FLAG_LOADING | FLAG_ERROR) ||
+		(node._equal !== null
+			? !node._equal(node._value, value)
+			: node._value !== value);
+	if (IDLE && flag & FLAG_SCHEDULED) {
+		supersede(node);
+	}
+	node._time++;
+	if (changed) {
+		node._flag &= ~(FLAG_LOADING | FLAG_ERROR);
+		node._value = value;
+		if (node._flag & FLAG_WAITER) {
+			settleNotify(node, false);
+		} else {
+			notify(node, FLAG_STALE);
+		}
+	}
+	return !!changed;
 }
 
 /**
@@ -680,29 +693,51 @@ function _runAsync(node, asyncFn, prev) {
 	try {
 		result = asyncFn(node, prev);
 	} catch (err) {
+		if (node._flag & FLAG_CALLBACK) {
+			node._flag &= ~FLAG_CALLBACK;
+			unhold(node);
+		}
 		node._error(err);
 		return;
 	}
 	if (node._flag & FLAG_SUSPEND) {
-		/** Callback suspend path — settlement handled by the callback,
-		 *  which may already have settled synchronously. */
+		/** Callback suspend path — settlement handled by the callback.
+		 *  What it delivered during asyncFn settles now. A plain write
+		 *  made during asyncFn superseded the activation. */
+		if (node._flag & FLAG_CALLBACK) {
+			node._flag &= ~FLAG_CALLBACK;
+			let i = HELD_COUNT > 0 ? findHeld(node) : -1;
+			let fn;
+			let held;
+			if (i >= 0) {
+				fn = HELD[i + 1];
+				held = HELD[i + 2];
+				dropHeld(i);
+			}
+			if (node._time === time) {
+				node._flag |= FLAG_LOADING;
+				if (i >= 0) {
+					if (fn === null) {
+						node._error(held);
+					} else {
+						node._settle(held);
+					}
+				}
+			}
+		}
 		return;
 	}
-	let kind = asyncKind(result);
-	if (kind === ASYNC_PROMISE) {
-		node._flag |= FLAG_LOADING;
-		resolvePromise(node, result, time);
-	} else if (kind === ASYNC_ITERATOR) {
-		node._flag |= FLAG_LOADING;
-		resolveIterator(node, result, time);
-	} else if (
+	if (startAsync(node, result, time)) {
+		return;
+	}
+	if (
 		result !== undefined &&
 		(node._flag & FLAG_MUTABLE ||
 			(node._equal !== null
 				? !node._equal(node._value, result)
 				: node._value !== result))
 	) {
-		/** ASYNC_SYNC: settle with the value immediately if changed. */
+		/** A sync result settles at once, if it changed. */
 		node._settle(result);
 	} else if (flag & FLAG_LOADING) {
 		node._settle(node._value);
@@ -710,11 +745,10 @@ function _runAsync(node, asyncFn, prev) {
 }
 
 /**
- * Batch-drain handler for both Signal and Compute. Resolves updater
- * functions against the current value at drain time, compares, and
- * only writes + notifies if the value actually changed. Delegates
- * the actual write to node._value which stores the resolved value
- * fields (_ctime, FLAG_INIT for Compute; plain _value for Signal).
+ * Batch-drain handler for signals, and for the optimistic value of a
+ * resource's async write. Resolves updater functions against the
+ * current value at drain time, compares, and only writes + notifies
+ * if the value actually changed.
  * @template T
  * @param {Sender<T>} node
  * @param {T | (function(T): T)} value
@@ -733,8 +767,10 @@ function assign(node, value, time) {
 	} else {
 		_value = value;
 	}
+	/** An errored resource (asyncAssign) counts as changed, so the
+	 *  equality function never sees the Defect. */
 	if (
-		node._flag & FLAG_MUTABLE ||
+		node._flag & (FLAG_MUTABLE | FLAG_ERROR) ||
 		(node._equal !== null
 			? !node._equal(node._value, _value)
 			: node._value !== _value)
@@ -778,6 +814,30 @@ function asyncRun(node, fn, time) {
 }
 
 /**
+ * Drain handler for a weak compute that lost its last reader in a
+ * transaction (see ComputeProto._drop): runs its cleanups, unless it was
+ * read again in the meantime, which ran them already. A throw is the
+ * weak compute's error, not its reader's: the flush rethrows it once it
+ * has drained.
+ * @param {Compute} node
+ * @returns {void}
+ */
+function releaseWeak(node) {
+	if (
+		node._flag & FLAG_STALE &&
+		node._cleanup !== null &&
+		node._sub1 === null &&
+		(node._subs === null || node._subs.length === 0)
+	) {
+		try {
+			clearCleanup(node);
+		} catch (error) {
+			throw defect(error);
+		}
+	}
+}
+
+/**
  * Batch-drain handler for notify(). No value write — just clears
  * FLAG_SCHEDULED and notifies subscribers.
  * @template T
@@ -793,9 +853,9 @@ function poke(node, _, time) {
 }
 
 /**
- * Enqueues a deferred update to run during the next drain cycle.
- * Used by extension packages (e.g. anod-list) to schedule custom
- * mutations like push, pop, splice without branching in the drain loop.
+ * Enqueues a deferred update to run during the next drain cycle. The
+ * drain calls `fn(node, payload, time)`, so each kind of write brings
+ * its own handler instead of branching in the drain loop.
  * FLAG_SCHEDULED marks the sender as having queued writes. The first
  * write that changes the value clears it and notifies; the drain clears
  * what is left once every write has run.
@@ -834,11 +894,11 @@ function supersede(node) {
 /**
  * Registers a dependency link from sender -> this (the tracking node).
  * Called from val() only for non-reuse cases (new dep or conflict).
- * The common reuse case (stamp === RVER - 1) is handled inline in val().
+ * The common reuse case (stamp === STAMP - 1) is handled inline in val().
  *
  * @this {Receiver}
  * @param {Sender} sender
- * @param {number} stamp - sender's previous _version before tagging
+ * @param {number} stamp - sender's previous _stamp before tagging
  * @returns {void}
  */
 function _read(sender, stamp) {
@@ -879,7 +939,7 @@ function _readAsync(sender, safe) {
 	if (sender._flag & (FLAG_STALE | FLAG_PENDING)) {
 		sender._refresh();
 	}
-	if ((this._flag & (FLAG_STABLE | FLAG_SETUP)) === FLAG_STABLE) {
+	if ((this._flag & (FLAG_STABLE | FLAG_SETUP | FLAG_FREEZE)) === FLAG_STABLE) {
 		if (!safe && sender._flag & FLAG_ERROR) {
 			throw sender._value;
 		}
@@ -960,16 +1020,17 @@ function root(fn) {
 	SignalProto._equal = null;
 
 	/**
-	 * Read on disposal to find the owner to compact. Signals are unowned,
-	 * and an owned compute keeps no reference back to its owner.
+	 * Read on disposal to find the owner to compact. An owned compute
+	 * keeps no reference back to its owner.
 	 */
-	SignalProto._owner =
-		ComputeProto._owner = null;
+	ComputeProto._owner = null;
 
 	/**
-	 * No op functions on signals
+	 * Never called on a signal: every call site tests a flag a signal
+	 * never has. They stay because removing them measurably slows the
+	 * compute-heavy benchmarks (Kairo diamond and triangle, about 10%).
 	 */
-	SignalProto._drop = 
+	SignalProto._drop =
 		SignalProto._refresh =
 		SignalProto._update = NOOP;
 
@@ -980,6 +1041,9 @@ function root(fn) {
 	 * undefined as prev: the seed applies to the first run only.
 	 * Loading nodes keep their value — active channel
 	 * waiters re-subscribe on settle.
+	 * The drop comes from inside a reader's dep reconciliation
+	 * (patchDeps, clearDeps), where no user code may run. In a
+	 * transaction, the cleanups are queued, and run once it is done.
 	 * @this {Compute}
 	 */
 	ComputeProto._drop = function () {
@@ -989,7 +1053,11 @@ function root(fn) {
 		this._flag |= FLAG_STALE;
 		this._value = undefined;
 		if (this._cleanup !== null) {
-			clearCleanup(this);
+			if (IDLE) {
+				clearCleanup(this);
+			} else {
+				schedule(this, null, releaseWeak);
+			}
 		}
 	};
 
@@ -1015,9 +1083,9 @@ function root(fn) {
 		owned.length = write;
 	};
 
-	// Disposer#dispose — shared by all four node types
+	// Disposer#dispose — shared by the owned node types. Signals and
+	// resources are not owned, and are never disposed.
 	RootProto.dispose =
-		SignalProto.dispose =
 		ComputeProto.dispose =
 		EffectProto.dispose =
 		dispose;
@@ -1057,7 +1125,6 @@ function root(fn) {
 	};
 
 	Object.defineProperties(RootProto, { disposed });
-	Object.defineProperties(SignalProto, { disposed });
 	Object.defineProperties(CellProto, {
 		loading: _readonlyLoading,
 		error: _readonlyError
@@ -1112,11 +1179,9 @@ function root(fn) {
 	 * @returns {void}
 	 */
 	function equal(eq) {
-		if (eq === false) {
-			this._flag = (this._flag | FLAG_NOTEQUAL) & ~FLAG_EQUAL;
-		} else {
-			this._flag = (this._flag | FLAG_EQUAL) & ~FLAG_NOTEQUAL;
-		}
+		this._flag =
+			(this._flag & ~(FLAG_EQUAL | FLAG_NOTEQUAL)) |
+			(eq === false ? FLAG_NOTEQUAL : FLAG_EQUAL);
 	}
 
 	/**
@@ -1172,23 +1237,24 @@ function root(fn) {
 		}
 	};
 
-	ComputeProto.equal = EffectProto.equal = equal;
+	ComputeProto.equal = equal;
 	ComputeProto.stable = stable;
 	EffectProto.stable = stableEffect;
 
 	/**
-	 * Signals an expected error from a compute. Sets FLAG_ERROR and
-	 * returns a REFUSE Defect. The caller returns this
-	 * from their fn — _update sees FLAG_ERROR and stores it as the
-	 * compute's error value without hitting the catch path.
-	 * Named `fail` to avoid collision with the `.error` getter.
+	 * Signals an expected error from a compute. Returns a REFUSE Defect
+	 * for the fn to return, and flags the node, so that _update stores
+	 * it as the compute's error without hitting the catch path. A task
+	 * is flagged FLAG_REFUSE instead, which becomes FLAG_ERROR when the
+	 * activation settles: until then the task still holds its previous
+	 * value.
 	 * @template T
 	 * @this {Compute<T>}
 	 * @param {T} val
 	 * @returns {{ error: *, type: number }}
 	 */
 	ComputeProto.refuse = function (val) {
-		this._flag |= FLAG_ERROR;
+		this._flag |= this._flag & FLAG_ASYNC ? FLAG_REFUSE : FLAG_ERROR;
 		return new Defect(val, REFUSE);
 	};
 
@@ -1242,132 +1308,80 @@ function root(fn) {
 	 * suppressed — the node accumulates stale/pending bits but
 	 * _receive() returns early. Computes are not paused because
 	 * they are pull-based and inherently lazy.
-	 * @this {Owner}
+	 * @param {Owner} node
 	 */
-	function pause() {
-		this._flag |= FLAG_PAUSED;
-		let owned = this._owned;
+	function pauseNode(node) {
+		node._flag |= FLAG_PAUSED;
+		let owned = node._owned;
 		if (owned !== null) {
-			pauseOwned(owned);
-		}
-	}
-
-	/**
-	 * Recursively walks an owned array and flags each child effect
-	 * as paused. Only traverses into children with FLAG_OWNER
-	 * (Effects), since Computes have no owned subtree.
-	 * @param {Array<Receiver>} owned
-	 */
-	function pauseOwned(owned) {
-		let count = owned.length;
-		for (let i = 0; i < count; i++) {
-			let child = owned[i];
-			if (child._flag & FLAG_OWNER) {
-				child._flag |= FLAG_PAUSED;
-				let childOwned = /** @type {Owner} */(child)._owned;
-				if (childOwned !== null) {
-					pauseOwned(childOwned);
+			let count = owned.length;
+			for (let i = 0; i < count; i++) {
+				if (owned[i]._flag & FLAG_OWNER) {
+					pauseNode(/** @type {Owner} */(owned[i]));
 				}
 			}
 		}
 	}
 
-	RootProto.pause = EffectProto.pause = pause;
+	/** @this {Owner} */
+	RootProto.pause = EffectProto.pause = function () {
+		pauseNode(this);
+	};
 
 	/**
-	 * Resumes a paused effect. If the effect itself needs an update,
-	 * it enqueues and lets the re-run rebuild its owned subtree.
-	 * Otherwise, it walks owned children to resume them individually.
-	 * @this {Effect}
+	 * Resumes a paused owner. One that missed a change while paused is
+	 * queued, and its re-run rebuilds its owned subtree. Otherwise its
+	 * paused child effects are resumed in turn.
+	 * @param {Owner} node
 	 */
-	function resumeEffect() {
-		let flag = this._flag;
-		if (!(flag & FLAG_PAUSED)) {
-			return;
-		}
-		this._flag = flag & ~FLAG_PAUSED;
+	function resumeNode(node) {
+		let flag = node._flag;
+		node._flag = flag & ~FLAG_PAUSED;
 		if (flag & (FLAG_STALE | FLAG_PENDING)) {
-			if (flag & FLAG_STALE || needsUpdate(this, TIME)) {
-				/** Effect needs update — enqueue it. The re-run will
-				 *  clearOwned and rebuild the subtree, so no need to
-				 *  individually resume children. */
-				if (this._owned === null) {
-					RECEIVERS[RECEIVER_COUNT++] = this;
-				} else {
-					enqueueScope(this);
-				}
-				if (IDLE) {
-					flush();
-				}
+			if (flag & FLAG_STALE || needsUpdate(/** @type {Effect} */(node), TIME)) {
+				/** @type {Effect} */(node)._receive();
 				return;
 			}
-			this._flag &= ~(FLAG_STALE | FLAG_PENDING);
+			node._flag &= ~(FLAG_STALE | FLAG_PENDING);
 		}
-		let owned = this._owned;
+		let owned = node._owned;
 		if (owned !== null) {
-			resumeOwned(owned);
-			if (IDLE) {
-				flush();
+			let count = owned.length;
+			for (let i = 0; i < count; i++) {
+				let child = owned[i];
+				if (
+					(child._flag & (FLAG_OWNER | FLAG_PAUSED | FLAG_DISPOSED)) ===
+					(FLAG_OWNER | FLAG_PAUSED)
+				) {
+					resumeNode(/** @type {Owner} */(child));
+				}
 			}
 		}
 	}
 
 	/**
-	 * Resumes a paused root. Root has no dependencies, so it just
-	 * walks owned children and resumes any that need updating.
-	 * @this {Root}
+	 * Resumes a paused effect or root. At idle, the resume runs in a
+	 * transaction: checking whether an effect missed a change pulls its
+	 * computes, and a fn must never run while idle.
+	 * @this {Owner}
 	 */
-	function resumeRoot() {
-		let flag = this._flag;
-		if (!(flag & FLAG_PAUSED)) {
+	RootProto.resume = EffectProto.resume = function () {
+		if (!(this._flag & FLAG_PAUSED)) {
 			return;
 		}
-		this._flag = flag & ~FLAG_PAUSED;
-		let owned = this._owned;
-		if (owned !== null) {
-			resumeOwned(owned);
-			if (IDLE) {
+		if (IDLE) {
+			IDLE = false;
+			try {
+				FENCE = SEED;
+				resumeNode(this);
 				flush();
+			} finally {
+				IDLE = true;
 			}
+		} else {
+			resumeNode(this);
 		}
-	}
-
-	/**
-	 * Recursively resumes owned child effects. Only processes
-	 * children with FLAG_OWNER (Effects). If a child effect needs
-	 * to update, it is enqueued and its subtree will be rebuilt
-	 * by the re-run. Otherwise, it walks further down.
-	 * @param {Array<Owner | Receiver>} owned
-	 */
-	function resumeOwned(owned) {
-		let count = owned.length;
-		for (let i = 0; i < count; i++) {
-			let child = owned[i];
-			let flag = child._flag;
-			if (!(flag & FLAG_OWNER) || !(flag & FLAG_PAUSED) || flag & FLAG_DISPOSED) {
-				continue;
-			}
-			child._flag = flag & ~FLAG_PAUSED;
-			if (flag & (FLAG_STALE | FLAG_PENDING)) {
-				if (flag & FLAG_STALE || needsUpdate(/** @type {Effect} */(child), TIME)) {
-					if (child._owned === null) {
-						RECEIVERS[RECEIVER_COUNT++] = /** @type {Effect} */(child);
-					} else {
-						enqueueScope(/** @type {Effect} */(child));
-					}
-					continue;
-				}
-				child._flag &= ~(FLAG_STALE | FLAG_PENDING);
-			}
-			let childOwned = child._owned;
-			if (childOwned !== null) {
-				resumeOwned(childOwned);
-			}
-		}
-	}
-
-	EffectProto.resume = resumeEffect;
-	RootProto.resume = resumeRoot;
+	};
 
 	/**
 	 * Intercepts a promise so the async continuation is silently dropped
@@ -1396,64 +1410,25 @@ function root(fn) {
 		/** Branch: setup function → callback constructor path.
 		 *  Sets FLAG_SUSPEND so _update knows the node is waiting
 		 *  for a callback-driven settlement, not a returned promise.
-		 *  FLAG_CALLBACK stays set until the node's fn returns, so a
-		 *  callback that settles before then (synchronously, inside
-		 *  the setup fn) is finished by _update, not mid-run. */
+		 *  A resolve or reject from inside the setup fn is held until
+		 *  the node's fn returns (callbackFlags). */
 		if (typeof promiseOrTask === "function") {
 			if (this._flag & FLAG_SUSPEND) {
-				throw new Error(
-					"Cannot call suspend() with callbacks after a previous suspend()"
-				);
+				throw new Error(SUSPEND_TWICE);
 			}
-			this._flag |= FLAG_SUSPEND | FLAG_LOADING | FLAG_CALLBACK;
-			let node = this;
-			let time = this._time;
-			promiseOrTask(
-				/** @param {*} val */
-				function (val) {
-					if (
-						node._time !== time ||
-						(node._flag & FLAG_DISPOSED && !(node._flag & FLAG_LOCKED))
-					) {
-						return;
-					}
-					if (!(node._flag & FLAG_LOCKED)) {
-						if (node._flag & FLAG_STALE) {
-							return;
-						}
-						if (node._flag & FLAG_PENDING && needsUpdate(node, TIME)) {
-							node._flag |= FLAG_STALE;
-							return;
-						}
-					}
-					node._settle(val);
-				},
-				/** @param {*} err */
-				function (err) {
-					if (
-						node._time !== time ||
-						(node._flag & FLAG_DISPOSED && !(node._flag & FLAG_LOCKED))
-					) {
-						return;
-					}
-					if (!(node._flag & FLAG_LOCKED)) {
-						if (node._flag & FLAG_STALE) {
-							return;
-						}
-						if (node._flag & FLAG_PENDING && needsUpdate(node, TIME)) {
-							node._flag |= FLAG_STALE;
-							return;
-						}
-					}
-					node._error(err);
-				}
-			);
+			this._flag |= callbackFlags(this);
+			resolvePromise(this, promiseOrTask, this._time);
 			return;
 		}
 		this._flag |= FLAG_SUSPEND;
 		if (typeof promiseOrTask.then === "function") {
 			/** Promise path — wrap with staleness guard. A thenable is
-			 *  adopted first, since its then() need not return a promise. */
+			 *  adopted first, since its then() need not return a promise.
+			 *  Kept inline rather than shared with guardAwait: through the
+			 *  shared function, suspend.test.js's "discarded promise does not
+			 *  retain spawn after re-run" keeps the first promise alive in the
+			 *  full dist run (collected in isolation, so most likely JSC's
+			 *  conservative stack scanning, but unproven). */
 			let node = this;
 			let time = this._time;
 			return Promise.resolve(promiseOrTask).then(
@@ -1494,7 +1469,7 @@ function root(fn) {
 	 * the raw value immediately. `await nonThenable` costs one microtask.
 	 *
 	 * **Slow-path** (task is loading): creates a two-way binding between
-	 * this node (IAwaiter) and the task (IResponder). Returns a Promise
+	 * this node and the task (see send()). Returns a Promise
 	 * that resolves when the task settles. At settle time, the task also
 	 * subscribes the awaiter as a dep for future reactive updates.
 	 * @template T
@@ -1531,7 +1506,7 @@ function root(fn) {
 		 *  the old waiter is removed and this Promise never resolves.
 		 *  With callbacks, they are the waiter, and no Promise is made. */
 		if (resolve !== undefined) {
-			node._flag |= FLAG_SUSPEND | FLAG_LOADING | FLAG_CALLBACK | FLAG_RELAY;
+			node._flag |= callbackFlags(node) | FLAG_RELAY;
 			send(node, taskNode, resolve, reject);
 			return REGRET;
 		}
@@ -1581,10 +1556,10 @@ function root(fn) {
 	 * Awaits an array of task nodes using a single-cursor walk.
 	 * Allocates exactly ONE Promise. The walk is callback-driven
 	 * via the global `_stepArray` helper: settled tasks are collected
-	 * synchronously; when a loading task is hit, addWaiter binds a
+	 * synchronously; when a loading task is hit, send() binds a
 	 * callback that re-enters `_stepArray` from the next index.
 	 *
-	 * FLAG_BLOCKED prevents resolveWaiters from subscribing the
+	 * FLAG_BLOCKED prevents settleNotify from subscribing the
 	 * awaiter during the walk. After all slots are filled, or a
 	 * member fails, we subscribe to every task in one pass and
 	 * resolve or reject the Promise.
@@ -1633,7 +1608,7 @@ function root(fn) {
 		}
 		node._flag |= FLAG_BLOCKED;
 		if (resolve !== undefined) {
-			node._flag |= FLAG_SUSPEND | FLAG_LOADING | FLAG_CALLBACK | FLAG_RELAY;
+			node._flag |= callbackFlags(node) | FLAG_RELAY;
 			_stepArray(node, tasks, results, resolve, reject);
 			return REGRET;
 		}
@@ -1745,12 +1720,15 @@ function root(fn) {
 	 * c.suspend(task, onResolve, onReject) and the array form. Works like
 	 * `.then(onResolve, onReject)` without the Promise:
 	 *
-	 * - Settled: the callback runs now, inside the run, so its reads are
-	 *   tracked like any other. A task settles with what it returns.
+	 * - Settled: the callback is held until the fn returns, and runs
+	 *   then, before the run ends: the code after c.suspend() runs first,
+	 *   as it does for a loading task. Its reads link like reads after an
+	 *   await. A task settles with what it returns.
 	 * - Loading: the callbacks are stored as the task's waiter, and the
 	 *   node is loading until one runs. It runs synchronously when the
 	 *   task settles, after the task's subscribers are marked stale, and
-	 *   the node settles with what it returns (see relay).
+	 *   the node settles with what it returns (see relay). A task that
+	 *   settles while the fn still runs is held like a settled one.
 	 *
 	 * An error with no onReject fails the node, as a throwing await
 	 * would. A re-run or dispose before the task settles drops the
@@ -1762,10 +1740,11 @@ function root(fn) {
 	 * @returns {void}
 	 */
 	function suspendTo(node, input, onResolve, onReject) {
-		if ((node._flag & (FLAG_SUSPEND | FLAG_LOADING)) === (FLAG_SUSPEND | FLAG_LOADING)) {
-			throw new Error(
-				"Cannot call suspend() with callbacks after a previous suspend()"
-			);
+		/** After an await, or after another callback suspend in this run
+		 *  (FLAG_CALLBACK, which a promise suspend does not set). */
+		let flag = node._flag;
+		if (flag & FLAG_SUSPEND && flag & (FLAG_LOADING | FLAG_CALLBACK)) {
+			throw new Error(SUSPEND_TWICE);
 		}
 		let value;
 		let failed = false;
@@ -1783,10 +1762,18 @@ function root(fn) {
 		if (value === REGRET) {
 			return;
 		}
+		/** Settled: the callback still waits for the fn to return, as it
+		 *  would for a loading task, so the code after c.suspend() runs
+		 *  first either way. */
+		if (!(node._flag & FLAG_LOADING)) {
+			node._flag |= FLAG_SUSPEND | FLAG_CALLBACK;
+			hold(node, failed ? onReject : onResolve, value);
+			return;
+		}
+		/** In a continuation the run is over, so the callback runs now,
+		 *  and a task settles with its result. */
 		let result = failed ? onReject(value) : onResolve(value);
-		/** A task settles with the callback's result, as part of this run. */
 		if (node._flag & FLAG_ASYNC && node instanceof Compute) {
-			node._flag |= FLAG_CALLBACK;
 			node._settle(result);
 		}
 	}
@@ -1839,7 +1826,8 @@ function root(fn) {
 		return channel;
 	}
 
-	ComputeProto._channel = EffectProto._channel = _channel;
+	/** A cell only uses the channel's _waiters: it is awaited, and never awaits. */
+	CellProto._channel = ComputeProto._channel = EffectProto._channel = _channel;
 
 	/**
 	 * Returns the AbortController of this async activation, which is
@@ -1863,14 +1851,19 @@ function root(fn) {
 	/**
 	 * Reads a sender's current value without subscribing immediately.
 	 * The subscription is deferred until settle time. For sync nodes
-	 * (FLAG_ASYNC not set), falls back to val().
+	 * (FLAG_ASYNC not set), falls back to val(), as it does for the reads
+	 * val() rejects.
 	 * @template T
 	 * @this {AsyncReceiver}
 	 * @param {Sender<T>} sender
 	 * @returns {T}
 	 */
 	function defer(sender) {
-		if (!(this._flag & FLAG_ASYNC) || sender === /** @type {Sender} */(this)) {
+		if (
+			!(this._flag & FLAG_ASYNC) ||
+			sender._flag & FLAG_DISPOSED ||
+			sender === /** @type {Sender} */(this)
+		) {
 			return this.val(sender);
 		}
 		if (sender._flag & (FLAG_STALE | FLAG_PENDING)) {
@@ -1878,16 +1871,10 @@ function root(fn) {
 		}
 		let value = sender._value;
 		let channel = this._channel();
-		if (channel._defer1 === null) {
-			channel._defer1 = sender;
-			channel._defer1val = value;
+		if (channel._defers === null) {
+			channel._defers = [sender, value];
 		} else {
-			let defers = channel._defers;
-			if (defers === null) {
-				channel._defers = [sender, value];
-			} else {
-				defers.push(sender, value);
-			}
+			channel._defers.push(sender, value);
 		}
 		if (sender._flag & FLAG_ERROR) {
 			throw value;
@@ -1976,29 +1963,16 @@ function root(fn) {
 	ComputeProto.rejected = EffectProto.rejected = rejected;
 
 	/**
-	 * Returns the current activation's sequence number. Increments
-	 * on each re-run. Useful for attaching to requests for server-side
-	 * ordering, or for manual staleness detection across async boundaries.
-	 * @this {Receiver}
+	 * Returns the current activation's sequence number. It grows with
+	 * each re-run (it is the time of the flush that started the run), or
+	 * with each write to a resource. Useful for attaching to requests for
+	 * server-side ordering, or for manual staleness detection across
+	 * async boundaries.
+	 * @this {Receiver | Cell}
 	 * @returns {number}
 	 */
-	ComputeProto.version = 
-		EffectProto.version = function () { return this._time; };
-
-	/**
-	 * Lazily allocates a mini-channel on Cell nodes for waiter support.
-	 * Only contains _waiters — no controller, defers, or responds.
-	 * @this {Cell}
-	 * @returns {Resolver}
-	 */
-	CellProto._channel = function () {
-		if (this._flag & FLAG_CHANNEL) {
-			return this._chan;
-		}
-		let channel = /** @type {Resolver} */({ _waiters: null });
-		this._chan = channel;
-		this._flag |= FLAG_CHANNEL;
-		return channel;
+	CellProto.version = ComputeProto.version = EffectProto.version = function () {
+		return this._time;
 	};
 
 	/**
@@ -2013,44 +1987,23 @@ function root(fn) {
 	CellProto.suspend = function (promiseOrFn) {
 		if (typeof promiseOrFn === "function") {
 			if (this._flag & FLAG_SUSPEND) {
-				throw new Error(
-					"Cannot call suspend() with callbacks after a previous suspend()"
-				);
+				throw new Error(SUSPEND_TWICE);
 			}
-			this._flag |= FLAG_SUSPEND | FLAG_LOADING;
-			let node = this;
-			let time = this._time;
-			promiseOrFn(
-				/** @param {*} val */
-				function (val) {
-					if (node._time !== time || node._flag & FLAG_DISPOSED) {
-						return;
-					}
-					node._settle(val);
-				},
-				/** @param {*} err */
-				function (err) {
-					if (node._time !== time || node._flag & FLAG_DISPOSED) {
-						return;
-					}
-					node._error(err);
-				}
-			);
+			this._flag |= callbackFlags(this);
+			resolvePromise(this, promiseOrFn, this._time);
 			return;
 		}
-		/** Promise path — wrap with staleness guard. A thenable is
-		 *  adopted first, since its then() need not return a promise. */
+		/** Promise path — wrap with staleness guard, inline as in
+		 *  suspend(). A thenable is adopted first, since its then() need
+		 *  not return a promise. */
 		let node = this;
 		let time = this._time;
 		return Promise.resolve(promiseOrFn).then(
 			function (val) {
-				if (node._time === time && !(node._flag & FLAG_DISPOSED)) {
-					return val;
-				}
-				return REGRET;
+				return node._time === time ? val : REGRET;
 			},
 			function (error) {
-				if (node._time === time && !(node._flag & FLAG_DISPOSED)) {
+				if (node._time === time) {
 					throw error;
 				}
 				return REGRET;
@@ -2066,20 +2019,16 @@ function root(fn) {
 	 * @param {T} value
 	 */
 	CellProto._settle = function (value) {
-		this._flag &= ~FLAG_LOADING;
-		if (this._flag & FLAG_DISPOSED) {
+		if (isHolding(this)) {
+			hold(this, undefined, value);
 			return;
 		}
+		this._flag &= ~FLAG_LOADING;
 		this._value = value;
 
 		if (this._flag & FLAG_WAITER) {
-			let ch = this._chan;
-			let waiters = ch._waiters;
-			let waiterCount = waiters.length;
-			ch._waiters = null;
-			this._flag &= ~FLAG_WAITER;
 			/** Notifies every subscriber that is not a resolved waiter. */
-			settleNotify(this, value, !!(this._flag & FLAG_ERROR), waiters, waiterCount);
+			settleNotify(this, false);
 		} else {
 			notify(this, FLAG_STALE);
 		}
@@ -2087,12 +2036,16 @@ function root(fn) {
 	};
 
 	/**
-	 * Settles an async resource with an error. Wraps as FATAL unless
-	 * anod created it, sets FLAG_ERROR, and delegates to _settle.
-	 * @this {Cell}
+	 * Settles an async resource or compute with an error. Wraps as FATAL
+	 * unless anod created it, sets FLAG_ERROR, and delegates to _settle.
+	 * @this {Cell | Compute}
 	 * @param {*} err
 	 */
-	CellProto._error = function (err) {
+	CellProto._error = ComputeProto._error = function (err) {
+		if (isHolding(this)) {
+			hold(this, null, err);
+			return;
+		}
 		this._flag |= FLAG_ERROR;
 		this._settle(defect(err));
 	};
@@ -2103,15 +2056,19 @@ function root(fn) {
 	 */
 	RootProto._dispose = function () {
 		this._flag = FLAG_DISPOSED;
+		/** Children first, then cleanups (D2). */
 		try {
-			if (this._cleanup !== null) {
-				clearCleanup(this);
-			}
-		} finally {
 			if (this._owned !== null) {
 				clearOwned(this);
 			}
-			this._owned = this._recover = null;
+		} finally {
+			try {
+				if (this._cleanup !== null) {
+					clearCleanup(this);
+				}
+			} finally {
+				this._owned = this._recover = null;
+			}
 		}
 	};
 
@@ -2161,39 +2118,120 @@ function root(fn) {
 	 * @template T
 	 * @this {Signal<T>}
 	 * @param {(function(T): T) | T} value
-	 * @param {function(AsyncSender<T>, T): T=} asyncFn
 	 * @returns {boolean}
 	 */
-	SignalProto.post = function (value, asyncFn) {
-		if (this._flag & FLAG_DISPOSED) {
-			throw new Error(ILLEGAL_READ);
-		}
-		/** Resource: single function arg = asyncFn with no optimistic update. */
+	function post(value) {
 		if (
-			typeof value === "function" &&
-			asyncFn === undefined &&
-			this._flag & FLAG_ASYNC
+			!(this._flag & (FLAG_MUTABLE | FLAG_SCHEDULED)) &&
+			typeof value !== "function" &&
+			(this._equal !== null
+				? this._equal(this._value, value)
+				: this._value === value)
 		) {
-			schedule(this, value, asyncRun);
-			if (!POSTING) {
-				POSTING = true;
-				queueMicrotask(microflush);
-			}
-			return true;
+			return false;
 		}
-		if (asyncFn !== undefined && this._flag & FLAG_ASYNC) {
-			schedule(this, { _value: value, _fn: asyncFn }, asyncAssign);
-		} else {
-			if (
-				!(this._flag & (FLAG_MUTABLE | FLAG_SCHEDULED)) &&
-				typeof value !== "function" &&
-				(this._equal !== null
-					? this._equal(this._value, value)
-					: this._value === value)
-			) {
+		schedule(this, value, assign);
+		if (!POSTING) {
+			POSTING = true;
+			queueMicrotask(microflush);
+		}
+		return true;
+	}
+
+	SignalProto.post = post;
+
+	/**
+	 * set for Cell. A signal with an equality function writes like any
+	 * signal. A resource also takes the async forms: r.set(fn) runs fn
+	 * as (c, current) with no value of its own, and r.set(value, fn)
+	 * writes value optimistically, then runs fn with the resource as
+	 * context and the optimistic value as prev, before the flush. A
+	 * plain write goes through writeResource(), which supersedes the
+	 * activation in flight, so it is queued even when unchanged.
+	 * @template T
+	 * @this {Cell<T>}
+	 * @param {T | (function(T): T)} value
+	 * @param {(function(AsyncSender<T>, T): (T | Promise<T>))=} asyncFn
+	 * @returns {boolean}
+	 */
+	CellProto.set = function (value, asyncFn) {
+		if (!(this._flag & FLAG_ASYNC)) {
+			return set.call(this, value);
+		}
+		if (asyncFn === undefined) {
+			if (typeof value === "function") {
+				if (IDLE) {
+					if (this._flag & FLAG_SCHEDULED) {
+						supersede(this);
+					}
+					_runAsync(this, value, this._value);
+				} else {
+					schedule(this, value, asyncRun);
+				}
+				return true;
+			}
+			if (IDLE) {
+				if (writeResource(this, value)) {
+					flush();
+					return true;
+				}
 				return false;
 			}
-			schedule(this, value, assign);
+			schedule(this, value, writeResource);
+			return true;
+		}
+		if (IDLE) {
+			let _value = value;
+			if (typeof value === "function") {
+				_value = value(this._value);
+				/** Mutable updater returning void — keep current value, still notify. */
+				if (_value === undefined && this._flag & FLAG_MUTABLE) {
+					_value = this._value;
+				}
+			}
+			/** The equality function never sees an error's Defect. */
+			let changed =
+				this._flag & (FLAG_MUTABLE | FLAG_ERROR) ||
+				(this._equal !== null
+					? !this._equal(this._value, _value)
+					: this._value !== _value);
+			if (this._flag & FLAG_SCHEDULED) {
+				supersede(this);
+			}
+			if (changed) {
+				this._value = _value;
+				notify(this, FLAG_STALE);
+			}
+			/** Starts the activation before flushing, so that subscribers
+			 *  see the optimistic value as loading. */
+			_runAsync(this, asyncFn, _value);
+			if (changed) {
+				flush();
+			}
+		} else {
+			schedule(this, { _value: value, _fn: asyncFn }, asyncAssign);
+		}
+		return true;
+	};
+
+	/**
+	 * post for Cell. A resource takes the same forms as CellProto.set,
+	 * and a plain write is queued even when unchanged, since it
+	 * supersedes the activation in flight.
+	 * @template T
+	 * @this {Cell<T>}
+	 * @param {T | (function(T): T)} value
+	 * @param {(function(AsyncSender<T>, T): (T | Promise<T>))=} asyncFn
+	 * @returns {boolean}
+	 */
+	CellProto.post = function (value, asyncFn) {
+		if (!(this._flag & FLAG_ASYNC)) {
+			return post.call(this, value);
+		}
+		if (asyncFn !== undefined) {
+			schedule(this, { _value: value, _fn: asyncFn }, asyncAssign);
+		} else {
+			schedule(this, value, typeof value === "function" ? asyncRun : writeResource);
 		}
 		if (!POSTING) {
 			POSTING = true;
@@ -2203,66 +2241,19 @@ function root(fn) {
 	};
 
 	/**
-	 * Returns true if the sender's current value differs from `value`.
-	 * Used by deferred dep settlement to detect changes. 
-	 * @template T 
-	 * @this {Sender<T>}
-	 * @param {T} value
-	 * @returns {boolean}
-	 */
-	function _changed(value) {
-		return this._value !== value;
-	}
-
-	/**
-	 * Returns true if the sender's current value differs from `value`.
-	 * Used by deferred dep settlement to detect changes.
-	 * @template T
-	 * @this {Signal}
-	 * @param {T} value
-	 * @returns {boolean}
-	 */
-	SignalProto._changed = ComputeProto._changed = _changed;
-
-	/**
-	 * @this {Signal}
-	 * @returns {void}
-	 */
-	SignalProto._dispose = function () {
-		this._flag = FLAG_DISPOSED;
-		clearSubs(this);
-		this._value = null;
-	};
-
-	/**
-	 * @override
-	 * @this {Cell}
-	 * @returns {void}
-	 */
-	CellProto._dispose = function() {
-		let flag = this._flag;
-		/** Disposed before the waiters run, so that they see it. */
-		this._flag = FLAG_DISPOSED;
-		if (flag & FLAG_WAITER) {
-			let ch = this._chan;
-			if (ch._waiters !== null) {
-				rejectWaiters(this, ch, new Defect(new Error("Awaited resource was disposed"), PANIC));
-			}
-		}
-		clearSubs(this);
-		this._value = null;
-	};
-
-	/**
 	 * Pulls and returns the compute's current value. Triggers lazy
-	 * re-evaluation if stale or pending. Rethrows if in error state.
+	 * re-evaluation if stale or pending. A disposed compute has no value,
+	 * so reading it throws ILLEGAL_READ, as c.val() does.
 	 * @template T
 	 * @this {Compute<T>}
 	 * @returns {T}
 	 */
 	ComputeProto.get = function () {
 		let flag = this._flag;
-		if (flag & (FLAG_STALE | FLAG_PENDING)) {
+		if (flag & (FLAG_STALE | FLAG_PENDING | FLAG_DISPOSED)) {
+			if (flag & FLAG_DISPOSED) {
+				throw new Error(ILLEGAL_READ);
+			}
 			if (IDLE) {
 				IDLE = false;
 				try {
@@ -2279,13 +2270,6 @@ function root(fn) {
 			} else {
 				this._refresh();
 			}
-		}
-		if (
-			this._flag & FLAG_BOUND &&
-			(this._dep1 === null || this._dep1._flag & FLAG_DISPOSED)
-		) {
-			this._flag |= FLAG_ERROR;
-			this._value = new Defect(ILLEGAL_READ, FATAL);
 		}
 		return this._value;
 	};
@@ -2335,14 +2319,31 @@ function root(fn) {
 	}
 
 	/**
-	 * Drain handler for contextual set. Wraps assign() with FLAG_PAUSED
-	 * on the receiver so that notifications propagating from this write
-	 * are ignored by the receiver that initiated the write. The write
-	 * skips the receiver, so FLAG_SCHEDULED stays armed for the sender:
-	 * a later write to it in the same drain still notifies the receiver.
+	 * unguard() for an immediate contextual write. unguard() can pull
+	 * computes, and a fn must never run while idle.
+	 * @param {Receiver} receiver
+	 * @param {number} flag - the receiver's flags before the write
+	 * @returns {void}
+	 */
+	function release(receiver, flag) {
+		IDLE = false;
+		try {
+			unguard(receiver, flag);
+		} finally {
+			IDLE = true;
+		}
+	}
+
+	/**
+	 * Drain handler for contextual set and post. Wraps assign() (for a
+	 * resource, asyncAssign() or writeResource()) with FLAG_PAUSED on the
+	 * receiver so that notifications propagating from this write are
+	 * ignored by the receiver that initiated the write. The write skips
+	 * the receiver, so FLAG_SCHEDULED stays armed for the sender: a later
+	 * write to it in the same drain still notifies the receiver.
 	 * @template T
 	 * @param {Sender<T>} node
-	 * @param {{ _value: T, _recv: Receiver }} payload
+	 * @param {{ _value: T, _fn: (function(AsyncSender<T>, T): (T | Promise<T>)) | undefined, _recv: Receiver }} payload
 	 * @param {number} time
 	 */
 	function guardedAssign(node, payload, time) {
@@ -2351,29 +2352,13 @@ function root(fn) {
 		let scheduled = node._flag & FLAG_SCHEDULED;
 		receiver._flag = flag | FLAG_PAUSED;
 		try {
-			assign(node, payload._value, time);
-		} finally {
-			unguard(receiver, flag);
-			node._flag |= scheduled;
-		}
-	}
-
-	/**
-	 * Drain handler for guarded async writes. Pauses the receiver
-	 * around asyncAssign so it ignores its own notification, and
-	 * keeps FLAG_SCHEDULED armed like guardedAssign.
-	 * @template T
-	 * @param {AsyncSender<T>} node
-	 * @param {{ _value: T, _fn: (function(AsyncSender<T>, T): (T | Promise<T>)), _recv: Receiver }} payload
-	 * @param {number} time
-	 */
-	function guardedAsyncAssign(node, payload, time) {
-		let receiver = payload._recv;
-		let flag = receiver._flag;
-		let scheduled = node._flag & FLAG_SCHEDULED;
-		receiver._flag = flag | FLAG_PAUSED;
-		try {
-			asyncAssign(node, payload, time);
+			if (payload._fn !== undefined) {
+				asyncAssign(/** @type {AsyncSender<T>} */(node), payload, time);
+			} else if (node._flag & FLAG_ASYNC) {
+				writeResource(/** @type {AsyncSender<T>} */(node), payload._value);
+			} else {
+				assign(node, payload._value, time);
+			}
 		} finally {
 			unguard(receiver, flag);
 			node._flag |= scheduled;
@@ -2394,10 +2379,21 @@ function root(fn) {
 	 * @returns {void}
 	 */
 	function contextSet(sender, value, asyncFn) {
-		if (sender._flag & FLAG_DISPOSED) {
-			throw new Error(ILLEGAL_READ);
-		}
 		if (IDLE) {
+			if (asyncFn === undefined && sender._flag & FLAG_ASYNC) {
+				let flag = this._flag;
+				let changed = false;
+				this._flag = flag | FLAG_PAUSED;
+				try {
+					changed = writeResource(/** @type {AsyncSender<T>} */(sender), value);
+				} finally {
+					release(this, flag);
+				}
+				if (changed) {
+					flush();
+				}
+				return;
+			}
 			let _value;
 			let write = true;
 			if (typeof value === "function") {
@@ -2425,22 +2421,18 @@ function root(fn) {
 				let flag = this._flag;
 				this._flag = flag | FLAG_PAUSED;
 				notify(sender, FLAG_STALE);
-				unguard(this, flag);
+				release(this, flag);
 				flush();
 			}
 			if (asyncFn !== undefined && sender._flag & FLAG_ASYNC) {
 				_runAsync(/** @type {AsyncSender} */(sender), asyncFn, _value);
 			}
 		} else {
-			if (asyncFn !== undefined && sender._flag & FLAG_ASYNC) {
-				schedule(
-					sender,
-					{ _recv: this, _value: value, _fn: asyncFn },
-					guardedAsyncAssign
-				);
-			} else {
-				schedule(sender, { _recv: this, _value: value }, guardedAssign);
-			}
+			schedule(
+				sender,
+				{ _recv: this, _value: value, _fn: sender._flag & FLAG_ASYNC ? asyncFn : undefined },
+				guardedAssign
+			);
 		}
 	}
 
@@ -2458,18 +2450,11 @@ function root(fn) {
 	 * @returns {void}
 	 */
 	function contextPost(sender, value, asyncFn) {
-		if (sender._flag & FLAG_DISPOSED) {
-			throw new Error(ILLEGAL_READ);
-		}
-		if (asyncFn !== undefined && sender._flag & FLAG_ASYNC) {
-			schedule(
-				sender,
-				{ _recv: this, _value: value, _fn: asyncFn },
-				guardedAsyncAssign
-			);
-		} else {
-			schedule(sender, { _recv: this, _value: value }, guardedAssign);
-		}
+		schedule(
+			sender,
+			{ _recv: this, _value: value, _fn: sender._flag & FLAG_ASYNC ? asyncFn : undefined },
+			guardedAssign
+		);
 		if (!POSTING) {
 			POSTING = true;
 			queueMicrotask(microflush);
@@ -2499,19 +2484,24 @@ function root(fn) {
 	 * dispose, settles deferred deps, resolves waiters, notifies subscribers,
 	 * and re-runs if the node was marked stale while locked. Settling always
 	 * completes the activation; only the subscriber notification depends on
-	 * the value having changed. Handles both value and error:
-	 * when FLAG_ERROR is set before calling, the value is treated as an
-	 * error. Uses err || { error: err } guard on errors to guarantee a
-	 * non-falsy value (prevents skipping the comparison branch when user
-	 * throws null/undefined/0).
+	 * the value having changed, which c.equal() decides as in the sync
+	 * tail of _update. Handles both value and error: when FLAG_ERROR is
+	 * set before calling, or the activation called c.refuse(), the value
+	 * is treated as an error.
 	 * @template T
 	 * @this {Compute}
 	 * @param {T} value
 	 */
 	ComputeProto._settle = function (value) {
+		if (isHolding(this)) {
+			hold(this, undefined, value);
+			return;
+		}
 		let flag = this._flag;
-		let isError = flag & FLAG_ERROR;
-		this._flag &= ~(FLAG_LOADING | FLAG_INIT | FLAG_LOCKED);
+		if (flag & FLAG_REFUSE) {
+			flag = (flag | FLAG_ERROR) & ~FLAG_REFUSE;
+		}
+		this._flag = flag & ~(FLAG_LOADING | FLAG_INIT | FLAG_LOCKED);
 
 		/** Deferred dispose: owner disposed while we were locked.
 		 *  FLAG_LOCKED was cleared above, so _dispose runs full cleanup. */
@@ -2520,23 +2510,27 @@ function root(fn) {
 			return;
 		}
 
+		/** A new value is stored even when c.equal(true) says it is no
+		 *  change, as in the sync tail. */
 		let changed =
-			value !== this._value || !!(flag & (FLAG_INIT | FLAG_ERROR));
+			flag & (FLAG_INIT | FLAG_ERROR)
+				? true
+				: value !== this._value
+					? !(flag & FLAG_EQUAL)
+					: !!(flag & FLAG_NOTEQUAL);
+		this._value = value;
 
-		/** Settled from inside the fn that called c.suspend(fn), which is
-		 *  still running. Only write the value, as part of that run (its
-		 *  _time); _update finishes the settle once the fn has returned
-		 *  and its deps are tracked. */
+		/** Called by _update with what the callback delivered while the
+		 *  fn ran (FLAG_CALLBACK without FLAG_SUSPEND). Only write the
+		 *  value, as part of that run (its _time); _update finishes the
+		 *  settle. */
 		if (flag & FLAG_CALLBACK) {
 			if (changed) {
-				this._value = value;
 				this._ctime = this._time;
 			}
 			return;
 		}
-
 		if (changed) {
-			this._value = value;
 			this._ctime = TIME + 1;
 		}
 
@@ -2544,30 +2538,24 @@ function root(fn) {
 		if (this._flag & FLAG_ASYNC) {
 			let hasDefers =
 				this._flag & FLAG_CHANNEL &&
-				(this._chan._defer1 !== null || this._chan._defers !== null);
+				this._chan._defers !== null;
 			if (this._deps !== null || hasDefers) {
 				stale = settleDeps(this);
 			}
 		}
 
-		let waiters = null;
-		if (this._flag & FLAG_CHANNEL) {
-			let ch = this._chan;
-			if (ch !== null && ch._waiters !== null) {
-				waiters = ch._waiters;
-				let waiterCount = waiters.length;
-				ch._waiters = null;
-				this._flag &= ~FLAG_WAITER;
-				settleNotify(this, value, !!isError, waiters, waiterCount, !changed);
-			}
+		if (this._flag & FLAG_WAITER) {
+			settleNotify(this, !changed);
+		} else if (changed) {
+			notify(this, FLAG_STALE);
 		}
 		if (changed) {
-			if (waiters === null) {
-				notify(this, FLAG_STALE);
-			}
 			flush();
 		}
 
+		/** A changed deferred dep, or a change that arrived while locked,
+		 *  re-runs the node. It is queued and flushed, as a fn must never
+		 *  run while idle. */
 		if (
 			stale ||
 			(flag & FLAG_LOCKED &&
@@ -2575,7 +2563,8 @@ function root(fn) {
 					(this._flag & FLAG_PENDING && needsUpdate(this, TIME))))
 		) {
 			this._flag |= FLAG_STALE;
-			this._update(TIME);
+			COMPUTES[COMPUTE_COUNT++] = this;
+			flush();
 		}
 
 		/** Weak node with no subscribers after settle — release value. */
@@ -2586,17 +2575,6 @@ function root(fn) {
 		) {
 			this._drop();
 		}
-	};
-
-	/**
-	 * Settles an async compute with an error. Wraps as FATAL unless
-	 * anod created it, sets FLAG_ERROR, and delegates to _settle.
-	 * @this {Compute}
-	 * @param {?} err
-	 */
-	ComputeProto._error = function (err) {
-		this._flag |= FLAG_ERROR;
-		this._settle(defect(err));
 	};
 
 	/** @this {Compute} */
@@ -2652,7 +2630,8 @@ function root(fn) {
 				FLAG_EQUAL |
 				FLAG_NOTEQUAL |
 				FLAG_SUSPEND |
-				FLAG_FREEZE
+				FLAG_FREEZE |
+				FLAG_REFUSE
 			);
 
 		if (!(flag & FLAG_INIT) && this._cleanup !== null) {
@@ -2665,7 +2644,7 @@ function root(fn) {
 					resetChannel(this);
 				}
 				this._flag = (this._flag | FLAG_ERROR) & ~FLAG_PENDING;
-				this._value = new Defect(error, FATAL);
+				this._value = defect(error);
 				this._ctime = time;
 				return;
 			}
@@ -2687,8 +2666,8 @@ function root(fn) {
 					if (dep._flag & (FLAG_STALE | FLAG_PENDING)) {
 						dep._refresh();
 					}
-					if (dep._flag & FLAG_ERROR) {
-						value = dep._value;
+					if (dep._flag & (FLAG_ERROR | FLAG_DISPOSED)) {
+						value = boundError(dep);
 						this._flag |= FLAG_ERROR;
 						break run;
 					}
@@ -2699,6 +2678,9 @@ function root(fn) {
 			} catch (error) {
 				value = defect(error);
 				/** A throw wins over a callback that already settled. */
+				if (this._flag & FLAG_CALLBACK) {
+					unhold(this);
+				}
 				this._flag = (this._flag | FLAG_ERROR) & ~FLAG_CALLBACK;
 			}
 		} else {
@@ -2732,8 +2714,8 @@ function root(fn) {
 					if (dep._flag & (FLAG_STALE | FLAG_PENDING)) {
 						dep._refresh();
 					}
-					if (dep._flag & FLAG_ERROR) {
-						value = dep._value;
+					if (dep._flag & (FLAG_ERROR | FLAG_DISPOSED)) {
+						value = boundError(dep);
 						this._flag |= FLAG_ERROR;
 						break call;
 					}
@@ -2745,6 +2727,9 @@ function root(fn) {
 			} catch (error) {
 				value = defect(error);
 				/** A throw wins over a callback that already settled. */
+				if (this._flag & FLAG_CALLBACK) {
+					unhold(this);
+				}
 				this._flag = (this._flag | FLAG_ERROR) & ~FLAG_CALLBACK;
 			}
 
@@ -2788,62 +2773,76 @@ function root(fn) {
 		this._flag &= ~(FLAG_STALE | FLAG_PENDING | FLAG_SETUP | FLAG_FREEZE);
 		flag = this._flag;
 
-		/** Async: if fn used callback suspend, the node is already
-		 *  FLAG_LOADING via the setup function. Skip async dispatch.
-		 *  Check both FLAG_SUSPEND and FLAG_LOADING: the callback path
-		 *  sets both, while promise/task paths only set FLAG_SUSPEND
-		 *  (FLAG_LOADING is set later by this dispatch code). Like the
-		 *  promise path, FLAG_INIT is kept for _settle, so the first
-		 *  settle notifies even if it resolves to the seed. */
-		if (flag & FLAG_ASYNC) {
-			if (this._flag & FLAG_SUSPEND && this._flag & FLAG_LOADING) {
-				this._flag &= ~FLAG_CALLBACK;
+		/** Async, a callback suspend made in the fn, or disposed by it.
+		 *  The masks fold to one constant, so a sync compute pays no more
+		 *  than before. */
+		if (flag & (FLAG_ASYNC | FLAG_CALLBACK | FLAG_DISPOSED)) {
+			if ((flag & (FLAG_DISPOSED | FLAG_LOCKED)) === FLAG_DISPOSED) {
+				if (flag & FLAG_CALLBACK) {
+					unhold(this);
+				}
 				return;
 			}
-			/** The callback settled before the fn returned, and _settle
-			 *  only wrote the value. As with any callback suspend, the
-			 *  fn's return value is ignored; finish the settle here. */
-			if (this._flag & FLAG_CALLBACK) {
+			if (flag & FLAG_CALLBACK) {
+				let i = HELD_COUNT > 0 ? findHeld(this) : -1;
+				/** Nothing delivered yet: loading from here on. Like the
+				 *  promise path, FLAG_INIT is kept for _settle, so the first
+				 *  settle notifies even if it resolves to the seed. */
+				if (i < 0) {
+					this._flag = (flag | FLAG_LOADING) & ~FLAG_CALLBACK;
+					return;
+				}
+				/** Delivered while the fn ran: the run ends with it, and the
+				 *  fn's return value is ignored, as on any callback suspend.
+				 *  A task callback runs now, loading, so that its reads link
+				 *  like reads after an await. FLAG_CALLBACK stays set while
+				 *  it settles, so _settle writes as part of this run. */
+				let fn = HELD[i + 1];
+				let held = HELD[i + 2];
+				dropHeld(i);
+				this._flag &= ~(FLAG_SUSPEND | FLAG_RELAY);
+				if (fn !== undefined && fn !== null) {
+					this._flag |= FLAG_LOADING;
+					try {
+						held = fn(held);
+						fn = undefined;
+					} catch (err) {
+						held = err;
+						fn = null;
+					}
+				}
+				if (fn === null) {
+					this._error(held);
+				} else {
+					this._settle(held);
+				}
 				this._flag &= ~FLAG_CALLBACK;
 				if (this._flag & FLAG_CHANNEL) {
-					let chan = this._chan;
-					if (chan._defer1 !== null || chan._defers !== null) {
+					if (this._chan._defers !== null) {
 						settleDefers(this);
 					}
-					let waiters = chan._waiters;
-					if (waiters !== null) {
-						let isError = !!(this._flag & FLAG_ERROR);
-						chan._waiters = null;
-						this._flag &= ~FLAG_WAITER;
-						settleNotify(this, this._value, isError, waiters, waiters.length, true);
+					if (this._flag & FLAG_WAITER) {
+						settleNotify(this, true);
 					}
 				}
 				return;
 			}
-			let kind = asyncKind(value);
-			if (kind !== ASYNC_SYNC) {
-				this._flag |= FLAG_LOADING;
-				if (kind === ASYNC_PROMISE) {
-					resolvePromise(this, /** @type {IThenable<T>} */(value), time);
-				} else {
-					resolveIterator(
-						this,
-						/** @type {AsyncIterator<T> | AsyncIterable<T>} */(value),
-						time
-					);
-				}
+			if (startAsync(this, value, time)) {
 				return;
+			}
+			if (this._flag & FLAG_REFUSE) {
+				this._flag = (this._flag | FLAG_ERROR) & ~FLAG_REFUSE;
 			}
 			/** Sync result: the activation settles here, deferred deps too. */
 			if (
 				this._flag & FLAG_CHANNEL &&
-				(this._chan._defer1 !== null || this._chan._defers !== null)
+				this._chan._defers !== null
 			) {
 				settleDefers(this);
 			}
 		}
 
-		flag = this._flag &= ~(FLAG_INIT | FLAG_CALLBACK);
+		flag = this._flag &= ~FLAG_INIT;
 		if (flag & FLAG_ERROR) {
 			this._value = value;
 			this._ctime = time;
@@ -2910,34 +2909,31 @@ function root(fn) {
 	 */
 	EffectProto._update = function (time) {
 		let flag = this._flag;
+		/** Tear down the previous activation's channel: its controller is
+		 *  aborted whether the activation is in flight or has completed,
+		 *  as a compute's is. Done here rather than in _receive, so a
+		 *  pending notice that resolves to no change leaves its waiters
+		 *  and controller alone. */
 		if (flag & (FLAG_LOCKED | FLAG_CHANNEL)) {
 			if (flag & FLAG_LOCKED) {
 				return;
 			}
-			/** A completed activation's controller is released, not
-			 *  aborted: only an activation in flight is aborted on re-run,
-			 *  below. The next activation gets a fresh one. */
-			if (!(flag & FLAG_LOADING)) {
-				this._chan._controller = null;
-			}
+			resetChannel(this);
 		}
 
 		this._time = time;
-		/** Tear down the in-flight activation. Done here rather than in
-		 *  _receive, so a pending notice that resolves to no change
-		 *  leaves its waiters and controller alone. */
 		if (flag & FLAG_LOADING) {
 			this._flag &= ~(FLAG_LOADING | FLAG_SUSPEND);
-			if (flag & FLAG_CHANNEL) {
-				resetChannel(this);
-			}
 		}
 		if (!(flag & FLAG_INIT)) {
-			if (this._cleanup !== null) {
-				clearCleanup(this);
-			}
 			if (this._owned !== null) {
-				clearOwned(this);
+				if (this._cleanup !== null) {
+					clearRun(this);
+				} else {
+					clearOwned(this);
+				}
+			} else if (this._cleanup !== null) {
+				clearCleanup(this);
 			}
 			this._recover = null;
 			if (this._finalize !== null) {
@@ -2957,15 +2953,16 @@ function root(fn) {
 					if (dep._flag & (FLAG_STALE | FLAG_PENDING)) {
 						dep._refresh();
 					}
-					if (dep._flag & FLAG_ERROR) {
-						throw dep._value;
+					if (dep._flag & (FLAG_ERROR | FLAG_DISPOSED)) {
+						throw boundError(dep);
 					}
 					value = this._fn(dep._value, this, args);
 				} else {
 					value = this._fn(this, args);
 				}
 			} finally {
-				this._flag &= ~(FLAG_STALE | FLAG_PENDING);
+				/** Kept in flag for the tail, which needs the bits the fn set. */
+				flag = this._flag &= ~(FLAG_STALE | FLAG_PENDING);
 			}
 		} else {
 			/** Setup or dynamic: bump STAMP for dep tracking */
@@ -2992,13 +2989,16 @@ function root(fn) {
 
 			try {
 				if (flag & FLAG_BOUND) {
+					/** Stamped, as in ComputeProto._update, so that a
+					 *  c.val() of the bound dep in the fn finds it read. */
 					let dep = this._dep1;
 					if (dep._flag & (FLAG_STALE | FLAG_PENDING)) {
 						dep._refresh();
 					}
-					if (dep._flag & FLAG_ERROR) {
-						throw dep._value;
+					if (dep._flag & (FLAG_ERROR | FLAG_DISPOSED)) {
+						throw boundError(dep);
 					}
+					dep._stamp = version;
 					value = this._fn(dep._value, this, args);
 				} else {
 					value = this._fn(this, args);
@@ -3038,37 +3038,66 @@ function root(fn) {
 					VCOUNT = saveStart;
 				}
 				STAMP = current;
-				this._flag &= ~(FLAG_SETUP | FLAG_STALE | FLAG_PENDING | FLAG_FREEZE);
+				flag = this._flag &= ~(FLAG_SETUP | FLAG_STALE | FLAG_PENDING | FLAG_FREEZE);
 			}
 		}
 
-		if (flag & FLAG_ASYNC) {
-			if (this._flag & FLAG_SUSPEND && this._flag & FLAG_LOADING) {
-				this._flag &= ~(FLAG_INIT | FLAG_CALLBACK);
+		/** Async, a callback suspend made in the fn, or disposed by it.
+		 *  The masks fold to one constant, so a sync effect pays no more
+		 *  than before. */
+		if (flag & (FLAG_ASYNC | FLAG_CALLBACK | FLAG_DISPOSED)) {
+			if ((flag & (FLAG_DISPOSED | FLAG_LOCKED)) === FLAG_DISPOSED) {
+				if (flag & FLAG_CALLBACK) {
+					unhold(this);
+				}
 				return;
 			}
-			let kind = asyncKind(value);
-			if (kind !== ASYNC_SYNC) {
-				this._flag |= FLAG_LOADING;
-				if (kind === ASYNC_PROMISE) {
-					resolvePromise(this, value, time);
-				} else {
-					resolveIterator(this, value, time);
+			if (flag & FLAG_CALLBACK) {
+				/** Loading from here on, until the callback delivers. */
+				this._flag = (flag | FLAG_LOADING) & ~(FLAG_INIT | FLAG_CALLBACK);
+				let i = HELD_COUNT > 0 ? findHeld(this) : -1;
+				if (i < 0) {
+					return;
 				}
+				/** Delivered while the fn ran: the activation settles now,
+				 *  and the fn's return value is ignored, as on any callback
+				 *  suspend. A task callback runs first, loading, so that its
+				 *  reads link like reads after an await. A rejection, or a
+				 *  throw from the callback, fails the run as a throw in the
+				 *  body does: the creator or c.recover() gets it. */
+				let fn = HELD[i + 1];
+				let held = HELD[i + 2];
+				dropHeld(i);
+				this._flag &= ~FLAG_RELAY;
+				if (fn !== undefined && fn !== null) {
+					try {
+						fn(held);
+						fn = undefined;
+					} catch (err) {
+						held = err;
+						fn = null;
+					}
+				}
+				if (fn === null) {
+					this._flag &= ~(FLAG_LOADING | FLAG_SUSPEND);
+					throw held;
+				}
+				this._settle();
+				return;
+			}
+			if (startAsync(this, value, time)) {
 				return;
 			}
 			/** Sync result: the activation settles here, deferred deps too. */
 			if (
 				this._flag & FLAG_CHANNEL &&
-				(this._chan._defer1 !== null || this._chan._defers !== null)
+				this._chan._defers !== null
 			) {
 				settleDefers(this);
 			}
 		}
 
-		/** An effect has no value for its fn's return to overwrite, so
-		 *  its callbacks settle as they fire; FLAG_CALLBACK is unused. */
-		this._flag &= ~(FLAG_INIT | FLAG_CALLBACK);
+		this._flag &= ~FLAG_INIT;
 		if (this._finalize !== null) {
 			clearFinalize(this);
 		}
@@ -3083,6 +3112,12 @@ function root(fn) {
 	 * @param {*=} err
 	 */
 	EffectProto._settle = function (err) {
+		/** Settled by its callback while the fn still runs: _update
+		 *  finishes the activation once the fn has returned. */
+		if (isHolding(this)) {
+			hold(this, undefined, undefined);
+			return;
+		}
 		let flag = this._flag;
 		this._flag &= ~(FLAG_LOADING | FLAG_SUSPEND | FLAG_LOCKED);
 
@@ -3112,7 +3147,7 @@ function root(fn) {
 		let stale = false;
 		if (
 			this._flag & FLAG_CHANNEL &&
-			(this._chan._defer1 !== null || this._chan._defers !== null)
+			this._chan._defers !== null
 		) {
 			stale = settleDeps(this);
 		}
@@ -3130,11 +3165,17 @@ function root(fn) {
 
 	/**
 	 * Settles an async effect with an error. Wraps as FATAL unless
-	 * anod created it, sets FLAG_ERROR, and delegates to _settle.
+	 * anod created it, sets FLAG_ERROR, and delegates to _settle. A
+	 * callback that rejects while the fn still runs is held, and _update
+	 * throws it once the fn has returned, as a throw in the body would.
 	 * @this {Effect}
 	 * @param {*} err
 	 */
 	EffectProto._error = function (err) {
+		if (isHolding(this)) {
+			hold(this, null, err);
+			return;
+		}
 		this._flag |= FLAG_ERROR;
 		this._settle(defect(err));
 	};
@@ -3154,15 +3195,16 @@ function root(fn) {
 			clearFinalize(this);
 		}
 		clearDeps(this);
-		/** A throwing cleanup, here or in a child, still finishes the disposal. */
+		/** Children first, then cleanups (D2). A throwing cleanup, here or
+		 *  in a child, still finishes the disposal. */
 		try {
-			if (this._cleanup !== null) {
-				clearCleanup(this);
+			if (this._owned !== null) {
+				clearOwned(this);
 			}
 		} finally {
 			try {
-				if (this._owned !== null) {
-					clearOwned(this);
+				if (this._cleanup !== null) {
+					clearCleanup(this);
 				}
 			} finally {
 				if (flag & FLAG_CHANNEL) {
@@ -3379,12 +3421,13 @@ function root(fn) {
 /**
  * Tracks sender as a dep of node from inside node's sync run, the
  * same way val() does: patchDeps or the setup slice links it after
- * the run. Stable nodes past setup track nothing.
+ * the run. Stable nodes past setup track nothing, unless they called
+ * c.stable() in this run (FLAG_FREEZE).
  * @param {Receiver} node
  * @param {Sender} sender
  */
 function track(node, sender) {
-	if ((node._flag & (FLAG_STABLE | FLAG_SETUP)) === FLAG_STABLE) {
+	if ((node._flag & (FLAG_STABLE | FLAG_SETUP | FLAG_FREEZE)) === FLAG_STABLE) {
 		return;
 	}
 	let version = STAMP;
@@ -3584,9 +3627,9 @@ function clearDeps(receive) {
 /**
  * Nulls out sender's subscriber list on disposal.
  * Receivers self-heal: dynamic nodes remove stale deps via
- * patchDeps on next re-run; stable bound nodes detect disposed
- * dep1 in _update via refreshDep1. clearReceiver skips disposed
- * senders, so their pairs need no unlinking.
+ * patchDeps on next re-run, and a disposed sender never notifies its
+ * stable receivers again. clearReceiver skips disposed senders, so
+ * their pairs need no unlinking.
  * @param {Sender} send
  * @returns {void}
  */
@@ -3652,10 +3695,9 @@ function clearFinalize(node) {
 }
 
 /**
- * Appends `child` to `owner._owned`, lazily allocating the array. Used by
- * the proto ownership methods after the top-level factory returns a new
- * node, so `_owned` is populated even when the factory runs the node's fn
- * inside its startup path.
+ * Appends `child` to `owner._owned`, lazily allocating the array. The
+ * factories call it before the node's first run, so a child that throws
+ * on its first run is already owned.
  * @param {Owner} owner
  * @param {Receiver} child
  * @returns {void}
@@ -3673,6 +3715,8 @@ function addOwned(owner, child) {
  * and on disposal. Only call when `_owned !== null` — owned is lazy and
  * only allocated when an effect or root actually adopts children. A
  * child whose cleanup throws is still disposed, and so are its siblings.
+ * The owner's recover handler is left to the caller, so that an error
+ * in the teardown of a run reaches that run's handler.
  * @param {Owner} owner
  * @returns {void}
  */
@@ -3684,12 +3728,45 @@ function clearOwned(owner) {
 			owned.pop()._dispose();
 		}
 	} finally {
-		owner._recover = null;
 		/** Positive only after a throw: the children still left to dispose. */
 		if (count > 0) {
 			clearOwned(owner);
 		}
 	}
+}
+
+/**
+ * Tears down the previous run of an owner that has both children and
+ * cleanups: the children first, then the cleanups (D2). A throw in one
+ * still runs the other; if both throw, the cleanup's error wins, as
+ * with nested `finally` blocks.
+ * @param {Owner} owner
+ * @returns {void}
+ */
+function clearRun(owner) {
+	try {
+		clearOwned(owner);
+	} finally {
+		clearCleanup(owner);
+	}
+}
+
+/**
+ * The error a bound node fails with, without calling its fn, when its
+ * dep is errored or disposed. An errored dep passes its own Defect on.
+ * A disposed dep fails it as c.val() of it would, so the fn never runs
+ * with the dep's null. A disposed node's subscriber lists only hold
+ * links made after its disposal, such as the bound factory's own, so
+ * they are dropped. Kept out of _update, where it would only add bytecode.
+ * @param {Sender} dep
+ * @returns {Defect}
+ */
+function boundError(dep) {
+	if (dep._flag & FLAG_DISPOSED) {
+		clearSubs(dep);
+		return defect(new Error(ILLEGAL_READ));
+	}
+	return dep._value;
 }
 
 /**
@@ -3821,14 +3898,11 @@ function tryRecover(node, error) {
 
 /**
  * After a dynamic fn re-execution, reconciles dep subscriptions.
- * Does three things in a single pass over the first _depCount entries:
- *
- * 1. Keep or drop each dep based on whether _version === execVersion
- * 2. Restore _vstack for each dep inline (no separate restore loop)
- * 3. Compact the kept deps in-place
- *
- * New deps pushed beyond _depCount during fn() are already subscribed.
- * They just need to be shifted into the compacted region.
+ * A dep read in this run carries the run's stamp (`version`); one that
+ * does not was dropped, and is unlinked. The first `depCount` deps are
+ * the previous run's; the deps from `existingLen` to `newLen` were first
+ * read in this run, and are connected as they move into the slots of
+ * the dropped ones, so the kept deps are compacted in place.
  *
  * @param {Receiver} node
  * @param {number} version
@@ -4312,113 +4386,149 @@ function checkCycle(base) {
 }
 
 /**
- * Classifies a value returned from a compute/effect fn:
- *   1 (ASYNC_PROMISE)  — thenable: resolve as a promise.
- *   2 (ASYNC_ITERATOR) — async iterable/iterator: consume incrementally.
- *   3 (ASYNC_SYNC)     — plain value: settle immediately, no loading.
+ * Starts settling `node` from what its fn returned, if that is async: a
+ * thenable resolves as a promise, an async iterable is consumed value by
+ * value. Returns false for any other value, which the caller settles
+ * synchronously.
+ * @template T
+ * @param {AsyncDisposer<T>} node
  * @param {*} value
- * @returns {number}
- */
-function asyncKind(value) {
-	if (value === null || typeof value !== "object") {
-		return ASYNC_SYNC;
-	}
-	if (typeof value.then === "function") {
-		return ASYNC_PROMISE;
-	}
-	if (typeof value[Symbol.asyncIterator] === "function") {
-		return ASYNC_ITERATOR;
-	}
-	return ASYNC_SYNC;
-}
-
-/**
- * @template T
- * @param {AsyncDisposer<T>} node
- * @param {IThenable<T>} promise
  * @param {number} time
- * @returns {void}
+ * @returns {boolean}
  */
-function resolvePromise(node, promise, time) {
-	promise.then(
-		(val) => {
-			if (
-				node._time !== time ||
-				(node._flag & FLAG_DISPOSED && !(node._flag & FLAG_LOCKED))
-			) {
-				return;
-			}
-			if (!(node._flag & FLAG_LOCKED)) {
-				if (node._flag & FLAG_STALE) {
-					return;
-				}
-				if (node._flag & FLAG_PENDING && needsUpdate(/** @type {Receiver} */(node), TIME)) {
-					node._flag |= FLAG_STALE;
-					return;
-				}
-			}
-			node._settle(val);
-		},
-		(err) => {
-			if (
-				node._time !== time ||
-				(node._flag & FLAG_DISPOSED && !(node._flag & FLAG_LOCKED))
-			) {
-				return;
-			}
-			if (!(node._flag & FLAG_LOCKED)) {
-				if (node._flag & FLAG_STALE) {
-					return;
-				}
-				if (node._flag & FLAG_PENDING && needsUpdate(/** @type {Receiver} */(node), TIME)) {
-					node._flag |= FLAG_STALE;
-					return;
-				}
-			}
-			node._error(err);
+function startAsync(node, value, time) {
+	if (value !== null && typeof value === "object") {
+		if (typeof value.then === "function") {
+			node._flag |= FLAG_LOADING;
+			resolvePromise(node, value, time);
+			return true;
 		}
-	);
+		if (typeof value[Symbol.asyncIterator] === "function") {
+			node._flag |= FLAG_LOADING;
+			resolveIterator(node, value[Symbol.asyncIterator](), time);
+			return true;
+		}
+	}
+	return false;
 }
 
 /**
+ * needsUpdate() for a check made outside any run: from a microtask, or
+ * from an API call at idle. Pulling the deps can run compute fns, and a
+ * fn must run inside a transaction, so at idle the check opens one, as
+ * the idle get() does.
+ * @param {Receiver} node
+ * @returns {boolean}
+ */
+function checkStale(node) {
+	if (!IDLE) {
+		return needsUpdate(node, TIME);
+	}
+	IDLE = false;
+	try {
+		FENCE = SEED;
+		let stale = needsUpdate(node, TIME);
+		if (SENDER_COUNT > 0 || DISPOSER_COUNT > 0) {
+			flush();
+		}
+		return stale;
+	} finally {
+		IDLE = true;
+	}
+}
+
+/**
+ * Whether the activation started at `time` may still settle `node`. A
+ * locked node always may. A disposed or stale one may not, and neither
+ * may one whose pending deps have changed: that one is marked stale, so
+ * that its re-run takes over. A callback that settles while the fn
+ * still runs settles the run in progress: an effect only clears the
+ * flags that queued that run once its fn returns.
+ * @param {AsyncDisposer} node
+ * @param {number} time
+ * @returns {boolean}
+ */
+function isCurrent(node, time) {
+	if (node._time !== time) {
+		return false;
+	}
+	let flag = node._flag;
+	if (flag & FLAG_LOCKED) {
+		return true;
+	}
+	if (flag & FLAG_DISPOSED) {
+		return false;
+	}
+	if (flag & FLAG_CALLBACK) {
+		return true;
+	}
+	if (flag & FLAG_STALE) {
+		return false;
+	}
+	if (flag & FLAG_PENDING && checkStale(/** @type {Receiver} */(node))) {
+		node._flag |= FLAG_STALE;
+		return false;
+	}
+	return true;
+}
+
+/**
+ * Settles `node` with the outcome of a promise, or of the callback form
+ * `source(resolve, reject)`, if the activation started at `time` is still
+ * current then. Like a promise, it settles once: after the first call,
+ * later calls to resolve or reject are ignored.
  * @template T
  * @param {AsyncDisposer<T>} node
- * @param {AsyncIterator<T> | AsyncIterable<T>} iterable
+ * @param {IThenable<T> | function(function(T): void, function(*): void)} source
  * @param {number} time
  * @returns {void}
  */
-function resolveIterator(node, iterable, time) {
-	/** @type {AsyncIterator<T>} */
-	let iterator =
-		typeof iterable[Symbol.asyncIterator] === "function"
-			? iterable[Symbol.asyncIterator]()
-			: iterable;
+function resolvePromise(node, source, time) {
+	let done = false;
+	/** @param {T} val */
+	let resolve = function (val) {
+		if (!done) {
+			done = true;
+			if (isCurrent(node, time)) {
+				node._settle(val);
+			}
+		}
+	};
+	/** @param {*} err */
+	let reject = function (err) {
+		if (!done) {
+			done = true;
+			if (isCurrent(node, time)) {
+				node._error(err);
+			}
+		}
+	};
+	if (typeof source === "function") {
+		source(resolve, reject);
+	} else {
+		source.then(resolve, reject);
+	}
+}
+
+/**
+ * Settles `node` with each value of an async iterator, while the
+ * activation started at `time` is current. Once it is not, the iterator
+ * is closed.
+ * @template T
+ * @param {AsyncDisposer<T>} node
+ * @param {AsyncIterator<T>} iterator
+ * @param {number} time
+ * @returns {void}
+ */
+function resolveIterator(node, iterator, time) {
 
 	/** @param {IteratorResult<T>} result */
 	let onNext = (result) => {
-		if (
-			node._time !== time ||
-			(node._flag & FLAG_DISPOSED && !(node._flag & FLAG_LOCKED))
-		) {
+		if (!isCurrent(node, time)) {
 			if (typeof iterator.return === "function") {
 				iterator.return();
 			}
 			return;
-		}
-		if (!(node._flag & FLAG_LOCKED)) {
-			if (node._flag & FLAG_STALE) {
-				if (typeof iterator.return === "function") {
-					iterator.return();
-				}
-				return;
-			}
-			if (node._flag & FLAG_PENDING && needsUpdate(/** @type {Receiver} */(node), TIME)) {
-				node._flag |= FLAG_STALE;
-				if (typeof iterator.return === "function") {
-					iterator.return();
-				}
-				return;
-			}
 		}
 
 		/** A finished iterator settles with its return value. If it returned
@@ -4440,31 +4550,19 @@ function resolveIterator(node, iterable, time) {
 
 	/** @param {*} err */
 	let onError = (err) => {
-		if (
-			node._time !== time ||
-			(node._flag & FLAG_DISPOSED && !(node._flag & FLAG_LOCKED))
-		) {
-			return;
+		if (isCurrent(node, time)) {
+			node._error(err);
 		}
-		if (!(node._flag & FLAG_LOCKED)) {
-			if (node._flag & FLAG_STALE) {
-				return;
-			}
-			if (node._flag & FLAG_PENDING && needsUpdate(/** @type {Receiver} */(node), TIME)) {
-				node._flag |= FLAG_STALE;
-				return;
-			}
-		}
-		node._error(err);
 	};
 
 	iterator.next().then(onNext, onError);
 }
 
 /**
- * Four-pass settle notification. Resolves waiters without triggering
- * redundant stale notifications on nodes that appear in both the sync
- * subscriber list and the async waiter list.
+ * Four-pass settle notification. Detaches the node's waiters and resolves
+ * them with its value or error, without triggering redundant stale
+ * notifications on nodes that appear in both the sync subscriber list and
+ * the async waiter list.
  *
  * Pass 1: Stamp all sync subs with `version - 1` ("belongs to us").
  * Pass 2: Walk waiters — skip subscribe if already a sync sub
@@ -4474,18 +4572,20 @@ function resolveIterator(node, iterable, time) {
  *         Skipped when quiet.
  * Pass 4: Call the waiters' callbacks. They run last, so a callback
  *         that reads the graph sees every subscriber marked stale,
- *         and the caller has already detached `waiters`, so a waiter
- *         added by a callback goes into a fresh list.
- * @template T
- * @param {AsyncSender<T>} node
- * @param {T} value
- * @param {boolean} isError
- * @param {Array<AsyncReceiver | Function>} waiters
- * @param {number} waiterCount
- * @param {boolean=} quiet - Only resolve the waiters, without marking
+ *         and the waiters are already detached, so a waiter added by
+ *         a callback goes into a fresh list.
+ * @param {AsyncSender} node
+ * @param {boolean} quiet - Only resolve the waiters, without marking
  *     subscribers stale (the value did not change).
  */
-function settleNotify(node, value, isError, waiters, waiterCount, quiet) {
+function settleNotify(node, quiet) {
+	let chan = node._chan;
+	let waiters = /** @type {Array<AsyncReceiver | Function>} */(chan._waiters);
+	let waiterCount = waiters.length;
+	let value = node._value;
+	let isError = (node._flag & FLAG_ERROR) !== 0;
+	chan._waiters = null;
+	node._flag &= ~FLAG_WAITER;
 	let version = (SEED += 2);
 
 	/** Pass 1: stamp all sync subs with version - 1. */
@@ -4518,7 +4618,7 @@ function settleNotify(node, value, isError, waiters, waiterCount, quiet) {
 		if (sub !== null && sub._stamp !== version) {
 			let flags = sub._flag;
 			sub._flag |= FLAG_STALE;
-			if (!(flags & (FLAG_PENDING | FLAG_STALE | FLAG_BLOCKED | FLAG_DISPOSED))) {
+			if (!(flags & (FLAG_PENDING | FLAG_STALE | FLAG_BLOCKED | FLAG_DISPOSED | FLAG_PAUSED))) {
 				sub._receive();
 			}
 		}
@@ -4530,7 +4630,7 @@ function settleNotify(node, value, isError, waiters, waiterCount, quiet) {
 					let flags = sub._flag;
 					sub._flag |= FLAG_STALE;
 					if (
-						!(flags & (FLAG_PENDING | FLAG_STALE | FLAG_BLOCKED | FLAG_DISPOSED))
+						!(flags & (FLAG_PENDING | FLAG_STALE | FLAG_BLOCKED | FLAG_DISPOSED | FLAG_PAUSED))
 					) {
 						sub._receive();
 					}
@@ -4551,11 +4651,97 @@ function settleNotify(node, value, isError, waiters, waiterCount, quiet) {
 }
 
 /**
+ * Flags for a callback suspend. Made while the fn runs, it sets
+ * FLAG_CALLBACK, under which a delivery is held until the fn returns,
+ * and the node becomes loading only then, so the rest of the fn reads
+ * and tracks as any run does. Made after the run, in a continuation,
+ * the node is already loading.
+ * @param {Receiver | AsyncSender} node
+ * @returns {number}
+ */
+function callbackFlags(node) {
+	return node._flag & FLAG_LOADING ? FLAG_SUSPEND : FLAG_SUSPEND | FLAG_CALLBACK;
+}
+
+/**
+ * True while a delivery to the node must be held: a callback suspend
+ * was made in its fn, which has not returned yet.
+ * @param {Receiver | AsyncSender} node
+ * @returns {boolean}
+ */
+function isHolding(node) {
+	return (node._flag & (FLAG_CALLBACK | FLAG_SUSPEND)) === (FLAG_CALLBACK | FLAG_SUSPEND);
+}
+
+/**
+ * Holds a delivery until the node's fn returns. Like a promise, the
+ * first one wins.
+ * @param {Receiver | AsyncSender} node
+ * @param {Function | null | undefined} fn
+ * @param {*} value
+ * @returns {void}
+ */
+function hold(node, fn, value) {
+	for (let i = 0; i < HELD_COUNT; i += 3) {
+		if (HELD[i] === node) {
+			return;
+		}
+	}
+	HELD[HELD_COUNT++] = node;
+	HELD[HELD_COUNT++] = fn;
+	HELD[HELD_COUNT++] = value;
+}
+
+/**
+ * Finds the node's held delivery. Nested runs push above it, and they
+ * have all returned by the time the node's fn does, but an outer node
+ * resolved from inside this run can sit above it.
+ * @param {Receiver | AsyncSender} node
+ * @returns {number} the index of the entry, or -1
+ */
+function findHeld(node) {
+	for (let i = HELD_COUNT - 3; i >= 0; i -= 3) {
+		if (HELD[i] === node) {
+			return i;
+		}
+	}
+	return -1;
+}
+
+/**
+ * Removes the entry at index i, keeping the order of the others.
+ * @param {number} i
+ * @returns {void}
+ */
+function dropHeld(i) {
+	let count = (HELD_COUNT -= 3);
+	for (; i < count; i++) {
+		HELD[i] = HELD[i + 3];
+	}
+	HELD[count] = HELD[count + 1] = HELD[count + 2] = null;
+}
+
+/**
+ * Drops the node's held delivery, if any: its fn threw, or it was
+ * disposed while the fn ran.
+ * @param {Receiver | AsyncSender} node
+ * @returns {void}
+ */
+function unhold(node) {
+	let i = HELD_COUNT > 0 ? findHeld(node) : -1;
+	if (i >= 0) {
+		dropHeld(i);
+	}
+}
+
+/**
  * Hands a settled value to one waiter's callback, unless the waiter
  * has been disposed. A node waiting
  * through c.suspend(task, onResolve, onReject) is relayed: its own
- * callback runs, and the node settles with what it returns. During an
- * array await (FLAG_BLOCKED) the callback is the internal re-scan.
+ * callback runs, and the node settles with what it returns, or, while
+ * the node's fn still runs, the callback is held until it returns.
+ * During an array await (FLAG_BLOCKED) the callback is the internal
+ * re-scan.
  * @param {AsyncReceiver} awaiter
  * @param {Function | null} fn
  * @param {*} value
@@ -4568,7 +4754,13 @@ function deliver(awaiter, fn, value, isError) {
 		return;
 	}
 	if ((awaiter._flag & (FLAG_RELAY | FLAG_BLOCKED)) === FLAG_RELAY) {
-		relay(awaiter, fn, value, isError);
+		/** Settled while the awaiter's fn still runs: the callback waits
+		 *  for it to return. onReject gets a Defect, as from relay(). */
+		if (isHolding(awaiter)) {
+			hold(awaiter, fn, fn !== null && isError ? defect(value) : value);
+		} else {
+			relay(awaiter, fn, value, isError);
+		}
 	} else {
 		/** @type {Function} */(fn)(value);
 	}
@@ -4615,21 +4807,10 @@ function settleDeps(node) {
 	let deps = node._deps;
 
 	/** Grab defers before clearing. */
-	let defer1 = null;
-	let defer1val;
 	let defers = null;
-	let deferLen = 0;
 	if (node._flag & FLAG_CHANNEL) {
-		defer1 = node._chan._defer1;
-		if (defer1 !== null) {
-			defer1val = node._chan._defer1val;
-			node._chan._defer1 = null;
-		}
 		defers = node._chan._defers;
-		if (defers !== null) {
-			deferLen = defers.length;
-			node._chan._defers = null;
-		}
+		node._chan._defers = null;
 	}
 
 	/** Stamp dep1. */
@@ -4639,7 +4820,6 @@ function settleDeps(node) {
 
 	/** Dedup scan of _deps — remove duplicates via swap-with-last.
 	 *  Walks back to front, so the pair swapped in is already seen. */
-	let hasDefers = defer1 !== null || deferLen > 0;
 	if (deps !== null) {
 		for (let i = deps.length - 2; i >= 0; i -= 2) {
 			let dep = /** @type {Sender} */ (deps[i]);
@@ -4651,41 +4831,23 @@ function settleDeps(node) {
 		}
 	}
 
-	/** Phase 2: subscribe deferred deps and detect changes. */
-	if (!hasDefers) {
+	/** Phase 2: subscribe deferred deps and detect changes. A sender
+	 *  disposed during the await is dropped: it never changes again. */
+	if (defers === null) {
 		return false;
 	}
-
 	let changed = false;
-
-	/** Check defer1 first. */
-	if (defer1 !== null) {
-		if (defer1._stamp === stamp) {
-			if (defer1._changed(defer1val)) {
-				changed = true;
-			}
-		} else {
-			defer1._stamp = stamp;
-			subscribe(node, defer1);
-			if (defer1._changed(defer1val)) {
-				changed = true;
-			}
-		}
-	}
-
-	/** Check overflow defers. */
-	for (let i = 0; i < deferLen; i += 2) {
+	let count = defers.length;
+	for (let i = 0; i < count; i += 2) {
 		let sender = /** @type {Sender} */(defers[i]);
-		let snapshot = /** @type {*} */(defers[i + 1]);
-		if (sender._stamp === stamp) {
-			if (sender._changed(snapshot)) {
-				changed = true;
-			}
+		if (sender._flag & FLAG_DISPOSED) {
 			continue;
 		}
-		sender._stamp = stamp;
-		subscribe(node, sender);
-		if (sender._changed(snapshot)) {
+		if (sender._stamp !== stamp) {
+			sender._stamp = stamp;
+			subscribe(node, sender);
+		}
+		if (sender._value !== defers[i + 1]) {
 			changed = true;
 		}
 	}
@@ -4704,20 +4866,13 @@ function settleDeps(node) {
  */
 function settleDefers(node) {
 	let chan = node._chan;
-	let defer1 = chan._defer1;
 	let defers = chan._defers;
-	chan._defer1 = null;
 	chan._defers = null;
-	if (defer1 !== null && !hasDep(node, defer1)) {
-		subscribe(node, defer1);
-	}
-	if (defers !== null) {
-		let count = defers.length;
-		for (let i = 0; i < count; i += 2) {
-			let sender = /** @type {Sender} */(defers[i]);
-			if (!hasDep(node, sender)) {
-				subscribe(node, sender);
-			}
+	let count = defers.length;
+	for (let i = 0; i < count; i += 2) {
+		let sender = /** @type {Sender} */(defers[i]);
+		if (!(sender._flag & FLAG_DISPOSED) && !hasDep(node, sender)) {
+			subscribe(node, sender);
 		}
 	}
 }
@@ -4749,29 +4904,11 @@ function resetChannel(node) {
 		chan._controller.abort();
 		chan._controller = null;
 	}
-	chan._defer1 = null;
 	chan._defers = null;
 	if (chan._res1 !== null || chan._responds !== null) {
 		clearChannel(chan, node);
 	}
 	node._flag &= ~(FLAG_BLOCKED | FLAG_RELAY);
-}
-
-/**
- * Adds a waiter entry to a responder's _waiters array (3-stride).
- * @param {Resolver} responderCh
- * @param {AsyncReceiver} awaiter
- * @param {Function} resolve
- * @param {Function} reject
- * @returns {void}
- */
-function addWaiter(responderCh, awaiter, resolve, reject) {
-	let waiters = responderCh._waiters;
-	if (waiters === null) {
-		responderCh._waiters = [awaiter, resolve, reject];
-	} else {
-		waiters.push(awaiter, resolve, reject);
-	}
 }
 
 /**
@@ -4785,14 +4922,14 @@ function addWaiter(responderCh, awaiter, resolve, reject) {
  * @returns {void}
  */
 function send(awaiter, task, resolve, reject) {
-	resolve = resolve;
-	reject = reject;
 	let awaiterCh = awaiter._channel();
 	let responderCh = task._channel();
-
-	addWaiter(responderCh, awaiter, resolve, reject);
+	if (responderCh._waiters === null) {
+		responderCh._waiters = [awaiter, resolve, reject];
+	} else {
+		responderCh._waiters.push(awaiter, resolve, reject);
+	}
 	task._flag |= FLAG_WAITER;
-
 	if (awaiterCh._res1 === null) {
 		awaiterCh._res1 = task;
 	} else if (awaiterCh._responds === null) {
@@ -4843,19 +4980,18 @@ function removeWaiter(responder, responderCh, awaiter) {
 function clearChannel(channel, awaiter) {
 	let res = channel._res1;
 	if (res !== null) {
-		removeWaiter(res, res._chan, awaiter);
 		channel._res1 = null;
+		removeWaiter(res, res._chan, awaiter);
 	}
 	let responds = channel._responds;
 	if (responds !== null) {
+		channel._responds = null;
 		for (let i = 0; i < responds.length; i++) {
 			let responder = responds[i];
-			if (responder === null) {
-				continue;
+			if (responder !== null) {
+				removeWaiter(responder, responder._chan, awaiter);
 			}
-			removeWaiter(responder, responder._chan, awaiter);
 		}
-		channel._responds = null;
 	}
 }
 
@@ -4898,24 +5034,13 @@ function rejectWaiters(responder, responderCh, error) {
 	let count = waiters.length;
 	responderCh._waiters = null;
 	responder._flag &= ~FLAG_WAITER;
+	/** Every dispose runs inside a flush or a teardown(), which
+	 *  delivers the queued rejections once the disposal has finished. */
 	for (let i = 0; i < count; i += 3) {
 		clearRespond(/** @type {AsyncReceiver} */(waiters[i]), responder);
-	}
-	if (FLUSHING || TEARING) {
-		for (let i = 0; i < count; i += 3) {
-			REJECTS[REJECT_COUNT++] = waiters[i];
-			REJECTS[REJECT_COUNT++] = waiters[i + 2];
-			REJECTS[REJECT_COUNT++] = error;
-		}
-	} else {
-		for (let i = 0; i < count; i += 3) {
-			deliver(
-				/** @type {AsyncReceiver} */(waiters[i]),
-				/** @type {Function} */(waiters[i + 2]),
-				error,
-				true
-			);
-		}
+		REJECTS[REJECT_COUNT++] = waiters[i];
+		REJECTS[REJECT_COUNT++] = waiters[i + 2];
+		REJECTS[REJECT_COUNT++] = error;
 	}
 }
 
@@ -5084,6 +5209,10 @@ function requeue(queue, count, total) {
  * @returns {void}
  */
 function failStart(node, error) {
+	if (node._flag & FLAG_CALLBACK) {
+		unhold(node);
+	}
+	node._flag &= ~(FLAG_SUSPEND | FLAG_CALLBACK);
 	if (node._finalize !== null) {
 		clearFinalize(node);
 	}
@@ -5110,6 +5239,11 @@ function failStart(node, error) {
  */
 function deferEffect(node) {
 	let dep = node._dep1;
+	/** A disposed dep fails the effect as its first run would. */
+	if (dep._flag & FLAG_DISPOSED) {
+		startEffect(node);
+		return;
+	}
 	node._time = TIME;
 	if (dep._flag & (FLAG_STALE | FLAG_PENDING)) {
 		if (IDLE) {
@@ -5132,7 +5266,7 @@ function deferEffect(node) {
 /**
  * Drains a queue of effect nodes: checks staleness, updates,
  * handles errors with finalize/recover/dispose. Returns the
- * first unrecoverable error POJO, or null if all succeeded.
+ * first unrecoverable error as a Defect, or null if all succeeded.
  * @param {Array<Effect>} queue
  * @param {number} count
  * @param {number} time
@@ -5143,38 +5277,45 @@ function flushEffects(queue, count, time) {
 	for (let i = 0; i < count; i++) {
 		let node = queue[i];
 		queue[i] = null;
-		/** A node paused after it was queued keeps its flags for resume(). */
-		if (
-			(node._flag & (FLAG_STALE | FLAG_PAUSED)) === FLAG_STALE ||
-			((node._flag & (FLAG_PENDING | FLAG_PAUSED)) === FLAG_PENDING &&
-				needsUpdate(node, time))
-		) {
-			FENCE = SEED;
-			try {
+		/** The pre-run check is inside the try: a throw from it, such as
+		 *  a cycle, is the node's error too, and the queue drains on. */
+		try {
+			/** A node paused after it was queued keeps its flags for resume(). */
+			if (
+				(node._flag & (FLAG_STALE | FLAG_PAUSED)) === FLAG_STALE ||
+				((node._flag & (FLAG_PENDING | FLAG_PAUSED)) === FLAG_PENDING &&
+					needsUpdate(node, time))
+			) {
+				FENCE = SEED;
 				node._update(time);
-			} catch (error) {
-				/** A cleanup that throws aborts the run before it clears these. */
+			} else if (!(node._flag & FLAG_PAUSED)) {
 				node._flag &= ~(FLAG_STALE | FLAG_PENDING);
-				if (node._finalize !== null) {
-					clearFinalize(node);
-				}
-				let err = defect(error);
-				let result = tryRecover(node, err);
-				if (thrown === null && result === RECOVER_NONE) {
-					thrown = err;
-				}
-				if (result !== RECOVER_SELF) {
-					try {
-						node._dispose();
-					} catch (cleanupError) {
-						if (thrown === null) {
-							thrown = new Defect(cleanupError, FATAL);
-						}
+			}
+		} catch (error) {
+			/** A throw before the run, or a cleanup that throws, aborts it
+			 *  before it clears these, and a throw ends a callback
+			 *  suspend's activation. */
+			if (node._flag & FLAG_CALLBACK) {
+				unhold(node);
+			}
+			node._flag &= ~(FLAG_STALE | FLAG_PENDING | FLAG_SUSPEND | FLAG_CALLBACK);
+			if (node._finalize !== null) {
+				clearFinalize(node);
+			}
+			let err = defect(error);
+			let result = tryRecover(node, err);
+			if (thrown === null && result === RECOVER_NONE) {
+				thrown = err;
+			}
+			if (result !== RECOVER_SELF) {
+				try {
+					node._dispose();
+				} catch (cleanupError) {
+					if (thrown === null) {
+						thrown = defect(cleanupError);
 					}
 				}
 			}
-		} else if (!(node._flag & FLAG_PAUSED)) {
-			node._flag &= ~(FLAG_STALE | FLAG_PENDING);
 		}
 	}
 	return thrown;
@@ -5220,7 +5361,7 @@ function flush() {
 						} catch (err) {
 							/** The node is disposed, but one of its cleanups threw. */
 							if (!thrown) {
-								error = new Defect(err, FATAL);
+								error = defect(err);
 								thrown = true;
 							}
 						}
@@ -5239,7 +5380,7 @@ function flush() {
 					deliverRejects();
 				} catch (err) {
 					if (!thrown) {
-						error = new Defect(err, FATAL);
+						error = defect(err);
 						thrown = true;
 					}
 				}
@@ -5281,13 +5422,25 @@ function flush() {
 				for (let i = 0; i < count; i++) {
 					let node = COMPUTES[i];
 					COMPUTES[i] = null;
-					if (
-						node._flag & FLAG_STALE ||
-						(node._flag & FLAG_PENDING && needsUpdate(node, time))
-					) {
-						node._update(time);
-					} else {
+					try {
+						if (
+							node._flag & FLAG_STALE ||
+							(node._flag & FLAG_PENDING && needsUpdate(node, time))
+						) {
+							node._update(time);
+						} else {
+							node._flag &= ~(FLAG_STALE | FLAG_PENDING);
+						}
+					} catch (err) {
+						/** A compute catches its fn's errors, so this is a throw
+						 *  from the pre-run check, such as a cycle. It is
+						 *  rethrown when the drain ends, as a pull rethrows it,
+						 *  and the node stays queueable. */
 						node._flag &= ~(FLAG_STALE | FLAG_PENDING);
+						if (!thrown) {
+							error = defect(err);
+							thrown = true;
+						}
 					}
 				}
 				COMPUTE_COUNT = COMPUTE_COUNT > count ? requeue(COMPUTES, count, COMPUTE_COUNT) : 0;
@@ -5416,6 +5569,7 @@ export {
 	FLAG_CALLBACK,
 	FLAG_FREEZE,
 	FLAG_VISIT,
+	FLAG_REFUSE,
 	REFUSE,
 	PANIC,
 	FATAL,
@@ -5429,9 +5583,6 @@ export {
 	OPT_WEAK,
 	OPT_EAGER,
 	OPTIONS,
-	ASYNC_PROMISE,
-	ASYNC_ITERATOR,
-	ASYNC_SYNC,
 	RECOVER_NONE,
 	RECOVER_SELF,
 	RECOVER_OWNER,

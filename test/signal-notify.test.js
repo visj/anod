@@ -54,9 +54,12 @@ describe("signal.notify()", () => {
     expect(runs).toBe(2);
   });
 
-  test("notify on disposed signal throws", () => {
-    const s = signal(1);
-    s.dispose();
-    expect(() => s.notify()).toThrow();
+  test("notify on a disposed compute throws", () => {
+    let cm;
+    const r = root((r) => {
+      cm = r.compute(() => 1);
+    });
+    r.dispose();
+    expect(() => cm.notify()).toThrow();
   });
 });

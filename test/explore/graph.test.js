@@ -1256,7 +1256,10 @@ describe("nested creation and disposed deps", () => {
     });
 
     test("an effect whose dep was disposed stops reacting and re-reading it throws", () => {
-        const a = signal(1);
+        let a;
+        const other = root((r) => {
+            a = r.compute(() => 1);
+        });
         const b = signal(1);
         const errors = [];
         let runs = 0;
@@ -1271,7 +1274,7 @@ describe("nested creation and disposed deps", () => {
                 cx.val(b);
             });
         });
-        a.dispose();
+        other.dispose();
         expect(runs).toBe(1);
         b.set(2);
         expect(runs).toBe(2);

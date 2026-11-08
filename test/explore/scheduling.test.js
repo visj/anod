@@ -790,30 +790,6 @@ describe("contextual writes (c.set / c.post)", () => {
         r.dispose();
     });
 
-    /**
-     * Expected: c.set on a disposed signal does not resurrect a value
-     * (signal.set throws ILLEGAL_READ, and the queued c.set path skips
-     * disposed senders).
-     * Actual: the disposed signal's value becomes 5.
-     * Root cause: the IDLE branch of contextSet (src/internal.js:2050-2075)
-     * has no FLAG_DISPOSED check.
-     */
-    test("idle c.set does not write into a disposed signal", async () => {
-        const s = signal(0);
-        const r = root((r) => {
-            r.spawn(async (cx) => {
-                await cx.suspend(Promise.resolve());
-                try {
-                    cx.set(s, 5);
-                } catch (e) { }
-            });
-        });
-        s.dispose();
-        await settle();
-        expect(s.get()).toBeNull();
-        r.dispose();
-    });
-
     test("an idle set supersedes a queued contextual post", async () => {
         const s = signal(0);
         let ctx;
@@ -949,22 +925,6 @@ describe("notify() interplay", () => {
         });
         expect(runs).toBe(1);
         expect(s.get()).toBe(1);
-        r.dispose();
-    });
-
-    test("notify() queued in a batch on a signal disposed later in the batch is dropped", () => {
-        const s = signal(0);
-        let runs = 0;
-        const r = root((r) => {
-            r.effect((cx) => { if (!s.disposed) cx.val(s); runs++; });
-        });
-        runs = 0;
-        batch(() => {
-            s.notify();
-            s.dispose();
-        });
-        expect(runs).toBe(0);
-        expect(() => s.notify()).toThrow();
         r.dispose();
     });
 });

@@ -44,7 +44,8 @@ export async function expectCollected(refs) {
 
 /**
  * Lightweight expect() shim that covers the assertion surface used by our tests.
- * Supports: toBe, toEqual, toBeInstanceOf, toBeNull, toBeUndefined, toThrow,
+ * Supports: toBe, toEqual, toBeInstanceOf, toBeNull, toBeUndefined,
+ * toBeGreaterThan, toMatch, toContain, toThrow,
  * and the .not modifier for each.
  * @param {*} actual
  */
@@ -58,7 +59,7 @@ export function expect(actual) {
  */
 function makeAssertions(actual, negated) {
     return {
-        /** @type {{ toBe: Function, toEqual: Function, toBeInstanceOf: Function, toBeNull: Function, toBeUndefined: Function, toThrow: Function }} */
+        /** @type {{ toBe: Function, toEqual: Function, toBeInstanceOf: Function, toBeNull: Function, toBeUndefined: Function, toBeGreaterThan: Function, toMatch: Function, toContain: Function, toThrow: Function }} */
         get not() {
             return makeAssertions(actual, !negated);
         },
@@ -98,6 +99,31 @@ function makeAssertions(actual, negated) {
                 assert.notStrictEqual(actual, undefined);
             } else {
                 assert.strictEqual(actual, undefined);
+            }
+        },
+        /** @param {number} expected */
+        toBeGreaterThan(expected) {
+            if (negated) {
+                assert.ok(!(actual > expected), `Expected ${actual} not to be greater than ${expected}`);
+            } else {
+                assert.ok(actual > expected, `Expected ${actual} to be greater than ${expected}`);
+            }
+        },
+        /** @param {string|RegExp} expected */
+        toMatch(expected) {
+            const matched = typeof expected === 'string' ? actual.includes(expected) : expected.test(actual);
+            if (negated) {
+                assert.ok(!matched, `Expected ${JSON.stringify(actual)} not to match ${expected}`);
+            } else {
+                assert.ok(matched, `Expected ${JSON.stringify(actual)} to match ${expected}`);
+            }
+        },
+        /** @param {*} expected */
+        toContain(expected) {
+            if (negated) {
+                assert.ok(!actual.includes(expected), `Expected ${actual} not to contain ${expected}`);
+            } else {
+                assert.ok(actual.includes(expected), `Expected ${actual} to contain ${expected}`);
             }
         },
         /** @param {string|RegExp} [expected] */

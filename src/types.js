@@ -61,10 +61,6 @@ class IChannel extends Resolver {
 		this._responds = null;
 		/** @type {AbortController | null} */
 		this._controller = null;
-		/** @type {Sender | null} */
-		this._defer1 = null;
-		/** @type {*} */
-		this._defer1val = null;
 		/** @type {Array<Sender | *> | null} */
 		this._defers = null;
 	}

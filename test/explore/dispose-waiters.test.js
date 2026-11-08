@@ -915,42 +915,4 @@ describe("the error a disposed task hands its waiters", () => {
 });
 
 describe("a disposed resource and its waiters", () => {
-    /**
-     * Already correct. A live waiter gets the error when the resource it
-     * waits on is disposed.
-     *
-     *     res.set(0, () => never())   the resource loads forever
-     *     spawn: await cx.suspend(res)  → promise waiter on res
-     *
-     *     res.dispose()
-     *       └─ CellProto._dispose marks res disposed first, then rejects
-     *          its waiters with a PANIC Defect ("Awaited resource was disposed")
-     *          (queued)
-     *     ── microtask ──
-     *     the spawn, which is alive (its root is untouched), catches it
-     *
-     * This is the case the disposal error exists for, and the outcome
-     * other tests compare against: a live waiter must hear that what it
-     * waits on is gone.
-     */
-    test("a live waiter gets the error when the resource it waits on is disposed", async () => {
-        const seen = [];
-        const res = resource(0);
-        res.set(0, () => never());
-        const r = root((r) => {
-            r.spawn(async (cx) => {
-                try {
-                    await cx.suspend(res);
-                } catch (err) {
-                    expect(err).toBeInstanceOf(Defect);
-                    expect(err.type).toBe(PANIC);
-                    seen.push(err.error.message);
-                }
-            });
-        });
-        res.dispose();
-        await wait();
-        expect(seen).toEqual(["Awaited resource was disposed"]);
-        r.dispose();
-    });
 });

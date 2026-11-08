@@ -315,4 +315,50 @@ describe("OPT_WEAK", () => {
         expect(c1.get()).toBe(10);
         expect(runs).toBe(1);
     });
+
+    test("a weak compute dropped by its last reader runs its cleanups before the write returns", () => {
+        const src = signal(1);
+        const mode = signal(true);
+        const log = [];
+        const w = c.compute((cx) => {
+            cx.cleanup(() => log.push("cleanup"));
+            return cx.val(src);
+        }, undefined, OPT_WEAK);
+        c.effect((cx) => {
+            if (cx.val(mode)) {
+                cx.val(w);
+            }
+            log.push("effect");
+        });
+        log.length = 0;
+        mode.set(false);
+        expect(log).toEqual(["effect", "cleanup"]);
+    });
+
+    test("a weak compute read again in the same flush keeps the new run's cleanups", () => {
+        const src = signal(1);
+        const mode = signal(true);
+        const log = [];
+        let n = 0;
+        const w = c.compute((cx) => {
+            const k = ++n;
+            cx.cleanup(() => log.push("cleanup" + k));
+            return cx.val(src);
+        }, undefined, OPT_WEAK);
+        /** The first drops w, the second picks it up in the same pass. */
+        c.effect((cx) => {
+            if (cx.val(mode)) {
+                cx.val(w);
+            }
+        });
+        c.effect((cx) => {
+            if (!cx.val(mode)) {
+                cx.val(w);
+            }
+        });
+        mode.set(false);
+        expect(log).toEqual(["cleanup1"]);
+        expect(w.get()).toBe(1);
+        expect(n).toBe(2);
+    });
 });
