@@ -1289,32 +1289,32 @@ Time is the average per iteration, the median of 8 rounds run in rotated order. 
 | Scenario | alien | anod | Δ time | alien | anod | Δ alloc |
 | :-- | --: | --: | --: | --: | --: | --: |
 | | **Time** | **Time** | | **Alloc** | **Alloc** | |
-| Mount + unmount 1k rows | 1.25 ms | 1.06 ms | -15% | 3.9 MB | 3.2 MB | -16% |
-| Edit one row | 237 ns | 194 ns | -18% | 177 B | 96 B | -45% |
-| Toggle one row | 23.5 µs | 4,975 ns | -79% | 25 B | 25 B | +1% |
-| Select a row | 567 ns | 482 ns | -15% | 97 B | 97 B | 0% |
-| Select a row, no selector | 126 µs | 79.9 µs | -37% | 40.4 kB | 97 B | -100% |
-| Edit 10 rows in a batch | 2,824 ns | 2,460 ns | -13% | 2.1 kB | 1.4 kB | -34% |
-| Change filter | 131 µs | 90.8 µs | -31% | 26.7 kB | 21.5 kB | -20% |
-| Change theme | 141 µs | 82.8 µs | -41% | 28.2 kB | 28.1 kB | 0% |
-| Remount 100 rows | 111 µs | 95.9 µs | -14% | 310.3 kB | 253.6 kB | -18% |
+| Mount + unmount 1k rows | 963 µs | 829 µs | -14% | 3.8 MB | 3.2 MB | -15% |
+| Edit one row | 181 ns | 147 ns | -19% | 177 B | 96 B | -46% |
+| Toggle one row | 17.3 µs | 3,716 ns | -79% | 24 B | 25 B | +1% |
+| Select a row | 423 ns | 363 ns | -14% | 97 B | 96 B | 0% |
+| Select a row, no selector | 95.6 µs | 61.4 µs | -36% | 40.4 kB | 97 B | -100% |
+| Edit 10 rows in a batch | 2,135 ns | 1,811 ns | -15% | 2.1 kB | 1.4 kB | -34% |
+| Change filter | 99.5 µs | 68.7 µs | -31% | 26.8 kB | 21.4 kB | -20% |
+| Change theme | 109 µs | 62.5 µs | -43% | 28.1 kB | 28.2 kB | 0% |
+| Remount 100 rows | 82.4 µs | 72.4 µs | -12% | 303.7 kB | 253.6 kB | -16% |
 
 ### anod vs [@solidjs/signals](https://github.com/solidjs/solid) (Solid 2.0 beta)
 
 | Scenario | solid | anod | Δ time | solid | anod | Δ alloc |
 | :-- | --: | --: | --: | --: | --: | --: |
 | | **Time** | **Time** | | **Alloc** | **Alloc** | |
-| Mount + unmount 1k rows | 7.06 ms | 1.06 ms | -85% | 11.2 MB | 3.2 MB | -71% |
-| Edit one row | 2,023 ns | 194 ns | -90% | 1.1 kB | 96 B | -91% |
-| Toggle one row | 63.7 µs | 4,975 ns | -92% | 1.0 kB | 25 B | -98% |
-| Select a row | 6,670 ns | 482 ns | -93% | 3.5 kB | 97 B | -97% |
-| Select a row, no selector | 282 µs | 79.9 µs | -72% | 151.1 kB | 97 B | -100% |
-| Edit 10 rows in a batch | 18.3 µs | 2,460 ns | -87% | 8.9 kB | 1.4 kB | -84% |
-| Change filter | 668 µs | 90.8 µs | -86% | 391.3 kB | 21.5 kB | -95% |
-| Change theme | 1.08 ms | 82.8 µs | -92% | 512.6 kB | 28.1 kB | -95% |
-| Remount 100 rows | 726 µs | 95.9 µs | -87% | 990.3 kB | 253.6 kB | -74% |
+| Mount + unmount 1k rows | 5.34 ms | 829 µs | -84% | 11.2 MB | 3.2 MB | -71% |
+| Edit one row | 1,531 ns | 147 ns | -90% | 1.1 kB | 96 B | -91% |
+| Toggle one row | 47.1 µs | 3,716 ns | -92% | 1.0 kB | 25 B | -98% |
+| Select a row | 4,449 ns | 363 ns | -92% | 3.5 kB | 96 B | -97% |
+| Select a row, no selector | 209 µs | 61.4 µs | -71% | 150.8 kB | 97 B | -100% |
+| Edit 10 rows in a batch | 12.7 µs | 1,811 ns | -86% | 8.9 kB | 1.4 kB | -85% |
+| Change filter | 496 µs | 68.7 µs | -86% | 391.4 kB | 21.4 kB | -95% |
+| Change theme | 786 µs | 62.5 µs | -92% | 511.6 kB | 28.2 kB | -94% |
+| Remount 100 rows | 561 µs | 72.4 µs | -87% | 992.8 kB | 253.6 kB | -74% |
 
-Solid's projection also slows its scenarios that never touch the selection: a toggle takes about 43 µs without it, 62 µs with it. Real Solid apps use stores throughout, so the suite keeps it; see [bench/app/README.md](bench/app/README.md).
+Solid's projection also slows its scenarios that never touch the selection: in a run of just that scenario, a toggle takes about 34 µs without it and 44 µs with it. Real Solid apps use stores throughout, so the suite keeps it; see [bench/app/README.md](bench/app/README.md).
 
 Run them with `node bench/app/anod.js`, `node bench/app/alien-signals.js` and `node bench/app/solid.js` after `npm run make`. `ANOD_API=unbound node bench/app/anod.js` builds every node with the unbound API (`c.compute(fn)`, `c.effect(fn)`) instead. See [bench/app/README.md](bench/app/README.md) for the full graph.
 

@@ -28,7 +28,7 @@ Apps don't give every row a compute over the shared selected id: a select would 
 - **Solid 2.0** replaces 1.x's `createSelector` with `createProjection`: a store holding `true` under the selected id, which each row reads at its own key.
 - **anod** and **alien-signals** have no built-in selector, so each suite has the same few-line helper an app would write: a signal per row id, and one effect on the selected id that sets the previous row's signal to `false` and the next row's to `true`.
 
-Using a projection makes Solid slower in scenarios that never touch the selection. Toggling a row, which only reads 1,000 plain signals, goes from about 43 to 62 µs, and changing the theme from about 0.6 to 1 ms. It appears to be a global effect of store proxies in Solid's read path. Real Solid apps use stores throughout, so the suite keeps the projection.
+Using a projection makes Solid slower in scenarios that never touch the selection. Toggling a row, which only reads 1,000 plain signals, goes from about 34 to 44 µs, and changing the theme from about 0.47 to 0.71 ms. It appears to be a global effect of store proxies in Solid's read path. Real Solid apps use stores throughout, so the suite keeps the projection.
 
 The selector's own run is not counted as a compute or an effect. "Select a row, no selector" keeps the per-row compute, as a measure of a 1,000-wide fan-out.
 
