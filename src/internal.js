@@ -489,7 +489,9 @@ function Effect(opts, fn, dep1, owner, args) {
  * @implements {IChannel}
  */
 function Channel() {
-	/** @type {Array<AsyncSender | null> | null} The responders we're waiting on. */
+	/** @type {AsyncSender | null} First responder we're waiting on. */
+	this._res1 = null;
+	/** @type {Array<AsyncSender | null> | null} Additional responders. */
 	this._responds = null;
 	/** @type {Array<AsyncReceiver | (function(*): void)> | null} 3-stride: [awaiter, resolve, reject]. */
 	this._waiters = null;
@@ -2595,7 +2597,7 @@ function root(fn) {
 				rejectWaiters(this, chan, new Defect(new Error("Awaited task was disposed"), PANIC));
 			}
 			/** Remove ourselves from any responders we were awaiting. */
-			if (chan._responds !== null) {
+			if (chan._res1 !== null || chan._responds !== null) {
 				clearChannel(chan, this);
 			}
 		}
@@ -3210,7 +3212,7 @@ function root(fn) {
 					if (chan._controller !== null) {
 						chan._controller.abort();
 					}
-					if (chan._responds !== null) {
+					if (chan._res1 !== null || chan._responds !== null) {
 						clearChannel(chan, this);
 					}
 				}
@@ -4903,7 +4905,7 @@ function resetChannel(node) {
 		chan._controller = null;
 	}
 	chan._defers = null;
-	if (chan._responds !== null) {
+	if (chan._res1 !== null || chan._responds !== null) {
 		clearChannel(chan, node);
 	}
 	node._flag &= ~(FLAG_BLOCKED | FLAG_RELAY);
@@ -4928,7 +4930,9 @@ function send(awaiter, task, resolve, reject) {
 		responderCh._waiters.push(awaiter, resolve, reject);
 	}
 	task._flag |= FLAG_WAITER;
-	if (awaiterCh._responds === null) {
+	if (awaiterCh._res1 === null) {
+		awaiterCh._res1 = task;
+	} else if (awaiterCh._responds === null) {
 		awaiterCh._responds = [task];
 	} else {
 		awaiterCh._responds.push(task);
@@ -4974,23 +4978,36 @@ function removeWaiter(responder, responderCh, awaiter) {
  * @returns {void}
  */
 function clearChannel(channel, awaiter) {
+	let res = channel._res1;
+	if (res !== null) {
+		channel._res1 = null;
+		removeWaiter(res, res._chan, awaiter);
+	}
 	let responds = channel._responds;
-	channel._responds = null;
-	for (let i = 0; i < responds.length; i++) {
-		let responder = responds[i];
-		if (responder !== null) {
-			removeWaiter(responder, responder._chan, awaiter);
+	if (responds !== null) {
+		channel._responds = null;
+		for (let i = 0; i < responds.length; i++) {
+			let responder = responds[i];
+			if (responder !== null) {
+				removeWaiter(responder, responder._chan, awaiter);
+			}
 		}
 	}
 }
 
 /**
  * Clears an awaiter's back-reference to a responder.
+ * Scans _res1 and _responds for identity match.
  * @param {AsyncReceiver} awaiter
  * @param {AsyncSender} responder
  */
 function clearRespond(awaiter, responder) {
-	let responds = awaiter._chan._responds;
+	let awaiterCh = awaiter._chan;
+	if (awaiterCh._res1 === responder) {
+		awaiterCh._res1 = null;
+		return;
+	}
+	let responds = awaiterCh._responds;
 	if (responds !== null) {
 		for (let i = 0; i < responds.length; i++) {
 			if (responds[i] === responder) {

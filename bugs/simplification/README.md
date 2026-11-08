@@ -19,7 +19,7 @@ The estimates count code lines, without comments, after removing the overlap bet
 
 ## Progress on `fix/24-slim-cold`
 
-Done, cold paths only: group 4, 5, 6 and 8, and most of 1 and 14. Also the cold parts of 2 (one guarded drain handler), the `equal()` one-liner from 13, and the stale comments. The bug fixes landed in the merged code.
+Done, cold paths only: group 4, 5 (except the responders, see below), 6 and 8, and most of 1 and 14. Also the cold parts of 2 (one guarded drain handler), the `equal()` one-liner from 13, and the stale comments. The bug fixes landed in the merged code.
 
 - `src/internal.js`: 3,477 → 3,221 code lines (−256) after this cold round, 1,738 → 1,716 comment lines. The hot-path fixes that followed (the resource write split, D9's held stack, the bound checks of D4, the weak release, D2, the flush's `try`) brought it back to 3,479 code lines and 1,869 comment lines.
 - `dist/internal.js`: 29.8 → 27.4 KB raw, 9.7 → 9.4 KB gzipped after the cold round; 29.4 KB raw and 10.0 KB gzipped with every fix in.
@@ -129,7 +129,7 @@ A Cell is never LOCKED, STALE or PENDING, so the shared guard is exact for it to
 The "one inline value, array from the second" pattern earns its keep on `_sub1/_subs` and `_dep1/_deps`. On the Channel it only adds branches:
 
 - **Defers:** merge `_defer1/_defer1val/_defers` into one `_defers` array. That shrinks `defer`, `settleDefers` and `resetChannel`. `settleDeps` (4612–4720) loses its duplicated defer1 branch, and the five "has defers" tests become one-liners.
-- **Responds:** merge `_res1/_responds`, used by `send`, `clearChannel` and `clearRespond`.
+- **Responds:** merge `_res1/_responds`, used by `send`, `clearChannel` and `clearRespond`. **Reverted in review:** unlike defers, a responder is bound every time an async node waits on a loading task, and an activation usually waits on one at a time. `_res1` holds it without an array, and sequential awaits reuse the slot once the previous task settles. Merged, each wait allocated a `[task]` array, about 55 bytes: a re-run that waits on one loading task went from about 163 to 218 bytes.
 - **Cell channel:** drop `CellProto._channel` (1994) and use `new Channel()`, which also makes `_waiters` access monomorphic.
 - **`_changed`:** inline it as `sender._value !== snapshot`. Signal and Compute share one implementation, and its JSDoc is written twice.
 - **Helper parameters:** inline `addWaiter` (one caller), and drop parameters that are always `node._chan`.
