@@ -51,7 +51,7 @@ anod is a reactive state management library. It has built-in support for both sy
 		- [4. Task callbacks with `c.suspend(task, onResolve, onReject)`](#4-task-callbacks-with-csuspendtask-onresolve-onreject)
 	- [Deferred dependencies with `c.defer()`](#deferred-dependencies-with-cdefer)
 	- [Abort controller with `c.controller()`](#abort-controller-with-ccontroller)
-	- [Async transactions with `c.lock()` / `c.unlock()`](#async-transactions-with-clock--cunlock)
+	- [Running to completion with `c.shield()`](#running-to-completion-with-cshield)
 	- [Stale activation safety](#stale-activation-safety)
 	- [Manual versioning with `c.version()`](#manual-versioning-with-cversion)
 - [Limitations](#limitations)
@@ -495,7 +495,7 @@ import { root, signal, FATAL } from "anod";
 root((c) => {
 	const record = signal({ id: 1, name: "Ada" });
 	c.spawn(async (c) => {
-		c.lock(); // Acquire transactional lock to block incoming updates until we commit
+		c.shield(); // Run to completion: updates and disposal wait until we commit
 		const db = await c.suspend(indexedDB.open("mydb"));
 		const tx = db.transaction("store", "readwrite");
 		const store = tx.objectStore("store");
@@ -1013,6 +1013,8 @@ root((c) => {
 });
 ```
 
+A task that awaits a task which, directly or through other tasks, awaits it back would never settle. The await that closes such a cycle throws `"Cycle detected"` instead, so the tasks fail rather than stay loading.
+
 **Array of tasks**: awaits multiple tasks concurrently. Returns when all tasks have settled.
 
 ```ts
@@ -1171,11 +1173,17 @@ root((c) => {
 });
 ```
 
-### Async transactions with `c.lock()` / `c.unlock()`
+### Running to completion with `c.shield()`
 
-By default, when a task or spawn's dependencies change during async work, the node is re-run: the old activation is abandoned and a new one starts. Sometimes this is wrong. If you are iterating over an array and saving each element to a database, you need the entire iteration to finish before processing the next update.
+By default, when a spawn's dependencies change during async work, the spawn re-runs: the old activation is abandoned and a new one starts. Sometimes that is wrong. If you are iterating over an array and saving each element to a database, the whole iteration has to finish before the next update is processed.
 
-`c.lock()` prevents the node from re-running until the current activation completes (or `c.unlock()` is called). The node is still marked stale by its dependencies, but the re-run is deferred until the lock releases. On completion, if the node was marked stale during the lock, it automatically re-runs with the fresh values, or disposes if its parent flagged it for disposal.
+`c.shield()` lets the current activation run to completion. Call it anywhere in the activation; it holds from then on, until the activation ends: when the function returns or throws, when its promise settles, or when a callback suspend delivers. There is no way to unshield.
+
+- **Changes wait.** A change to a dependency still marks the node stale, but the re-run waits until the activation ends, then runs with the fresh values.
+- **Owners wait.** An owner above the shielded node that would re-run (a route change, say) re-runs once the activation ends, so the old and the new run never overlap. Everything else keeps updating as usual, siblings included.
+- **Disposal waits.** Disposing the node, or any owner above it, waits until the activation ends. Meanwhile, the disposed subtree is frozen: nothing in it starts a new run. The shielded activation keeps going, though. It can read and create children, and its controller is not aborted. Then the subtree is torn down, children first, so a cleanup on the root is the "shutdown finished" hook.
+
+Only effects and spawns can shield, because they perform the side effects that must finish. A task only produces data, and a disposed task simply stops.
 
 ```ts
 import { root, signal } from "anod";
@@ -1187,23 +1195,27 @@ const saveToDb = (item) =>
 		}, 10)
 	);
 
-root((c) => {
+const app = root((c) => {
 	const todoList = signal(["buy milk", "write docs"]);
 	c.spawn(async (c) => {
 		const items = c.val(todoList);
-		c.lock();
+		c.shield();
 		for (const item of items) {
 			await c.suspend(saveToDb(item));
 		}
-		// Lock releases implicitly when the spawn completes.
-		// If todoList changed during the loop, the spawn
-		// re-runs now with the updated list.
+		// The shield ends when the spawn completes. If todoList
+		// changed during the loop, the spawn re-runs now with
+		// the updated list.
 		console.log("batch complete");
 	});
-	// This update is deferred until the current batch finishes
+	// This update waits until the current batch finishes
 	todoList.set(["deploy", "celebrate"]);
 });
+
+app.dispose(); // Waits for the batch in flight, then tears down
 ```
+
+`dispose(true)` doesn't wait. It ends every shield under the node, aborts their controllers, runs the cleanups, and drops each shielded continuation at its next `c.suspend()`. It also works on a disposal that is already waiting. You need it when a shielded activation waits on something that only its own teardown would deliver, such as its controller's abort, or a cleanup of its owner or of one of its children. Those waits never end on their own.
 
 ### Stale activation safety
 
@@ -1211,9 +1223,9 @@ Every call to `c.suspend()` captures the current activation timestamp. When the 
 
 This applies to both resolve and reject: if a promise rejects after the node was invalidated, the error is also discarded. You are never notified about errors from stale activations.
 
-The same holds for awaiting a task, and for the callback form: a node that has been disposed never resumes, whatever it waits on. When a task is disposed, the nodes waiting on it are rejected once the disposal has finished, with a `Defect` of type `PANIC` ("Awaited task was disposed"). Signals and resources are not owned, so they are never disposed. It is `PANIC`, not `FATAL`, because nothing crashed: what you waited on was ended by its owner, like an `AbortError` from `fetch`. Every waiter gets the same value, through `await` and `onReject` alike. A waiter that the same disposal tore down (a spawn and the task it awaits, owned by the same root) is not told; a waiter elsewhere is. A locked node (`c.lock()`) counts as alive until its activation finishes, so it is told, and is disposed once it completes.
+The same holds for awaiting a task, and for the callback form: a node that has been disposed never resumes, whatever it waits on. When a task is disposed, the nodes waiting on it are rejected once the disposal has finished, with a `Defect` of type `PANIC` ("Awaited task was disposed"). Signals and resources are not owned, so they are never disposed. It is `PANIC`, not `FATAL`, because nothing crashed: what you waited on was ended by its owner, like an `AbortError` from `fetch`. Every waiter gets the same value, through `await` and `onReject` alike. A waiter that the same disposal tore down (a spawn and the task it awaits, owned by the same root) is not told; a waiter elsewhere is. A shielded node (`c.shield()`) is not disposed until its activation finishes, so it is told, and is disposed once it completes.
 
-Instead, you must rely on the builtin lifecycle helpers. If you await a promise, and create some state that needs cleaning up, use c.cleanup(). If you must run the async function to completion, run c.lock(). The idea about anod's async correctness guarantee is that we do not want promises firing all over the place, writing state in an unpredictable way. The sync reactive graph is always consistent. When you write a value, every reader is guaranteed to see a consistent state of that signal. This idea extends to async, but with a different guarantee: every async primitive is guaranteed a consistent snapshot in time, but there is no guarantee exactly which time that is. This means: if you await and suspend 10 tasks, we will block until all 10 tasks have settled at some point in time, and all produce a valid value.
+Instead, you must rely on the builtin lifecycle helpers. If you await a promise, and create some state that needs cleaning up, use c.cleanup(). If you must run the async function to completion, call c.shield(). The idea about anod's async correctness guarantee is that we do not want promises firing all over the place, writing state in an unpredictable way. The sync reactive graph is always consistent. When you write a value, every reader is guaranteed to see a consistent state of that signal. This idea extends to async, but with a different guarantee: every async primitive is guaranteed a consistent snapshot in time, but there is no guarantee exactly which time that is. This means: if you await and suspend 10 tasks, we will block until all 10 tasks have settled at some point in time, and all produce a valid value.
 
 ### Manual versioning with `c.version()`
 

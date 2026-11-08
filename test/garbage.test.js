@@ -1,4 +1,4 @@
-import { describe, test, expect, collect } from "#test-runner";
+import { describe, test, expect, collect, expectCollected } from "#test-runner";
 import { signal, root } from "#anod";
 
 describe("garbage collection", () => {
@@ -32,11 +32,9 @@ describe("garbage collection", () => {
         // Disposing c1 unlinks it from s1, which then holds no reference to it.
         r.dispose();
 
-        await new Promise((resolve) => {
-            collect(() => {
-                expect(c1.deref()).toBeUndefined(); // "Disposed compute should be GCed"
-                resolve();
-            });
-        });
+        /** Polls, like the other GC tests: one pass under Bun's conservative
+         *  stack scan can still see a stale pointer, depending on what ran
+         *  before. A real leak fails either way. */
+        await expectCollected([c1]);
     });
 });

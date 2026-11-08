@@ -348,8 +348,8 @@ describe("24: reads after a loading callback suspend corrupt dependency links", 
     });
 });
 
-/** Skipped until the lock rework, which goes in its own branch; see bugs/25-sync-lock. */
-describe.skip("25: c.lock() is never released when an activation finishes synchronously", () => {
+/** c.lock() is c.shield() since D10; see bugs/25-sync-lock. */
+describe("25: c.lock() is never released when an activation finishes synchronously", () => {
     /**
      * README: lock() "prevents the node from re-running until the
      * current activation completes". A sync effect's activation
@@ -361,7 +361,7 @@ describe.skip("25: c.lock() is never released when an activation finishes synchr
         let runs = 0;
         c.effect((cx) => {
             cx.val(s);
-            cx.lock();
+            cx.shield();
             runs++;
         });
         s.set(1);
@@ -379,7 +379,7 @@ describe.skip("25: c.lock() is never released when an activation finishes synchr
         let cleaned = 0;
         const r = root((r) => {
             r.effect((cx) => {
-                cx.lock();
+                cx.shield();
                 cx.cleanup(() => {
                     cleaned++;
                 });
@@ -395,7 +395,7 @@ describe.skip("25: c.lock() is never released when an activation finishes synchr
         let runs = 0;
         c.spawn((cx) => {
             cx.val(s);
-            cx.lock();
+            cx.shield();
             runs++;
         });
         s.set(1);
@@ -403,17 +403,24 @@ describe.skip("25: c.lock() is never released when an activation finishes synchr
         expect(runs).toBe(2);
     });
 
-    /** Expected: 20. Actual: 10, and the task never runs again. */
-    test("a task that locks and returns a plain value recomputes", async () => {
-        const s = signal(1);
-        const t = c.task((cx) => {
-            const v = cx.val(s);
-            cx.lock();
-            return v * 10;
+    /**
+     * The task test this block had is gone: tasks can't shield (D10).
+     * In its place, the same leak through a throw. Expected: the owner's
+     * recover handler takes the error and the effect is disposed, as
+     * without the lock. Actual: the teardown finds the lock and only
+     * marks the effect, so its cleanup never runs.
+     */
+    test("a sync effect that locks and throws is disposed", () => {
+        let cleaned = 0;
+        root((r) => {
+            r.recover(() => true);
+            r.effect((cx) => {
+                cx.cleanup(() => cleaned++);
+                cx.shield();
+                throw new Error("boom");
+            });
         });
-        s.set(2);
-        await settle();
-        expect(t.get()).toBe(20);
+        expect(cleaned).toBe(1);
     });
 });
 
@@ -1268,29 +1275,30 @@ describe("33: an error escaping a flush's pre-run check deafens queued effects",
 
 describe("34: node functions that run while the engine is idle", () => {
     /**
-     * ComputeProto._settle replays a change that arrived during a lock by
-     * calling _update at idle. The write in the body then flushes at once,
-     * in the middle of the run; the flush resets FENCE, the effect stamps
-     * `s` over the task's stamp, and the task's patchDeps drops `s`.
-     * Expected: the task still depends on `s`. Actual: `s` is gone.
+     * ComputeProto._settle replayed a change that arrived during a lock by
+     * calling _update at idle. The write in the body then flushed at once,
+     * in the middle of the run; the flush reset FENCE, the effect stamped
+     * `s` over the task's stamp, and the task's patchDeps dropped `s`.
+     * Tasks can't shield since D10, so this checks the same for a
+     * shielded spawn, whose replay is queued and flushed.
+     * Expected: the spawn still depends on `s`.
      */
-    test("a locked task replayed at settle keeps its deps when its body writes a signal", async () => {
+    test("a shielded spawn replayed at release keeps its deps when its body writes a signal", async () => {
         const s = signal(1);
         const mode = signal(false);
         const extra = signal(0);
         const busy = signal(0);
         const resolvers = [];
         let runs = 0;
-        const t = c.task(async (cx) => {
+        const sp = c.spawn(async (cx) => {
             runs++;
-            const v = cx.val(s);
-            cx.lock();
+            cx.val(s);
+            cx.shield();
             cx.set(busy, runs);
             if (cx.val(mode)) {
                 cx.val(extra);
             }
             await cx.suspend(new Promise((r) => resolvers.push(r)));
-            return v;
         });
         c.effect((cx) => {
             cx.val(busy);
@@ -1299,17 +1307,15 @@ describe("34: node functions that run while the engine is idle", () => {
         resolvers.shift()(1);
         await settle();
         s.set(2);
-        t.get();
         mode.set(true);
         resolvers.shift()(2);
         await settle();
         expect(runs).toBe(3);
-        expect(depsOf(t).includes(s)).toBe(true);
+        expect(depsOf(sp).includes(s)).toBe(true);
         resolvers.forEach((r) => r(3));
         await settle();
         const before = runs;
         s.set(10);
-        t.get();
         expect(runs).toBe(before + 1);
     });
 
@@ -1678,5 +1684,126 @@ describe("D9: a callback suspend waits for the fn to return", () => {
             order.push("outer body");
         });
         expect(order).toEqual(["inner body", "inner finalize", "outer body", "outer finalize"]);
+    });
+});
+
+describe("D10: an await that closes a wait cycle is rejected", () => {
+    /**
+     * Two tasks that await each other after a startup gate. Expected:
+     * the await that closes the cycle throws "Cycle detected", so both
+     * tasks settle with an error. Before: both stayed loading for good.
+     */
+    test("two tasks awaiting each other both fail", async () => {
+        const gate = deferred();
+        let a, b;
+        root((r) => {
+            a = r.task(async (cx) => {
+                await cx.suspend(gate.promise);
+                return await cx.suspend(b);
+            });
+            b = r.task(async (cx) => {
+                await cx.suspend(gate.promise);
+                return await cx.suspend(a);
+            });
+        });
+        gate.resolve();
+        await settle();
+        expect(a.loading).toBe(false);
+        expect(b.loading).toBe(false);
+        expect(a.error).toBe(true);
+        expect(b.error).toBe(true);
+        expect(b.get().error.message).toBe("Cycle detected");
+        expect(a.get().error.message).toBe("Cycle detected");
+    });
+
+    test("a cycle through a third task is found", async () => {
+        const gate = deferred();
+        let a, b, d;
+        root((r) => {
+            a = r.task(async (cx) => {
+                await cx.suspend(gate.promise);
+                return await cx.suspend(b);
+            });
+            b = r.task(async (cx) => {
+                await cx.suspend(gate.promise);
+                return await cx.suspend(d);
+            });
+            d = r.task(async (cx) => {
+                await cx.suspend(gate.promise);
+                return await cx.suspend(a);
+            });
+        });
+        gate.resolve();
+        await settle();
+        expect([a.loading, b.loading, d.loading]).toEqual([false, false, false]);
+        expect([a.error, b.error, d.error]).toEqual([true, true, true]);
+    });
+
+    test("an array await that closes a cycle fails", async () => {
+        const gate = deferred();
+        const other = deferred();
+        let a, b, x;
+        root((r) => {
+            x = r.task(async (cx) => await cx.suspend(other.promise));
+            a = r.task(async (cx) => {
+                await cx.suspend(gate.promise);
+                return await cx.suspend(b);
+            });
+            b = r.task(async (cx) => {
+                await cx.suspend(gate.promise);
+                return await cx.suspend([x, a]);
+            });
+        });
+        gate.resolve();
+        await settle();
+        other.resolve(1);
+        await settle();
+        expect(a.loading).toBe(false);
+        expect(b.loading).toBe(false);
+        expect(b.error).toBe(true);
+    });
+
+    /** Control: waits that share a task without a cycle still settle. */
+    test("a diamond of waits settles", async () => {
+        const gate = deferred();
+        let top, left, right;
+        root((r) => {
+            const base = r.task(async (cx) => {
+                await cx.suspend(gate.promise);
+                return 1;
+            });
+            left = r.task(async (cx) => (await cx.suspend(base)) + 1);
+            right = r.task(async (cx) => (await cx.suspend(base)) + 2);
+            top = r.task(async (cx) => {
+                const [l, rr] = await cx.suspend([left, right]);
+                return l + rr;
+            });
+        });
+        gate.resolve();
+        await settle();
+        expect(top.get()).toBe(5);
+    });
+});
+
+describe("D10: shield bookkeeping", () => {
+    /** A spawn disposed on its own, once its shield releases, leaves its
+     *  owner's children, so the owner's teardown can't dispose it again. */
+    test("a shielded spawn disposed on its own leaves its owner's children", async () => {
+        const d = deferred();
+        let spawn;
+        const r1 = root((r) => {
+            r.effect(() => {});
+            spawn = r.spawn(async (sc) => {
+                sc.shield();
+                await sc.suspend(d.promise);
+            });
+        });
+        spawn.dispose();
+        expect(r1._owned.includes(spawn)).toBe(true);
+        d.resolve();
+        await settle();
+        expect(spawn.disposed).toBe(true);
+        expect(r1._owned.includes(spawn)).toBe(false);
+        r1.dispose();
     });
 });

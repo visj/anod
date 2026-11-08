@@ -93,6 +93,8 @@ var NOOP = function() {};
  */
 var ILLEGAL_READ = "Cannot read a disposed node or yourself";
 
+var CYCLE = "Cycle detected";
+
 /**
  * Thrown when the callback form of suspend() follows another suspend()
  * in the same activation.
@@ -235,6 +237,20 @@ var REJECT_COUNT = 0;
 var HELD = [];
 
 var HELD_COUNT = 0;
+
+/**
+ * The shields that hold each node, while any are active (D10). A node's
+ * count is four times the number of shielded effects below it, plus two
+ * if its disposal waits for them (HELD_DISPOSE), plus one if it is
+ * shielded itself (HELD_SELF). A node with a count is FLAG_LOCKED. Kept
+ * off the nodes, since only a few are ever held at once.
+ * @const @type {Map<Owner, number>}
+ */
+var HOLDS = new Map();
+
+const HELD_SELF = 1;
+const HELD_DISPOSE = 2;
+const HELD_BELOW = 4;
 
 /**
  * True while teardown() disposes a node outside a flush, or delivers
@@ -507,12 +523,17 @@ function Channel() {
  * cleanups join the same transaction and flush once the whole subtree is
  * disposed, so nothing being torn down re-runs. An effect's live owner
  * then drops it from `_owned`. A cleanup that throws is reported once the
- * disposal has finished, as an error of its node.
+ * disposal has finished, as an error of its node. A locked node waits for
+ * the shields under it (D10); `force` ends them and disposes it now, also
+ * after a plain dispose() it is waiting on.
  * @this {Disposer}
+ * @param {boolean=} force
  * @returns {void}
  */
-function dispose() {
-	if (!(this._flag & FLAG_DISPOSED)) {
+function dispose(force) {
+	if (force === true && this._flag & FLAG_LOCKED) {
+		forceDispose(this);
+	} else if (!(this._flag & FLAG_DISPOSED)) {
 		DISPOSES[DISPOSER_COUNT++] = this;
 		if (IDLE) {
 			flush();
@@ -1302,27 +1323,6 @@ function root(fn) {
 		SCOPE_COUNT++;
 	}
 
-	/**
-	 * Pauses an owner node (Effect or Root) and recursively pauses
-	 * all owned child effects. While paused, notifications are
-	 * suppressed — the node accumulates stale/pending bits but
-	 * _receive() returns early. Computes are not paused because
-	 * they are pull-based and inherently lazy.
-	 * @param {Owner} node
-	 */
-	function pauseNode(node) {
-		node._flag |= FLAG_PAUSED;
-		let owned = node._owned;
-		if (owned !== null) {
-			let count = owned.length;
-			for (let i = 0; i < count; i++) {
-				if (owned[i]._flag & FLAG_OWNER) {
-					pauseNode(/** @type {Owner} */(owned[i]));
-				}
-			}
-		}
-	}
-
 	/** @this {Owner} */
 	RootProto.pause = EffectProto.pause = function () {
 		pauseNode(this);
@@ -1366,7 +1366,8 @@ function root(fn) {
 	 * @this {Owner}
 	 */
 	RootProto.resume = EffectProto.resume = function () {
-		if (!(this._flag & FLAG_PAUSED)) {
+		/** A subtree waiting to be disposed stays frozen (D10). */
+		if (!(this._flag & FLAG_PAUSED) || (HOLDS.size > 0 && isFrozen(this))) {
 			return;
 		}
 		if (IDLE) {
@@ -1504,7 +1505,11 @@ function root(fn) {
 		/** Task is loading — create channel binding and return a Promise.
 		 *  Staleness is handled by resetChannel: if the node re-runs,
 		 *  the old waiter is removed and this Promise never resolves.
-		 *  With callbacks, they are the waiter, and no Promise is made. */
+		 *  With callbacks, they are the waiter, and no Promise is made.
+		 *  A task that waits on this node would wait forever. */
+		if (awaits(taskNode, node)) {
+			throw new Error(CYCLE);
+		}
 		if (resolve !== undefined) {
 			node._flag |= callbackFlags(node) | FLAG_RELAY;
 			send(node, taskNode, resolve, reject);
@@ -1652,7 +1657,12 @@ function root(fn) {
 				task._refresh();
 			}
 			if (task._flag & FLAG_LOADING) {
-				blocked = i;
+				if (awaits(task, node)) {
+					error = new Error(CYCLE);
+					failed = true;
+				} else {
+					blocked = i;
+				}
 				break;
 			}
 			if (task._flag & FLAG_ERROR) {
@@ -1780,32 +1790,33 @@ function root(fn) {
 
 	ComputeProto.suspend = EffectProto.suspend = suspend;
 
-	/** @this {Receiver} */
-	ComputeProto.lock = EffectProto.lock = function () {
-		this._flag |= FLAG_LOCKED;
-	};
-
 	/**
-	 * Releases the lock. A change or dispose that arrived while locked
-	 * was deferred, and is replayed: when the activation settles if it
-	 * is still in flight (the lock holds until then, and _settle replays
-	 * it), or right away if it has already finished.
-	 * @this {Receiver}
+	 * Shields the current activation: it runs to completion (D10). Its
+	 * re-run or disposal, and those of every owner above it, wait until
+	 * it ends; only dispose(true) ends it early. Each owner on the path
+	 * is locked and counted in HOLDS. The walk stops at a root, which
+	 * has no owner, or at the global `c`, which has no FLAG_OWNER.
+	 * @this {Effect}
 	 */
-	ComputeProto.unlock = EffectProto.unlock = function () {
+	EffectProto.shield = function () {
 		let flag = this._flag;
-		if (!(flag & (FLAG_STALE | FLAG_PENDING | FLAG_DISPOSED))) {
-			this._flag = flag & ~FLAG_LOCKED;
-		} else if (flag & FLAG_LOCKED && !(flag & FLAG_LOADING)) {
-			this._flag = flag & ~FLAG_LOCKED;
-			if (flag & FLAG_DISPOSED) {
-				teardown(this);
-			} else {
-				this._receive();
-				if (IDLE) {
-					flush();
-				}
-			}
+		if ((flag & (FLAG_DISPOSED | FLAG_LOCKED)) === FLAG_DISPOSED) {
+			return;
+		}
+		let count = HOLDS.get(this);
+		if (count === undefined) {
+			count = 0;
+		} else if (count & HELD_SELF) {
+			return;
+		}
+		HOLDS.set(this, count + HELD_SELF);
+		this._flag = flag | FLAG_LOCKED;
+		let owner = this._owner;
+		while (owner !== null && owner._flag & FLAG_OWNER) {
+			count = HOLDS.get(owner);
+			HOLDS.set(owner, count === undefined ? HELD_BELOW : count + HELD_BELOW);
+			owner._flag |= FLAG_LOCKED;
+			owner = owner._owner;
 		}
 	};
 
@@ -2055,6 +2066,10 @@ function root(fn) {
 	 * @returns {void}
 	 */
 	RootProto._dispose = function () {
+		if (this._flag & FLAG_LOCKED) {
+			deferDispose(this);
+			return;
+		}
 		this._flag = FLAG_DISPOSED;
 		/** Children first, then cleanups (D2). */
 		try {
@@ -2480,9 +2495,9 @@ function root(fn) {
 	};
 
 	/**
-	 * Settles an async compute. Clears loading/lock/init, handles deferred
-	 * dispose, settles deferred deps, resolves waiters, notifies subscribers,
-	 * and re-runs if the node was marked stale while locked. Settling always
+	 * Settles an async compute. Clears loading/init, settles deferred
+	 * deps, resolves waiters, notifies subscribers, and re-runs if a
+	 * deferred dep changed. Settling always
 	 * completes the activation; only the subscriber notification depends on
 	 * the value having changed, which c.equal() decides as in the sync
 	 * tail of _update. Handles both value and error: when FLAG_ERROR is
@@ -2501,12 +2516,10 @@ function root(fn) {
 		if (flag & FLAG_REFUSE) {
 			flag = (flag | FLAG_ERROR) & ~FLAG_REFUSE;
 		}
-		this._flag = flag & ~(FLAG_LOADING | FLAG_INIT | FLAG_LOCKED);
+		this._flag = flag & ~(FLAG_LOADING | FLAG_INIT);
 
-		/** Deferred dispose: owner disposed while we were locked.
-		 *  FLAG_LOCKED was cleared above, so _dispose runs full cleanup. */
+		/** A disposed task never settles. */
 		if (flag & FLAG_DISPOSED) {
-			teardown(this);
 			return;
 		}
 
@@ -2553,15 +2566,9 @@ function root(fn) {
 			flush();
 		}
 
-		/** A changed deferred dep, or a change that arrived while locked,
-		 *  re-runs the node. It is queued and flushed, as a fn must never
-		 *  run while idle. */
-		if (
-			stale ||
-			(flag & FLAG_LOCKED &&
-				(this._flag & FLAG_STALE ||
-					(this._flag & FLAG_PENDING && needsUpdate(this, TIME))))
-		) {
+		/** A changed deferred dep re-runs the node. It is queued and
+		 *  flushed, as a fn must never run while idle. */
+		if (stale) {
 			this._flag |= FLAG_STALE;
 			COMPUTES[COMPUTE_COUNT++] = this;
 			flush();
@@ -2579,10 +2586,6 @@ function root(fn) {
 
 	/** @this {Compute} */
 	ComputeProto._dispose = function () {
-		if (this._flag & FLAG_LOCKED) {
-			this._flag |= FLAG_DISPOSED;
-			return;
-		}
 		let flag = this._flag;
 		this._flag = FLAG_DISPOSED;
 		clearSubs(this);
@@ -2617,9 +2620,6 @@ function root(fn) {
 	 */
 	ComputeProto._update = function (time) {
 		let flag = this._flag;
-		if (flag & FLAG_LOCKED) {
-			return;
-		}
 		this._time = time;
 		this._flag =
 			flag &
@@ -2777,7 +2777,7 @@ function root(fn) {
 		 *  The masks fold to one constant, so a sync compute pays no more
 		 *  than before. */
 		if (flag & (FLAG_ASYNC | FLAG_CALLBACK | FLAG_DISPOSED)) {
-			if ((flag & (FLAG_DISPOSED | FLAG_LOCKED)) === FLAG_DISPOSED) {
+			if (flag & FLAG_DISPOSED) {
 				if (flag & FLAG_CALLBACK) {
 					unhold(this);
 				}
@@ -2875,13 +2875,12 @@ function root(fn) {
 				flag &
 				(FLAG_EAGER |
 					FLAG_WAITER |
-					FLAG_LOCKED |
 					FLAG_PAUSED |
 					FLAG_DISPOSED)
 			)
 		) {
 			notify(this, FLAG_PENDING);
-		} else if (flag & (FLAG_LOCKED | FLAG_PAUSED | FLAG_DISPOSED)) {
+		} else if (flag & (FLAG_PAUSED | FLAG_DISPOSED)) {
 			return;
 		} else {
 			COMPUTES[COMPUTE_COUNT++] = this;
@@ -3042,10 +3041,10 @@ function root(fn) {
 			}
 		}
 
-		/** Async, a callback suspend made in the fn, or disposed by it.
-		 *  The masks fold to one constant, so a sync effect pays no more
-		 *  than before. */
-		if (flag & (FLAG_ASYNC | FLAG_CALLBACK | FLAG_DISPOSED)) {
+		/** Async, a callback suspend made in the fn, disposed by it, or
+		 *  shielded. The masks fold to one constant, so a sync effect pays
+		 *  no more than before. */
+		if (flag & (FLAG_ASYNC | FLAG_CALLBACK | FLAG_DISPOSED | FLAG_LOCKED)) {
 			if ((flag & (FLAG_DISPOSED | FLAG_LOCKED)) === FLAG_DISPOSED) {
 				if (flag & FLAG_CALLBACK) {
 					unhold(this);
@@ -3085,7 +3084,7 @@ function root(fn) {
 				this._settle();
 				return;
 			}
-			if (startAsync(this, value, time)) {
+			if (flag & FLAG_ASYNC && startAsync(this, value, time)) {
 				return;
 			}
 			/** Sync result: the activation settles here, deferred deps too. */
@@ -3094,6 +3093,16 @@ function root(fn) {
 				this._chan._defers !== null
 			) {
 				settleDefers(this);
+			}
+			/** It ends here, and so does its shield. A node locked only
+			 *  by a shield below it keeps the lock. */
+			if (flag & FLAG_LOCKED) {
+				this._flag &= ~FLAG_INIT;
+				if (this._finalize !== null) {
+					clearFinalize(this);
+				}
+				unshield(this);
+				return;
 			}
 		}
 
@@ -3104,10 +3113,11 @@ function root(fn) {
 	};
 
 	/**
-	 * Settles an async effect. Clears loading/lock, handles deferred
-	 * dispose, checks deferred deps, re-runs if stale. When FLAG_ERROR
-	 * is set before calling, treats the value as an error: attempts
-	 * recovery, disposes if unrecoverable.
+	 * Settles an async effect. Clears loading, checks deferred deps,
+	 * re-runs if stale, and ends the activation's shield, which replays
+	 * what it deferred. When FLAG_ERROR is set before calling, treats
+	 * the value as an error: attempts recovery, disposes if
+	 * unrecoverable.
 	 * @this {Effect}
 	 * @param {*=} err
 	 */
@@ -3119,12 +3129,11 @@ function root(fn) {
 			return;
 		}
 		let flag = this._flag;
-		this._flag &= ~(FLAG_LOADING | FLAG_SUSPEND | FLAG_LOCKED);
+		this._flag &= ~(FLAG_LOADING | FLAG_SUSPEND);
 
-		/** Deferred dispose: owner disposed while we were locked.
-		 *  FLAG_LOCKED was cleared above, so _dispose runs full cleanup. */
+		/** A disposed node never settles. One whose disposal waits for
+		 *  its shields is not marked yet, and settles as usual. */
 		if (flag & FLAG_DISPOSED) {
-			teardown(this);
 			return;
 		}
 
@@ -3136,6 +3145,9 @@ function root(fn) {
 			let result = tryRecover(this, err);
 			if (result !== RECOVER_SELF) {
 				teardown(this);
+			}
+			if (flag & FLAG_LOCKED) {
+				unshield(this);
 			}
 			return;
 		}
@@ -3151,13 +3163,14 @@ function root(fn) {
 		) {
 			stale = settleDeps(this);
 		}
-		if (
-			stale ||
-			(flag & FLAG_LOCKED &&
-				(this._flag & FLAG_STALE ||
-					(this._flag & FLAG_PENDING && needsUpdate(this, TIME))))
-		) {
+		if (stale) {
 			this._flag |= FLAG_STALE;
+		}
+		/** A change that arrived while shielded is replayed when the
+		 *  shield releases. */
+		if (flag & FLAG_LOCKED) {
+			unshield(this);
+		} else if (stale) {
 			this._receive();
 			flush();
 		}
@@ -3186,7 +3199,7 @@ function root(fn) {
 	 */
 	EffectProto._dispose = function () {
 		if (this._flag & FLAG_LOCKED) {
-			this._flag |= FLAG_DISPOSED;
+			deferDispose(this);
 			return;
 		}
 		let flag = this._flag;
@@ -4376,7 +4389,7 @@ function checkCycle(base) {
 			CSTACK[j] = null;
 		}
 		CTOP = base;
-		throw new Error("Cycle detected");
+		throw new Error(CYCLE);
 	}
 	/** A nested checkRun may already have raised it past this depth. */
 	if (CTOP >= CMARK) {
@@ -4940,6 +4953,59 @@ function send(awaiter, task, resolve, reject) {
 }
 
 /**
+ * Whether `task` waits on `node`, directly or through the tasks it
+ * waits on. Awaiting `task` from `node` would then close a cycle that
+ * never settles. Every wait is checked here before it is bound, so the
+ * waits form no cycle of their own and the walk ends; FLAG_VISIT skips
+ * a task reached twice. A task that waits on nothing costs one check.
+ * @param {AsyncSender} task
+ * @param {AsyncReceiver} node
+ * @returns {boolean}
+ */
+function awaits(task, node) {
+	if (!(task._flag & FLAG_CHANNEL)) {
+		return false;
+	}
+	let chan = task._chan;
+	if (chan._res1 === null && chan._responds === null) {
+		return false;
+	}
+	let found = false;
+	/** @type {Array<AsyncSender>} */
+	let stack = [task];
+	/** @type {Array<AsyncSender>} */
+	let seen = [];
+	while (stack.length > 0) {
+		let next = stack.pop();
+		if (next === node) {
+			found = true;
+			break;
+		}
+		if (next._flag & FLAG_VISIT || !(next._flag & FLAG_CHANNEL)) {
+			continue;
+		}
+		next._flag |= FLAG_VISIT;
+		seen.push(next);
+		let res = next._chan._res1;
+		if (res !== null) {
+			stack.push(res);
+		}
+		let responds = next._chan._responds;
+		if (responds !== null) {
+			for (let i = 0; i < responds.length; i++) {
+				if (responds[i] !== null) {
+					stack.push(responds[i]);
+				}
+			}
+		}
+	}
+	for (let i = 0; i < seen.length; i++) {
+		seen[i]._flag &= ~FLAG_VISIT;
+	}
+	return found;
+}
+
+/**
  * Removes a single awaiter from a responder's _waiters array.
  * Linear scan for identity match, then 3-stride swap-with-last.
  * Clears FLAG_WAITER on the responder when the last waiter is removed.
@@ -5075,8 +5141,208 @@ function deliverRejects() {
 }
 
 /**
+ * Pauses an owner node (Effect or Root) and recursively pauses
+ * all owned child effects. While paused, notifications are
+ * suppressed — the node accumulates stale/pending bits but
+ * _receive() returns early. Computes are not paused because
+ * they are pull-based and inherently lazy.
+ * @param {Owner} node
+ */
+function pauseNode(node) {
+	node._flag |= FLAG_PAUSED;
+	let owned = node._owned;
+	if (owned !== null) {
+		let count = owned.length;
+		for (let i = 0; i < count; i++) {
+			if (owned[i]._flag & FLAG_OWNER) {
+				pauseNode(/** @type {Owner} */(owned[i]));
+			}
+		}
+	}
+}
+
+/**
+ * Records the disposal of a locked owner, which waits until the shields
+ * under it release (D10). It is not marked disposed until then, so it
+ * still reads and creates children. Its subtree is frozen meanwhile:
+ * paused, so nothing in it starts a new run, while activations in flight
+ * go on.
+ * @param {Owner} node
+ * @returns {void}
+ */
+function deferDispose(node) {
+	let count = /** @type {number} */(HOLDS.get(node));
+	if (!(count & HELD_DISPOSE)) {
+		HOLDS.set(node, count + HELD_DISPOSE);
+		pauseNode(node);
+	}
+}
+
+/**
+ * Whether `node` or an owner above it waits to be disposed, so that its
+ * subtree is frozen.
+ * @param {Owner} node
+ * @returns {boolean}
+ */
+function isFrozen(node) {
+	for (let next = node; next !== null && next._flag & FLAG_OWNER; next = next._owner) {
+		let count = HOLDS.get(next);
+		if (count !== undefined && count & HELD_DISPOSE) {
+			return true;
+		}
+	}
+	return false;
+}
+
+/**
+ * Ends the shield of `node`'s activation, which has completed (D10),
+ * and replays what it deferred. Does nothing if the node is not
+ * shielded itself.
+ * @param {Effect} node
+ * @returns {void}
+ */
+function unshield(node) {
+	let count = HOLDS.get(node);
+	if (count !== undefined && count & HELD_SELF) {
+		countOff(node);
+		replay(node);
+	}
+}
+
+/**
+ * Counts the shield of `node` off it and off every owner above it. A
+ * node that no shield holds any more is unlocked; one whose disposal
+ * waited is marked disposed, for replay() to tear down.
+ * @param {Effect} node
+ * @returns {void}
+ */
+function countOff(node) {
+	let by = HELD_SELF;
+	let next = /** @type {Owner | null} */(node);
+	while (next !== null && next._flag & FLAG_OWNER) {
+		let count = /** @type {number} */(HOLDS.get(next)) - by;
+		if (count & ~HELD_DISPOSE) {
+			HOLDS.set(next, count);
+		} else {
+			HOLDS.delete(next);
+			next._flag &= ~FLAG_LOCKED;
+			if (count & HELD_DISPOSE) {
+				next._flag |= FLAG_DISPOSED;
+			}
+		}
+		by = HELD_BELOW;
+		next = next._owner;
+	}
+}
+
+/**
+ * Replays what the released shields deferred, on the path from `node`
+ * up. The nodes they freed are the bottom of the path, as an owner
+ * counts every shield below it. The topmost freed node whose disposal
+ * waited is torn down, children first. The topmost freed node with a
+ * deferred re-run above that is queued, unless an owner further up
+ * still waits to be disposed: then its subtree stays frozen, the re-run
+ * is dropped, and children created meanwhile are paused too.
+ * @param {Owner | null} node
+ * @returns {void}
+ */
+function replay(node) {
+	/** @type {Owner | null} */
+	let top = null;
+	/** @type {Owner | null} */
+	let disposed = null;
+	/** @type {Owner | null} */
+	let rerun = null;
+	let frozen = false;
+	for (let next = node; next !== null && next._flag & FLAG_OWNER; next = next._owner) {
+		let flag = next._flag;
+		if (flag & FLAG_LOCKED) {
+			if (/** @type {number} */(HOLDS.get(next)) & HELD_DISPOSE) {
+				frozen = true;
+				break;
+			}
+		} else {
+			top = next;
+			if (flag & FLAG_DISPOSED) {
+				disposed = next;
+				rerun = null;
+			} else if (flag & (FLAG_STALE | FLAG_PENDING)) {
+				rerun = next;
+			}
+		}
+	}
+	if (disposed !== null) {
+		disposeHeld(disposed);
+		if (disposed === top) {
+			return;
+		}
+	}
+	if (frozen) {
+		if (top !== null) {
+			pauseNode(top);
+		}
+	} else if (rerun !== null) {
+		/** @type {Effect} */(rerun)._receive();
+		flush();
+	}
+}
+
+/**
+ * Tears down a node whose disposal waited for its shields. Its owner
+ * may live on, so the node leaves the owner's children: the owner's own
+ * teardown must not dispose it a second time.
+ * @param {Owner} node
+ * @returns {void}
+ */
+function disposeHeld(node) {
+	let owner = node._owner;
+	try {
+		teardown(node);
+	} finally {
+		if (owner !== null && owner._flag & FLAG_OWNER && owner._owned !== null) {
+			let i = owner._owned.lastIndexOf(node);
+			if (i !== -1) {
+				owner._owned.splice(i, 1);
+			}
+		}
+	}
+}
+
+/**
+ * dispose(true) of a locked node: ends every shield under it, its own
+ * included, and disposes it now. The shielded activations are dropped
+ * at their next suspend, and what they deferred is not replayed, since
+ * the disposal takes it. An owner above that this frees replays its own
+ * deferred request.
+ * @param {Owner} node
+ * @returns {void}
+ */
+function forceDispose(node) {
+	let owner = node._owner;
+	/** @type {Array<Effect>} */
+	let shields = [];
+	HOLDS.forEach(function (count, held) {
+		if (count & HELD_SELF) {
+			for (let next = held; next !== null; next = next._owner) {
+				if (next === node) {
+					shields.push(held);
+					break;
+				}
+			}
+		}
+	});
+	for (let i = 0; i < shields.length; i++) {
+		countOff(shields[i]);
+	}
+	disposeHeld(node);
+	if (owner !== null) {
+		replay(owner);
+	}
+}
+
+/**
  * Disposes a node from outside the dispose queue: a deferred dispose
- * replayed on settle or unlock, or a node its error disposes. Outside
+ * replayed when a shield releases, or a node its error disposes. Outside
  * a flush, the rejections the teardown collects are delivered once it
  * has finished; inside one, the flush delivers them.
  * @param {Disposer} node
@@ -5221,6 +5487,9 @@ function failStart(node, error) {
 	if (result !== RECOVER_SELF) {
 		teardown(node);
 	}
+	if (node._flag & FLAG_LOCKED) {
+		unshield(node);
+	}
 	if (result === RECOVER_NONE) {
 		UNHANDLED = err;
 		UNHANDLED_NODE = node;
@@ -5307,9 +5576,16 @@ function flushEffects(queue, count, time) {
 			if (thrown === null && result === RECOVER_NONE) {
 				thrown = err;
 			}
-			if (result !== RECOVER_SELF) {
+			/** The throw ends the activation, and its shield: a locked
+			 *  node is disposed once that releases. */
+			if (result !== RECOVER_SELF || node._flag & FLAG_LOCKED) {
 				try {
-					node._dispose();
+					if (result !== RECOVER_SELF) {
+						node._dispose();
+					}
+					if (node._flag & FLAG_LOCKED) {
+						unshield(node);
+					}
 				} catch (cleanupError) {
 					if (thrown === null) {
 						thrown = defect(cleanupError);
