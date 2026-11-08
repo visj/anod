@@ -85,7 +85,7 @@ describe("ownership", () => {
         const outer = root((r) => {
             r.effect((cx) => {
                 cx.val(s);
-                if (inner === undefined) {
+                if (inner === void 0) {
                     inner = root((r2) => {
                         r2.effect((c2) => {
                             log.push(c2.val(s));
@@ -850,7 +850,7 @@ describe("error propagation", () => {
                 throw new Error("neg");
             }
             return v * 10;
-        }, undefined, opts);
+        }, void 0, opts);
         const stable = make(STABLE);
         const weak = make(WEAK);
         expect(stable.is(ERROR)).toBe(true);

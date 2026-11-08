@@ -620,7 +620,7 @@ function set(value) {
 		if (typeof value === "function") {
 			_value = value(this._value);
 			/** Mutable updater returning void — keep current value, still notify. */
-			if (_value === undefined && this._flag & FLAG_MUTABLE) {
+			if (_value === void 0 && this._flag & FLAG_MUTABLE) {
 				write = false;
 			}
 		} else {
@@ -676,7 +676,7 @@ function writeResource(node, value) {
 	if (typeof value === "function") {
 		value = value(node._value);
 		/** Mutable updater returning void — keep current value, still notify. */
-		if (value === undefined && node._flag & FLAG_MUTABLE) {
+		if (value === void 0 && node._flag & FLAG_MUTABLE) {
 			value = node._value;
 		}
 	}
@@ -759,7 +759,7 @@ function _runAsync(node, asyncFn, prev) {
 		return;
 	}
 	if (
-		result !== undefined &&
+		result !== void 0 &&
 		(node._flag & FLAG_MUTABLE ||
 			(node._equal !== null
 				? !node._equal(node._value, result)
@@ -789,7 +789,7 @@ function assign(node, value, time) {
 	if (typeof value === "function") {
 		_value = value(node._value);
 		/** Mutable updater returning void — keep current value, still notify. */
-		if (_value === undefined && node._flag & FLAG_MUTABLE) {
+		if (_value === void 0 && node._flag & FLAG_MUTABLE) {
 			write = false;
 		}
 	} else {
@@ -1079,7 +1079,7 @@ function root(fn) {
 			return;
 		}
 		this._flag |= FLAG_STALE;
-		this._value = undefined;
+		this._value = void 0;
 		if (this._cleanup !== null) {
 			if (IDLE) {
 				clearCleanup(this);
@@ -1332,8 +1332,8 @@ function root(fn) {
 	 * @returns {T | Array<T> | Promise<T | Array<T>> | void}
 	 */
 	function suspend(promiseOrTask, onResolve, onReject) {
-		if (onResolve !== undefined) {
-			suspendTo(this, promiseOrTask, onResolve, onReject === undefined ? null : onReject);
+		if (onResolve !== void 0) {
+			suspendTo(this, promiseOrTask, onResolve, onReject === void 0 ? null : onReject);
 			return;
 		}
 		/** Branch: setup function → callback constructor path.
@@ -1438,7 +1438,7 @@ function root(fn) {
 		if (awaits(taskNode, node)) {
 			throw new Error(CYCLE);
 		}
-		if (resolve !== undefined) {
+		if (resolve !== void 0) {
 			node._flag |= callbackFlags(node) | FLAG_RELAY;
 			send(node, taskNode, resolve, reject);
 			return REGRET;
@@ -1540,7 +1540,7 @@ function root(fn) {
 			return results;
 		}
 		node._flag |= FLAG_BLOCKED;
-		if (resolve !== undefined) {
+		if (resolve !== void 0) {
 			node._flag |= callbackFlags(node) | FLAG_RELAY;
 			_stepArray(node, tasks, results, resolve, reject);
 			return REGRET;
@@ -1732,7 +1732,7 @@ function root(fn) {
 			return;
 		}
 		let count = HOLDS.get(this);
-		if (count === undefined) {
+		if (count === void 0) {
 			count = 0;
 		} else if (count & HELD_SELF) {
 			return;
@@ -1742,7 +1742,7 @@ function root(fn) {
 		let owner = this._owner;
 		while (owner !== null && owner._flag & FLAG_OWNER) {
 			count = HOLDS.get(owner);
-			HOLDS.set(owner, count === undefined ? HELD_BELOW : count + HELD_BELOW);
+			HOLDS.set(owner, count === void 0 ? HELD_BELOW : count + HELD_BELOW);
 			owner._flag |= FLAG_LOCKED;
 			owner = owner._owner;
 		}
@@ -1959,7 +1959,7 @@ function root(fn) {
 	 */
 	CellProto._settle = function (value) {
 		if (isHolding(this)) {
-			hold(this, undefined, value);
+			hold(this, void 0, value);
 			return;
 		}
 		this._flag &= ~FLAG_LOADING;
@@ -2101,7 +2101,7 @@ function root(fn) {
 		if (!(this._flag & FLAG_ASYNC)) {
 			return set.call(this, value);
 		}
-		if (asyncFn === undefined) {
+		if (asyncFn === void 0) {
 			if (typeof value === "function") {
 				if (IDLE) {
 					if (this._flag & FLAG_SCHEDULED) {
@@ -2128,7 +2128,7 @@ function root(fn) {
 			if (typeof value === "function") {
 				_value = value(this._value);
 				/** Mutable updater returning void — keep current value, still notify. */
-				if (_value === undefined && this._flag & FLAG_MUTABLE) {
+				if (_value === void 0 && this._flag & FLAG_MUTABLE) {
 					_value = this._value;
 				}
 			}
@@ -2171,7 +2171,7 @@ function root(fn) {
 		if (!(this._flag & FLAG_ASYNC)) {
 			return post.call(this, value);
 		}
-		if (asyncFn !== undefined) {
+		if (asyncFn !== void 0) {
 			schedule(this, { _value: value, _fn: asyncFn }, asyncAssign);
 		} else {
 			schedule(this, value, typeof value === "function" ? asyncRun : writeResource);
@@ -2295,7 +2295,7 @@ function root(fn) {
 		let scheduled = node._flag & FLAG_SCHEDULED;
 		receiver._flag = flag | FLAG_PAUSED;
 		try {
-			if (payload._fn !== undefined) {
+			if (payload._fn !== void 0) {
 				asyncAssign(/** @type {AsyncSender<T>} */(node), payload, time);
 			} else if (node._flag & FLAG_ASYNC) {
 				writeResource(/** @type {AsyncSender<T>} */(node), payload._value);
@@ -2323,7 +2323,7 @@ function root(fn) {
 	 */
 	function contextSet(sender, value, asyncFn) {
 		if (IDLE) {
-			if (asyncFn === undefined && sender._flag & FLAG_ASYNC) {
+			if (asyncFn === void 0 && sender._flag & FLAG_ASYNC) {
 				let flag = this._flag;
 				let changed = false;
 				this._flag = flag | FLAG_PAUSED;
@@ -2342,7 +2342,7 @@ function root(fn) {
 			if (typeof value === "function") {
 				_value = value(sender._value);
 				/** Mutable updater returning void — keep current value, still notify. */
-				if (_value === undefined && sender._flag & FLAG_MUTABLE) {
+				if (_value === void 0 && sender._flag & FLAG_MUTABLE) {
 					write = false;
 				}
 			} else {
@@ -2367,13 +2367,13 @@ function root(fn) {
 				release(this, flag);
 				flush();
 			}
-			if (asyncFn !== undefined && sender._flag & FLAG_ASYNC) {
+			if (asyncFn !== void 0 && sender._flag & FLAG_ASYNC) {
 				_runAsync(/** @type {AsyncSender} */(sender), asyncFn, _value);
 			}
 		} else {
 			schedule(
 				sender,
-				{ _recv: this, _value: value, _fn: sender._flag & FLAG_ASYNC ? asyncFn : undefined },
+				{ _recv: this, _value: value, _fn: sender._flag & FLAG_ASYNC ? asyncFn : void 0 },
 				guardedAssign
 			);
 		}
@@ -2395,7 +2395,7 @@ function root(fn) {
 	function contextPost(sender, value, asyncFn) {
 		schedule(
 			sender,
-			{ _recv: this, _value: value, _fn: sender._flag & FLAG_ASYNC ? asyncFn : undefined },
+			{ _recv: this, _value: value, _fn: sender._flag & FLAG_ASYNC ? asyncFn : void 0 },
 			guardedAssign
 		);
 		if (!POSTING) {
@@ -2437,7 +2437,7 @@ function root(fn) {
 	 */
 	ComputeProto._settle = function (value) {
 		if (isHolding(this)) {
-			hold(this, undefined, value);
+			hold(this, void 0, value);
 			return;
 		}
 		let flag = this._flag;
@@ -2728,11 +2728,11 @@ function root(fn) {
 				let held = HELD[i + 2];
 				dropHeld(i);
 				this._flag &= ~(FLAG_SUSPEND | FLAG_RELAY);
-				if (fn !== undefined && fn !== null) {
+				if (fn !== void 0 && fn !== null) {
 					this._flag |= FLAG_LOADING;
 					try {
 						held = fn(held);
-						fn = undefined;
+						fn = void 0;
 					} catch (err) {
 						held = err;
 						fn = null;
@@ -2994,10 +2994,10 @@ function root(fn) {
 				let held = HELD[i + 2];
 				dropHeld(i);
 				this._flag &= ~FLAG_RELAY;
-				if (fn !== undefined && fn !== null) {
+				if (fn !== void 0 && fn !== null) {
 					try {
 						fn(held);
-						fn = undefined;
+						fn = void 0;
 					} catch (err) {
 						held = err;
 						fn = null;
@@ -3051,7 +3051,7 @@ function root(fn) {
 		/** Settled by its callback while the fn still runs: _update
 		 *  finishes the activation once the fn has returned. */
 		if (isHolding(this)) {
-			hold(this, undefined, undefined);
+			hold(this, void 0, void 0);
 			return;
 		}
 		let flag = this._flag;
@@ -4473,7 +4473,7 @@ function resolveIterator(node, iterator, time) {
 		 *  nothing, the last yield already settled the node; if it never
 		 *  yielded, it settles to its current value (the seed or previous). */
 		if (result.done) {
-			if (result.value !== undefined) {
+			if (result.value !== void 0) {
 				node._settle(result.value);
 			} else if (node._flag & FLAG_LOADING) {
 				node._settle(node._value);
@@ -5112,7 +5112,7 @@ function deferDispose(node) {
 function isFrozen(node) {
 	for (let next = node; next !== null && next._flag & FLAG_OWNER; next = next._owner) {
 		let count = HOLDS.get(next);
-		if (count !== undefined && count & HELD_DISPOSE) {
+		if (count !== void 0 && count & HELD_DISPOSE) {
 			return true;
 		}
 	}
@@ -5128,7 +5128,7 @@ function isFrozen(node) {
  */
 function unshield(node) {
 	let count = HOLDS.get(node);
-	if (count !== undefined && count & HELD_SELF) {
+	if (count !== void 0 && count & HELD_SELF) {
 		countOff(node);
 		replay(node);
 	}

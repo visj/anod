@@ -706,7 +706,7 @@ describe("28: a weak compute's throwing cleanup corrupts its reader", () => {
                 });
                 return cx.val(src);
             },
-            undefined,
+            void 0,
             WEAK
         );
         const log = [];
@@ -751,7 +751,7 @@ describe("28: a weak compute's throwing cleanup corrupts its reader", () => {
                 });
                 return cx.val(src);
             },
-            undefined,
+            void 0,
             WEAK
         );
         let runs = 0;
@@ -790,7 +790,7 @@ describe("28: a weak compute's throwing cleanup corrupts its reader", () => {
                 });
                 return cx.val(src);
             },
-            undefined,
+            void 0,
             WEAK
         );
         let runs = 0;
@@ -850,7 +850,7 @@ describe("30: c.equal() is ignored when a task settles asynchronously", () => {
         const t = c.task(async (cx, prev) => {
             cx.val(id);
             const data = await cx.suspend(Promise.resolve({ name: "same" }));
-            cx.equal(prev !== undefined && prev.name === data.name);
+            cx.equal(prev !== void 0 && prev.name === data.name);
             return data;
         });
         await settle();
@@ -1254,7 +1254,7 @@ describe("33: an error escaping a flush's pre-run check deafens queued effects",
                     return -1;
                 }
             },
-            undefined,
+            void 0,
             EAGER
         );
         const log = [];
@@ -1487,7 +1487,7 @@ describe("36: c.suspend(task) in a stable task drops the task", () => {
         const outer = c.task(async (cx) => {
             runs++;
             return await cx.suspend(t);
-        }, undefined, STABLE);
+        }, void 0, STABLE);
         c.effect((cx) => {
             cx.val(outer);
         });

@@ -23,10 +23,10 @@ describe("is()", () => {
     test("reads back the creation options of a compute", () => {
         const s = signal(1);
         const plain = c.compute((cx) => cx.val(s));
-        const stable = c.compute((cx) => cx.val(s), undefined, STABLE);
-        const weak = c.compute((cx) => cx.val(s), undefined, WEAK);
-        const eager = c.compute((cx) => cx.val(s), undefined, EAGER);
-        const deferred = c.compute((cx) => cx.val(s), undefined, DEFER);
+        const stable = c.compute((cx) => cx.val(s), void 0, STABLE);
+        const weak = c.compute((cx) => cx.val(s), void 0, WEAK);
+        const eager = c.compute((cx) => cx.val(s), void 0, EAGER);
+        const deferred = c.compute((cx) => cx.val(s), void 0, DEFER);
         expect([plain.is(STABLE), plain.is(WEAK), plain.is(EAGER), plain.is(DEFER)]).toEqual([false, false, false, false]);
         expect(stable.is(STABLE)).toBe(true);
         expect(weak.is(WEAK)).toBe(true);
@@ -37,7 +37,7 @@ describe("is()", () => {
 
     test("JavaScript can pass several options at creation", () => {
         const s = signal(1);
-        const n = c.compute((cx) => cx.val(s), undefined, STABLE | WEAK);
+        const n = c.compute((cx) => cx.val(s), void 0, STABLE | WEAK);
         expect([n.is(STABLE), n.is(WEAK), n.is(EAGER)]).toEqual([true, true, false]);
     });
 
@@ -58,7 +58,7 @@ describe("is()", () => {
         const n = c.compute((cx) => {
             seen = [cx.is(STABLE), cx.is(DISPOSED)];
             return cx.val(s);
-        }, undefined, STABLE);
+        }, void 0, STABLE);
         n.get();
         expect(seen).toEqual([true, false]);
     });

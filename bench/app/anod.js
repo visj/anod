@@ -42,18 +42,18 @@ function createSelector(r, source) {
     let prev = source.get();
     r.effect(source, (id) => {
         const old = keys.get(prev);
-        if (old !== undefined) {
+        if (old !== void 0) {
             old.set(false);
         }
         const next = keys.get(id);
-        if (next !== undefined) {
+        if (next !== void 0) {
             next.set(true);
         }
         prev = id;
     });
     return (id) => {
         let s = keys.get(id);
-        if (s === undefined) {
+        if (s === void 0) {
             s = signal(id === prev);
             keys.set(id, s);
         }
@@ -122,7 +122,7 @@ function mountApp(r, store, footer) {
             }
         }
         return n;
-    }, undefined, BOUND ? STABLE : 0);
+    }, void 0, BOUND ? STABLE : 0);
     if (BOUND) {
         r.effect(doneCount, (v) => { effects++; footer.textContent = v + ' done'; });
         r.effect(store.filter, (v) => { effects++; storage = v; });

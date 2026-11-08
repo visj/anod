@@ -315,7 +315,7 @@ describe("dynamic dependencies", () => {
         let mode = false;
         const a = signal(1);
         const x = c.compute((cx) => cx.val(a) * 2);
-        const w = c.compute((cx) => (mode ? cx.val(x) : 0), undefined, WEAK);
+        const w = c.compute((cx) => (mode ? cx.val(x) : 0), void 0, WEAK);
         const e = c.effect((cx) => {
             cx.val(w);
         });
@@ -338,7 +338,7 @@ describe("dynamic dependencies", () => {
         let mode = false;
         const a = signal(1);
         const x = c.compute((cx) => cx.val(a) * 2);
-        const w = c.compute((cx) => (mode ? cx.val(x) : 0), undefined, WEAK);
+        const w = c.compute((cx) => (mode ? cx.val(x) : 0), void 0, WEAK);
         const e = c.effect((cx) => {
             cx.val(w);
         });
@@ -523,7 +523,7 @@ describe("version stamping across nesting", () => {
         const lazy = c.compute((cx) => {
             lazyRuns++;
             return cx.val(a) + cx.val(b);
-        }, undefined, DEFER);
+        }, void 0, DEFER);
         expect(lazyRuns).toBe(0);
         const seen = [];
         const e = c.effect((cx) => {
@@ -828,7 +828,7 @@ describe("cycles", () => {
         `;
         const args = typeof Bun !== "undefined" ? ["-e", code] : ["--input-type=module", "-e", code];
         const res = spawnSync(process.execPath, args, { timeout: 4000, encoding: "utf8" });
-        const timedOut = res.error !== undefined || res.signal !== null;
+        const timedOut = res.error !== void 0 || res.signal !== null;
         expect(timedOut).toBe(false);
     });
 });
@@ -841,7 +841,7 @@ describe("options", () => {
         const x = c.compute((cx) => {
             runs++;
             return cx.val(flag) ? cx.val(a) : -1;
-        }, undefined, STABLE);
+        }, void 0, STABLE);
         const seen = [];
         c.effect((cx) => {
             seen.push(cx.val(x));
@@ -881,7 +881,7 @@ describe("options", () => {
         const a = signal(1);
         const s = signal(1);
         const xc = c.compute((cx) => cx.val(s) * 100);
-        const bound = c.compute(a, (v, cx) => v + cx.val(xc), undefined, SETUP);
+        const bound = c.compute(a, (v, cx) => v + cx.val(xc), void 0, SETUP);
         const seen = [];
         c.effect((cx) => {
             seen.push(cx.val(bound));
@@ -916,7 +916,7 @@ describe("options", () => {
         const x = c.compute(s, (v) => {
             runs++;
             return v * 2;
-        }, undefined, DEFER);
+        }, void 0, DEFER);
         s.set(2);
         expect(runs).toBe(0);
         const seen = [];
@@ -938,7 +938,7 @@ describe("options", () => {
                 cleanups++;
             });
             return cx.val(s) * 2;
-        }, undefined, WEAK);
+        }, void 0, WEAK);
         const e1 = c.effect((cx) => {
             cx.val(w);
         });
@@ -978,12 +978,12 @@ describe("options", () => {
         e.dispose();
         expect(w._value).toBeUndefined();
         w.get();
-        expect(prevs).toEqual([100, undefined]);
+        expect(prevs).toEqual([100, void 0]);
     });
 
     test("WEAK: a default parameter reapplies after release", () => {
         const s = signal(1);
-        const w = c.compute((cx, prev = 100) => prev + cx.val(s), undefined, WEAK);
+        const w = c.compute((cx, prev = 100) => prev + cx.val(s), void 0, WEAK);
         const e = c.effect((cx) => {
             cx.val(w);
         });
@@ -1024,7 +1024,7 @@ describe("options", () => {
         });
         e.dispose();
         w.get();
-        expect(prevs).toEqual([100, undefined]);
+        expect(prevs).toEqual([100, void 0]);
     });
 
     /**
@@ -1038,7 +1038,7 @@ describe("options", () => {
      */
     test("EAGER: recomputing to the same value does not re-run downstream effects", () => {
         const s = signal(1);
-        const parity = c.compute((cx) => cx.val(s) % 2, undefined, EAGER);
+        const parity = c.compute((cx) => cx.val(s) % 2, void 0, EAGER);
         let runs = 0;
         c.effect((cx) => {
             cx.val(parity);
@@ -1063,7 +1063,7 @@ describe("options", () => {
         const eg = c.compute((cx) => {
             egRuns++;
             return cx.val(par) * 10;
-        }, undefined, EAGER);
+        }, void 0, EAGER);
         let runs = 0;
         c.effect((cx) => {
             cx.val(eg);
@@ -1080,16 +1080,16 @@ describe("options", () => {
         const eg = c.compute((cx) => {
             runs++;
             return cx.val(s);
-        }, undefined, EAGER);
+        }, void 0, EAGER);
         s.set(2);
         s.set(3);
         expect(runs).toBe(3);
-        const lazy = c.compute((cx) => cx.val(s), undefined, EAGER);
+        const lazy = c.compute((cx) => cx.val(s), void 0, EAGER);
         let runs2 = 0;
         const eg2 = c.compute((cx) => {
             runs2++;
             return cx.val(lazy) * 2;
-        }, undefined, EAGER);
+        }, void 0, EAGER);
         s.set(4);
         expect(runs).toBe(4);
         expect(runs2).toBe(2);

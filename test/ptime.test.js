@@ -87,7 +87,7 @@ describe("ptime guard: correct usage patterns", () => {
 
         test("stable effect always reads all deps -- compute is always pulled", () => {
             const s = signal(0);
-            const comp = c.compute(r => { return r.val(s) + 1; }, undefined, STABLE);
+            const comp = c.compute(r => { return r.val(s) + 1; }, void 0, STABLE);
 
             let effectRuns = 0;
             let lastVal = 0;
@@ -110,8 +110,8 @@ describe("ptime guard: correct usage patterns", () => {
         test("stable effect with two deps always pulls both", () => {
             const s1 = signal(0);
             const s2 = signal(10);
-            const c1 = c.compute(r => { return r.val(s1) + 1; }, undefined, STABLE);
-            const c2 = c.compute(r => { return r.val(s2) + 1; }, undefined, STABLE);
+            const c1 = c.compute(r => { return r.val(s1) + 1; }, void 0, STABLE);
+            const c2 = c.compute(r => { return r.val(s2) + 1; }, void 0, STABLE);
 
             let effectRuns = 0;
             let lastVal = 0;
@@ -136,9 +136,9 @@ describe("ptime guard: correct usage patterns", () => {
 
         test("diamond: both arms stale in same round", () => {
             const s = signal(0);
-            const left = c.compute(r => { return r.val(s) + 1; }, undefined, STABLE);
-            const right = c.compute(r => { return r.val(s) * 10; }, undefined, STABLE);
-            const join = c.compute(r => { return r.val(left) + r.val(right); }, undefined, STABLE);
+            const left = c.compute(r => { return r.val(s) + 1; }, void 0, STABLE);
+            const right = c.compute(r => { return r.val(s) * 10; }, void 0, STABLE);
+            const join = c.compute(r => { return r.val(left) + r.val(right); }, void 0, STABLE);
 
             let effectRuns = 0;
             c.effect(r => {
@@ -159,9 +159,9 @@ describe("ptime guard: correct usage patterns", () => {
 
         test("deep diamond with pending/stale split", () => {
             const s = signal(0);
-            const a = c.compute(r => { return r.val(s) + 1; }, undefined, STABLE);
-            const b = c.compute(r => { return r.val(a) + 1; }, undefined, STABLE);
-            const d = c.compute(r => { return r.val(a) + r.val(b); }, undefined, STABLE);
+            const a = c.compute(r => { return r.val(s) + 1; }, void 0, STABLE);
+            const b = c.compute(r => { return r.val(a) + 1; }, void 0, STABLE);
+            const d = c.compute(r => { return r.val(a) + r.val(b); }, void 0, STABLE);
 
             let effectRuns = 0;
             c.effect(r => {

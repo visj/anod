@@ -14,7 +14,7 @@ describe("garbage collection", () => {
 
         await new Promise((resolve) => {
             collect(() => {
-                expect(ref.deref() !== undefined).toBe(true); // "Active compute should remain"
+                expect(ref.deref() !== void 0).toBe(true); // "Active compute should remain"
                 resolve();
             });
         });

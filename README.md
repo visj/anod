@@ -752,7 +752,7 @@ root((c) => {
 	 */
 	const formatted = c.compute(
 		(c) => signals.map((i) => `Item: ${c.val(i)}`),
-		undefined,
+		void 0,
 		STABLE
 	);
 
@@ -764,7 +764,7 @@ root((c) => {
 				return c.val(second);
 			}
 		},
-		undefined,
+		void 0,
 		STABLE
 	);
 
@@ -795,7 +795,7 @@ root((c) => {
 			});
 			return rows;
 		},
-		undefined,
+		void 0,
 		WEAK
 	);
 
@@ -813,7 +813,7 @@ root((c) => {
 Releasing keeps nothing from the compute's previous life, not even its seed. The seed is only the first `prev`, and a released compute has no `prev`, so the recompute receives `undefined`. A reducer that should restart from an initial value uses a default parameter, which applies on the first run and after every release:
 
 ```ts
-const totals = c.compute((c, prev = []) => [...prev, c.val(entry)], undefined, WEAK);
+const totals = c.compute((c, prev = []) => [...prev, c.val(entry)], void 0, WEAK);
 ```
 
 State that must survive a release belongs in `args`, the last argument of `compute()`, which the compute keeps for its whole lifetime and passes to every run.
@@ -829,7 +829,7 @@ Makes a compute push-based instead of pull-based. An eager compute re-evaluates 
 ```ts
 import { root, signal, LOADING, ERROR, DISPOSED, STABLE } from "anod";
 root((c) => {
-	const user = c.task(async (c) => fetchUser(), undefined, STABLE);
+	const user = c.task(async (c) => fetchUser(), void 0, STABLE);
 	user.is(STABLE); // true
 	user.is(LOADING); // true while the fetch is in flight
 	user.is(ERROR); // true if the fetch failed

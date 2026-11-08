@@ -6,7 +6,7 @@ describe("WEAK", () => {
         const s1 = signal({ data: "large" });
         const c1 = c.compute(c => {
             return c.val(s1);
-        }, undefined, WEAK);
+        }, void 0, WEAK);
 
         const e1 = c.effect(c => {
             c.val(c1);
@@ -26,7 +26,7 @@ describe("WEAK", () => {
         const c1 = c.compute(c => {
             runs++;
             return c.val(s1);
-        }, undefined, WEAK);
+        }, void 0, WEAK);
 
         const e1 = c.effect(c => {
             c.val(c1);
@@ -49,7 +49,7 @@ describe("WEAK", () => {
         const c1 = c.compute(c => {
             runs++;
             return c.val(s1);
-        }, undefined, WEAK);
+        }, void 0, WEAK);
 
         const e1 = c.effect(c => {
             c.val(c1);
@@ -75,7 +75,7 @@ describe("WEAK", () => {
         const c1 = c.compute(c => {
             runs++;
             return c.val(s1);
-        }, undefined, WEAK);
+        }, void 0, WEAK);
 
         const e1 = c.effect(c => {
             c.val(c1);
@@ -99,7 +99,7 @@ describe("WEAK", () => {
         const c1 = c.compute(c => {
             runs++;
             return c.val(s1) * 2;
-        }, undefined, WEAK);
+        }, void 0, WEAK);
 
         const e1 = c.effect(c => {
             c.val(c1);
@@ -121,7 +121,7 @@ describe("WEAK", () => {
         const c1 = c.compute(c => {
             runs++;
             return c.val(s1);
-        }, undefined, WEAK);
+        }, void 0, WEAK);
 
         /** First subscriber */
         const e1 = c.effect(c => {
@@ -162,7 +162,7 @@ describe("WEAK", () => {
         const weak1 = c.compute(c => {
             runs++;
             return c.val(s1);
-        }, undefined, WEAK);
+        }, void 0, WEAK);
 
         /**
          * This compute conditionally reads weak1.  When the
@@ -193,7 +193,7 @@ describe("WEAK", () => {
         const c1 = c.compute(c => {
             runs++;
             return c.val(s1);
-        }, undefined, WEAK);
+        }, void 0, WEAK);
 
         const e1 = c.effect(c => {
             c.val(c1);
@@ -236,7 +236,7 @@ describe("WEAK", () => {
         const c1 = c.compute(c => {
             runs1++;
             return c.val(s1);
-        }, undefined, WEAK);
+        }, void 0, WEAK);
         const c2 = c.compute(c => {
             return c.val(c1) * 2;
         });
@@ -263,7 +263,7 @@ describe("WEAK", () => {
         const c1 = c.compute(c => {
             runs1++;
             return c.val(s1);
-        }, undefined, WEAK);
+        }, void 0, WEAK);
         const c2 = c.compute(c => {
             return c.val(c1) * 2;
         });
@@ -290,7 +290,7 @@ describe("WEAK", () => {
         const c1 = c.compute(c => {
             runs++;
             return c.val(s1);
-        }, undefined, WEAK);
+        }, void 0, WEAK);
 
         let effectVal = 0;
         const e1 = c.effect(c => {
@@ -323,7 +323,7 @@ describe("WEAK", () => {
         const w = c.compute((cx) => {
             cx.cleanup(() => log.push("cleanup"));
             return cx.val(src);
-        }, undefined, WEAK);
+        }, void 0, WEAK);
         c.effect((cx) => {
             if (cx.val(mode)) {
                 cx.val(w);
@@ -344,7 +344,7 @@ describe("WEAK", () => {
             const k = ++n;
             cx.cleanup(() => log.push("cleanup" + k));
             return cx.val(src);
-        }, undefined, WEAK);
+        }, void 0, WEAK);
         /** The first drops w, the second picks it up in the same pass. */
         c.effect((cx) => {
             if (cx.val(mode)) {

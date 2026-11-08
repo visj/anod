@@ -107,7 +107,7 @@ describe("dispose", () => {
             const bound = c.compute(dep, (val, cx) => {
                 calls++;
                 return val * cx.val(k);
-            }, undefined, SETUP);
+            }, void 0, SETUP);
             expect(bound.get()).toBe(1);
 
             dep.dispose();

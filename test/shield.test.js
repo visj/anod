@@ -64,11 +64,11 @@ describe("shield", () => {
       await settle();
       expect(steps).toEqual(["start:1"]);
 
-      resolve(undefined);
+      resolve(void 0);
       await settle();
       expect(steps).toEqual(["start:1", "end:1", "start:2"]);
 
-      resolve(undefined);
+      resolve(void 0);
       await settle();
       expect(steps).toEqual(["start:1", "end:1", "start:2", "end:2"]);
     });
@@ -93,12 +93,12 @@ describe("shield", () => {
       await settle();
       expect(runs).toBe(1);
 
-      resolve(undefined);
+      resolve(void 0);
       await settle();
       expect(values).toEqual([1]);
       expect(runs).toBe(2);
 
-      resolve(undefined);
+      resolve(void 0);
       await settle();
       expect(values).toEqual([1, 2]);
     });
@@ -119,11 +119,11 @@ describe("shield", () => {
 
       s1.set(2);
       await settle();
-      resolve(undefined);
+      resolve(void 0);
       await settle();
       expect(values).toEqual([2]);
 
-      resolve(undefined);
+      resolve(void 0);
       await settle();
       expect(values).toEqual([2, 4]);
     });
@@ -616,7 +616,7 @@ describe("shield", () => {
        *  The old promise resolves — should be discarded (stale).
        *  After discarding, FLAG_STALE is set so the next pull re-runs. */
       s1.set(2);
-      resolve(undefined);
+      resolve(void 0);
       await settle();
 
       /** Task is still loading (old activation discarded, FLAG_STALE set).
@@ -626,7 +626,7 @@ describe("shield", () => {
       expect(runs).toBe(2);
 
       /** Resolve the new activation. */
-      resolve(undefined);
+      resolve(void 0);
       await settle();
       expect(t1.get()).toBe(4);
     });
@@ -653,16 +653,16 @@ describe("shield", () => {
           observed.push(cx.val(t1));
         }
       });
-      resolve(undefined);
+      resolve(void 0);
       await settle();
       expect(observed).toEqual([2]);
       expect(runs).toBe(1);
 
       /** Change dep while loading. Effect ensures task re-runs. */
       s1.set(2);
-      resolve(undefined);
+      resolve(void 0);
       await settle();
-      resolve(undefined);
+      resolve(void 0);
       await settle();
       expect(observed).toEqual([2, 4]);
       expect(runs).toBe(2);

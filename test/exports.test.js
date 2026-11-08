@@ -21,17 +21,17 @@ function compile(source) {
     const host = ts.createCompilerHost(options);
     const getSourceFile = host.getSourceFile;
     host.getSourceFile = (fileName, version, ...rest) => {
-        if (source !== undefined && path.resolve(fileName) === checkPath) {
+        if (source !== void 0 && path.resolve(fileName) === checkPath) {
             return ts.createSourceFile(fileName, source, version);
         }
         return getSourceFile.call(host, fileName, version, ...rest);
     };
-    const roots = source !== undefined ? [indexPath, internalPath, checkPath] : [indexPath, internalPath];
+    const roots = source !== void 0 ? [indexPath, internalPath, checkPath] : [indexPath, internalPath];
     const program = ts.createProgram(roots, options, host);
     const all = ts.getPreEmitDiagnostics(program);
     const diagnostics = all.map((d) => ts.flattenDiagnosticMessageText(d.messageText, "\n"));
     const lines = all.map((d) =>
-        d.file !== undefined && path.resolve(d.file.fileName) === checkPath
+        d.file !== void 0 && path.resolve(d.file.fileName) === checkPath
             ? d.file.getLineAndCharacterOfPosition(d.start).line
             : -1
     );
@@ -104,13 +104,13 @@ describe("declarations", () => {
         const { diagnostics } = compile(`
             import { c, signal, root, STABLE, WEAK, EAGER, DEFER, SETUP, DISPOSED, LOADING, ERROR, REFUSE, PANIC, Defect } from "./index.js";
             const s = signal(1);
-            const n = c.compute((cx) => cx.val(s), undefined, STABLE);
-            c.compute((cx) => cx.val(s), undefined, WEAK);
-            c.compute((cx) => cx.val(s), undefined, EAGER);
-            c.compute(s, (v) => v, undefined, SETUP);
+            const n = c.compute((cx) => cx.val(s), void 0, STABLE);
+            c.compute((cx) => cx.val(s), void 0, WEAK);
+            c.compute((cx) => cx.val(s), void 0, EAGER);
+            c.compute(s, (v) => v, void 0, SETUP);
             c.effect((cx) => { cx.is(STABLE); }, DEFER);
             c.spawn(async (cx) => { cx.is(LOADING); }, STABLE);
-            c.task(async (cx) => 1, undefined, EAGER);
+            c.task(async (cx) => 1, void 0, EAGER);
             n.is(STABLE);
             n.is(LOADING);
             s.is(ERROR);
@@ -123,12 +123,12 @@ describe("declarations", () => {
 
     test("misused options, states and Defect types are compile errors", () => {
         const cases = [
-            "c.compute(() => 1, undefined, ERROR);",
+            "c.compute(() => 1, void 0, ERROR);",
             "c.effect(() => {}, LOADING);",
             "c.effect(() => {}, WEAK);",
             "c.spawn(async () => {}, EAGER);",
-            "c.compute(() => 1, undefined, STABLE | WEAK);",
-            "c.compute(() => 1, undefined, 2048);",
+            "c.compute(() => 1, void 0, STABLE | WEAK);",
+            "c.compute(() => 1, void 0, 2048);",
             "n.is(REFUSE);",
             "n.is(LOADING | ERROR);",
             "if (d.type === ERROR) {}",

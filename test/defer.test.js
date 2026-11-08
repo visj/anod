@@ -5,7 +5,7 @@ describe("DEFER", () => {
     describe("compute", () => {
         test("does not run fn until val() is read", () => {
             let runs = 0;
-            const c1 = c.compute(() => { runs++; return 1; }, undefined, DEFER);
+            const c1 = c.compute(() => { runs++; return 1; }, void 0, DEFER);
             expect(runs).toBe(0);
             expect(c1.get()).toBe(1);
             expect(runs).toBe(1);
@@ -16,7 +16,7 @@ describe("DEFER", () => {
         test("defers initial run", () => {
             const s1 = signal(1);
             let runs = 0;
-            const c1 = c.compute(c => { runs++; return c.val(s1) * 2; }, undefined, DEFER | STABLE);
+            const c1 = c.compute(c => { runs++; return c.val(s1) * 2; }, void 0, DEFER | STABLE);
             expect(runs).toBe(0);
             expect(c1.get()).toBe(2);
             expect(runs).toBe(1);
@@ -27,7 +27,7 @@ describe("DEFER", () => {
         test("defers async compute until read", () => {
             const s1 = signal(3);
             let runs = 0;
-            const c1 = c.compute(c => { runs++; return c.val(s1); }, undefined, DEFER | STABLE);
+            const c1 = c.compute(c => { runs++; return c.val(s1); }, void 0, DEFER | STABLE);
             expect(runs).toBe(0);
         });
     });
@@ -47,7 +47,7 @@ describe("DEFER", () => {
             root(r => {
                 const s1 = signal(10);
                 let runs = 0;
-                const c1 = r.compute(c => { runs++; return c.val(s1) * 2; }, undefined, DEFER | STABLE);
+                const c1 = r.compute(c => { runs++; return c.val(s1) * 2; }, void 0, DEFER | STABLE);
                 expect(runs).toBe(0);
                 expect(c1.get()).toBe(20);
                 expect(runs).toBe(1);

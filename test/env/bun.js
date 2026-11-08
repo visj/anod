@@ -35,7 +35,7 @@ export async function collectAsync() {
 export async function expectCollected(refs) {
     await collectAsync();
     for (let i = 0; i < 10; i++) {
-        if (refs.every((ref) => ref.deref() === undefined)) {
+        if (refs.every((ref) => ref.deref() === void 0)) {
             return;
         }
         await new Promise((r) => setTimeout(r, 1));

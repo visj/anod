@@ -273,7 +273,7 @@ describe("async", () => {
         },
         return() {
           returnCalled = true;
-          return Promise.resolve({ value: undefined, done: true });
+          return Promise.resolve({ value: void 0, done: true });
         }
       };
 
@@ -433,7 +433,7 @@ describe("async", () => {
       const s1 = signal(1);
       let captured;
       const c1 = c.task(async (c) => {
-        if (captured === undefined) {
+        if (captured === void 0) {
           captured = c;
         }
         await c.suspend(tick());
@@ -503,7 +503,7 @@ describe("async", () => {
         const v2 = c.val(s2);
         await c.suspend(tick());
         return v1 + v2;
-      }, undefined, STABLE);
+      }, void 0, STABLE);
       await settle();
       expect(c1.get()).toBe(11);
 
@@ -524,7 +524,7 @@ describe("async", () => {
         const v2 = v1 > 1 ? c.val(s2) : 0;
         await c.suspend(tick());
         return v1 + v2;
-      }, undefined, STABLE);
+      }, void 0, STABLE);
       await settle();
       expect(c1.get()).toBe(1);
 

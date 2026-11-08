@@ -38,18 +38,18 @@ function createSelector(source) {
     effect(() => {
         const id = source();
         const old = keys.get(prev);
-        if (old !== undefined) {
+        if (old !== void 0) {
             old(false);
         }
         const next = keys.get(id);
-        if (next !== undefined) {
+        if (next !== void 0) {
             next(true);
         }
         prev = id;
     });
     return (id) => {
         let s = keys.get(id);
-        if (s === undefined) {
+        if (s === void 0) {
             s = signal(id === prev);
             keys.set(id, s);
         }

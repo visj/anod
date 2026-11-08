@@ -30,7 +30,7 @@ describe("stable compute", () => {
 				return cx.val(victim); // new dep in stable mode
 			}
 			return -1;
-		}, undefined, STABLE);
+		}, void 0, STABLE);
 
 		// Run setup
 		expect(stable.get()).toBe(-1);
@@ -74,7 +74,7 @@ describe("stable compute", () => {
 				return base + cx.val(victim);
 			}
 			return base;
-		}, undefined, STABLE);
+		}, void 0, STABLE);
 
 		expect(outer.get()).toBe(100);
 
