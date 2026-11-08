@@ -1,5 +1,5 @@
 import { describe, test, expect } from "#test-runner";
-import { signal, root, REFUSE, PANIC, FATAL, c } from "#anod";
+import { signal, root, REFUSE, PANIC, FATAL, c, ERROR } from "#anod";
 
 const tick = () => Promise.resolve();
 const settle = () => tick().then(tick).then(tick);
@@ -24,7 +24,7 @@ describe("error types", () => {
         return v;
       });
       expect(c1.get()).toBe(1);
-      expect(c1.error).toBe(false);
+      expect(c1.is(ERROR)).toBe(false);
 
       s1.set(20);
       /** Compute is lazy — must pull to trigger re-run. */
@@ -34,7 +34,7 @@ describe("error types", () => {
       } catch (e) {
         caught = e;
       }
-      expect(c1.error).toBe(true);
+      expect(c1.is(ERROR)).toBe(true);
       expect(c1.get().type).toBe(REFUSE);
       expect(c1.get().error).toBe("too large");
     });
@@ -43,7 +43,7 @@ describe("error types", () => {
       const c1 = c.compute((cx) => {
         return cx.refuse("nope");
       });
-      expect(c1.error).toBe(true);
+      expect(c1.is(ERROR)).toBe(true);
       expect(c1.get().type).toBe(REFUSE);
       expect(c1.get().error).toBe("nope");
     });
@@ -68,7 +68,7 @@ describe("error types", () => {
       } catch (e) {
         caught = e;
       }
-      expect(c2.error).toBe(true);
+      expect(c2.is(ERROR)).toBe(true);
       expect(c2.get().type).toBe(REFUSE);
     });
 
@@ -85,12 +85,12 @@ describe("error types", () => {
 
       s1.set(20);
       try { c1.get(); } catch (e) { }
-      expect(c1.error).toBe(true);
+      expect(c1.is(ERROR)).toBe(true);
 
       /** Fix the input — error clears, value updates. */
       s1.set(5);
       expect(c1.get()).toBe(5);
-      expect(c1.error).toBe(false);
+      expect(c1.is(ERROR)).toBe(false);
     });
   });
 
@@ -99,7 +99,7 @@ describe("error types", () => {
       const c1 = c.compute((cx) => {
         cx.panic("critical");
       });
-      expect(c1.error).toBe(true);
+      expect(c1.is(ERROR)).toBe(true);
       expect(c1.get().type).toBe(PANIC);
       expect(c1.get().error).toBe("critical");
     });
@@ -154,7 +154,7 @@ describe("error types", () => {
       const c1 = c.compute((cx) => {
         cx.panic("sync panic");
       });
-      expect(c1.error).toBe(true);
+      expect(c1.is(ERROR)).toBe(true);
       expect(c1.get().type).toBe(PANIC);
       expect(c1.get().error).toBe("sync panic");
     });

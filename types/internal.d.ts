@@ -54,18 +54,38 @@ export declare const FLAG_PURGE: number;
 export declare const FLAG_PAUSED: number;
 export declare const FLAG_OWNER: number;
 export declare const FLAG_CALLBACK: number;
-export declare const FLAG_FREEZE: number;
 export declare const FLAG_VISIT: number;
 export declare const FLAG_REFUSE: number;
 
-export declare const REFUSE: 1;
-export declare const PANIC: 2;
-export declare const FATAL: 3;
+/* The brands are private: `export {}` keeps the declarations below
+ * that are not exported out of the module. */
+export {};
+declare const OPTION: unique symbol;
+declare const EFFECT_OPTION: unique symbol;
+declare const STATE: unique symbol;
+declare const DEFECT_TYPE: unique symbol;
+
+/**
+ * A creation option: STABLE, EAGER, WEAK, DEFER or SETUP. Pass one in a
+ * factory's `opts`; it is fixed once the node is created, and `is()`
+ * reads it back.
+ */
+export type Option = number & { readonly [OPTION]: true };
+/** The options an effect or spawn takes too: STABLE, DEFER and SETUP. */
+export type EffectOption = Option & { readonly [EFFECT_OPTION]: true };
+/** A node state, read with `is()`: DISPOSED, LOADING or ERROR. */
+export type State = number & { readonly [STATE]: true };
+/** The type of a Defect: REFUSE, PANIC or FATAL. */
+export type DefectType = number & { readonly [DEFECT_TYPE]: true };
+
+export declare const REFUSE: DefectType;
+export declare const PANIC: DefectType;
+export declare const FATAL: DefectType;
 
 /** An error in the signal graph, tagged REFUSE, PANIC or FATAL. */
 export declare class Defect<T = unknown> {
-	constructor(error: T, type: typeof REFUSE | typeof PANIC | typeof FATAL);
-	type: typeof REFUSE | typeof PANIC | typeof FATAL;
+	constructor(error: T, type: DefectType);
+	type: DefectType;
 	error: T;
 }
 
@@ -76,14 +96,35 @@ export declare function panic<E>(error: E): Defect<E>;
 /** Creates a FATAL Defect. */
 export declare function fatal<E>(error: E): Defect<E>;
 
-export declare const OPT_DEFER: number;
-export declare const OPT_STABLE: number;
-export declare const OPT_SETUP: number;
-export declare const OPT_WEAK: number;
-export declare const OPT_EAGER: number;
+/**
+ * Skips the node's first run: a compute runs when it is first read, a
+ * bound effect when its dep first changes.
+ */
+export declare const DEFER: EffectOption;
+/**
+ * Tracks dependencies on the first run only. Later runs read through
+ * `c.val()` without subscribing. A bound node is always stable.
+ */
+export declare const STABLE: EffectOption;
+/** A bound node also tracks the `c.val()` reads of its first run. */
+export declare const SETUP: EffectOption;
+/** A compute releases its value and runs its cleanups once it loses its last subscriber. */
+export declare const WEAK: Option;
+/** A compute re-runs as soon as a dependency changes, instead of when it is read. */
+export declare const EAGER: Option;
 
 /** Every option flag, for masking the opts a caller passes in. */
 export declare const OPTIONS: number;
+
+/** The node has been disposed. */
+export declare const DISPOSED: State;
+/** The node waits on async work. */
+export declare const LOADING: State;
+/** The node's value is a Defect. */
+export declare const ERROR: State;
+
+/** Every bit `is()` answers for; the rest are internal. */
+export declare const PUBLIC: number;
 
 /* Recovery outcomes — who, if anyone, handled an error. */
 export declare const RECOVER_NONE: 0;
@@ -98,6 +139,8 @@ export declare const ILLEGAL_READ: string;
 export interface ReadonlySignal<T = any> {
 	get(): T;
 	notify(): void;
+	/** Whether the node has `flag` set: a creation option or a state. */
+	is(flag: Option | State): boolean;
 }
 
 export interface Signal<T = any> extends ReadonlySignal<T> {
@@ -123,8 +166,6 @@ export interface MutableSignal<T = any> extends ReadonlySignal<T> {
 }
 
 export interface Resource<T = any> extends Signal<T> {
-	readonly error: boolean;
-	readonly loading: boolean;
 	set(value: T): boolean;
 	set(fn: (c: ResourceContext, current: T) => T | Promise<T>): boolean;
 	set(
@@ -160,13 +201,7 @@ export interface CellConstructor {
 export declare var Cell: CellConstructor;
 
 export interface Compute<T = any> extends ReadonlySignal<T> {
-	readonly disposed: boolean;
 	dispose(): void;
-	readonly error: boolean;
-	readonly loading: boolean;
-	weak(): void;
-	eager(): void;
-	stable(): void;
 	cleanup(fn: () => void): void;
 }
 
@@ -210,7 +245,8 @@ export declare var Compute: ComputeConstructor;
 export interface Task<T = any> extends Compute<T> {}
 
 export interface Root {
-	readonly disposed: boolean;
+	/** Whether the node has `flag` set: a creation option or a state. */
+	is(flag: Option | State): boolean;
 	recover(fn: (error: Defect) => boolean): void;
 	cleanup(fn: () => void): void;
 	/**
@@ -231,10 +267,7 @@ export interface RootConstructor {
 
 export declare var Root: RootConstructor;
 
-export interface Effect extends Root {
-	readonly loading: boolean;
-	stable(): void;
-}
+export interface Effect extends Root {}
 
 /** Pass `null` as `dep1` for an unbound effect, or a sender to bind it. */
 export interface EffectConstructor {
@@ -326,7 +359,8 @@ export interface Context {
 	version(): number;
 	controller(): AbortController;
 	defer<R>(sender: Sender<R>): R;
-	stable(): void;
+	/** Whether this node has `flag` set: a creation option or a state. */
+	is(flag: Option | State): boolean;
 }
 
 /** Dependency tracking — adds val() for reading and subscribing. */
@@ -351,6 +385,8 @@ export interface ComputeReader extends ComputeContext, Reader {}
 export interface RootContext extends Factory {
 	cleanup(fn: () => void): void;
 	recover(fn: (error: Defect) => boolean): void;
+	/** Whether this node has `flag` set: a creation option or a state. */
+	is(flag: Option | State): boolean;
 }
 
 /** Bound effect callback context. */
@@ -433,13 +469,13 @@ export interface Factory {
 	compute<U, W>(
 		fn: (c: ComputeReader, prev: U, args: W) => U,
 		seed: U,
-		opts?: number,
+		opts?: Option,
 		args?: W
 	): Compute<U>;
 	compute<U, W>(
 		fn: (c: ComputeReader, prev: U | undefined, args: W) => U,
 		seed?: U,
-		opts?: number,
+		opts?: Option,
 		args?: W
 	): Compute<U>;
 	// Bound compute
@@ -456,7 +492,7 @@ export interface Factory {
 		dep: Sender<T>,
 		fn: (val: T, c: ComputeContext, prev: U, args: W) => U,
 		seed: U,
-		opts?: number,
+		opts?: Option,
 		args?: W
 	): Compute<U>;
 
@@ -464,12 +500,12 @@ export interface Factory {
 	task<U>(
 		fn: (c: TaskReader, prev: Resolve<U>) => Promise<U>,
 		seed?: Resolve<U>,
-		opts?: number
+		opts?: Option
 	): Task<Resolve<U>>;
 	task<U, W>(
 		fn: (c: TaskReader, prev: Resolve<U>, args: W) => Promise<U>,
 		seed?: Resolve<U>,
-		opts?: number,
+		opts?: Option,
 		args?: W
 	): Task<Resolve<U>>;
 	// Bound task
@@ -477,35 +513,35 @@ export interface Factory {
 		dep: Sender<T>,
 		fn: (val: T, c: TaskContext, prev: Resolve<U>) => Promise<U>,
 		seed?: Resolve<U>,
-		opts?: number
+		opts?: Option
 	): Task<Resolve<U>>;
 
 	// Unbound effect
-	effect(fn: (c: EffectReader) => void, opts?: number): Effect;
+	effect(fn: (c: EffectReader) => void, opts?: EffectOption): Effect;
 	effect<W>(
 		fn: (c: EffectReader, args: W) => void,
-		opts?: number,
+		opts?: EffectOption,
 		args?: W
 	): Effect;
 	// Bound effect
 	effect<T>(
 		dep: Sender<T>,
 		fn: (val: T, c: EffectContext) => void,
-		opts?: number
+		opts?: EffectOption
 	): Effect;
 
 	// Unbound spawn
-	spawn(fn: (c: SpawnReader) => Promise<void>, opts?: number): Spawn;
+	spawn(fn: (c: SpawnReader) => Promise<void>, opts?: EffectOption): Spawn;
 	spawn<W>(
 		fn: (c: SpawnReader, args: W) => Promise<void>,
-		opts?: number,
+		opts?: EffectOption,
 		args?: W
 	): Spawn;
 	// Bound spawn
 	spawn<T>(
 		dep: Sender<T>,
 		fn: (val: T, c: SpawnContext) => Promise<void>,
-		opts?: number
+		opts?: EffectOption
 	): Spawn;
 }
 

@@ -1,5 +1,5 @@
 import { describe, test, expect } from "#test-runner";
-import { signal, root, c, REFUSE, PANIC, FATAL, refuse } from "#anod";
+import { signal, root, c, REFUSE, PANIC, FATAL, refuse, LOADING, ERROR } from "#anod";
 
 const tick = () => Promise.resolve();
 const settle = async (n = 10) => {
@@ -89,10 +89,10 @@ describe("c.suspend(task, onResolve, onReject)", () => {
 				cx.suspend(g.task, (v) => v * 2);
 			});
 		});
-		expect(doubled.loading).toBe(true);
+		expect(doubled.is(LOADING)).toBe(true);
 		g.resolve(21);
 		await settle();
-		expect(doubled.loading).toBe(false);
+		expect(doubled.is(LOADING)).toBe(false);
 		expect(doubled.get()).toBe(42);
 		r.dispose();
 	});
@@ -105,7 +105,7 @@ describe("c.suspend(task, onResolve, onReject)", () => {
 				cx.suspend(task, (v) => v * 2);
 			});
 		});
-		expect(doubled.loading).toBe(false);
+		expect(doubled.is(LOADING)).toBe(false);
 		expect(doubled.get()).toBe(10);
 		r.dispose();
 	});
@@ -129,7 +129,7 @@ describe("c.suspend(task, onResolve, onReject)", () => {
 		await settle();
 		expect(seen.type).toBe(FATAL);
 		expect(seen.error).toBe("boom");
-		expect(safe.error).toBe(false);
+		expect(safe.is(ERROR)).toBe(false);
 		expect(safe.get()).toBe("fallback");
 		r.dispose();
 	});
@@ -148,7 +148,7 @@ describe("c.suspend(task, onResolve, onReject)", () => {
 			d.resolve();
 		});
 		await settle();
-		expect(dst.error).toBe(true);
+		expect(dst.is(ERROR)).toBe(true);
 		expect(dst.get()).toBe(src.get());
 		expect(dst.get().type).toBe(REFUSE);
 		r.dispose();
@@ -185,7 +185,7 @@ describe("c.suspend(task, onResolve, onReject)", () => {
 		});
 		g.resolve(1);
 		await settle();
-		expect(dst.error).toBe(true);
+		expect(dst.is(ERROR)).toBe(true);
 		expect(dst.get().type).toBe(FATAL);
 		expect(dst.get().error).toBeInstanceOf(TypeError);
 		r.dispose();

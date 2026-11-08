@@ -1,5 +1,5 @@
 import { describe, test, expect } from "#test-runner";
-import { signal, root, batch, c } from "#anod";
+import { signal, root, batch, c, STABLE } from "#anod";
 
 /**
  * Tests exploring whether _ptime is necessary when the library
@@ -87,15 +87,14 @@ describe("ptime guard: correct usage patterns", () => {
 
         test("stable effect always reads all deps -- compute is always pulled", () => {
             const s = signal(0);
-            const comp = c.compute(r => { r.stable(); return r.val(s) + 1; });
+            const comp = c.compute(r => { return r.val(s) + 1; }, void 0, STABLE);
 
             let effectRuns = 0;
             let lastVal = 0;
             c.effect(r => {
-                r.stable();
                 effectRuns++;
                 lastVal = r.val(comp);
-            });
+            }, STABLE);
             expect(effectRuns).toBe(1);
             expect(lastVal).toBe(1);
 
@@ -111,16 +110,15 @@ describe("ptime guard: correct usage patterns", () => {
         test("stable effect with two deps always pulls both", () => {
             const s1 = signal(0);
             const s2 = signal(10);
-            const c1 = c.compute(r => { r.stable(); return r.val(s1) + 1; });
-            const c2 = c.compute(r => { r.stable(); return r.val(s2) + 1; });
+            const c1 = c.compute(r => { return r.val(s1) + 1; }, void 0, STABLE);
+            const c2 = c.compute(r => { return r.val(s2) + 1; }, void 0, STABLE);
 
             let effectRuns = 0;
             let lastVal = 0;
             c.effect(r => {
-                r.stable();
                 effectRuns++;
                 lastVal = r.val(c1) + r.val(c2);
-            });
+            }, STABLE);
             expect(effectRuns).toBe(1);
             expect(lastVal).toBe(12);
 
@@ -138,9 +136,9 @@ describe("ptime guard: correct usage patterns", () => {
 
         test("diamond: both arms stale in same round", () => {
             const s = signal(0);
-            const left = c.compute(r => { r.stable(); return r.val(s) + 1; });
-            const right = c.compute(r => { r.stable(); return r.val(s) * 10; });
-            const join = c.compute(r => { r.stable(); return r.val(left) + r.val(right); });
+            const left = c.compute(r => { return r.val(s) + 1; }, void 0, STABLE);
+            const right = c.compute(r => { return r.val(s) * 10; }, void 0, STABLE);
+            const join = c.compute(r => { return r.val(left) + r.val(right); }, void 0, STABLE);
 
             let effectRuns = 0;
             c.effect(r => {
@@ -161,9 +159,9 @@ describe("ptime guard: correct usage patterns", () => {
 
         test("deep diamond with pending/stale split", () => {
             const s = signal(0);
-            const a = c.compute(r => { r.stable(); return r.val(s) + 1; });
-            const b = c.compute(r => { r.stable(); return r.val(a) + 1; });
-            const d = c.compute(r => { r.stable(); return r.val(a) + r.val(b); });
+            const a = c.compute(r => { return r.val(s) + 1; }, void 0, STABLE);
+            const b = c.compute(r => { return r.val(a) + 1; }, void 0, STABLE);
+            const d = c.compute(r => { return r.val(a) + r.val(b); }, void 0, STABLE);
 
             let effectRuns = 0;
             c.effect(r => {

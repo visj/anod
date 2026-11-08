@@ -1,5 +1,5 @@
 import { describe, test, expect } from "#test-runner";
-import { signal, resource, root, batch, flush, c, REFUSE, PANIC, FATAL, refuse, panic, OPT_DEFER, OPT_STABLE, OPT_SETUP, OPT_WEAK, OPT_EAGER } from "#anod-src";
+import { signal, resource, root, batch, flush, c, REFUSE, PANIC, FATAL, refuse, panic, DEFER, STABLE, SETUP, WEAK, EAGER, DISPOSED, ERROR } from "#anod-src";
 
 /**
  * Exploratory tests: ownership, disposal, cleanup/finalize and error
@@ -29,9 +29,9 @@ describe("ownership", () => {
         const oldEffect = childEffect;
         const oldCompute = childCompute;
         s.set(1);
-        expect(oldEffect.disposed).toBe(true);
-        expect(oldCompute.disposed).toBe(true);
-        expect(childEffect.disposed).toBe(false);
+        expect(oldEffect.is(DISPOSED)).toBe(true);
+        expect(oldCompute.is(DISPOSED)).toBe(true);
+        expect(childEffect.is(DISPOSED)).toBe(false);
         log.length = 0;
         inner.set(5);
         /** Only the new child reacts; the old one is gone for good. */
@@ -73,7 +73,7 @@ describe("ownership", () => {
         s.set(2);
         expect(runs).toEqual([0, 1, 2]);
         r1.dispose();
-        expect(leaf.disposed).toBe(true);
+        expect(leaf.is(DISPOSED)).toBe(true);
         s.set(3);
         expect(runs).toEqual([0, 1, 2]);
     });
@@ -85,7 +85,7 @@ describe("ownership", () => {
         const outer = root((r) => {
             r.effect((cx) => {
                 cx.val(s);
-                if (inner === undefined) {
+                if (inner === void 0) {
                     inner = root((r2) => {
                         r2.effect((c2) => {
                             log.push(c2.val(s));
@@ -95,7 +95,7 @@ describe("ownership", () => {
             });
         });
         outer.dispose();
-        expect(inner.disposed).toBe(false);
+        expect(inner.is(DISPOSED)).toBe(false);
         s.set(1);
         expect(log).toEqual([0, 1]);
         inner.dispose();
@@ -161,7 +161,7 @@ describe("disposal timing", () => {
             });
         });
         s.set(1);
-        expect(r1.disposed).toBe(true);
+        expect(r1.is(DISPOSED)).toBe(true);
         const settled = log.length;
         s.set(2);
         s.set(3);
@@ -175,7 +175,7 @@ describe("disposal timing", () => {
             r.effect(() => {
                 r.dispose();
             });
-            disposedAfterEffect = r.disposed;
+            disposedAfterEffect = r.is(DISPOSED);
             try {
                 r.effect(() => { });
             } catch (e) {
@@ -200,7 +200,7 @@ describe("disposal timing", () => {
             e.dispose();
         });
         expect(log).toEqual([0]);
-        expect(e.disposed).toBe(true);
+        expect(e.is(DISPOSED)).toBe(true);
     });
 
     test("disposing twice runs cleanup once", () => {
@@ -393,7 +393,7 @@ describe("cleanup and finalize", () => {
         expect(calls).toBe(1);
         expect(caught.type).toBe(FATAL);
         expect(caught.error.message).toBe("cleanup boom");
-        expect(e.disposed).toBe(true);
+        expect(e.is(DISPOSED)).toBe(true);
     });
 
     /**
@@ -420,7 +420,7 @@ describe("cleanup and finalize", () => {
         try {
             r1.dispose();
         } catch (e) { }
-        expect(r1.disposed).toBe(true);
+        expect(r1.is(DISPOSED)).toBe(true);
         s.set(1);
         expect(log).toEqual([0]);
     });
@@ -472,7 +472,7 @@ describe("error propagation", () => {
             caught = err;
         }
         expect(caught instanceof TypeError).toBe(false);
-        expect(e.disposed).toBe(true);
+        expect(e.is(DISPOSED)).toBe(true);
     });
 
     /**
@@ -745,7 +745,7 @@ describe("error propagation", () => {
                 trigger.set(1);
             });
         } catch (e) { }
-        expect(creator.disposed).toBe(false);
+        expect(creator.is(DISPOSED)).toBe(false);
         s.set(1);
         expect(runs).toEqual([0, 1]);
     });
@@ -766,7 +766,7 @@ describe("error propagation", () => {
             });
         });
         expect(log).toEqual(["recovered:init", "second"]);
-        expect(failed.disposed).toBe(true);
+        expect(failed.is(DISPOSED)).toBe(true);
         r1.dispose();
     });
 
@@ -793,8 +793,8 @@ describe("error propagation", () => {
         });
         s.set(1);
         expect(log).toEqual(["leaf:0", "root:leaf"]);
-        expect(leaf.disposed).toBe(true);
-        expect(mid.disposed).toBe(false);
+        expect(leaf.is(DISPOSED)).toBe(true);
+        expect(mid.is(DISPOSED)).toBe(false);
     });
 
     test("an effect that recovers itself re-runs once the errored compute heals", () => {
@@ -850,14 +850,14 @@ describe("error propagation", () => {
                 throw new Error("neg");
             }
             return v * 10;
-        }, undefined, opts);
-        const stable = make(OPT_STABLE);
-        const weak = make(OPT_WEAK);
-        expect(stable.error).toBe(true);
-        expect(weak.error).toBe(true);
+        }, void 0, opts);
+        const stable = make(STABLE);
+        const weak = make(WEAK);
+        expect(stable.is(ERROR)).toBe(true);
+        expect(weak.is(ERROR)).toBe(true);
         s.set(2);
         expect(stable.get()).toBe(20);
-        expect(stable.error).toBe(false);
+        expect(stable.is(ERROR)).toBe(false);
         expect(weak.get()).toBe(20);
         const seen = [];
         const e = c.effect(weak, (v) => seen.push(v));
@@ -913,7 +913,7 @@ describe("engine state after errors", () => {
             caught = e;
         }
         expect(caught.error.message).toBe("bad");
-        expect(bad.disposed).toBe(true);
+        expect(bad.is(DISPOSED)).toBe(true);
         s.set(2);
         expect(log).toEqual([0, 1, 2]);
     });
@@ -953,7 +953,7 @@ describe("engine state after errors", () => {
             s.set(1);
         } catch (e) { }
         other.set(1);
-        expect(victim.disposed).toBe(true);
+        expect(victim.is(DISPOSED)).toBe(true);
         expect(runs).toBe(1);
     });
 
@@ -989,7 +989,7 @@ describe("engine state after errors", () => {
         try {
             s.set(1);
         } catch (e) { }
-        expect(bad.disposed).toBe(true);
+        expect(bad.is(DISPOSED)).toBe(true);
         s.set(2);
         expect(log).toEqual([0, 1, 2]);
     });

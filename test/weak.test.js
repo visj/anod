@@ -1,12 +1,12 @@
 import { describe, test, expect } from "#test-runner";
-import { signal, root, batch, OPT_WEAK, c } from "#anod";
+import { signal, root, batch, WEAK, c } from "#anod";
 
-describe("OPT_WEAK", () => {
+describe("WEAK", () => {
     test("releases value when last subscriber disposes", () => {
         const s1 = signal({ data: "large" });
         const c1 = c.compute(c => {
             return c.val(s1);
-        }, undefined, OPT_WEAK);
+        }, void 0, WEAK);
 
         const e1 = c.effect(c => {
             c.val(c1);
@@ -26,7 +26,7 @@ describe("OPT_WEAK", () => {
         const c1 = c.compute(c => {
             runs++;
             return c.val(s1);
-        }, undefined, OPT_WEAK);
+        }, void 0, WEAK);
 
         const e1 = c.effect(c => {
             c.val(c1);
@@ -49,7 +49,7 @@ describe("OPT_WEAK", () => {
         const c1 = c.compute(c => {
             runs++;
             return c.val(s1);
-        }, undefined, OPT_WEAK);
+        }, void 0, WEAK);
 
         const e1 = c.effect(c => {
             c.val(c1);
@@ -75,7 +75,7 @@ describe("OPT_WEAK", () => {
         const c1 = c.compute(c => {
             runs++;
             return c.val(s1);
-        }, undefined, OPT_WEAK);
+        }, void 0, WEAK);
 
         const e1 = c.effect(c => {
             c.val(c1);
@@ -99,7 +99,7 @@ describe("OPT_WEAK", () => {
         const c1 = c.compute(c => {
             runs++;
             return c.val(s1) * 2;
-        }, undefined, OPT_WEAK);
+        }, void 0, WEAK);
 
         const e1 = c.effect(c => {
             c.val(c1);
@@ -121,7 +121,7 @@ describe("OPT_WEAK", () => {
         const c1 = c.compute(c => {
             runs++;
             return c.val(s1);
-        }, undefined, OPT_WEAK);
+        }, void 0, WEAK);
 
         /** First subscriber */
         const e1 = c.effect(c => {
@@ -162,7 +162,7 @@ describe("OPT_WEAK", () => {
         const weak1 = c.compute(c => {
             runs++;
             return c.val(s1);
-        }, undefined, OPT_WEAK);
+        }, void 0, WEAK);
 
         /**
          * This compute conditionally reads weak1.  When the
@@ -193,7 +193,7 @@ describe("OPT_WEAK", () => {
         const c1 = c.compute(c => {
             runs++;
             return c.val(s1);
-        }, undefined, OPT_WEAK);
+        }, void 0, WEAK);
 
         const e1 = c.effect(c => {
             c.val(c1);
@@ -236,7 +236,7 @@ describe("OPT_WEAK", () => {
         const c1 = c.compute(c => {
             runs1++;
             return c.val(s1);
-        }, undefined, OPT_WEAK);
+        }, void 0, WEAK);
         const c2 = c.compute(c => {
             return c.val(c1) * 2;
         });
@@ -263,7 +263,7 @@ describe("OPT_WEAK", () => {
         const c1 = c.compute(c => {
             runs1++;
             return c.val(s1);
-        }, undefined, OPT_WEAK);
+        }, void 0, WEAK);
         const c2 = c.compute(c => {
             return c.val(c1) * 2;
         });
@@ -284,13 +284,13 @@ describe("OPT_WEAK", () => {
         expect(runs1).toBe(1);
     });
 
-    test("OPT_WEAK with batch", () => {
+    test("WEAK with batch", () => {
         let runs = 0;
         const s1 = signal(1);
         const c1 = c.compute(c => {
             runs++;
             return c.val(s1);
-        }, undefined, OPT_WEAK);
+        }, void 0, WEAK);
 
         let effectVal = 0;
         const e1 = c.effect(c => {
@@ -323,7 +323,7 @@ describe("OPT_WEAK", () => {
         const w = c.compute((cx) => {
             cx.cleanup(() => log.push("cleanup"));
             return cx.val(src);
-        }, undefined, OPT_WEAK);
+        }, void 0, WEAK);
         c.effect((cx) => {
             if (cx.val(mode)) {
                 cx.val(w);
@@ -344,7 +344,7 @@ describe("OPT_WEAK", () => {
             const k = ++n;
             cx.cleanup(() => log.push("cleanup" + k));
             return cx.val(src);
-        }, undefined, OPT_WEAK);
+        }, void 0, WEAK);
         /** The first drops w, the second picks it up in the same pass. */
         c.effect((cx) => {
             if (cx.val(mode)) {

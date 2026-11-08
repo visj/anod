@@ -1,5 +1,5 @@
 import { describe, test, expect } from "#test-runner";
-import { signal, root, batch } from "#anod";
+import { signal, root, batch, LOADING } from "#anod";
 
 const tick = () => Promise.resolve();
 const settle = () => tick().then(tick).then(tick);
@@ -167,12 +167,12 @@ describe("stale spawn activation", () => {
 		});
 
 		await settle();
-		expect(spawnRef.loading).toBe(false);
+		expect(spawnRef.is(LOADING)).toBe(false);
 
 		trigger.set(1);
 		await settle();
 		/** After re-run and settle, should not be loading. */
-		expect(spawnRef.loading).toBe(false);
+		expect(spawnRef.is(LOADING)).toBe(false);
 		r.dispose();
 	});
 

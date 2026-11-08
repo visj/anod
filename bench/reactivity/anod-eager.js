@@ -1,16 +1,19 @@
 /**
  * Anod eager-compute benchmark. Same as anod-post but all compute
- * nodes are marked .eager() — push-based like Solid 2.0's memos.
+ * nodes are created with EAGER — push-based like Solid 2.0's memos.
  * This measures the cost of anod when every memo re-evaluates
  * immediately on notification instead of waiting to be pulled.
  */
 import { bench, run } from 'mitata';
 import { EXPECTED_EAGER } from './expected.js';
-import { signal, root, batch, flush, c } from '../../dist/index.js';
+import { signal, root, batch, flush, c, EAGER } from '../../dist/index.js';
 import { saveRun } from './save-run.js';
 
 let sink = 0;
 let counter = 0;
+
+/** Every compute in this file is eager. */
+const eager = (r, fn, seed) => r.compute(fn, seed, EAGER);
 
 
 const fib = (n) => {
@@ -29,8 +32,7 @@ function setupDeep() {
         let current = head;
         for (let i = 0; i < len; i++) {
             const prev = current;
-            current = r.compute(cx => { counter++; return cx.val(prev) + 1; });
-            current.eager();
+            current = eager(r, cx => { counter++; return cx.val(prev) + 1; });
         }
         const tail = current;
         r.effect(cx => { counter++; sink += cx.val(tail); });
@@ -45,10 +47,8 @@ function setupBroad() {
     root((r) => {
         const head = signal(0);
         for (let i = 0; i < 50; i++) {
-            const current = r.compute(cx => { counter++; return cx.val(head) + i; });
-            current.eager();
-            const current2 = r.compute(cx => { counter++; return cx.val(current) + 1; });
-            current2.eager();
+            const current = eager(r, cx => { counter++; return cx.val(head) + i; });
+            const current2 = eager(r, cx => { counter++; return cx.val(current) + 1; });
             r.effect(cx => { counter++; sink += cx.val(current2); });
         }
         let i = 0;
@@ -64,12 +64,10 @@ function setupDiamond() {
         const head = signal(0);
         const branches = [];
         for (let i = 0; i < width; i++) {
-            const b = r.compute(cx => { counter++; return cx.val(head) + 1; });
-            b.eager();
+            const b = eager(r, cx => { counter++; return cx.val(head) + 1; });
             branches.push(b);
         }
-        const sum = r.compute(cx => { counter++; return branches.reduce((a, b) => a + cx.val(b), 0); });
-        sum.eager();
+        const sum = eager(r, cx => { counter++; return branches.reduce((a, b) => a + cx.val(b), 0); });
         r.effect(cx => { counter++; sink += cx.val(sum); });
         let i = 0;
         run = () => { head.post(++i); flush(); };
@@ -87,12 +85,10 @@ function setupTriangle() {
         for (let i = 0; i < width - 1; i++) {
             const prev = current;
             list.push(current);
-            current = r.compute(cx => { counter++; return cx.val(prev) + 1; });
-            current.eager();
+            current = eager(r, cx => { counter++; return cx.val(prev) + 1; });
         }
         list.push(current);
-        const sum = r.compute(cx => { counter++; return list.reduce((a, b) => a + cx.val(b), 0); });
-        sum.eager();
+        const sum = eager(r, cx => { counter++; return list.reduce((a, b) => a + cx.val(b), 0); });
         r.effect(cx => { counter++; sink += cx.val(sum); });
         let i = 0;
         run = () => { head.post(++i); flush(); };
@@ -104,11 +100,10 @@ function setupMux() {
     let run;
     root((r) => {
         const heads = new Array(100).fill(null).map(() => signal(0));
-        const mux = r.compute(cx => { counter++; return heads.map(h => cx.val(h)); });
-        mux.eager();
+        const mux = eager(r, cx => { counter++; return heads.map(h => cx.val(h)); });
         const split = heads
-            .map((_, index) => { const n = r.compute(cx => { counter++; return cx.val(mux)[index]; }); n.eager(); return n; })
-            .map(x => { const n = r.compute(cx => { counter++; return cx.val(x) + 1; }); n.eager(); return n; });
+            .map((_, index) => { const n = eager(r, cx => { counter++; return cx.val(mux)[index]; }); return n; })
+            .map(x => { const n = eager(r, cx => { counter++; return cx.val(x) + 1; }); return n; });
         for (const x of split) {
             r.effect(cx => { counter++; sink += cx.val(x); });
         }
@@ -122,11 +117,9 @@ function setupUnstable() {
     let run;
     root((r) => {
         const head = signal(0);
-        const double = r.compute(cx => { counter++; return cx.val(head) * 2; });
-        double.eager();
-        const inverse = r.compute(cx => { counter++; return -cx.val(head); });
-        inverse.eager();
-        const current = r.compute(cx => {
+        const double = eager(r, cx => { counter++; return cx.val(head) * 2; });
+        const inverse = eager(r, cx => { counter++; return -cx.val(head); });
+        const current = eager(r, cx => {
             counter++;
             let result = 0;
             for (let i = 0; i < 20; i++) {
@@ -134,7 +127,6 @@ function setupUnstable() {
             }
             return result;
         });
-        current.eager();
         r.effect(cx => { counter++; sink += cx.val(current); });
         let i = 0;
         run = () => { head.post(++i); flush(); };
@@ -146,16 +138,11 @@ function setupAvoidable() {
     let run;
     root((r) => {
         const head = signal(0);
-        const computed1 = r.compute(cx => { counter++; return cx.val(head); });
-        computed1.eager();
-        const computed2 = r.compute(cx => { counter++; cx.val(computed1); return 0; });
-        computed2.eager();
-        const computed3 = r.compute(cx => { counter++; return cx.val(computed2) + 1; });
-        computed3.eager();
-        const computed4 = r.compute(cx => { counter++; return cx.val(computed3) + 2; });
-        computed4.eager();
-        const computed5 = r.compute(cx => { counter++; return cx.val(computed4) + 3; });
-        computed5.eager();
+        const computed1 = eager(r, cx => { counter++; return cx.val(head); });
+        const computed2 = eager(r, cx => { counter++; cx.val(computed1); return 0; });
+        const computed3 = eager(r, cx => { counter++; return cx.val(computed2) + 1; });
+        const computed4 = eager(r, cx => { counter++; return cx.val(computed3) + 2; });
+        const computed5 = eager(r, cx => { counter++; return cx.val(computed4) + 3; });
         r.effect(cx => { counter++; sink += cx.val(computed5); });
         let i = 0;
         run = () => { head.post(++i); flush(); };
@@ -168,13 +155,12 @@ function setupRepeatedObservers() {
     root((r) => {
         const size = 30;
         const head = signal(0);
-        const current = r.compute(cx => {
+        const current = eager(r, cx => {
             counter++;
             let result = 0;
             for (let i = 0; i < size; i++) result += cx.val(head);
             return result;
         });
-        current.eager();
         r.effect(cx => { counter++; sink += cx.val(current); });
         let i = 0;
         run = () => { head.post(++i); flush(); };
@@ -196,10 +182,10 @@ function setupCellx(layers) {
         let layer = start;
         for (let i = layers; i > 0; i--) {
             const m = layer;
-            const p1 = r.compute(cx => { counter++; return cx.val(m.prop2); }); p1.eager();
-            const p2 = r.compute(cx => { counter++; return cx.val(m.prop1) - cx.val(m.prop3); }); p2.eager();
-            const p3 = r.compute(cx => { counter++; return cx.val(m.prop2) + cx.val(m.prop4); }); p3.eager();
-            const p4 = r.compute(cx => { counter++; return cx.val(m.prop3); }); p4.eager();
+            const p1 = eager(r, cx => { counter++; return cx.val(m.prop2); });
+            const p2 = eager(r, cx => { counter++; return cx.val(m.prop1) - cx.val(m.prop3); });
+            const p3 = eager(r, cx => { counter++; return cx.val(m.prop2) + cx.val(m.prop4); });
+            const p4 = eager(r, cx => { counter++; return cx.val(m.prop3); });
             const s = { prop1: p1, prop2: p2, prop3: p3, prop4: p4 };
             r.effect(cx => { counter++; sink += cx.val(s.prop1); });
             r.effect(cx => { counter++; sink += cx.val(s.prop2); });
@@ -237,11 +223,11 @@ function setupMolWire() {
         const numbers = Array.from({ length: 5 }, (_, i) => i);
         const A = signal(0);
         const B = signal(0);
-        const C = r.compute(cx => { counter++; return (cx.val(A) % 2) + (cx.val(B) % 2); }); C.eager();
-        const D = r.compute(cx => { counter++; return numbers.map(i => ({ x: i + (cx.val(A) % 2) - (cx.val(B) % 2) })); }); D.eager();
-        const E = r.compute(cx => { counter++; return hard(cx.val(C) + cx.val(A) + cx.val(D)[0].x, 'E'); }); E.eager();
-        const F = r.compute(cx => { counter++; return hard(cx.val(D)[2].x || cx.val(B), 'F'); }); F.eager();
-        const G = r.compute(cx => { counter++; return cx.val(C) + (cx.val(C) || cx.val(E) % 2) + cx.val(D)[4].x + cx.val(F); }); G.eager();
+        const C = eager(r, cx => { counter++; return (cx.val(A) % 2) + (cx.val(B) % 2); });
+        const D = eager(r, cx => { counter++; return numbers.map(i => ({ x: i + (cx.val(A) % 2) - (cx.val(B) % 2) })); });
+        const E = eager(r, cx => { counter++; return hard(cx.val(C) + cx.val(A) + cx.val(D)[0].x, 'E'); });
+        const F = eager(r, cx => { counter++; return hard(cx.val(D)[2].x || cx.val(B), 'F'); });
+        const G = eager(r, cx => { counter++; return cx.val(C) + (cx.val(C) || cx.val(E) % 2) + cx.val(D)[4].x + cx.val(F); });
         r.effect(cx => { counter++; sink += hard(cx.val(G), 'H'); });
         r.effect(cx => { counter++; sink += cx.val(G); });
         r.effect(cx => { counter++; sink += hard(cx.val(F), 'J'); });
@@ -273,8 +259,7 @@ function benchCreateComputations(count) {
         run = () => {
             const src = signal(0);
             for (let i = 0; i < count; i++) {
-                const comp = r.compute(cx => { counter++; return cx.val(src); });
-                comp.eager();
+                const comp = eager(r, cx => { counter++; return cx.val(src); });
                 r.effect(cx => { counter++; sink += cx.val(comp); });
             }
         };
@@ -341,7 +326,7 @@ function makeDynGraph(r, width, totalLayers, staticFraction, nSources) {
                 mySources[s] = prevRow[(myDex + s) % width];
             }
             if (random() < staticFraction) {
-                const node = r.compute(cx => {
+                const node = eager(r, cx => {
                     counter++;
                     let sum = 0;
                     for (let s = 0; s < mySources.length; s++) {
@@ -349,12 +334,11 @@ function makeDynGraph(r, width, totalLayers, staticFraction, nSources) {
                     }
                     return sum;
                 });
-                node.eager();
                 row[myDex] = node;
             } else {
                 const first = mySources[0];
                 const tail = mySources.slice(1);
-                const node = r.compute(cx => {
+                const node = eager(r, cx => {
                     counter++;
                     let sum = cx.val(first);
                     const shouldDrop = sum & 0x1;
@@ -365,7 +349,6 @@ function makeDynGraph(r, width, totalLayers, staticFraction, nSources) {
                     }
                     return sum;
                 });
-                node.eager();
                 row[myDex] = node;
             }
         }

@@ -65,7 +65,7 @@ describe("c.equal()", () => {
       let runs = 0;
       const c1 = c.compute((cx, prev) => {
         let obj = cx.val(s1);
-        if (prev !== undefined) {
+        if (prev !== void 0) {
           cx.equal(prev.x === obj.x && prev.y === obj.y);
         }
         return obj;

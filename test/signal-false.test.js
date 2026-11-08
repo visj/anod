@@ -99,8 +99,8 @@ describe("signal(value, false)", () => {
 
   test("regular signal updater returning undefined sets value to undefined", () => {
     const s = signal(1);
-    s.set(() => undefined);
-    expect(s.get()).toBe(undefined);
+    s.set(() => void 0);
+    expect(s.get()).toBe(void 0);
   });
 
   test("post() of the same value notifies", async () => {

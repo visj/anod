@@ -9,14 +9,16 @@ import {
     REFUSE,
     PANIC,
     FATAL,
-    OPT_DEFER,
-    OPT_STABLE,
-    OPT_SETUP,
-    OPT_WEAK,
-    OPT_EAGER,
+    DEFER,
+    STABLE,
+    SETUP,
+    WEAK,
+    EAGER,
     refuse,
     panic,
     fatal,
+    LOADING,
+    ERROR,
 } from "#anod";
 
 const tick = () => Promise.resolve();
@@ -56,13 +58,13 @@ describe("stale activations", () => {
         ds[3].resolve("v3");
         await settle();
         expect(t.get()).toBe("v3");
-        expect(t.loading).toBe(false);
+        expect(t.is(LOADING)).toBe(false);
         ds[2].resolve("v2");
         ds[1].resolve("v1");
         ds[0].resolve("v0");
         await settle();
         expect(t.get()).toBe("v3");
-        expect(t.loading).toBe(false);
+        expect(t.is(LOADING)).toBe(false);
         r.dispose();
     });
 
@@ -88,7 +90,7 @@ describe("stale activations", () => {
         }
         await settle();
         expect(done).toEqual([19]);
-        expect(sp.loading).toBe(false);
+        expect(sp.is(LOADING)).toBe(false);
         r.dispose();
     });
 
@@ -145,7 +147,7 @@ describe("absorbed upstream change while awaiting", () => {
         });
         s.set(2);
         /** Secondary symptom: the spawn already reports loading=false here. */
-        const loadingAfterChange = sp.loading;
+        const loadingAfterChange = sp.is(LOADING);
         d.resolve("ok");
         await settle();
         expect(got).toEqual(["ok"]);
@@ -184,7 +186,7 @@ describe("absorbed upstream change while awaiting", () => {
         expect(aborted).toBe(false);
         d.resolve(5);
         await settle();
-        expect(t.error).toBe(false);
+        expect(t.is(ERROR)).toBe(false);
         expect(t.get()).toBe(5);
         r.dispose();
     });
@@ -212,7 +214,7 @@ describe("absorbed upstream change while awaiting", () => {
         s.set(2);
         d.resolve("done");
         await settle();
-        expect(t.loading).toBe(false);
+        expect(t.is(LOADING)).toBe(false);
         expect(t.get()).toBe("done");
         r.dispose();
     });
@@ -252,13 +254,13 @@ describe("settling to an unchanged value", () => {
         /** Re-run the task (pulled through the spawn's subscription). */
         s.set(1);
         await settle();
-        expect(t.loading).toBe(true);
+        expect(t.is(LOADING)).toBe(true);
         /** Re-run the spawn so it awaits the loading task. */
         x.set(1);
         await settle();
         ds[1].resolve();
         await settle();
-        expect(t.loading).toBe(false);
+        expect(t.is(LOADING)).toBe(false);
         expect(got).toEqual(["0:same", "1:same"]);
         r.dispose();
     });
@@ -285,10 +287,10 @@ describe("settling to an unchanged value", () => {
                 got.push(await c.suspend(t));
             });
         });
-        expect(t.loading).toBe(true);
+        expect(t.is(LOADING)).toBe(true);
         resolveCb(0);
         await settle();
-        expect(t.loading).toBe(false);
+        expect(t.is(LOADING)).toBe(false);
         expect(got).toEqual([0]);
         r.dispose();
     });
@@ -412,14 +414,14 @@ describe("resource", () => {
         const r = resource("a");
         const d = deferred();
         r.set("b", async (c) => await c.suspend(d.promise));
-        expect(r.loading).toBe(true);
+        expect(r.is(LOADING)).toBe(true);
         r.set("plain");
-        const loadingAfterPlainSet = r.loading;
+        const loadingAfterPlainSet = r.is(LOADING);
         d.resolve("server");
         await settle();
         expect(r.get()).toBe("plain");
         expect(loadingAfterPlainSet).toBe(false);
-        expect(r.loading).toBe(false);
+        expect(r.is(LOADING)).toBe(false);
     });
 
     /**
@@ -442,7 +444,7 @@ describe("resource", () => {
         });
         r.set(() => 7);
         await settle();
-        expect(r.loading).toBe(false);
+        expect(r.is(LOADING)).toBe(false);
         expect(r.get()).toBe(7);
         expect(got).toEqual([7]);
         rt.dispose();
@@ -452,11 +454,11 @@ describe("resource", () => {
      * BUG (medium). Expected: effects that check c.pending(r) see the optimistic
      * value as loading: ["a:false", "b:true", "c:false"]. Actual:
      * ["a:false", "b:false", "c:false"]: the effect never observes the loading
-     * state, although r.loading is true right after set() returns. set() notifies
+     * state, although r.is(LOADING) is true right after set() returns. set() notifies
      * and flushes the optimistic write (src/internal.js:545-546) before
      * _runAsync sets FLAG_LOADING (src/internal.js:596), and setting
      * FLAG_LOADING notifies nobody. An effect like the README's resource
-     * example (`console.log(val, name.loading ? "(loading)" : "")`), if created
+     * example (`console.log(val, name.is(LOADING) ? "(loading)" : "")`), if created
      * before the optimistic write, prints "charlie" without "(loading)".
      */
     test("effect checking c.pending(resource) sees the optimistic value as loading", async () => {
@@ -469,7 +471,7 @@ describe("resource", () => {
             });
         });
         r.set("b", async (c) => await c.suspend(d.promise));
-        expect(r.loading).toBe(true);
+        expect(r.is(LOADING)).toBe(true);
         d.resolve("c");
         await settle();
         expect(log).toEqual(["a:false", "b:true", "c:false"]);
@@ -494,7 +496,7 @@ describe("resource", () => {
         d1.resolve();
         await settle();
         expect(r.get()).toBe("new");
-        expect(r.loading).toBe(false);
+        expect(r.is(LOADING)).toBe(false);
     });
 
     test("set() supersedes a queued post(value, asyncFn): asyncFn never runs", async () => {
@@ -508,7 +510,7 @@ describe("resource", () => {
         await settle();
         expect(ran).toBe(false);
         expect(r.get()).toBe("y");
-        expect(r.loading).toBe(false);
+        expect(r.is(LOADING)).toBe(false);
     });
 });
 
@@ -528,7 +530,7 @@ describe("callback suspend", () => {
                 c.suspend((res) => res(42));
             });
         });
-        expect(t.loading).toBe(false);
+        expect(t.is(LOADING)).toBe(false);
         expect(t.get()).toBe(42);
         r.dispose();
     });
@@ -545,7 +547,7 @@ describe("callback suspend", () => {
                 c.suspend((res, rej) => rej("bad"));
             });
         });
-        expect(t.error).toBe(true);
+        expect(t.is(ERROR)).toBe(true);
         expect(t.get()).toEqual(fatal("bad"));
         r.dispose();
     });
@@ -599,7 +601,7 @@ describe("callback suspend", () => {
             });
         });
         s.set(1);
-        expect(t.error).toBe(false);
+        expect(t.is(ERROR)).toBe(false);
         expect(t.get()).toBe(1);
         r.dispose();
     });
@@ -895,7 +897,7 @@ describe("async iterators", () => {
             });
         });
         await settle();
-        expect(t.loading).toBe(false);
+        expect(t.is(LOADING)).toBe(false);
         r.dispose();
     });
 
@@ -911,11 +913,11 @@ describe("async iterators", () => {
         });
         await settle();
         expect(t.get()).toBe(1);
-        expect(t.loading).toBe(false);
+        expect(t.is(LOADING)).toBe(false);
         d.resolve();
         await settle();
-        expect(t.error).toBe(true);
-        expect(t.loading).toBe(false);
+        expect(t.is(ERROR)).toBe(true);
+        expect(t.is(LOADING)).toBe(false);
         expect(t.get().type).toBe(FATAL);
         expect(t.get().error.message).toBe("late");
         r.dispose();
@@ -993,7 +995,7 @@ describe("c.suspend() inputs", () => {
             }, "seed");
         });
         await settle();
-        expect(t.loading).toBe(false);
+        expect(t.is(LOADING)).toBe(false);
         expect(caught).not.toBeNull();
         r.dispose();
     });
@@ -1017,7 +1019,7 @@ describe("errors across await", () => {
             });
         });
         await settle();
-        expect(t.error).toBe(true);
+        expect(t.is(ERROR)).toBe(true);
         expect(t.get()).toEqual(panic("bad"));
         r.dispose();
     });
@@ -1053,7 +1055,7 @@ describe("errors across await", () => {
             });
         });
         await settle();
-        expect(t.error).toBe(true);
+        expect(t.is(ERROR)).toBe(true);
         expect(t.get()).toEqual(refuse("nope"));
         r.dispose();
     });

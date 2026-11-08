@@ -193,7 +193,16 @@
       "$disposeHeld": "rl",
       "$forceDispose": "ol",
       "$CYCLE": "cl",
-      "$awaits": "yl"
+      "$awaits": "yl",
+      "$DEFER": "er",
+      "$DISPOSED": "ir",
+      "$EAGER": "mr",
+      "$ERROR": "nr",
+      "$LOADING": "pr",
+      "$SETUP": "ar",
+      "$STABLE": "fr",
+      "$WEAK": "jr",
+      "$PUBLIC": "al"
     }
   },
   "props": {

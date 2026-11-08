@@ -1,5 +1,5 @@
 import { describe, test, expect } from "#test-runner";
-import { signal, resource, root, batch } from "#anod";
+import { signal, resource, root, batch, LOADING, ERROR } from "#anod";
 
 const tick = () => Promise.resolve();
 const settle = () => tick().then(tick).then(tick);
@@ -25,8 +25,8 @@ describe("resource", () => {
 
         test("initial loading and error are false", () => {
             const r = resource(0);
-            expect(r.loading).toBe(false);
-            expect(r.error).toBe(false);
+            expect(r.is(LOADING)).toBe(false);
+            expect(r.is(ERROR)).toBe(false);
         });
 
         test("notifies subscribers on sync set", () => {
@@ -69,9 +69,9 @@ describe("resource", () => {
             r.set(1, async (c, prev) => {
                 return await c.suspend(Promise.resolve(prev));
             });
-            expect(r.loading).toBe(true);
+            expect(r.is(LOADING)).toBe(true);
             await settle();
-            expect(r.loading).toBe(false);
+            expect(r.is(LOADING)).toBe(false);
         });
 
         test("settled value replaces optimistic if different", async () => {
@@ -98,7 +98,7 @@ describe("resource", () => {
             });
             await settle();
             /** Settle notifies again — loading transitioned to false,
-             *  subscribers checking .loading need to see the change. */
+             *  subscribers checking .is(LOADING) need to see the change. */
             expect(notifyCount).toBe(2);
         });
 
@@ -131,8 +131,8 @@ describe("resource", () => {
                 return await c.suspend(Promise.reject(new Error("fail")));
             });
             await settle();
-            expect(r.error).toBe(true);
-            expect(r.loading).toBe(false);
+            expect(r.is(ERROR)).toBe(true);
+            expect(r.is(LOADING)).toBe(false);
         });
 
         test("error POJO accessible via get()", async () => {
@@ -150,7 +150,7 @@ describe("resource", () => {
             r.set(1, (c, prev) => {
                 throw new Error("sync fail");
             });
-            expect(r.error).toBe(true);
+            expect(r.is(ERROR)).toBe(true);
             expect(r.get().error.message).toBe("sync fail");
         });
 
@@ -160,13 +160,13 @@ describe("resource", () => {
                 return await c.suspend(Promise.reject(new Error("fail")));
             });
             await settle();
-            expect(r.error).toBe(true);
+            expect(r.is(ERROR)).toBe(true);
 
             r.set(2, async (c, prev) => {
                 return await c.suspend(Promise.resolve(prev));
             });
             await settle();
-            expect(r.error).toBe(false);
+            expect(r.is(ERROR)).toBe(false);
             expect(r.get()).toBe(2);
         });
     });
@@ -208,14 +208,14 @@ describe("resource", () => {
             r.set(1, async (c, prev) => {
                 return await c.suspend(new Promise((resolve) => { resolveFirst = resolve; }));
             });
-            expect(r.loading).toBe(true);
+            expect(r.is(LOADING)).toBe(true);
 
             r.set(2, async (c, prev) => {
                 return await c.suspend(Promise.resolve(prev));
             });
             await settle();
             expect(r.get()).toBe(2);
-            expect(r.loading).toBe(false);
+            expect(r.is(LOADING)).toBe(false);
 
             resolveFirst(999);
             await settle();
@@ -241,9 +241,9 @@ describe("resource", () => {
                     setTimeout(() => resolve(prev * 100), 10);
                 });
             });
-            expect(r.loading).toBe(true);
+            expect(r.is(LOADING)).toBe(true);
             await new Promise((resolve) => setTimeout(resolve, 50));
-            expect(r.loading).toBe(false);
+            expect(r.is(LOADING)).toBe(false);
             expect(r.get()).toBe(100);
         });
     });
@@ -255,10 +255,10 @@ describe("resource", () => {
                 return await c.suspend(Promise.resolve("fresh"));
             });
             expect(r.get()).toBe("stale");
-            expect(r.loading).toBe(true);
+            expect(r.is(LOADING)).toBe(true);
             await settle();
             expect(r.get()).toBe("fresh");
-            expect(r.loading).toBe(false);
+            expect(r.is(LOADING)).toBe(false);
         });
 
         test("set(asyncFn) receives current value as second arg", async () => {
@@ -294,7 +294,7 @@ describe("resource", () => {
                 );
             });
             expect(r.get()).toBe("initial");
-            expect(r.loading).toBe(true);
+            expect(r.is(LOADING)).toBe(true);
 
             /** Optimistic write cancels the refresh. */
             r.set("optimistic", async (c, optimistic) => {
@@ -318,7 +318,7 @@ describe("resource", () => {
 
             await Promise.resolve();
             expect(asyncRan).toBe(true);
-            expect(r.loading).toBe(true);
+            expect(r.is(LOADING)).toBe(true);
 
             await settle();
             expect(r.get()).toBe("new");
@@ -336,16 +336,16 @@ describe("resource", () => {
             /** Nothing has run yet — post defers everything. */
             expect(r.get()).toBe(0);
             expect(asyncRan).toBe(false);
-            expect(r.loading).toBe(false);
+            expect(r.is(LOADING)).toBe(false);
 
             /** After microtask flush: value written, asyncFn started. */
             await Promise.resolve();
             expect(r.get()).toBe(5);
             expect(asyncRan).toBe(true);
-            expect(r.loading).toBe(true);
+            expect(r.is(LOADING)).toBe(true);
 
             await settle();
-            expect(r.loading).toBe(false);
+            expect(r.is(LOADING)).toBe(false);
         });
 
         test("LWW works with post", async () => {
@@ -428,7 +428,7 @@ describe("resource", () => {
             });
             expect(data.get()).toEqual({ name: "bob" });
             await settle();
-            expect(data.error).toBe(true);
+            expect(data.is(ERROR)).toBe(true);
             expect(data.get().type).toBe(3);
         });
 

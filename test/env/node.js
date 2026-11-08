@@ -35,7 +35,7 @@ export function collectAsync() {
 export async function expectCollected(refs) {
     await collectAsync();
     for (let i = 0; i < 10; i++) {
-        if (refs.every((ref) => ref.deref() === undefined)) {
+        if (refs.every((ref) => ref.deref() === void 0)) {
             return;
         }
         await new Promise((r) => setTimeout(r, 1));
@@ -96,9 +96,9 @@ function makeAssertions(actual, negated) {
         },
         toBeUndefined() {
             if (negated) {
-                assert.notStrictEqual(actual, undefined);
+                assert.notStrictEqual(actual, void 0);
             } else {
-                assert.strictEqual(actual, undefined);
+                assert.strictEqual(actual, void 0);
             }
         },
         /** @param {number} expected */
@@ -135,7 +135,7 @@ function makeAssertions(actual, negated) {
                 try {
                     actual();
                 } catch (e) {
-                    if (expected !== undefined) {
+                    if (expected !== void 0) {
                         const msg = e instanceof Error ? e.message : String(e);
                         if (typeof expected === 'string' && msg.includes(expected)) {
                             assert.fail(`Expected function not to throw matching "${expected}", but it did`);
@@ -145,7 +145,7 @@ function makeAssertions(actual, negated) {
                     }
                 }
             } else {
-                if (expected !== undefined) {
+                if (expected !== void 0) {
                     assert.throws(actual, (/** @type {*} */ e) => {
                         const msg = e instanceof Error ? e.message
                             : (e && typeof e.message === 'string') ? e.message

@@ -245,7 +245,7 @@ class AsyncReceiver extends Receiver {
  */
 class ReadonlySignal {
 	/** @returns {T} */
-	val() { return /** @type {T} */ (/** @type {*} */ (undefined)); }
+	val() { return /** @type {T} */ (/** @type {*} */ (void 0)); }
 	/** @returns {void} */
 	dispose() { }
 }
@@ -273,7 +273,7 @@ class ICompute extends Sender {
 		/** @type {IChannel | null} */
 		this._chan = null;
 		/** @type {*} */
-		this._args = undefined;
+		this._args = void 0;
 		/** @type {(function(): void) | Array<(function(): void)> | null} */
 		this._cleanup = null;
 	}
@@ -335,7 +335,7 @@ class IEffect extends Owner {
 		/** @type {IChannel | null} */
 		this._chan = null;
 		/** @type {*} */
-		this._args = undefined;
+		this._args = void 0;
 		/* IEffect-specific */
 		/** @type {(function(): void) | Array<(function(): void)> | null} */
 		this._finalize = null;

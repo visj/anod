@@ -39,7 +39,7 @@ describe("suspend([tasks]) consistency", () => {
     await settle();
 
     /** Settle taskA first. */
-    resolveA(undefined);
+    resolveA(void 0);
     await settle();
     /** taskA is settled, taskB is still loading. suspend waits. */
     expect(observed).toBeNull();
@@ -51,12 +51,12 @@ describe("suspend([tasks]) consistency", () => {
 
     /** Settle taskB. But taskA is loading again! suspend must NOT
      *  resolve yet — it should re-scan and see taskA is loading. */
-    resolveB(undefined);
+    resolveB(void 0);
     await settle();
     expect(observed).toBeNull();
 
     /** Finally settle taskA again. NOW both are settled. */
-    resolveA(undefined);
+    resolveA(void 0);
     await settle();
     expect(observed).not.toBeNull();
     expect(observed[0]).toBe("A:/api:1");
@@ -95,8 +95,8 @@ describe("suspend([tasks]) consistency", () => {
     await settle();
 
     /** Settle A and C. B still loading. */
-    resolveA(undefined);
-    resolveC(undefined);
+    resolveA(void 0);
+    resolveC(void 0);
     await settle();
     expect(observed).toBeNull();
 
@@ -106,12 +106,12 @@ describe("suspend([tasks]) consistency", () => {
     expect(observed).toBeNull();
 
     /** Settle B. A is still loading! Must not resolve yet. */
-    resolveB(undefined);
+    resolveB(void 0);
     await settle();
     expect(observed).toBeNull();
 
     /** Settle A again. Now all three are settled. */
-    resolveA(undefined);
+    resolveA(void 0);
     await settle();
     expect(observed).not.toBeNull();
     expect(observed[0]).toBe("A1");

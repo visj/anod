@@ -21,11 +21,11 @@ let sink = 0;
 
 group('effect: stable + bound (1 dep)', () => {
     bench('new (split try/finally)', () => {
-        const { signal, root, batch, OPT_STABLE } = newMod;
+        const { signal, root, batch, STABLE } = newMod;
         let sum = 0;
         const dispose = root((c) => {
             const s = signal(0);
-            c.effect(s, (val) => { sum += val; }, OPT_STABLE);
+            c.effect(s, (val) => { sum += val; }, STABLE);
             for (let i = 0; i < 1000; i++) {
                 s.set(i);
             }
@@ -35,11 +35,11 @@ group('effect: stable + bound (1 dep)', () => {
     });
 
     bench('old (unified try/finally)', () => {
-        const { signal, root, batch, OPT_STABLE } = oldMod;
+        const { signal, root, batch, STABLE } = oldMod;
         let sum = 0;
         const dispose = root((c) => {
             const s = signal(0);
-            c.effect(s, (val) => { sum += val; }, OPT_STABLE);
+            c.effect(s, (val) => { sum += val; }, STABLE);
             for (let i = 0; i < 1000; i++) {
                 s.set(i);
             }
@@ -51,7 +51,7 @@ group('effect: stable + bound (1 dep)', () => {
 
 group('effect: stable + unbound (3 deps)', () => {
     bench('new (split try/finally)', () => {
-        const { signal, root, OPT_STABLE } = newMod;
+        const { signal, root, STABLE } = newMod;
         let sum = 0;
         const dispose = root((c) => {
             const a = signal(0);
@@ -59,7 +59,7 @@ group('effect: stable + unbound (3 deps)', () => {
             const d = signal(0);
             c.effect((c) => {
                 sum += c.val(a) + c.val(b) + c.val(d);
-            }, OPT_STABLE);
+            }, STABLE);
             for (let i = 0; i < 1000; i++) {
                 a.set(i);
             }
@@ -69,7 +69,7 @@ group('effect: stable + unbound (3 deps)', () => {
     });
 
     bench('old (unified try/finally)', () => {
-        const { signal, root, OPT_STABLE } = oldMod;
+        const { signal, root, STABLE } = oldMod;
         let sum = 0;
         const dispose = root((c) => {
             const a = signal(0);
@@ -77,7 +77,7 @@ group('effect: stable + unbound (3 deps)', () => {
             const d = signal(0);
             c.effect((c) => {
                 sum += c.val(a) + c.val(b) + c.val(d);
-            }, OPT_STABLE);
+            }, STABLE);
             for (let i = 0; i < 1000; i++) {
                 a.set(i);
             }
@@ -135,13 +135,13 @@ group('effect: dynamic deps (alternating)', () => {
 
 group('effect: batched writes (stable + bound)', () => {
     bench('new (split try/finally)', () => {
-        const { signal, root, batch, OPT_STABLE } = newMod;
+        const { signal, root, batch, STABLE } = newMod;
         let sum = 0;
         const dispose = root((c) => {
             const a = signal(0);
             const b = signal(0);
-            c.effect(a, (val) => { sum += val; }, OPT_STABLE);
-            c.effect(b, (val) => { sum += val; }, OPT_STABLE);
+            c.effect(a, (val) => { sum += val; }, STABLE);
+            c.effect(b, (val) => { sum += val; }, STABLE);
             for (let i = 0; i < 1000; i++) {
                 batch(() => {
                     a.set(i);
@@ -154,13 +154,13 @@ group('effect: batched writes (stable + bound)', () => {
     });
 
     bench('old (unified try/finally)', () => {
-        const { signal, root, batch, OPT_STABLE } = oldMod;
+        const { signal, root, batch, STABLE } = oldMod;
         let sum = 0;
         const dispose = root((c) => {
             const a = signal(0);
             const b = signal(0);
-            c.effect(a, (val) => { sum += val; }, OPT_STABLE);
-            c.effect(b, (val) => { sum += val; }, OPT_STABLE);
+            c.effect(a, (val) => { sum += val; }, STABLE);
+            c.effect(b, (val) => { sum += val; }, STABLE);
             for (let i = 0; i < 1000; i++) {
                 batch(() => {
                     a.set(i);
@@ -175,14 +175,14 @@ group('effect: batched writes (stable + bound)', () => {
 
 group('compute chain: stable + bound (4 deep)', () => {
     bench('new (split try/finally)', () => {
-        const { signal, root, OPT_STABLE } = newMod;
+        const { signal, root, STABLE } = newMod;
         let sum = 0;
         const dispose = root((c) => {
             const s = signal(0);
             const c1 = c.compute(s, (v) => v + 1);
             const c2 = c.compute(c1, (v) => v * 2);
             const c3 = c.compute(c2, (v) => v - 1);
-            c.effect(c3, (val) => { sum += val; }, OPT_STABLE);
+            c.effect(c3, (val) => { sum += val; }, STABLE);
             for (let i = 0; i < 1000; i++) {
                 s.set(i);
             }
@@ -192,14 +192,14 @@ group('compute chain: stable + bound (4 deep)', () => {
     });
 
     bench('old (unified try/finally)', () => {
-        const { signal, root, OPT_STABLE } = oldMod;
+        const { signal, root, STABLE } = oldMod;
         let sum = 0;
         const dispose = root((c) => {
             const s = signal(0);
             const c1 = c.compute(s, (v) => v + 1);
             const c2 = c.compute(c1, (v) => v * 2);
             const c3 = c.compute(c2, (v) => v - 1);
-            c.effect(c3, (val) => { sum += val; }, OPT_STABLE);
+            c.effect(c3, (val) => { sum += val; }, STABLE);
             for (let i = 0; i < 1000; i++) {
                 s.set(i);
             }

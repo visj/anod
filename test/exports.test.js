@@ -12,7 +12,8 @@ const checkPath = path.join(typesDir, "__check__.ts");
 
 /**
  * Type-checks the declarations, plus an optional virtual source file that
- * imports from them, and returns the program and its diagnostics.
+ * imports from them, and returns the program, its diagnostics, and the
+ * 0-based line in the source file of each diagnostic (-1 elsewhere).
  * @param {string=} source
  */
 function compile(source) {
@@ -20,15 +21,21 @@ function compile(source) {
     const host = ts.createCompilerHost(options);
     const getSourceFile = host.getSourceFile;
     host.getSourceFile = (fileName, version, ...rest) => {
-        if (source !== undefined && path.resolve(fileName) === checkPath) {
+        if (source !== void 0 && path.resolve(fileName) === checkPath) {
             return ts.createSourceFile(fileName, source, version);
         }
         return getSourceFile.call(host, fileName, version, ...rest);
     };
-    const roots = source !== undefined ? [indexPath, internalPath, checkPath] : [indexPath, internalPath];
+    const roots = source !== void 0 ? [indexPath, internalPath, checkPath] : [indexPath, internalPath];
     const program = ts.createProgram(roots, options, host);
-    const diagnostics = ts.getPreEmitDiagnostics(program).map((d) => ts.flattenDiagnosticMessageText(d.messageText, "\n"));
-    return { program, diagnostics };
+    const all = ts.getPreEmitDiagnostics(program);
+    const diagnostics = all.map((d) => ts.flattenDiagnosticMessageText(d.messageText, "\n"));
+    const lines = all.map((d) =>
+        d.file !== void 0 && path.resolve(d.file.fileName) === checkPath
+            ? d.file.getLineAndCharacterOfPosition(d.start).line
+            : -1
+    );
+    return { program, diagnostics, lines };
 }
 
 /**
@@ -91,6 +98,58 @@ describe("declarations", () => {
             const ok: Equal<ReturnType<Context["rejected"]>, Defect | null> = true;
         `);
         expect(diagnostics).toEqual([]);
+    });
+
+    test("options, states and Defect types type-check where they belong", () => {
+        const { diagnostics } = compile(`
+            import { c, signal, root, STABLE, WEAK, EAGER, DEFER, SETUP, DISPOSED, LOADING, ERROR, REFUSE, PANIC, Defect } from "./index.js";
+            const s = signal(1);
+            const n = c.compute((cx) => cx.val(s), void 0, STABLE);
+            c.compute((cx) => cx.val(s), void 0, WEAK);
+            c.compute((cx) => cx.val(s), void 0, EAGER);
+            c.compute(s, (v) => v, void 0, SETUP);
+            c.effect((cx) => { cx.is(STABLE); }, DEFER);
+            c.spawn(async (cx) => { cx.is(LOADING); }, STABLE);
+            c.task(async (cx) => 1, void 0, EAGER);
+            n.is(STABLE);
+            n.is(LOADING);
+            s.is(ERROR);
+            root((cx) => cx.is(DISPOSED));
+            const d = new Defect("x", PANIC);
+            if (d.type === REFUSE) {}
+        `);
+        expect(diagnostics).toEqual([]);
+    });
+
+    test("misused options, states and Defect types are compile errors", () => {
+        const cases = [
+            "c.compute(() => 1, void 0, ERROR);",
+            "c.effect(() => {}, LOADING);",
+            "c.effect(() => {}, WEAK);",
+            "c.spawn(async () => {}, EAGER);",
+            "c.compute(() => 1, void 0, STABLE | WEAK);",
+            "c.compute(() => 1, void 0, 2048);",
+            "n.is(REFUSE);",
+            "n.is(LOADING | ERROR);",
+            "if (d.type === ERROR) {}",
+            "new Defect('x', STABLE);",
+            "n.stable();",
+            "n.weak();",
+            "n.eager();",
+            "n.disposed;",
+            "n.loading;",
+            "n.error;"
+        ];
+        const header = [
+            `import { c, STABLE, WEAK, EAGER, LOADING, ERROR, REFUSE, PANIC, Defect } from "./index.js";`,
+            "const n = c.compute(() => 1);",
+            `const d = new Defect("x", PANIC);`
+        ];
+        /** One program for all the cases: each sits on its own line, in its own block. */
+        const { lines } = compile(header.concat(cases.map((line) => `{ ${line} }`)).join("\n"));
+        const errors = cases.map((line, i) => [line, lines.filter((l) => l === header.length + i).length]);
+        expect(errors).toEqual(cases.map((line) => [line, 1]));
+        expect(lines.length).toBe(cases.length);
     });
 
     test("rejected() returns the error at runtime", () => {

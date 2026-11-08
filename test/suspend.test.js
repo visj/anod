@@ -1,5 +1,5 @@
 import { describe, test, expect, collectAsync, expectCollected } from "#test-runner";
-import { signal, root, c } from "#anod";
+import { signal, root, c, LOADING } from "#anod";
 
 const tick = () => Promise.resolve();
 const settle = () => tick().then(tick).then(tick);
@@ -270,7 +270,7 @@ describe("suspend(promise): memory safety", () => {
 		});
 
 		await tick();
-		expect(taskA.loading).toBe(true);
+		expect(taskA.is(LOADING)).toBe(true);
 		expect(resolvers.length).toBe(1);
 
 		// Re-run the task by changing dep (task is eager due to awaiter)
@@ -282,7 +282,7 @@ describe("suspend(promise): memory safety", () => {
 		resolvers[1].resolve(222);
 		await settle();
 
-		expect(taskA.loading).toBe(false);
+		expect(taskA.is(LOADING)).toBe(false);
 		expect(taskA.get()).toBe(222);
 
 		// Resolving the first (stale) promise should be a no-op
