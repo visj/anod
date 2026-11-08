@@ -17,6 +17,7 @@ anod is a reactive state management library. It has built-in support for both sy
 		- [Signal](#signal)
 		- [Compute](#compute)
 		- [Effect](#effect)
+		- [Action](#action)
 	- [Async reactivity](#async-reactivity)
 		- [Resource](#resource)
 		- [Task](#task)
@@ -278,6 +279,28 @@ root((c) => {
 	message.set("ignored"); // nothing happens, no inner effect exists
 });
 ```
+
+#### Action
+
+An action is a slim effect for the common case of a function that runs when its dependencies change and does nothing else, like writing a value to the DOM. It takes the same arguments and options as `c.effect()`, and its context keeps `c.val()`, `c.pending()`, `c.rejected()`, `c.set()`, `c.post()` and `c.is()`.
+
+```ts
+import { root, signal } from "anod";
+root((c) => {
+	const name = signal("anod");
+	const el = document.createElement("span");
+	c.action(name, (val) => {
+		el.textContent = val;
+	});
+	c.action((c) => {
+		el.title = `Hello ${c.val(name)}`;
+	});
+});
+```
+
+An action owns nothing, and has no `c.cleanup()`, `c.recover()`, `c.finalize()`, async variant or child nodes. That makes it about half the size of an effect: 8 fields instead of 14. It still tracks dynamic dependencies, as an effect does, and takes `STABLE`, `SETUP` and `DEFER`. The root or effect that creates it disposes it, pauses it with `pause()`, and recovers its errors: an error in an action, or in a compute it reads, goes to its owner's `c.recover()` handlers, and the action is disposed, as an effect would be.
+
+Use an effect for anything that needs cleanups, children of its own or async work.
 
 ### Async reactivity
 

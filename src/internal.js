@@ -52,7 +52,10 @@ const FLAG_CALLBACK = 1 << 27;
  *  when the activation settles, so readers never see the error flag next
  *  to the previous value. */
 const FLAG_REFUSE = 1 << 28;
-/** Set on the nodes of a checkRun stack only while checkCycle scans it.
+/** A scratch mark, set and cleared within one call that runs no user
+ *  code: checkCycle and awaits() mark the nodes they walk, and the
+ *  settle passes (settleNotify, settleDeps, settleDefers) mark the nodes
+ *  they dedupe. Any node can carry it, a plain signal too.
  *  It is the last bit: 1 << 30 is outside V8's 31-bit Smi range under
  *  pointer compression. */
 const FLAG_VISIT = 1 << 29;
@@ -498,8 +501,39 @@ function Effect(opts, fn, dep1, owner, args) {
 	this._finalize = null;
 	/** @type {IChannel | null} */
 	this._chan = null;
+	/** @type {W | undefined} */
+	this._args = args;
+}
+
+/**
+ * A slim sync effect: it runs its fn when its deps change, and nothing
+ * else. It owns nothing and has no cleanup, recover, finalize or
+ * channel, so it is about half the size of an Effect. It keeps its
+ * owner, which disposes it and recovers its errors.
+ * @constructor
+ * @template U, W
+ * @param {number} opts
+ * @param {(function(U,W): void) | (function(W): void)} fn
+ * @param {Sender<U> | null} dep1
+ * @param {Owner | null} owner
+ * @param {W=} args
+ * @implements {IAction}
+ */
+function Action(opts, fn, dep1, owner, args) {
 	/** @type {number} */
-	this._stamp = 0;
+	this._flag = 0 | opts;
+	/** @type {(function(U,W): void) | (function(W): void) | null} */
+	this._fn = fn;
+	/** @type {Sender<U> | null} */
+	this._dep1 = dep1;
+	/** @type {number} */
+	this._dep1slot = -1;
+	/** @type {Array<Sender | number> | null} */
+	this._deps = null;
+	/** @type {number} */
+	this._time = 0;
+	/** @type {Owner | null} */
+	this._owner = owner;
 	/** @type {W | undefined} */
 	this._args = args;
 }
@@ -557,29 +591,38 @@ function dispose(force) {
  */
 function val(sender) {
 	let flag = this._flag;
-	if (sender._flag & FLAG_DISPOSED || sender === /** @type {Sender} */(this)) {
+	let state = sender._flag;
+	if (state & FLAG_DISPOSED || sender === /** @type {Sender} */(this)) {
 		throw new Error(ILLEGAL_READ);
 	}
-	if (flag & FLAG_LOADING) {
-		return this._readAsync(sender, false);
+	if (flag & (FLAG_LOADING | FLAG_STABLE)) {
+		if (flag & FLAG_LOADING) {
+			return this._readAsync(sender, false);
+		}
+		/** Stable after setup: nothing to track, and a stable run never
+		 *  stamps, so skip the stamp compare that would always miss. */
+		if (!(flag & FLAG_SETUP)) {
+			if (state & (FLAG_STALE | FLAG_PENDING)) {
+				sender._refresh();
+				state = sender._flag;
+			}
+			if (state & FLAG_ERROR) {
+				throw sender._value;
+			}
+			return sender._value;
+		}
 	}
 	/** Sync path: version-tagged dep tracking with VSTACK restore. */
 	let version = STAMP;
 	if (sender._stamp === version) {
 		/** Already read this run: an errored sender throws on every read. */
-		if (sender._flag & FLAG_ERROR) {
+		if (state & FLAG_ERROR) {
 			throw sender._value;
 		}
 		return sender._value;
 	}
-	if (sender._flag & (FLAG_STALE | FLAG_PENDING)) {
+	if (state & (FLAG_STALE | FLAG_PENDING)) {
 		sender._refresh();
-	}
-	if ((flag & (FLAG_STABLE | FLAG_SETUP)) === FLAG_STABLE) {
-		if (sender._flag & FLAG_ERROR) {
-			throw sender._value;
-		}
-		return sender._value;
 	}
 	let stamp = sender._stamp;
 	sender._stamp = version;
@@ -938,14 +981,14 @@ function _read(sender, stamp) {
 	}
 
 	if (this._flag & FLAG_SETUP) {
-		/** Setup path: first run, push deps to DSTACK. */
+		/** Setup path: first run, push deps to DSTACK. They are connected
+		 *  after the run, once each pair's index in _deps is known. */
 		if (this._dep1 === null) {
 			this._dep1 = sender;
 			this._dep1slot = connect(sender, this, -1);
 		} else {
-			let subslot = connect(sender, this, DCOUNT);
 			DSTACK[DCOUNT++] = sender;
-			DSTACK[DCOUNT++] = subslot;
+			DSTACK[DCOUNT++] = 0;
 		}
 	} else if (this._deps === null) {
 		/** New deps are connected by patchDeps after the run. */
@@ -1039,6 +1082,8 @@ function root(fn) {
 	let ComputeProto = Compute.prototype;
 	/** @const */
 	let EffectProto = Effect.prototype;
+	/** @const */
+	let ActionProto = Action.prototype;
 
 	RootProto._owner = null;
 	RootProto._level = -1;
@@ -1052,6 +1097,15 @@ function root(fn) {
 	 * keeps no reference back to its owner.
 	 */
 	ComputeProto._owner = null;
+
+	/**
+	 * The Effect fields an Action does not have, for the shared paths
+	 * that read them: a failed run and recovery.
+	 */
+	ActionProto._owned =
+		ActionProto._recover =
+		ActionProto._finalize =
+		null;
 
 	/**
 	 * Never called on a signal: every call site tests a flag a signal
@@ -1116,10 +1170,11 @@ function root(fn) {
 	RootProto.dispose =
 		ComputeProto.dispose =
 		EffectProto.dispose =
+		ActionProto.dispose =
 		dispose;
 
 	// Receiver#_read — internal dep tracking, called from val() when listening
-	ComputeProto._read = EffectProto._read = _read;
+	ComputeProto._read = EffectProto._read = ActionProto._read = _read;
 
 	ComputeProto._readAsync = EffectProto._readAsync = _readAsync;
 
@@ -1135,7 +1190,7 @@ function root(fn) {
 		return (this._flag & flag & PUBLIC) !== 0;
 	}
 
-	SignalProto.is = RootProto.is = ComputeProto.is = EffectProto.is = is;
+	SignalProto.is = RootProto.is = ComputeProto.is = EffectProto.is = ActionProto.is = is;
 
 	/**
 	 * Registers a cleanup fn on this owner. Stored compactly: _cleanup holds
@@ -1278,8 +1333,8 @@ function root(fn) {
 			for (let i = 0; i < count; i++) {
 				let child = owned[i];
 				if (
-					(child._flag & (FLAG_OWNER | FLAG_PAUSED | FLAG_DISPOSED)) ===
-					(FLAG_OWNER | FLAG_PAUSED)
+					(child._flag & (FLAG_PAUSED | FLAG_DISPOSED)) === FLAG_PAUSED &&
+					(child._flag & FLAG_OWNER || child instanceof Action)
 				) {
 					resumeNode(/** @type {Owner} */(child));
 				}
@@ -1898,8 +1953,8 @@ function root(fn) {
 		return null;
 	}
 
-	ComputeProto.pending = EffectProto.pending = pending;
-	ComputeProto.rejected = EffectProto.rejected = rejected;
+	ComputeProto.pending = EffectProto.pending = ActionProto.pending = pending;
+	ComputeProto.rejected = EffectProto.rejected = ActionProto.rejected = rejected;
 
 	/**
 	 * Returns the current activation's sequence number. It grows with
@@ -2670,8 +2725,8 @@ function root(fn) {
 					for (let i = DBASE; i < DCOUNT; i++) {
 						stack[i] = null;
 					}
-					if (DBASE !== 0) {
-						rebaseDeps(deps);
+					for (let i = 0; i < deps.length; i += 2) {
+						deps[i + 1] = connect(/** @type {Sender} */ (deps[i]), this, i);
 					}
 					DCOUNT = DBASE;
 					/** A bound node starts single. */
@@ -2828,9 +2883,9 @@ function root(fn) {
 	 * @param {Sender<T>} sender
 	 * @returns {T}
 	 */
-	EffectProto.val = val;
-	EffectProto.set = contextSet;
-	EffectProto.post = contextPost;
+	EffectProto.val = ActionProto.val = val;
+	EffectProto.set = ActionProto.set = contextSet;
+	EffectProto.post = ActionProto.post = contextPost;
 
 	/**
 	 * @this {Effect}
@@ -2939,8 +2994,8 @@ function root(fn) {
 						for (let i = DBASE; i < DCOUNT; i++) {
 							stack[i] = null;
 						}
-						if (DBASE !== 0) {
-							rebaseDeps(deps);
+						for (let i = 0; i < deps.length; i += 2) {
+							deps[i + 1] = connect(/** @type {Sender} */ (deps[i]), this, i);
 						}
 						DCOUNT = DBASE;
 						/** A bound node starts single. */
@@ -3187,6 +3242,131 @@ function root(fn) {
 	};
 
 	/**
+	 * An Effect's run without the parts an Action does not have: no
+	 * channel or shield to check, no children or cleanups to tear down,
+	 * and no async tail.
+	 * @this {Action}
+	 * @param {number} time
+	 */
+	ActionProto._update = function (time) {
+		let flag = this._flag;
+		let args = this._args;
+		this._time = time;
+
+		if ((flag & (FLAG_STABLE | FLAG_SETUP)) === FLAG_STABLE) {
+			try {
+				if (flag & FLAG_BOUND) {
+					let dep = this._dep1;
+					if (dep._flag & (FLAG_STALE | FLAG_PENDING)) {
+						dep._refresh();
+					}
+					if (dep._flag & (FLAG_ERROR | FLAG_DISPOSED)) {
+						throw boundError(dep);
+					}
+					this._fn(dep._value, this, args);
+				} else {
+					this._fn(this, args);
+				}
+			} finally {
+				this._flag &= ~(FLAG_STALE | FLAG_PENDING);
+			}
+		} else {
+			/** Setup or dynamic: bump STAMP for dep tracking */
+			let current = STAMP;
+			let version = (SEED += 2);
+			STAMP = version;
+			let saveStart = VCOUNT;
+			let depCount = 0;
+			let depsLen = 0;
+			/** @type {number} */
+			let dbase;
+			/** @type {number} */
+			let reused;
+			if (flag & FLAG_SETUP) {
+				dbase = DBASE;
+				DBASE = DCOUNT;
+			} else {
+				reused = REUSED;
+				REUSED = 0;
+				let deps = this._deps;
+				depCount = sweepDeps(version - 1, this._dep1, deps);
+				depsLen = deps !== null ? deps.length : 0;
+			}
+
+			try {
+				if (flag & FLAG_BOUND) {
+					let dep = this._dep1;
+					if (dep._flag & (FLAG_STALE | FLAG_PENDING)) {
+						dep._refresh();
+					}
+					if (dep._flag & (FLAG_ERROR | FLAG_DISPOSED)) {
+						throw boundError(dep);
+					}
+					dep._stamp = version;
+					this._fn(dep._value, this, args);
+				} else {
+					this._fn(this, args);
+				}
+			} finally {
+				if (flag & FLAG_SETUP) {
+					if (DCOUNT > DBASE) {
+						let stack = DSTACK;
+						let deps = (this._deps = stack.slice(DBASE, DCOUNT));
+						for (let i = DBASE; i < DCOUNT; i++) {
+							stack[i] = null;
+						}
+						for (let i = 0; i < deps.length; i += 2) {
+							deps[i + 1] = connect(/** @type {Sender} */ (deps[i]), this, i);
+						}
+						DCOUNT = DBASE;
+						this._flag &= ~FLAG_SINGLE;
+					} else if (this._dep1 !== null) {
+						this._flag |= FLAG_SINGLE;
+					}
+					DBASE = dbase;
+				} else {
+					let newLen = this._deps !== null ? this._deps.length : 0;
+					if (REUSED !== depCount || newLen !== depsLen) {
+						patchDeps(this, version, depCount, newLen);
+					}
+					REUSED = reused;
+				}
+				if (VCOUNT > saveStart) {
+					let count = VCOUNT;
+					let stack = VSTACK;
+					for (let i = saveStart; i < count; i += 2) {
+						stack[i]._stamp = stack[i + 1];
+						stack[i] = null;
+					}
+					VCOUNT = saveStart;
+				}
+				STAMP = current;
+				this._flag &= ~(FLAG_SETUP | FLAG_STALE | FLAG_PENDING);
+			}
+		}
+	};
+
+	/**
+	 * @this {Action}
+	 * @returns {void}
+	 */
+	ActionProto._receive = function () {
+		if (!(this._flag & (FLAG_PAUSED | FLAG_DISPOSED))) {
+			RECEIVERS[RECEIVER_COUNT++] = this;
+		}
+	};
+
+	/**
+	 * @this {Action}
+	 * @returns {void}
+	 */
+	ActionProto._dispose = function () {
+		this._flag = FLAG_DISPOSED;
+		clearDeps(this);
+		this._fn = this._args = this._owner = null;
+	};
+
+	/**
 	 * Creates a sync compute node.
 	 * Unbound: compute(fn, seed?, opts?, args?)
 	 * Bound:   compute(dep, fn, seed?, opts?, args?)
@@ -3352,12 +3532,52 @@ function root(fn) {
 		return node;
 	}
 
+	/**
+	 * Creates an action: a sync effect that owns nothing and takes no
+	 * cleanup, recover or finalize. Its owner disposes it, and its
+	 * errors go to its owner's recover handlers.
+	 * Unbound: action(fn, opts?, args?)
+	 * Bound:   action(dep, fn, opts?, args?)
+	 * @this {Owner}
+	 * @template U, W
+	 * @param {Sender<U> | (function(Action, W): void)} depOrFn
+	 * @param {(function(U, Action, W): void) | number=} fnOrOpts
+	 * @param {number | W=} optsOrArgs
+	 * @param {W=} args
+	 * @returns {Action<U, W>}
+	 */
+	function action(depOrFn, fnOrOpts, optsOrArgs, args) {
+		if (this._flag & FLAG_DISPOSED) {
+			throw new Error(ILLEGAL_READ);
+		}
+		let flag, node;
+		if (typeof depOrFn === "function") {
+			flag = FLAG_SETUP | ((0 | fnOrOpts) & OPTIONS);
+			node = new Action(flag, depOrFn, null, this, optsOrArgs);
+		} else {
+			flag =
+				FLAG_STABLE | FLAG_BOUND | FLAG_SINGLE | ((0 | optsOrArgs) & OPTIONS);
+			node = new Action(flag, /** @type {!Function} */(fnOrOpts), depOrFn, this, args);
+			node._dep1slot = connect(depOrFn, node, -1);
+		}
+		if (this._flag & FLAG_OWNER) {
+			addOwned(this, node);
+		}
+		if ((flag & (FLAG_DEFER | FLAG_BOUND)) === (FLAG_DEFER | FLAG_BOUND)) {
+			deferEffect(node);
+		} else {
+			startEffect(node);
+		}
+		return node;
+	}
+
 	/** Install factory methods on Root, Effect, and Clock prototypes */
 	var ClockProto = Clock.prototype;
 	RootProto.compute = EffectProto.compute = ClockProto.compute = compute;
 	RootProto.task = EffectProto.task = ClockProto.task = task;
 	RootProto.effect = EffectProto.effect = ClockProto.effect = effect;
 	RootProto.spawn = EffectProto.spawn = ClockProto.spawn = spawn;
+	RootProto.action = EffectProto.action = ClockProto.action = action;
 }
 
 /**
@@ -3453,7 +3673,7 @@ function connect(send, receiver, depslot) {
 /**
  * Removes the receiver at subslot from send's subscriber list.
  * Swap-with-last O(1), then points the moved receiver's dep pair at
- * its new index. A receiver in its setup run keeps its pairs in DSTACK.
+ * its new index.
  * Disposed senders have already dropped their subscribers.
  * @param {Sender} send
  * @param {number} subslot
@@ -3474,10 +3694,8 @@ function clearReceiver(send, subslot) {
 			subs[subslot + 1] = lastSlot;
 			if (lastSlot === -1) {
 				lastNode._dep1slot = subslot;
-			} else if (lastNode._deps !== null) {
-				lastNode._deps[lastSlot + 1] = subslot;
 			} else {
-				DSTACK[lastSlot + 1] = subslot;
+				lastNode._deps[lastSlot + 1] = subslot;
 			}
 		}
 	}
@@ -3502,23 +3720,6 @@ function clearReceiver(send, subslot) {
 function moveDep(send, subslot, depslot) {
 	if (subslot !== -1 && send._subs !== null) {
 		send._subs[subslot + 1] = depslot;
-	}
-}
-
-/**
- * After a nested setup run, the senders point at absolute DSTACK
- * indices. Points them at the pairs' indices in the sliced _deps.
- * @param {Array<Sender | number>} deps
- * @returns {void}
- */
-function rebaseDeps(deps) {
-	let count = deps.length;
-	for (let i = 0; i < count; i += 2) {
-		moveDep(
-			/** @type {Sender} */ (deps[i]),
-			/** @type {number} */ (deps[i + 1]),
-			i
-		);
 	}
 }
 
@@ -4015,40 +4216,6 @@ function sweepDeps(stamp, dep1, deps) {
 	}
 	VCOUNT = vcount;
 	return depCount;
-}
-
-/**
- * Stamps sender from outside a tracking run of its own, such as when an
- * async node settles. A node that is still running may own the stamp
- * being replaced (a stamp above FENCE, as in _read), so it is saved to
- * VSTACK for restoreStamps() to put back.
- * @param {Sender} sender
- * @param {number} stamp
- * @returns {void}
- */
-function stampSaved(sender, stamp) {
-	let old = sender._stamp;
-	if (old > FENCE) {
-		VSTACK[VCOUNT++] = sender;
-		VSTACK[VCOUNT++] = old;
-	}
-	sender._stamp = stamp;
-}
-
-/**
- * Puts back the stamps saved to VSTACK since `base`, by sweepDeps() or
- * stampSaved(), as a tracking run does when it ends. It walks back to
- * front, so a sender saved twice ends with its first saved stamp.
- * @param {number} base
- * @returns {void}
- */
-function restoreStamps(base) {
-	let stack = VSTACK;
-	for (let i = VCOUNT - 2; i >= base; i -= 2) {
-		stack[i]._stamp = stack[i + 1];
-		stack[i] = null;
-	}
-	VCOUNT = base;
 }
 
 /**
@@ -4593,16 +4760,19 @@ function resolveIterator(node, iterator, time) {
  * notifications on nodes that appear in both the sync subscriber list and
  * the async waiter list.
  *
- * Pass 1: Stamp all sync subs with `version - 1` ("belongs to us").
- * Pass 2: Walk waiters — skip subscribe if already a sync sub
- *         (version - 1), stamp with `version` ("notified").
- * Pass 3: Inline notify — OR FLAG_STALE on all subs, but only call
- *         _receive() on subs not stamped `version` (not a waiter).
- *         Skipped when quiet.
+ * Pass 1: Mark all sync subs with FLAG_VISIT.
+ * Pass 2: Walk waiters — subscribe the unmarked ones, and unmark the
+ *         ones that are sync subs too, so pass 3 skips them.
+ * Pass 3: Unmark the subs, and inline notify the ones that were marked
+ *         (not a waiter). The notify is skipped when quiet.
  * Pass 4: Call the waiters' callbacks. They run last, so a callback
  *         that reads the graph sees every subscriber marked stale,
  *         and the waiters are already detached, so a waiter added by
  *         a callback goes into a fresh list.
+ *
+ * The marks are flags, not stamps: a settle can happen inside another
+ * node's run, and a subscriber's stamp may be one that run tracks with.
+ * Nothing between pass 1 and pass 3 runs user code.
  * @param {AsyncSender} node
  * @param {boolean} quiet - Only resolve the waiters, without marking
  *     subscribers stale (the value did not change).
@@ -4615,51 +4785,54 @@ function settleNotify(node, quiet) {
 	let isError = (node._flag & FLAG_ERROR) !== 0;
 	chan._waiters = null;
 	node._flag &= ~FLAG_WAITER;
-	/** A settle can happen inside another node's run, so the stamps
-	 *  passes 1 and 2 replace are put back after pass 3. */
-	let base = VCOUNT;
-	let version = (SEED += 2);
 
-	/** Pass 1: stamp all sync subs with version - 1. */
+	/** Pass 1: mark all sync subs. */
 	let sub = node._sub1;
 	if (sub !== null) {
-		stampSaved(sub, version - 1);
+		sub._flag |= FLAG_VISIT;
 	}
 	let subs = node._subs;
 	if (subs !== null) {
 		let count = subs.length;
 		for (let i = 0; i < count; i += 2) {
-			stampSaved(subs[i], version - 1);
+			subs[i]._flag |= FLAG_VISIT;
 		}
 	}
 
 	/** Pass 2: subscribe waiters, skip if already a sync sub. */
 	for (let i = 0; i < waiterCount; i += 3) {
 		let awaiter = /** @type {AsyncReceiver} */(waiters[i]);
-		if (!(awaiter._flag & FLAG_BLOCKED)) {
-			if (awaiter._stamp !== version - 1) {
-				subscribe(awaiter, node);
-			}
+		if (awaiter._flag & FLAG_VISIT) {
+			awaiter._flag &= ~FLAG_VISIT;
+		} else if (!(awaiter._flag & FLAG_BLOCKED)) {
+			subscribe(awaiter, node);
 		}
-		stampSaved(awaiter, version);
 		clearRespond(awaiter, node);
 	}
 
-	/** Pass 3: inline notify — skip subs that were resolved as waiters. */
-	if (!quiet) {
-		if (sub !== null && sub._stamp !== version) {
-			let flags = sub._flag;
-			sub._flag |= FLAG_STALE;
-			if (!(flags & (FLAG_PENDING | FLAG_STALE | FLAG_BLOCKED | FLAG_DISPOSED | FLAG_PAUSED))) {
-				sub._receive();
+	/** Pass 3: unmark, and inline notify the subs that are not waiters.
+	 *  A waiter subscribed in pass 2 was never marked. */
+	if (sub !== null) {
+		let flags = sub._flag;
+		if (flags & FLAG_VISIT) {
+			sub._flag = flags & ~FLAG_VISIT;
+			if (!quiet) {
+				sub._flag |= FLAG_STALE;
+				if (!(flags & (FLAG_PENDING | FLAG_STALE | FLAG_BLOCKED | FLAG_DISPOSED | FLAG_PAUSED))) {
+					sub._receive();
+				}
 			}
 		}
-		if (subs !== null) {
-			let count = subs.length;
-			for (let i = 0; i < count; i += 2) {
-				sub = subs[i];
-				if (sub._stamp !== version) {
-					let flags = sub._flag;
+	}
+	subs = node._subs;
+	if (subs !== null) {
+		let count = subs.length;
+		for (let i = 0; i < count; i += 2) {
+			sub = subs[i];
+			let flags = sub._flag;
+			if (flags & FLAG_VISIT) {
+				sub._flag = flags & ~FLAG_VISIT;
+				if (!quiet) {
 					sub._flag |= FLAG_STALE;
 					if (
 						!(flags & (FLAG_PENDING | FLAG_STALE | FLAG_BLOCKED | FLAG_DISPOSED | FLAG_PAUSED))
@@ -4670,8 +4843,6 @@ function settleNotify(node, quiet) {
 			}
 		}
 	}
-
-	restoreStamps(base);
 
 	/** Pass 4: resume the waiters. */
 	for (let i = 0; i < waiterCount; i += 3) {
@@ -4832,15 +5003,15 @@ function relay(node, fn, value, isError) {
  * 1. Deduplicates _deps (val() across awaits can insert duplicates).
  * 2. If deferred deps exist, subscribes unique deferred senders and
  *    checks if any changed. Returns true if node needs to re-run.
- * A settle can happen inside another node's run (a callback suspend
- * resolved from its fn), so the stamps it replaces are saved and put
- * back before it returns.
+ * Seen senders are marked with FLAG_VISIT, not stamped: a settle can
+ * happen inside another node's run (a callback suspend resolved from
+ * its fn), and a sender's stamp may be one that run tracks with. Every
+ * marked sender ends up in _dep1 or _deps, and unmarkDeps() clears
+ * them all; nothing in between runs user code.
  * @param {AsyncReceiver} node
  * @returns {boolean}
  */
 function settleDeps(node) {
-	let base = VCOUNT;
-	let stamp = (SEED += 2);
 	let dep1 = node._dep1;
 	let deps = node._deps;
 
@@ -4851,9 +5022,9 @@ function settleDeps(node) {
 		node._chan._defers = null;
 	}
 
-	/** Stamp dep1. */
+	/** Mark dep1. */
 	if (dep1 !== null) {
-		stampSaved(dep1, stamp);
+		dep1._flag |= FLAG_VISIT;
 	}
 
 	/** Dedup scan of _deps — remove duplicates via swap-with-last.
@@ -4861,10 +5032,10 @@ function settleDeps(node) {
 	if (deps !== null) {
 		for (let i = deps.length - 2; i >= 0; i -= 2) {
 			let dep = /** @type {Sender} */ (deps[i]);
-			if (dep._stamp === stamp) {
+			if (dep._flag & FLAG_VISIT) {
 				removeDep(deps, i);
 			} else {
-				stampSaved(dep, stamp);
+				dep._flag |= FLAG_VISIT;
 			}
 		}
 	}
@@ -4879,8 +5050,8 @@ function settleDeps(node) {
 			if (sender._flag & FLAG_DISPOSED) {
 				continue;
 			}
-			if (sender._stamp !== stamp) {
-				stampSaved(sender, stamp);
+			if (!(sender._flag & FLAG_VISIT)) {
+				sender._flag |= FLAG_VISIT;
 				subscribe(node, sender);
 			}
 			if (sender._value !== defers[i + 1]) {
@@ -4888,17 +5059,16 @@ function settleDeps(node) {
 			}
 		}
 	}
-	restoreStamps(base);
+	unmarkDeps(node);
 	return changed;
 }
 
 /**
  * Subscribes the deferred deps of an async node whose fn returned a
- * sync value, so the activation settles without ever loading. The run
- * has just tracked the node's other deps: they are stamped, so a
- * sender the node already has is skipped, and the stamps are put back
- * afterwards, as an outer node may still be running. A deferred value
- * was read in this same run, so there is nothing to re-run for.
+ * sync value, so the activation settles without ever loading. The
+ * node's deps are marked, so a sender it already has is skipped, as in
+ * settleDeps(). A deferred value was read in this same run, so there
+ * is nothing to re-run for.
  * @param {AsyncReceiver} node
  * @returns {void}
  */
@@ -4906,18 +5076,46 @@ function settleDefers(node) {
 	let chan = node._chan;
 	let defers = chan._defers;
 	chan._defers = null;
-	let base = VCOUNT;
-	let stamp = (SEED += 2);
-	sweepDeps(stamp, node._dep1, node._deps);
+	let dep1 = node._dep1;
+	if (dep1 !== null) {
+		dep1._flag |= FLAG_VISIT;
+	}
+	let deps = node._deps;
+	if (deps !== null) {
+		for (let i = 0; i < deps.length; i += 2) {
+			deps[i]._flag |= FLAG_VISIT;
+		}
+	}
 	let count = defers.length;
 	for (let i = 0; i < count; i += 2) {
 		let sender = /** @type {Sender} */(defers[i]);
-		if (!(sender._flag & FLAG_DISPOSED) && sender._stamp !== stamp) {
-			stampSaved(sender, stamp);
+		if (!(sender._flag & (FLAG_DISPOSED | FLAG_VISIT))) {
+			sender._flag |= FLAG_VISIT;
 			subscribe(node, sender);
 		}
 	}
-	restoreStamps(base);
+	unmarkDeps(node);
+}
+
+/**
+ * Clears the FLAG_VISIT marks settleDeps() and settleDefers() put on
+ * the senders of `node`. Every sender they mark is one of its deps by
+ * then: a deferred one was subscribed.
+ * @param {Receiver} node
+ * @returns {void}
+ */
+function unmarkDeps(node) {
+	let dep1 = node._dep1;
+	if (dep1 !== null) {
+		dep1._flag &= ~FLAG_VISIT;
+	}
+	let deps = node._deps;
+	if (deps !== null) {
+		let count = deps.length;
+		for (let i = 0; i < count; i += 2) {
+			deps[i]._flag &= ~FLAG_VISIT;
+		}
+	}
 }
 
 /**
@@ -5159,7 +5357,7 @@ function deliverRejects() {
 
 /**
  * Pauses an owner node (Effect or Root) and recursively pauses
- * all owned child effects. While paused, notifications are
+ * all owned child effects and actions. While paused, notifications are
  * suppressed — the node accumulates stale/pending bits but
  * _receive() returns early. Computes are not paused because
  * they are pull-based and inherently lazy.
@@ -5171,8 +5369,11 @@ function pauseNode(node) {
 	if (owned !== null) {
 		let count = owned.length;
 		for (let i = 0; i < count; i++) {
-			if (owned[i]._flag & FLAG_OWNER) {
-				pauseNode(/** @type {Owner} */(owned[i]));
+			let child = owned[i];
+			if (child._flag & FLAG_OWNER) {
+				pauseNode(/** @type {Owner} */(child));
+			} else if (child instanceof Action) {
+				child._flag |= FLAG_PAUSED;
 			}
 		}
 	}
@@ -5925,6 +6126,7 @@ export {
 	Cell,
 	Compute,
 	Effect,
+	Action,
 	Channel,
 
 	connect,
