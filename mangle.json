@@ -202,7 +202,12 @@
       "$SETUP": "ar",
       "$STABLE": "fr",
       "$WEAK": "jr",
-      "$PUBLIC": "al"
+      "$PUBLIC": "al",
+      "$stampSaved": "wl",
+      "$restoreStamps": "dl",
+      "$postSettle": "vl",
+      "$settleLater": "pl",
+      "$errorLater": "bl"
     }
   },
   "props": {

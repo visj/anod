@@ -1802,3 +1802,391 @@ describe("D10: shield bookkeeping", () => {
         r1.dispose();
     });
 });
+
+describe("39: a settle inside another node's run overwrites its dependency stamps", () => {
+    /**
+     * A callback suspend's resolve() runs later, here from inside
+     * another node's fn. The task settles there: settleDeps stamps its
+     * deps with a fresh SEED, and `s` is also a dep of `outer`, which is
+     * still running. `outer` read nothing yet, so its read of `s` finds
+     * a stamp that is not its own and subscribes `s` a second time.
+     *
+     * Expected: `outer` is subscribed to `s` once and runs once per write.
+     * Actual: `outer` is subscribed twice.
+     */
+    test("a task resolved before the outer node reads a shared dep is not subscribed twice", () => {
+        const s = signal(1);
+        const u = signal(100);
+        const k = signal(0);
+        let resolveT = null;
+        const t = c.task((cx) => {
+            const v = cx.val(s) + cx.val(u);
+            cx.suspend((resolve) => {
+                resolveT = () => resolve(v * 10);
+            });
+        });
+        let runs = 0;
+        const outer = c.compute((cx) => {
+            runs++;
+            if (cx.val(k) > 0 && resolveT !== null) {
+                const resolve = resolveT;
+                resolveT = null;
+                resolve();
+            }
+            return cx.val(s);
+        });
+        root((r) => {
+            r.effect((cx) => {
+                cx.val(outer);
+            });
+        });
+        k.set(1);
+        expect(t.get()).toBe(1010);
+        expect(subCount(s, outer)).toBe(1);
+        runs = 0;
+        s.set(2);
+        expect(outer.get()).toBe(2);
+        expect(runs).toBe(1);
+    });
+
+    /**
+     * `outer` reads `s`, then resolves the task, then reads a new dep,
+     * so the run ends in patchDeps. The settle restamped `s`, and
+     * patchDeps drops every dep whose stamp is not the run's own.
+     *
+     * Expected: `outer` keeps `s`, and s.set(2) gives 2 + 7.
+     * Actual: `outer` loses `s` and stays at 8.
+     */
+    test("a compute keeps a dep it read before resolving a task", () => {
+        const s = signal(1);
+        const u = signal(100);
+        const k = signal(0);
+        const w = signal(7);
+        let resolveT = null;
+        c.task((cx) => {
+            const v = cx.val(s) + cx.val(u);
+            cx.suspend((resolve) => {
+                resolveT = () => resolve(v * 10);
+            });
+        });
+        const outer = c.compute((cx) => {
+            const kv = cx.val(k);
+            const sv = cx.val(s);
+            if (kv > 0 && resolveT !== null) {
+                const resolve = resolveT;
+                resolveT = null;
+                resolve();
+            }
+            return sv + (kv > 0 ? cx.val(w) : 0);
+        });
+        root((r) => {
+            r.effect((cx) => {
+                cx.val(outer);
+            });
+        });
+        k.set(1);
+        expect(depsOf(outer)).toEqual([k, s, w]);
+        s.set(2);
+        expect(outer.get()).toBe(9);
+    });
+
+    /** Same in an effect, as when a transport's send() answers at once. */
+    test("an effect keeps a dep it read before resolving a task", () => {
+        const s = signal(1);
+        const u = signal(100);
+        const k = signal(0);
+        const w = signal(7);
+        let resolveT = null;
+        c.task((cx) => {
+            const v = cx.val(s) + cx.val(u);
+            cx.suspend((resolve) => {
+                resolveT = () => resolve(v * 10);
+            });
+        });
+        const transport = {
+            send() {
+                if (resolveT !== null) {
+                    const resolve = resolveT;
+                    resolveT = null;
+                    resolve();
+                }
+            }
+        };
+        const seen = [];
+        root((r) => {
+            r.effect((cx) => {
+                const kv = cx.val(k);
+                const sv = cx.val(s);
+                if (kv > 0) {
+                    transport.send();
+                }
+                seen.push(sv + (kv > 0 ? cx.val(w) : 0));
+            });
+        });
+        k.set(1);
+        s.set(2);
+        expect(seen).toEqual([1, 8, 9]);
+    });
+
+    /**
+     * The task has a waiter, so its settle runs settleNotify, whose
+     * first pass stamps the task's sync subscribers. `C` is one of them
+     * and a dep of `outer`, which read it before resolving the task.
+     *
+     * Expected: `outer` keeps `C`.
+     * Actual: patchDeps drops `C`.
+     */
+    test("a compute keeps a subscriber of the task it resolves", async () => {
+        const k = signal(0);
+        const w = signal(7);
+        let resolveT = null;
+        const t = c.task((cx) => {
+            cx.suspend((resolve) => {
+                resolveT = resolve;
+            });
+        });
+        const C = c.compute((cx) => (cx.pending(t) ? -1 : cx.val(t)));
+        let outer;
+        root((r) => {
+            r.spawn(async (cx) => {
+                await cx.suspend(t);
+            });
+            outer = r.compute((cx) => {
+                const kv = cx.val(k);
+                const cv = cx.val(C);
+                if (kv > 0 && resolveT !== null) {
+                    const resolve = resolveT;
+                    resolveT = null;
+                    resolve(5);
+                }
+                return cv + (kv > 0 ? cx.val(w) : 0);
+            });
+            r.effect((cx) => {
+                cx.val(outer);
+            });
+        });
+        k.set(1);
+        await settle();
+        expect(depsOf(outer)).toEqual([k, C, w]);
+    });
+
+    /**
+     * Guard, passes on master: a task that defers `s` and settles in its
+     * own run, pulled from inside `outer`'s run. settleDefers stamps to
+     * skip the deps the task already has, and must put back the stamp
+     * `outer` left on `s`.
+     */
+    test("settleDefers inside another node's run keeps that node's deps", () => {
+        const s = signal(1);
+        const k = signal(0);
+        const w = signal(7);
+        const q = signal(0);
+        const t = c.task((cx) => {
+            const kv = cx.val(k);
+            const sv = cx.defer(s);
+            const qv = cx.defer(q);
+            cx.suspend((resolve) => resolve(kv + sv + qv));
+        });
+        const outer = c.compute((cx) => {
+            const kv = cx.val(k);
+            const sv = cx.val(s);
+            const tv = cx.pending(t) ? -1 : cx.val(t);
+            return sv + tv + (kv > 0 ? cx.val(w) : 0);
+        });
+        root((r) => {
+            r.effect((cx) => {
+                cx.val(outer);
+            });
+        });
+        k.set(1);
+        expect(depsOf(outer)).toEqual([k, s, t, w]);
+        expect(depsOf(t)).toEqual([k, s, q]);
+        expect(subCount(s, t)).toBe(1);
+        s.set(2);
+        expect(outer.get()).toBe(2 + (1 + 2 + 0) + 7);
+    });
+});
+
+describe("40: a settle inside another node's run is lost on its readers", () => {
+    /**
+     * `outer` reads the task while it loads, then resolves it. The
+     * settle notified `outer` while it ran, and the end of its run
+     * cleared the mark, so `outer` kept the loading value.
+     *
+     * Expected: the settle is queued like a write. The task still loads
+     * for the rest of the run, and `outer` re-runs with 50.
+     * Actual: `outer` stays at -1.
+     */
+    test("a task resolved in another node's run settles after it, like a write", () => {
+        const k = signal(0);
+        let resolveT = null;
+        const t = c.task((cx) => {
+            cx.suspend((resolve) => {
+                resolveT = resolve;
+            });
+        });
+        const loading = [];
+        const outer = c.compute((cx) => {
+            const kv = cx.val(k);
+            const v = cx.pending(t) ? -1 : cx.val(t);
+            if (kv > 0 && resolveT !== null) {
+                const resolve = resolveT;
+                resolveT = null;
+                resolve(50);
+                loading.push(t.is(LOADING));
+            }
+            return v;
+        });
+        root((r) => {
+            r.effect((cx) => {
+                cx.val(outer);
+            });
+        });
+        k.set(1);
+        expect(loading).toEqual([true]);
+        expect(t.get()).toBe(50);
+        expect(outer.get()).toBe(50);
+    });
+
+    /** Same for a reject. */
+    test("a task rejected in another node's run errors after it", () => {
+        const k = signal(0);
+        let rejectT = null;
+        const t = c.task((cx) => {
+            cx.suspend((resolve, reject) => {
+                rejectT = reject;
+            });
+        });
+        const seen = [];
+        root((r) => {
+            r.effect((cx) => {
+                const kv = cx.val(k);
+                seen.push(cx.pending(t) ? "loading" : t.is(ERROR) ? "error" : "value");
+                if (kv > 0 && rejectT !== null) {
+                    const reject = rejectT;
+                    rejectT = null;
+                    reject(new Error("boom"));
+                    seen.push(t.is(LOADING));
+                }
+            });
+        });
+        k.set(1);
+        expect(seen).toEqual(["loading", "loading", true, "error"]);
+    });
+
+    /**
+     * `C` subscribes to the task and is a dep of `outer`. The settle
+     * marked `C` stale and `C` notified the running `outer`, whose run
+     * then cleared the mark. Nothing pulled `C`, so it stayed stale,
+     * and every later notification skipped it.
+     *
+     * Expected: `outer` gets 5 + 7, and the next settle reaches it.
+     * Actual: `outer` stays at -1 + 7 for good.
+     */
+    test("a subscriber of the task is not left stale", async () => {
+        const k = signal(0);
+        const w = signal(7);
+        const base = signal(1);
+        let resolveT = null;
+        const t = c.task((cx) => {
+            cx.val(base);
+            cx.suspend((resolve) => {
+                resolveT = resolve;
+            });
+        });
+        const C = c.compute((cx) => (cx.pending(t) ? -1 : cx.val(t)));
+        let outer;
+        root((r) => {
+            r.spawn(async (cx) => {
+                await cx.suspend(t);
+            });
+            outer = r.compute((cx) => {
+                const kv = cx.val(k);
+                const cv = cx.val(C);
+                if (kv > 0 && resolveT !== null) {
+                    const resolve = resolveT;
+                    resolveT = null;
+                    resolve(5);
+                }
+                return cv + (kv > 0 ? cx.val(w) : 0);
+            });
+            r.effect((cx) => {
+                cx.val(outer);
+            });
+        });
+        k.set(1);
+        await settle();
+        expect(outer.get()).toBe(12);
+        k.set(0);
+        base.set(2);
+        resolveT(9);
+        await settle();
+        expect(outer.get()).toBe(9);
+    });
+
+    /**
+     * Guard, passes on master, which settled these right away: a queued
+     * settle runs in the drain. It stamped the task's change time
+     * TIME + 1, but the drain's pass is at TIME, so `C` re-ran at TIME
+     * and still saw the task as newer. When the task reloaded, `C`
+     * re-ran, read it as pending, and a settle to the same value did not
+     * notify it again.
+     *
+     * Expected: `C` keeps 5 through the reload.
+     * Actual, with the queue but without the fix: `C` is stuck at -1.
+     */
+    test("a settle in a drain does not leave its readers a tick behind", async () => {
+        const base = signal(1);
+        let resolveT = null;
+        const t = c.task((cx) => {
+            cx.val(base);
+            cx.suspend((resolve) => {
+                resolveT = resolve;
+            });
+        });
+        const C = c.compute((cx) => (cx.pending(t) ? -1 : cx.val(t)));
+        root((r) => {
+            r.effect((cx) => {
+                cx.val(C);
+            });
+        });
+        batch(() => resolveT(5));
+        expect(C.get()).toBe(5);
+        base.set(2);
+        resolveT(5);
+        await settle();
+        expect(C.get()).toBe(5);
+    });
+
+    /** Guard, same, with the resolve made in an effect's run. */
+    test("a settle from an effect's run does not leave its readers a tick behind", async () => {
+        const base = signal(1);
+        const go = signal(0);
+        let resolveT = null;
+        const t = c.task((cx) => {
+            cx.val(base);
+            cx.suspend((resolve) => {
+                resolveT = resolve;
+            });
+        });
+        const C = c.compute((cx) => (cx.pending(t) ? -1 : cx.val(t)));
+        root((r) => {
+            r.effect((cx) => {
+                cx.val(C);
+            });
+            r.effect((cx) => {
+                if (cx.val(go) > 0 && resolveT !== null) {
+                    const resolve = resolveT;
+                    resolveT = null;
+                    resolve(5);
+                }
+            });
+        });
+        go.set(1);
+        expect(C.get()).toBe(5);
+        base.set(2);
+        resolveT(5);
+        await settle();
+        expect(C.get()).toBe(5);
+    });
+});

@@ -53,6 +53,8 @@ Branch `fix/24-slim-cold` shrinks the engine and fixes the bugs that don't need 
 
 Branch `fix/25-shield` fixes bug 25 with D10: `c.lock()` becomes `c.shield()`, a run-to-completion guarantee for effects and spawns, and `unlock()` is removed. A disposal waits for the shields under it with its subtree frozen, and `dispose(true)` forces it. An await that closes a cycle between tasks now fails with "Cycle detected". `test/shield.test.js` replaces `test/lock.test.js`, and bug 25's tests run again. On the branch, 807 tests pass and none fail or are skipped, the same in src and dist.
 
+Branch `fix/settle-stamps` fixes bugs 39 and 40. An async settle no longer overwrites the stamps a running node tracks with (39), and a settle made while the engine is busy is queued like a write, so the task stays loading until the drain settles it (40). It adds ten tests to `hardening.test.js`.
+
 | Bug | Title | Tests | Related | Status |
 | --- | --- | --- | --- | --- |
 | [23](23-errored-resource-write/README.md) | A plain write leaves a resource errored | 5 | 26 | fixed |
@@ -71,6 +73,8 @@ Branch `fix/25-shield` fixes bug 25 with D10: `c.lock()` becomes `c.shield()`, a
 | [36](36-stable-suspend-task/README.md) | `c.suspend(task)` after `c.stable()` drops the task | 1 | 24 | fixed |
 | [37](37-cleanup-defect-wrap/README.md) | A cleanup error that is already a `Defect` is wrapped again | 1 | 07 | fixed |
 | [38](38-bound-effect-double-link/README.md) | A bound effect with `OPT_SETUP` that reads its own dep is linked twice | 1 | — | fixed |
+| [39](39-settle-stamps/README.md) | A settle inside another node's run overwrites its dependency stamps | 5 | 24, 40 | fixed on `fix/settle-stamps` |
+| [40](40-settle-in-run/README.md) | A settle inside another node's run is lost on its readers | 5 | 16, 39 | fixed on `fix/settle-stamps` |
 
 Suggested grouping for fix branches, by the code they touch:
 
@@ -80,6 +84,7 @@ Suggested grouping for fix branches, by the code they touch:
 - **Graph:** 24, 28 and 36 (`val`/`rejected`/`track` routing, `patchDeps` and `clearReceiver`). Fixed.
 - **Teardown:** 35, together with D2. Fixed.
 - **Independent:** 29, 32, 33, 37 and 38.
+- **Settle in a run:** 39 and 40 (`settleDeps`, `settleDefers`, `settleNotify`, `resolvePromise`).
 
 ### Simplification
 

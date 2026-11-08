@@ -2471,8 +2471,11 @@ function root(fn) {
 			}
 			return;
 		}
+		/** Outside a drain, the flush() below starts the pass at TIME + 1.
+		 *  Inside one (a queued settle), that flush() returns at once, and
+		 *  the readers re-run in the current pass, at TIME. */
 		if (changed) {
-			this._ctime = TIME + 1;
+			this._ctime = FLUSHING ? TIME : TIME + 1;
 		}
 
 		let stale = false;
@@ -4015,6 +4018,40 @@ function sweepDeps(stamp, dep1, deps) {
 }
 
 /**
+ * Stamps sender from outside a tracking run of its own, such as when an
+ * async node settles. A node that is still running may own the stamp
+ * being replaced (a stamp above FENCE, as in _read), so it is saved to
+ * VSTACK for restoreStamps() to put back.
+ * @param {Sender} sender
+ * @param {number} stamp
+ * @returns {void}
+ */
+function stampSaved(sender, stamp) {
+	let old = sender._stamp;
+	if (old > FENCE) {
+		VSTACK[VCOUNT++] = sender;
+		VSTACK[VCOUNT++] = old;
+	}
+	sender._stamp = stamp;
+}
+
+/**
+ * Puts back the stamps saved to VSTACK since `base`, by sweepDeps() or
+ * stampSaved(), as a tracking run does when it ends. It walks back to
+ * front, so a sender saved twice ends with its first saved stamp.
+ * @param {number} base
+ * @returns {void}
+ */
+function restoreStamps(base) {
+	let stack = VSTACK;
+	for (let i = VCOUNT - 2; i >= base; i -= 2) {
+		stack[i]._stamp = stack[i + 1];
+		stack[i] = null;
+	}
+	VCOUNT = base;
+}
+
+/**
  * @param {Sender} node
  * @param {number} flag
  */
@@ -4411,6 +4448,52 @@ function isCurrent(node, time) {
 }
 
 /**
+ * Queues a settle made while the engine is busy, such as a callback
+ * resolved from inside another node's fn, as set() queues a write. The
+ * node stays loading until the drain settles it, so a run in progress
+ * never sees the graph change under it. A settle made while the node's
+ * own fn runs (FLAG_CALLBACK) is held by the node instead. No
+ * FLAG_SCHEDULED: a write to a resource supersedes its activation
+ * through _time, which isCurrent checks when the settle drains.
+ * @param {AsyncDisposer} node
+ * @param {{ _value: *, _time: number }} payload
+ * @param {Function} fn
+ * @returns {void}
+ */
+function postSettle(node, payload, fn) {
+	let index = SENDER_COUNT++;
+	SENDERS[index] = node;
+	PAYLOADS[index] = payload;
+	UPDATES[index] = fn;
+}
+
+/**
+ * Drain handler for a queued resolve, if the activation that made it
+ * is still current.
+ * @param {AsyncDisposer} node
+ * @param {{ _value: *, _time: number }} payload
+ * @returns {void}
+ */
+function settleLater(node, payload) {
+	if (isCurrent(node, payload._time)) {
+		node._settle(payload._value);
+	}
+}
+
+/**
+ * Drain handler for a queued reject, if the activation that made it
+ * is still current.
+ * @param {AsyncDisposer} node
+ * @param {{ _value: *, _time: number }} payload
+ * @returns {void}
+ */
+function errorLater(node, payload) {
+	if (isCurrent(node, payload._time)) {
+		node._error(payload._value);
+	}
+}
+
+/**
  * Settles `node` with the outcome of a promise, or of the callback form
  * `source(resolve, reject)`, if the activation started at `time` is still
  * current then. Like a promise, it settles once: after the first call,
@@ -4427,8 +4510,12 @@ function resolvePromise(node, source, time) {
 	let resolve = function (val) {
 		if (!done) {
 			done = true;
-			if (isCurrent(node, time)) {
-				node._settle(val);
+			if (IDLE || node._flag & FLAG_CALLBACK) {
+				if (isCurrent(node, time)) {
+					node._settle(val);
+				}
+			} else {
+				postSettle(node, { _value: val, _time: time }, settleLater);
 			}
 		}
 	};
@@ -4436,8 +4523,12 @@ function resolvePromise(node, source, time) {
 	let reject = function (err) {
 		if (!done) {
 			done = true;
-			if (isCurrent(node, time)) {
-				node._error(err);
+			if (IDLE || node._flag & FLAG_CALLBACK) {
+				if (isCurrent(node, time)) {
+					node._error(err);
+				}
+			} else {
+				postSettle(node, { _value: err, _time: time }, errorLater);
 			}
 		}
 	};
@@ -4524,18 +4615,21 @@ function settleNotify(node, quiet) {
 	let isError = (node._flag & FLAG_ERROR) !== 0;
 	chan._waiters = null;
 	node._flag &= ~FLAG_WAITER;
+	/** A settle can happen inside another node's run, so the stamps
+	 *  passes 1 and 2 replace are put back after pass 3. */
+	let base = VCOUNT;
 	let version = (SEED += 2);
 
 	/** Pass 1: stamp all sync subs with version - 1. */
 	let sub = node._sub1;
 	if (sub !== null) {
-		sub._stamp = version - 1;
+		stampSaved(sub, version - 1);
 	}
 	let subs = node._subs;
 	if (subs !== null) {
 		let count = subs.length;
 		for (let i = 0; i < count; i += 2) {
-			subs[i]._stamp = version - 1;
+			stampSaved(subs[i], version - 1);
 		}
 	}
 
@@ -4547,7 +4641,7 @@ function settleNotify(node, quiet) {
 				subscribe(awaiter, node);
 			}
 		}
-		awaiter._stamp = version;
+		stampSaved(awaiter, version);
 		clearRespond(awaiter, node);
 	}
 
@@ -4576,6 +4670,8 @@ function settleNotify(node, quiet) {
 			}
 		}
 	}
+
+	restoreStamps(base);
 
 	/** Pass 4: resume the waiters. */
 	for (let i = 0; i < waiterCount; i += 3) {
@@ -4736,10 +4832,14 @@ function relay(node, fn, value, isError) {
  * 1. Deduplicates _deps (val() across awaits can insert duplicates).
  * 2. If deferred deps exist, subscribes unique deferred senders and
  *    checks if any changed. Returns true if node needs to re-run.
+ * A settle can happen inside another node's run (a callback suspend
+ * resolved from its fn), so the stamps it replaces are saved and put
+ * back before it returns.
  * @param {AsyncReceiver} node
  * @returns {boolean}
  */
 function settleDeps(node) {
+	let base = VCOUNT;
 	let stamp = (SEED += 2);
 	let dep1 = node._dep1;
 	let deps = node._deps;
@@ -4753,7 +4853,7 @@ function settleDeps(node) {
 
 	/** Stamp dep1. */
 	if (dep1 !== null) {
-		dep1._stamp = stamp;
+		stampSaved(dep1, stamp);
 	}
 
 	/** Dedup scan of _deps — remove duplicates via swap-with-last.
@@ -4764,41 +4864,41 @@ function settleDeps(node) {
 			if (dep._stamp === stamp) {
 				removeDep(deps, i);
 			} else {
-				dep._stamp = stamp;
+				stampSaved(dep, stamp);
 			}
 		}
 	}
 
 	/** Phase 2: subscribe deferred deps and detect changes. A sender
 	 *  disposed during the await is dropped: it never changes again. */
-	if (defers === null) {
-		return false;
-	}
 	let changed = false;
-	let count = defers.length;
-	for (let i = 0; i < count; i += 2) {
-		let sender = /** @type {Sender} */(defers[i]);
-		if (sender._flag & FLAG_DISPOSED) {
-			continue;
-		}
-		if (sender._stamp !== stamp) {
-			sender._stamp = stamp;
-			subscribe(node, sender);
-		}
-		if (sender._value !== defers[i + 1]) {
-			changed = true;
+	if (defers !== null) {
+		let count = defers.length;
+		for (let i = 0; i < count; i += 2) {
+			let sender = /** @type {Sender} */(defers[i]);
+			if (sender._flag & FLAG_DISPOSED) {
+				continue;
+			}
+			if (sender._stamp !== stamp) {
+				stampSaved(sender, stamp);
+				subscribe(node, sender);
+			}
+			if (sender._value !== defers[i + 1]) {
+				changed = true;
+			}
 		}
 	}
+	restoreStamps(base);
 	return changed;
 }
 
 /**
  * Subscribes the deferred deps of an async node whose fn returned a
  * sync value, so the activation settles without ever loading. The run
- * has just tracked the node's other deps, so a sender it already has
- * is found by scan instead of by stamp: settleDeps' stamps would
- * overwrite those of an outer node that is still running. A deferred
- * value was read in this same run, so there is nothing to re-run for.
+ * has just tracked the node's other deps: they are stamped, so a
+ * sender the node already has is skipped, and the stamps are put back
+ * afterwards, as an outer node may still be running. A deferred value
+ * was read in this same run, so there is nothing to re-run for.
  * @param {AsyncReceiver} node
  * @returns {void}
  */
@@ -4806,26 +4906,18 @@ function settleDefers(node) {
 	let chan = node._chan;
 	let defers = chan._defers;
 	chan._defers = null;
+	let base = VCOUNT;
+	let stamp = (SEED += 2);
+	sweepDeps(stamp, node._dep1, node._deps);
 	let count = defers.length;
 	for (let i = 0; i < count; i += 2) {
 		let sender = /** @type {Sender} */(defers[i]);
-		if (!(sender._flag & FLAG_DISPOSED) && !hasDep(node, sender)) {
+		if (!(sender._flag & FLAG_DISPOSED) && sender._stamp !== stamp) {
+			stampSaved(sender, stamp);
 			subscribe(node, sender);
 		}
 	}
-}
-
-/**
- * @param {Receiver} node
- * @param {Sender} sender
- * @returns {boolean} true if sender is already a dep of node
- */
-function hasDep(node, sender) {
-	if (node._dep1 === sender) {
-		return true;
-	}
-	let deps = node._deps;
-	return deps !== null && deps.indexOf(sender) !== -1;
+	restoreStamps(base);
 }
 
 /**
