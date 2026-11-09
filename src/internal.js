@@ -719,17 +719,7 @@ function val(sender) {
 function set(value) {
 	if (IDLE) {
 		/** @type {T} */
-		let _value;
-		let write = true;
-		if (typeof value === "function") {
-			_value = value(this._value);
-			/** Mutable updater returning void — keep current value, still notify. */
-			if (_value === void 0 && this._flag & FLAG_MUTABLE) {
-				write = false;
-			}
-		} else {
-			_value = value;
-		}
+		let _value = resolveValue(this, value);
 		let changed =
 			this._flag & FLAG_MUTABLE ||
 			(this._equal !== null
@@ -739,9 +729,7 @@ function set(value) {
 			supersede(this);
 		}
 		if (changed) {
-			if (write) {
-				this._value = _value;
-			}
+			this._value = _value;
 			notify(this, FLAG_STALE);
 			flush();
 			return true;
@@ -945,17 +933,7 @@ function startLoading(node) {
  * @returns {void}
  */
 function assign(node, value) {
-	let _value;
-	let write = true;
-	if (typeof value === "function") {
-		_value = value(node._value);
-		/** Mutable updater returning void — keep current value, still notify. */
-		if (_value === void 0 && node._flag & FLAG_MUTABLE) {
-			write = false;
-		}
-	} else {
-		_value = value;
-	}
+	let _value = resolveValue(node, value);
 	/** An errored resource (asyncAssign) counts as changed, so the
 	 *  equality function never sees the Defect. */
 	if (
@@ -964,9 +942,7 @@ function assign(node, value) {
 			? !node._equal(node._value, _value)
 			: node._value !== _value)
 	) {
-		if (write) {
-			node._value = _value;
-		}
+		node._value = _value;
 		if (node._flag & FLAG_SCHEDULED) {
 			node._flag &= ~FLAG_SCHEDULED;
 			notify(node, FLAG_STALE);
