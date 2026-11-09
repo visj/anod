@@ -943,10 +943,7 @@ function assign(node, value) {
 			: node._value !== _value)
 	) {
 		node._value = _value;
-		if (node._flag & FLAG_SCHEDULED) {
-			node._flag &= ~FLAG_SCHEDULED;
-			notify(node, FLAG_STALE);
-		}
+		poke(node);
 	}
 }
 
@@ -1028,10 +1025,7 @@ function poke(node) {
  */
 function schedule(node, payload, fn) {
 	node._flag |= FLAG_SCHEDULED;
-	let index = SENDER_COUNT++;
-	SENDERS[index] = node;
-	PAYLOADS[index] = payload;
-	UPDATES[index] = fn;
+	postSettle(node, payload, fn);
 }
 
 /**
@@ -2219,10 +2213,7 @@ function root(fn) {
 			return false;
 		}
 		schedule(this, value, assign);
-		if (!POSTING) {
-			POSTING = true;
-			queueMicrotask(microflush);
-		}
+		postFlush();
 		return true;
 	}
 
