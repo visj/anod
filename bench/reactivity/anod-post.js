@@ -30,7 +30,7 @@ function setupDeep() {
             current = r.compute(cx => { counter++; return cx.val(prev) + 1; });
         }
         const tail = current;
-        r.effect(cx => { counter++; sink += cx.val(tail); });
+        r.action(cx => { counter++; sink += cx.val(tail); });
         let i = 0;
         run = () => { head.post(++i); flush(); };
     });
@@ -44,7 +44,7 @@ function setupBroad() {
         for (let i = 0; i < 50; i++) {
             const current = r.compute(cx => { counter++; return cx.val(head) + i; });
             const current2 = r.compute(cx => { counter++; return cx.val(current) + 1; });
-            r.effect(cx => { counter++; sink += cx.val(current2); });
+            r.action(cx => { counter++; sink += cx.val(current2); });
         }
         let i = 0;
         run = () => { head.post(++i); flush(); };
@@ -62,7 +62,7 @@ function setupDiamond() {
             branches.push(r.compute(cx => { counter++; return cx.val(head) + 1; }));
         }
         const sum = r.compute(cx => { counter++; return branches.reduce((a, b) => a + cx.val(b), 0); });
-        r.effect(cx => { counter++; sink += cx.val(sum); });
+        r.action(cx => { counter++; sink += cx.val(sum); });
         let i = 0;
         run = () => { head.post(++i); flush(); };
     });
@@ -83,7 +83,7 @@ function setupTriangle() {
         }
         list.push(current);
         const sum = r.compute(cx => { counter++; return list.reduce((a, b) => a + cx.val(b), 0); });
-        r.effect(cx => { counter++; sink += cx.val(sum); });
+        r.action(cx => { counter++; sink += cx.val(sum); });
         let i = 0;
         run = () => { head.post(++i); flush(); };
     });
@@ -99,7 +99,7 @@ function setupMux() {
             .map((_, index) => r.compute(cx => { counter++; return cx.val(mux)[index]; }))
             .map(x => r.compute(cx => { counter++; return cx.val(x) + 1; }));
         for (const x of split) {
-            r.effect(cx => { counter++; sink += cx.val(x); });
+            r.action(cx => { counter++; sink += cx.val(x); });
         }
         let i = 0;
         run = () => { const idx = i % heads.length; heads[idx].post(++i); flush(); };
@@ -121,7 +121,7 @@ function setupUnstable() {
             }
             return result;
         });
-        r.effect(cx => { counter++; sink += cx.val(current); });
+        r.action(cx => { counter++; sink += cx.val(current); });
         let i = 0;
         run = () => { head.post(++i); flush(); };
     });
@@ -137,7 +137,7 @@ function setupAvoidable() {
         const computed3 = r.compute(cx => { counter++; return cx.val(computed2) + 1; });
         const computed4 = r.compute(cx => { counter++; return cx.val(computed3) + 2; });
         const computed5 = r.compute(cx => { counter++; return cx.val(computed4) + 3; });
-        r.effect(cx => { counter++; sink += cx.val(computed5); });
+        r.action(cx => { counter++; sink += cx.val(computed5); });
         let i = 0;
         run = () => { head.post(++i); flush(); };
     });
@@ -155,7 +155,7 @@ function setupRepeatedObservers() {
             for (let i = 0; i < size; i++) result += cx.val(head);
             return result;
         });
-        r.effect(cx => { counter++; sink += cx.val(current); });
+        r.action(cx => { counter++; sink += cx.val(current); });
         let i = 0;
         run = () => { head.post(++i); flush(); };
     });
@@ -182,14 +182,14 @@ function setupCellx(layers) {
                 prop3: r.compute(cx => { counter++; return cx.val(m.prop2) + cx.val(m.prop4); }),
                 prop4: r.compute(cx => { counter++; return cx.val(m.prop3); }),
             };
-            r.effect(cx => { counter++; sink += cx.val(s.prop1); });
-            r.effect(cx => { counter++; sink += cx.val(s.prop2); });
-            r.effect(cx => { counter++; sink += cx.val(s.prop3); });
-            r.effect(cx => { counter++; sink += cx.val(s.prop4); });
-            r.effect(cx => { counter++; sink += cx.val(s.prop1); });
-            r.effect(cx => { counter++; sink += cx.val(s.prop2); });
-            r.effect(cx => { counter++; sink += cx.val(s.prop3); });
-            r.effect(cx => { counter++; sink += cx.val(s.prop4); });
+            r.action(cx => { counter++; sink += cx.val(s.prop1); });
+            r.action(cx => { counter++; sink += cx.val(s.prop2); });
+            r.action(cx => { counter++; sink += cx.val(s.prop3); });
+            r.action(cx => { counter++; sink += cx.val(s.prop4); });
+            r.action(cx => { counter++; sink += cx.val(s.prop1); });
+            r.action(cx => { counter++; sink += cx.val(s.prop2); });
+            r.action(cx => { counter++; sink += cx.val(s.prop3); });
+            r.action(cx => { counter++; sink += cx.val(s.prop4); });
             layer = s;
         }
         const end = layer;
@@ -223,9 +223,9 @@ function setupMolWire() {
         const E = r.compute(cx => { counter++; return hard(cx.val(C) + cx.val(A) + cx.val(D)[0].x, 'E'); });
         const F = r.compute(cx => { counter++; return hard(cx.val(D)[2].x || cx.val(B), 'F'); });
         const G = r.compute(cx => { counter++; return cx.val(C) + (cx.val(C) || cx.val(E) % 2) + cx.val(D)[4].x + cx.val(F); });
-        r.effect(cx => { counter++; sink += hard(cx.val(G), 'H'); });
-        r.effect(cx => { counter++; sink += cx.val(G); });
-        r.effect(cx => { counter++; sink += hard(cx.val(F), 'J'); });
+        r.action(cx => { counter++; sink += hard(cx.val(G), 'H'); });
+        r.action(cx => { counter++; sink += cx.val(G); });
+        r.action(cx => { counter++; sink += hard(cx.val(F), 'J'); });
         let i = 0;
         run = () => {
             i++;
@@ -255,7 +255,7 @@ function benchCreateComputations(count) {
             const src = signal(0);
             for (let i = 0; i < count; i++) {
                 const comp = r.compute(cx => { counter++; return cx.val(src); });
-                r.effect(cx => { counter++; sink += cx.val(comp); });
+                r.action(cx => { counter++; sink += cx.val(comp); });
             }
         };
     });

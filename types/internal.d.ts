@@ -23,7 +23,8 @@ export type Resolve<T> =
 				: T;
 
 /* Sender flags (bits 0-6) — readable on any Sender (Signal or Compute).
- * Bits 7+ on a plain Signal are free for extension. */
+ * Bits 7+ on a plain Signal are free for extension, except FLAG_VISIT,
+ * a scratch mark the engine sets and clears within one call. */
 export declare const FLAG_STALE: number;
 export declare const FLAG_PENDING: number;
 export declare const FLAG_SCHEDULED: number;
@@ -54,6 +55,8 @@ export declare const FLAG_PURGE: number;
 export declare const FLAG_PAUSED: number;
 export declare const FLAG_OWNER: number;
 export declare const FLAG_CALLBACK: number;
+/** A scratch mark on any node, set and cleared within one engine call:
+ *  cycle checks and the dedupe passes of an async settle. */
 export declare const FLAG_VISIT: number;
 export declare const FLAG_REFUSE: number;
 
@@ -308,6 +311,54 @@ export declare var Effect: EffectConstructor;
 
 export interface Spawn extends Effect {}
 
+/**
+ * A slim sync effect: it runs its fn when its deps change, and nothing
+ * else. It owns nothing and takes no cleanup, recover or finalize; the
+ * root or effect that creates it disposes it and recovers its errors.
+ */
+export interface Action {
+	/** Whether the node has `flag` set: a creation option or a state. */
+	is(flag: Option | State): boolean;
+	dispose(): void;
+}
+
+/** Pass `null` as `dep1` for an unbound action, or a sender to bind it. */
+export interface ActionConstructor {
+	new <W = undefined>(
+		opts: number,
+		fn: (c: ActionReader, args: W) => void,
+		dep1: null,
+		owner: Owner | null,
+		args?: W
+	): Action;
+	new <T, W = undefined>(
+		opts: number,
+		fn: (val: T, c: ActionContext, args: W) => void,
+		dep1: Sender<T>,
+		owner: Owner | null,
+		args?: W
+	): Action;
+	call<W = undefined>(
+		self: Action,
+		opts: number,
+		fn: (c: ActionReader, args: W) => void,
+		dep1: null,
+		owner: Owner | null,
+		args?: W
+	): void;
+	call<T, W = undefined>(
+		self: Action,
+		opts: number,
+		fn: (val: T, c: ActionContext, args: W) => void,
+		dep1: Sender<T>,
+		owner: Owner | null,
+		args?: W
+	): void;
+	readonly prototype: Action;
+}
+
+export declare var Action: ActionConstructor;
+
 /** Async coordination state of a node, allocated on first use. */
 export interface Channel {}
 
@@ -331,17 +382,15 @@ export interface ResourceContext {
 
 export type Sender<T = any> = Signal<T> | MutableSignal<T> | Resource<T> | Compute<T> | Task<T>;
 export type AsyncSender<T = any> = Resource<T> | Task<T>;
-export type Receiver = Compute | Effect;
+export type Receiver = Compute | Effect | Action;
 export type Owner = Root | Effect;
 export type Disposer = Sender | Receiver | Root;
 
 /**
- * Base context available on all receiver callbacks.
- * Includes callback-based suspend, controller, defer,
- * pending/rejected checks, and contextual set/post.
+ * Bound action callback context: contextual set/post, pending/rejected
+ * checks and is(). The base of every other receiver context.
  */
-export interface Context {
-	cleanup(fn: () => void): void;
+export interface ActionContext {
 	set<T>(sender: Sender<T>, value: T | ((prev: T) => T)): void;
 	set<T>(
 		sender: Resource<T>,
@@ -356,11 +405,19 @@ export interface Context {
 	): void;
 	pending(senders: Sender | Sender[]): boolean;
 	rejected(sender: Sender): Defect | null;
+	/** Whether this node has `flag` set: a creation option or a state. */
+	is(flag: Option | State): boolean;
+}
+
+/**
+ * Base context available on compute, task, effect and spawn callbacks.
+ * Adds cleanups, the activation's version, controller and defer.
+ */
+export interface Context extends ActionContext {
+	cleanup(fn: () => void): void;
 	version(): number;
 	controller(): AbortController;
 	defer<R>(sender: Sender<R>): R;
-	/** Whether this node has `flag` set: a creation option or a state. */
-	is(flag: Option | State): boolean;
 }
 
 /** Dependency tracking — adds val() for reading and subscribing. */
@@ -406,6 +463,9 @@ export interface EffectContext extends RootContext, Context {
 
 /** Unbound effect callback context. */
 export interface EffectReader extends EffectContext, Reader {}
+
+/** Unbound action callback context. */
+export interface ActionReader extends ActionContext, Reader {}
 
 /** Bound task callback context. */
 export interface TaskContext extends ComputeContext {
@@ -543,6 +603,26 @@ export interface Factory {
 		fn: (val: T, c: SpawnContext) => Promise<void>,
 		opts?: EffectOption
 	): Spawn;
+
+	// Unbound action
+	action(fn: (c: ActionReader) => void, opts?: EffectOption): Action;
+	action<W>(
+		fn: (c: ActionReader, args: W) => void,
+		opts?: EffectOption,
+		args?: W
+	): Action;
+	// Bound action
+	action<T>(
+		dep: Sender<T>,
+		fn: (val: T, c: ActionContext) => void,
+		opts?: EffectOption
+	): Action;
+	action<T, W>(
+		dep: Sender<T>,
+		fn: (val: T, c: ActionContext, args: W) => void,
+		opts?: EffectOption,
+		args?: W
+	): Action;
 }
 
 /** Unowned factory — nodes created through it live until GC or dispose. */
@@ -587,21 +667,21 @@ export declare var COMPUTE_COUNT: number;
 export declare const LEVELS: Array<number>;
 export declare const SCOPES: Array<Array<Effect>>;
 export declare var SCOPE_COUNT: number;
-export declare const RECEIVERS: Array<Effect>;
+export declare const RECEIVERS: Array<Effect | Action>;
 export declare var RECEIVER_COUNT: number;
 export declare const PURGES: Array<Owner>;
 export declare var PURGE_COUNT: number;
 
 /* What the factories do once a node is constructed: connect() a bound
  * node to its dep, addOwned() it to an owning root or effect, then run it
- * with startCompute() or startEffect(). An effect also takes its owner's
- * level + 1, growing LEVELS and SCOPES to fit. root() is startRoot() on
+ * with startCompute() or startEffect() (an action too). An effect also
+ * takes its owner's level + 1, growing LEVELS and SCOPES to fit. root() is startRoot() on
  * a new Root. */
 export declare function connect(send: Sender, receiver: Receiver): void;
 export declare function addOwned(owner: Owner, child: Receiver): void;
 export declare function startRoot(root: Root, fn: (c: RootContext) => void): void;
 export declare function startCompute(node: Compute): void;
-export declare function startEffect(node: Effect): void;
+export declare function startEffect(node: Effect | Action): void;
 
 export declare function signal<T>(value: T): Signal<T>;
 export declare function signal<T>(

@@ -1,8 +1,9 @@
 /**
- * Reference benchmark using only c.compute() and c.effect() — the "dumb" API
+ * Reference benchmark using only c.compute() and c.action() — the "dumb" API
  * that matches what other frameworks expose. No derive/watch/bound
  * optimizations. This measures anod's baseline performance when used the
- * same way as alien-signals, preact-signals, etc.
+ * same way as alien-signals, preact-signals, etc. Side effects are
+ * actions: none of them owns nodes or registers cleanups.
  */
 import { bench, run } from 'mitata';
 import { EXPECTED } from './expected.js';
@@ -34,7 +35,7 @@ function setupDeep() {
         });
     }
     const tail = current;
-    c.effect(cx => {
+    c.action(cx => {
         counter++;
         sink += cx.val(tail);
     });
@@ -55,7 +56,7 @@ function setupBroad() {
             counter++;
             return cx.val(current) + 1;
         });
-        c.effect(cx => {
+        c.action(cx => {
             counter++;
             sink += cx.val(current2);
         });
@@ -80,7 +81,7 @@ function setupDiamond() {
         counter++;
         return branches.reduce((a, b) => a + cx.val(b), 0);
     });
-    c.effect(cx => {
+    c.action(cx => {
         counter++;
         sink += cx.val(sum);
     });
@@ -108,7 +109,7 @@ function setupTriangle() {
         counter++;
         return list.reduce((a, b) => a + cx.val(b), 0);
     });
-    c.effect(cx => {
+    c.action(cx => {
         counter++;
         sink += cx.val(sum);
     });
@@ -134,7 +135,7 @@ function setupMux() {
             return cx.val(x) + 1;
         }));
     for (const x of split) {
-        c.effect(cx => {
+        c.action(cx => {
             counter++;
             sink += cx.val(x);
         });
@@ -164,7 +165,7 @@ function setupUnstable() {
         }
         return result;
     });
-    c.effect(cx => {
+    c.action(cx => {
         counter++;
         sink += cx.val(current);
     });
@@ -197,7 +198,7 @@ function setupAvoidable() {
         counter++;
         return cx.val(computed4) + 3;
     });
-    c.effect(cx => {
+    c.action(cx => {
         counter++;
         sink += cx.val(computed5);
     });
@@ -218,7 +219,7 @@ function setupRepeatedObservers() {
         }
         return result;
     });
-    c.effect(cx => {
+    c.action(cx => {
         counter++;
         sink += cx.val(current);
     });
@@ -258,14 +259,14 @@ function setupCellx(layers) {
                 return cx.val(m.prop3);
             }),
         };
-        c.effect(cx => { counter++; sink += cx.val(s.prop1); });
-        c.effect(cx => { counter++; sink += cx.val(s.prop2); });
-        c.effect(cx => { counter++; sink += cx.val(s.prop3); });
-        c.effect(cx => { counter++; sink += cx.val(s.prop4); });
-        c.effect(cx => { counter++; sink += cx.val(s.prop1); });
-        c.effect(cx => { counter++; sink += cx.val(s.prop2); });
-        c.effect(cx => { counter++; sink += cx.val(s.prop3); });
-        c.effect(cx => { counter++; sink += cx.val(s.prop4); });
+        c.action(cx => { counter++; sink += cx.val(s.prop1); });
+        c.action(cx => { counter++; sink += cx.val(s.prop2); });
+        c.action(cx => { counter++; sink += cx.val(s.prop3); });
+        c.action(cx => { counter++; sink += cx.val(s.prop4); });
+        c.action(cx => { counter++; sink += cx.val(s.prop1); });
+        c.action(cx => { counter++; sink += cx.val(s.prop2); });
+        c.action(cx => { counter++; sink += cx.val(s.prop3); });
+        c.action(cx => { counter++; sink += cx.val(s.prop4); });
         layer = s;
     }
     const end = layer;
@@ -311,15 +312,15 @@ function setupMolWire() {
         counter++;
         return cx.val(C) + (cx.val(C) || cx.val(E) % 2) + cx.val(D)[4].x + cx.val(F);
     });
-    c.effect(cx => {
+    c.action(cx => {
         counter++;
         sink += hard(cx.val(G), 'H');
     });
-    c.effect(cx => {
+    c.action(cx => {
         counter++;
         sink += cx.val(G);
     });
-    c.effect(cx => {
+    c.action(cx => {
         counter++;
         sink += hard(cx.val(F), 'J');
     });
@@ -357,7 +358,7 @@ function benchCreateComputations(count) {
                 counter++;
                 return cx.val(src);
             });
-            c.effect(cx => {
+            c.action(cx => {
                 counter++;
                 sink += cx.val(comp);
             });
