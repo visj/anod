@@ -2023,21 +2023,10 @@ function root(fn) {
 		if (flag & FLAG_LOADING) {
 			this._readAsync(sender, true);
 		} else {
-			let version = STAMP;
 			if (sender._flag & (FLAG_STALE | FLAG_PENDING)) {
 				sender._refresh();
 			}
-			if ((flag & (FLAG_STABLE | FLAG_SETUP)) !== FLAG_STABLE) {
-				if (sender._stamp !== version) {
-					let stamp = sender._stamp;
-					sender._stamp = version;
-					if (stamp === version - 1) {
-						REUSED++;
-					} else {
-						this._read(sender, stamp);
-					}
-				}
-			}
+			track(this, sender);
 		}
 		if (sender._flag & FLAG_ERROR) {
 			return sender._value;
@@ -2769,8 +2758,7 @@ function root(fn) {
 			STAMP = current;
 		}
 
-		this._flag &= ~(FLAG_STALE | FLAG_PENDING | FLAG_SETUP);
-		flag = this._flag;
+		flag = this._flag &= ~(FLAG_STALE | FLAG_PENDING | FLAG_SETUP);
 
 		/** Async, a callback suspend made in the fn, or disposed by it.
 		 *  The masks fold to one constant: a sync compute pays a single
