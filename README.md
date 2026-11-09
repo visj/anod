@@ -734,7 +734,7 @@ root((c) => {
 
 `c.post(signal, value)` is the deferred variant — schedules the write for the next microtask flush, with the same self-notification guard.
 
-Both `c.set()` and `c.post()` also support writing to resources with an async callback: `c.set(resource, value, asyncFn)` .
+Both `c.set()` and `c.post()` also support writing to resources with an async callback: `c.set(resource, value, asyncFn)`. It writes as `resource.set(value, asyncFn)` would, optimistically and then async, and the node that writes is not run again by its own write, including the resource starting to load.
 
 ### Async state checks: `c.pending()` / `c.rejected()`
 
@@ -1086,7 +1086,7 @@ root((c) => {
 });
 ```
 
-A task that awaits a task which, directly or through other tasks, awaits it back would never settle. The await that closes such a cycle throws `"Cycle detected"` instead, so the tasks fail rather than stay loading.
+A task that awaits a task which, directly or through other tasks, awaits it back would never settle. The await that closes such a cycle throws `"Cycle detected"` instead, so the tasks fail rather than stay loading. The same goes for an array await, and with callbacks, `onReject` receives the error.
 
 **Array**: awaits multiple tasks, resources and promises concurrently. Returns when all of them have settled, with the values in the same order. A plain value in the array is returned as it is. A promise is waited on like a task, so a rejection reaches you as a `Defect`, and an array with a promise in it always takes at least a microtask, since a promise can't be read synchronously.
 
