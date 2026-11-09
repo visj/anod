@@ -3943,17 +3943,15 @@ function patchDeps(node, version, depCount, newLen) {
 	 *  writes new deps into dep1 (only setup does), so the only
 	 *  question is whether dep1 was reused or dropped. */
 	let dep1 = node._dep1;
-	if (dep1 !== null) {
-		if (dep1._stamp !== version) {
-			clearReceiver(dep1, node._dep1slot);
-			if (newidx < newLen) {
-				let newDep = /** @type {Sender} */ (deps[newidx]);
-				node._dep1 = newDep;
-				node._dep1slot = connect(newDep, node, -1);
-				newidx += 2;
-			} else {
-				node._dep1 = null;
-			}
+	if (dep1 !== null && dep1._stamp !== version) {
+		clearReceiver(dep1, node._dep1slot);
+		if (newidx < newLen) {
+			let newDep = /** @type {Sender} */ (deps[newidx]);
+			node._dep1 = newDep;
+			node._dep1slot = connect(newDep, node, -1);
+			newidx += 2;
+		} else {
+			node._dep1 = null;
 		}
 	}
 
@@ -3990,8 +3988,13 @@ function patchDeps(node, version, depCount, newLen) {
 			newidx += 2;
 			i += 2;
 		} else {
-			let found = 0;
-			while (tail > i + 2) {
+			/** Fill the slot with a kept dep from the back, unbinding the
+			 *  dropped ones passed on the way; none left ends the region. */
+			for (; ;) {
+				if (tail <= i + 2) {
+					tail = i;
+					break;
+				}
 				tail -= 2;
 				let tDep = /** @type {Sender} */ (deps[tail]);
 				let tSlot = /** @type {number} */ (deps[tail + 1]);
@@ -3999,34 +4002,26 @@ function patchDeps(node, version, depCount, newLen) {
 					deps[i] = tDep;
 					deps[i + 1] = tSlot;
 					moveDep(tDep, tSlot, i);
-					found = 1;
+					i += 2;
 					break;
-				} else {
-					clearReceiver(tDep, tSlot);
 				}
-			}
-			if (found) {
-				i += 2;
-			} else {
-				tail = i;
+				clearReceiver(tDep, tSlot);
 			}
 		}
 	}
-	if (newidx < newLen) {
-		if (node._dep1 === null) {
-			/** No deps before this run: the first new dep becomes dep1. */
-			let newDep = /** @type {Sender} */ (deps[newidx]);
-			node._dep1 = newDep;
-			node._dep1slot = connect(newDep, node, -1);
-			newidx += 2;
-		}
-		while (newidx < newLen) {
-			let dep = /** @type {Sender} */ (deps[newidx]);
-			deps[tail] = dep;
-			deps[tail + 1] = connect(dep, node, tail);
-			tail += 2;
-			newidx += 2;
-		}
+	/** No deps before this run: the first new dep becomes dep1. */
+	if (node._dep1 === null && newidx < newLen) {
+		let newDep = /** @type {Sender} */ (deps[newidx]);
+		node._dep1 = newDep;
+		node._dep1slot = connect(newDep, node, -1);
+		newidx += 2;
+	}
+	while (newidx < newLen) {
+		let dep = /** @type {Sender} */ (deps[newidx]);
+		deps[tail] = dep;
+		deps[tail + 1] = connect(dep, node, tail);
+		tail += 2;
+		newidx += 2;
 	}
 
 	/** Promote last array entry to dep1 when dep1 is empty. */
