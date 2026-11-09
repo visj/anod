@@ -1,15 +1,98 @@
 <!-- omit in toc -->
 # anod
 
-anod is a reactive state management library. It has built-in support for both sync and async graphs. It's similar to many other signal libraries, but its architecture differs in several meaningful ways:
+anod is a fast signal library where async is part of the reactive graph, not bolted onto it.
 
-* No global/automatic dependency tracking, provides a context object to every callback
-* Uses a hybrid push/pull model, where nodes can both eagerly and lazily send updates
-* Async is built into the core, and is a first-hand member
+```sh
+npm install anod
+```
+
+* **Async without races.** Tasks, resources and spawns are the async versions of computes, signals and effects. When a dependency changes while one is in flight, the old run is dropped: its late response never lands, and its `AbortController` is aborted.
+* **Tracking that survives `await`.** Every callback gets a context `c`, and `c.val()` reads and subscribes. Since tracking goes through `c` rather than a global listener, a read after an `await` is tracked like any other.
+* **Fast and lean.** A hybrid push/pull graph that reconciles dependencies without allocating. In a benchmark shaped like a real list view, anod is 12–65% faster than alien-signals and 69–93% faster than Solid 2.0's signals (see [Benchmarks](#benchmarks)).
+* **Errors and lifecycles you can reason about.** Every error is a typed `Defect`. `c.recover()` and `c.finalize()` work like `catch` and `finally` for a reactive run, `c.cleanup()` runs before the next one, and `c.shield()` lets an async side effect run to completion.
+
+<!-- omit in toc -->
+## Quick example
+
+A search box. Each keystroke starts a request, and only the latest one is ever shown:
+
+```ts
+import { root, signal } from "anod";
+
+const query = signal("an");
+
+root((c) => {
+	/**
+	 * A task is an async compute. When query changes, it runs again:
+	 * anod aborts the previous request through c.controller(), and
+	 * c.suspend() drops its response if it arrives anyway.
+	 */
+	const results = c.task(query, async (q, c) => {
+		const res = await c.suspend(
+			fetch(`/api/search?q=${q}`, { signal: c.controller().signal })
+		);
+		return await c.suspend(res.json());
+	});
+
+	const count = c.compute(results, (list) => list.length);
+
+	c.effect((c) => {
+		if (c.pending(results)) {
+			console.log("Searching...");
+		} else {
+			console.log(`${c.val(count)} results:`, c.val(results));
+		}
+	});
+});
+
+query.set("ant");
+query.set("anod");
+// Searching...
+// 1 results: ["anod"]
+```
+
+There is no request id to compare and no `isMounted` flag to check. The requests for `"an"` and `"ant"` are aborted, and even a response that arrived after the abort would be dropped.
+
+The same guard covers writes. A resource is a signal that can be written optimistically and confirmed later:
+
+```ts
+import { root, resource, LOADING } from "anod";
+
+const save = (todos) => new Promise((r) => setTimeout(() => r(todos), 100));
+
+root((c) => {
+	const todos = resource([]);
+
+	function add(text) {
+		/**
+		 * Shows the todo at once, then settles with what the server
+		 * confirms. If add() runs again before this save returns,
+		 * this save is dropped: only the latest write settles.
+		 */
+		todos.set([...todos.get(), { text, saved: false }], async (c, optimistic) => {
+			const saved = await c.suspend(save(optimistic));
+			return saved.map((t) => ({ ...t, saved: true }));
+		});
+	}
+
+	c.effect(todos, (list) => {
+		const items = list.map((t) => (t.saved ? "✓ " : "… ") + t.text);
+		console.log(items.join(", ") || "(empty)", todos.is(LOADING) ? "(saving)" : "");
+	});
+
+	add("Write docs");
+	setTimeout(() => add("Ship it"), 50);
+});
+// (empty)
+// … Write docs (saving)
+// … Write docs, … Ship it (saving)
+// ✓ Write docs, ✓ Ship it
+```
+
 <!-- omit in toc -->
 ## Table of contents
 
-- [Quick example](#quick-example)
 - [Basic usage](#basic-usage)
 	- [Sync reactivity](#sync-reactivity)
 		- [Root](#root)
@@ -18,6 +101,7 @@ anod is a reactive state management library. It has built-in support for both sy
 		- [Compute](#compute)
 		- [Effect](#effect)
 		- [Action](#action)
+		- [Batching](#batching)
 	- [Async reactivity](#async-reactivity)
 		- [Resource](#resource)
 		- [Task](#task)
@@ -26,7 +110,6 @@ anod is a reactive state management library. It has built-in support for both sy
 	- [Error handling](#error-handling)
 		- [c.recover(), REFUSE, PANIC, FATAL](#crecover-refuse-panic-fatal)
 		- [c.finalize()](#cfinalize)
-		- [Batching](#batching)
 - [Bundling](#bundling)
 - [The reactive graph in depth](#the-reactive-graph-in-depth)
 	- [Eager creation, lazy pull](#eager-creation-lazy-pull)
@@ -34,7 +117,6 @@ anod is a reactive state management library. It has built-in support for both sy
 	- [Contextual helpers](#contextual-helpers)
 		- [`c.equal()`](#cequal)
 		- [`c.cleanup()`](#ccleanup)
-		- [`c.recover()` , `c.refuse()` , `c.panic()`](#crecover--crefuse--cpanic)
 	- [Contextual writes: `c.set()` / `c.post()`](#contextual-writes-cset--cpost)
 	- [Async state checks: `c.pending()` / `c.rejected()`](#async-state-checks-cpending--crejected)
 	- [Evaluation helpers](#evaluation-helpers)
@@ -64,57 +146,18 @@ anod is a reactive state management library. It has built-in support for both sy
 - [Contributing](#contributing)
 - [License](#license)
 
-## Quick example
-
-```ts
-import { root, resource } from "anod";
-
-const saveBatch = (todos) => new Promise((r) => setTimeout(() => r(todos), 1000));
-
-const app = root((c) => {
-	const todos = resource([]);
-
-	// Add a todo: appears instantly with saved: false, settles when server confirms
-	function addTodo(text) {
-		todos.set([...todos.get(), { text, saved: false }], async (c, optimistic) => {
-			// suspend() guards the await: if a newer set() fires while this
-			// request is still in flight, this callback silently stops here -
-			// the stale response is discarded, only the latest write settles.
-			await c.suspend(saveBatch(optimistic));
-			return optimistic.map((t) => ({ ...t, saved: true }));
-		});
-	}
-
-	// Derived: count of items still saving
-	const pending = c.compute(todos, (list) => list.filter((t) => !t.saved).length);
-
-	// Render on every change
-	c.effect((c) => {
-		const list = c.val(todos);
-		const n = c.val(pending);
-		const items = list.map((t) => `${t.saved ? "✓" : "⏳"} ${t.text}`).join("  ");
-		console.log(items || "(empty)", n > 0 ? `| ${n} saving...` : list.length ? "| all saved" : "");
-	});
-
-	// Simulate clicking on addTodo button twice with some delay in between
-	addTodo("Build anod");
-	setTimeout(() => addTodo("Ship it"), 500);
-});
-```
-
 ## Basic usage
 
-The following primitives exist in anod:
+anod has these primitives:
 
-* Signal, holds a value and notifies when it changes. `signal(value, false)` creates a signal that always notifies.
-* Compute, a derived signal, updates and notifies when its derived value changes
-* Effect, a sink that listens to signals and computes and performs actions
-* Resource, an async signal for optimistic updates with server confirmation
-* Task, an async compute for awaiting promises
-* Spawn, an async effect for doing async work
-* Root, which owns inner primitives and disposes them on request
-* Clock, the root clock on which the system operates and tick time
-* Context, a callback parameter that provides the current reactive context
+| Sync | Async | Role |
+| --- | --- | --- |
+| Signal | Resource | A writable value. A resource can also be written by an async function, optimistically or not. |
+| Compute | Task | A derived value. It runs when created, then only when read after a dependency changed. |
+| Effect | Spawn | A side effect. It runs again whenever what it reads changes, and owns the nodes it creates. |
+| Action | | A slim effect with no cleanups or children, for small writes like setting a DOM property. |
+
+A **root** owns the nodes created inside it and disposes them together. Every callback gets a **context** `c`, through which it reads (`c.val()`), writes (`c.set()`) and creates owned nodes (`c.compute()`, `c.effect()`, ...).
 
 ### Sync reactivity
 
@@ -197,7 +240,7 @@ root((c) => {
 	 */
 	const feelsCold = c.compute((c) => {
 		console.log("Evaluating weather");
-		return c.val(temp) < 0; // Warm weather today
+		return c.val(temp) < 0;
 	});
 
 	// Create a compute node, but defer its initial run with DEFER.
@@ -302,15 +345,59 @@ An action owns nothing, and has no `c.cleanup()`, `c.recover()`, `c.finalize()`,
 
 Use an effect for anything that needs cleanups, children of its own or async work.
 
+#### Batching
+
+`batch()` groups multiple signal writes into a single notification pass. Without batch, each `.set()` immediately flushes the reactive graph. Inside a batch, writes are coalesced and the graph flushes once at the end.
+
+```ts
+import { root, signal, batch } from "anod";
+root((c) => {
+	const first = signal("Ada");
+	const last = signal("Lovelace");
+	c.effect((c) => {
+		console.log(`${c.val(first)} ${c.val(last)}`);
+	});
+	/**
+	 * Without batch: two separate flushes, effect runs twice.
+	 * With batch: one flush, effect runs once with both values updated.
+	 */
+	batch(() => {
+		first.set("Grace");
+		last.set("Hopper");
+	});
+});
+```
+
+Signals also expose `.post()` which defers the write to a microtask. Nothing is written immediately, instead, the value is scheduled and applied when the microtask flush runs. Multiple `.post()` calls are run in sequence, and applied one by one during the microtask flush.
+
+```ts
+import { signal } from "anod";
+const counter = signal(0);
+counter.post(1); // scheduled, not written yet
+counter.post(2); // same tick, both scheduled, one flush
+counter.post((prev) => prev + 1); // updater resolved at flush time
+console.log(counter.get()); // still 0 — flush hasn't run
+// after microtask: counter is 3
+```
+
+Both `.set()` and `.post()` accept an updater function `(prev) => next` . For `.set()` , the updater is called immediately when idle, or deferred to drain time when inside a flush cycle. For `.post()` , the updater is always deferred to flush time, so it sees the latest value at that point.
+
+When you mix the two, a later `.set()` takes precedence over earlier posts to the same signal. It cancels them, so their updaters never run, then writes and flushes. Posts to other signals stay queued and flush along with it. A `.post()` after the `.set()` is a new write, applied on the next microtask.
+
+```ts
+import { signal } from "anod";
+const count = signal(0);
+count.post(1); // scheduled
+count.set(2); // cancels the post, count is 2
+count.post(3); // scheduled again
+// after microtask: count is 3
+```
+
+An idle updater `.set(fn)` sees the committed value, since the posts it supersedes never run. If the updater throws, the posts stay queued. Inside a batch or a flush, `.set()` is queued as well, behind the earlier posts, so the last write wins.
+
 ### Async reactivity
 
-anod aims to bridge the gap between sync and async signal reactivity. Each sync primitive has an async counterpart:
-
-| Sync | Async | Role |
-| --- | --- | --- |
-| Signal | Resource | Writable value |
-| Compute | Task | Derived value |
-| Effect | Spawn | Side effect |
+Each sync primitive has an async counterpart: a resource is a signal, a task is a compute, and a spawn is an effect, each of which can wait on promises and on each other. They share one guard: when a node runs again or is disposed, whatever its previous run was waiting on is dropped.
 
 #### Resource
 
@@ -425,48 +512,28 @@ However, `c.suspend()` is not the only way. For cases where you need more contro
 ```ts
 import { root, signal } from "anod";
 
-function sideEffect(source, data) {
-	console.log(`Side effect from ${source} with data ${data}`);
-}
-
-let time = 0;
-
-function load(url) {
-	// Simulate network call
-	return new Promise((resolve) => setTimeout(() => resolve(time++), 200));
-}
+const load = (url) => new Promise((r) => setTimeout(() => r(`data from ${url}`), 100));
 
 root((c) => {
-	const url = signal("vilhelm.se");
+	const url = signal("/a");
+
+	/** A plain await: nothing stops the stale run once its promise resolves. */
 	c.spawn(async (c) => {
-		// Here we load a raw promise
 		const data = await load(c.val(url));
-		/**
-		 * This is going to log twice, first upon creation,
-		 * and then again after the value updates. There is nothing
-		 * blocking re-entry after the promise resolves.
-		 */
-		sideEffect("raw promise", data);
+		console.log("await:  ", data);
 	});
 
+	/** A suspended await: the stale run never continues past it. */
 	c.spawn(async (c) => {
-		/**
-		 * Here, by guarding the load inside a suspend,
-		 * when setting the url value the first spawn is disposed and never yields.
-		 * This only runs the sideEffect once.
-		 */
 		const data = await c.suspend(load(c.val(url)));
-		sideEffect("suspended promise", data);
+		console.log("suspend:", data);
 	});
 
-	/**
-	 * This will invalidate the spawn and trigger it to re-run
-	 * But we cannot stop the existing promise that is still mid-flight
-	 * This causes a leak, where both promises resolve, despite the first one
-	 * being disposed.
-	 */
-	url.set("github.com");
+	url.set("/b");
 });
+// await:   data from /a   <- the run that url.set() replaced still finishes
+// await:   data from /b
+// suspend: data from /b
 ```
 
 ### Error handling
@@ -543,66 +610,18 @@ root((c) => {
 A few things to note:
 
 * Multiple `finalize` calls accumulate and run forward in registration order
-* Errors inside finalizers are swallowed, matching JS `finally` semantics
+* Errors inside finalizers are swallowed, so a finalizer never replaces the run's result or error, unlike a throw inside a JS `finally`
 * `finalize` does not bubble to parent effects, it's scoped to the activation it was registered in
 * On re-run, any leftover finalize from the previous activation is cleared before the new run starts
 * This differs from `cleanup`, which runs in reverse order (stack unwinding). Finalize is sequential post-completion work, not resource teardown
 
-#### Batching
-
-`batch()` groups multiple signal writes into a single notification pass. Without batch, each `.set()` immediately flushes the reactive graph. Inside a batch, writes are coalesced and the graph flushes once at the end.
-
-```ts
-import { root, signal, batch } from "anod";
-root((c) => {
-	const first = signal("Ada");
-	const last = signal("Lovelace");
-	c.effect((c) => {
-		console.log(`${c.val(first)} ${c.val(last)}`);
-	});
-	/**
-	 * Without batch: two separate flushes, effect runs twice.
-	 * With batch: one flush, effect runs once with both values updated.
-	 */
-	batch(() => {
-		first.set("Grace");
-		last.set("Hopper");
-	});
-});
-```
-
-Signals also expose `.post()` which defers the write to a microtask. Nothing is written immediately, instead, the value is scheduled and applied when the microtask flush runs. Multiple `.post()` calls are run in sequence, and applied one by one during the microtask flush.
-
-```ts
-import { signal } from "anod";
-const counter = signal(0);
-counter.post(1); // scheduled, not written yet
-counter.post(2); // same tick, both scheduled, one flush
-counter.post((prev) => prev + 1); // updater resolved at flush time
-console.log(counter.get()); // still 0 — flush hasn't run
-// after microtask: counter is 3
-```
-
-Both `.set()` and `.post()` accept an updater function `(prev) => next` . For `.set()` , the updater is called immediately when idle, or deferred to drain time when inside a flush cycle. For `.post()` , the updater is always deferred to flush time, so it sees the latest value at that point.
-
-When you mix the two, a later `.set()` takes precedence over earlier posts to the same signal. It cancels them, so their updaters never run, then writes and flushes. Posts to other signals stay queued and flush along with it. A `.post()` after the `.set()` is a new write, applied on the next microtask.
-
-```ts
-import { signal } from "anod";
-const count = signal(0);
-count.post(1); // scheduled
-count.set(2); // cancels the post, count is 2
-count.post(3); // scheduled again
-// after microtask: count is 3
-```
-
-An idle updater `.set(fn)` sees the committed value, since the posts it supersedes never run. If the updater throws, the posts stay queued. Inside a batch or a flush, `.set()` is queued as well, behind the earlier posts, so the last write wins.
-
 ## Bundling
 
-anod supports two JavaScript type systems: Typescript and Google's Closure Compiler. For those wondering why the source code is written in plain JavaScript: Closure Compiler had some experimental support for Typescript in the past, but it has since been discontinued. Closure operates on JSDoc style type safety. To my knowledge, no bundler except Closure Compiler can confidently tree-shake prototype based method dispatch. Since anod uses a context object, which internally is Compute/Effect node, it's impossible to tree-shake anod with normal bundlers.
+anod is written in plain JavaScript with JSDoc types, so one source serves two type systems: TypeScript, through the shipped `.d.ts` files, and Google's Closure Compiler, with which it is safe to use ADVANCED_OPTIMIZATIONS. Closure once had experimental TypeScript support, but it was discontinued, and it reads JSDoc types only.
 
-anod is fully typed for Closure Compiler, meaning, it's safe to use with ADVANCED OPTIMIZATIONS. On npm, the package exposes the raw source code. Import those files directly and it will work out of the box.
+The npm package ships both the minified build, in `dist/`, and the raw source, in `src/`. Bundlers pick the build by default, and the `src` export condition picks the source.
+
+The context `c` is the node itself, and its methods live on prototypes. Ordinary bundlers can't tree-shake methods out of a prototype, so they keep all of anod; to my knowledge, only Closure Compiler can drop the methods you don't call. The build mangles anod's internal property names, and the name map ships as `anod/mangle.json`, so a library that extends anod can minify its own code with the same names.
 
 ## The reactive graph in depth
 
@@ -676,10 +695,6 @@ root((c) => {
 });
 ```
 
-#### `c.recover()` , `c.refuse()` , `c.panic()`
-
-See dedicated error lifecycle section.
-
 ### Contextual writes: `c.set()` / `c.post()`
 
 Inside a callback, `c.set(signal, value)` writes to a signal while preventing the current node from re-triggering itself. This enables the interceptor pattern: subscribe to a signal, observe writes from elsewhere in the app, persist or validate them asynchronously, and write back a correction if needed, without causing a circular dependency.
@@ -723,9 +738,9 @@ Both `c.set()` and `c.post()` also support writing to resources with an async ca
 
 ### Async state checks: `c.pending()` / `c.rejected()`
 
-`c.pending(sender)` subscribes to a sender and returns `true` if it has `FLAG_LOADING` set. Works with tasks, resources, or any sender. Accepts an array of senders — returns `true` if any is loading.
+`c.pending(sender)` subscribes to a sender and returns `true` if it is loading. It works with tasks, resources, or any sender, and accepts an array of senders, returning `true` if any of them is loading.
 
-`c.rejected(sender)` subscribes to a sender and safely returns its error value if `FLAG_ERROR` is set, or `null` otherwise. Unlike `c.val()` , it does not throw on error — this is the safe way to check error state reactively.
+`c.rejected(sender)` subscribes to a sender and returns its error if it has failed, or `null` otherwise. Unlike `c.val()` , it does not throw on error — this is the safe way to check error state reactively.
 
 ```ts
 import { root } from "anod";
@@ -1312,7 +1327,9 @@ This applies to both resolve and reject: if a promise rejects after the node was
 
 The same holds for awaiting a task, and for the callback form: a node that has been disposed never resumes, whatever it waits on. When a task is disposed, the nodes waiting on it are rejected once the disposal has finished, with a `Defect` of type `PANIC` ("Awaited task was disposed"). Signals and resources are not owned, so they are never disposed. It is `PANIC`, not `FATAL`, because nothing crashed: what you waited on was ended by its owner, like an `AbortError` from `fetch`. Every waiter gets the same value, through `await` and `onReject` alike. A waiter that the same disposal tore down (a spawn and the task it awaits, owned by the same root) is not told; a waiter elsewhere is. A shielded node (`c.shield()`) is not disposed until its activation finishes, so it is told, and is disposed once it completes.
 
-Instead, you must rely on the builtin lifecycle helpers. If you await a promise, and create some state that needs cleaning up, use c.cleanup(). If you must run the async function to completion, call c.shield(). The idea about anod's async correctness guarantee is that we do not want promises firing all over the place, writing state in an unpredictable way. The sync reactive graph is always consistent. When you write a value, every reader is guaranteed to see a consistent state of that signal. This idea extends to async, but with a different guarantee: every async primitive is guaranteed a consistent snapshot in time, but there is no guarantee exactly which time that is. This means: if you await and suspend 10 tasks, we will block until all 10 tasks have settled at some point in time, and all produce a valid value.
+A dropped continuation never runs, so it can't clean up after itself either. Register what a run acquires with `c.cleanup()`, which runs when the node runs again or is disposed, and call `c.shield()` when the run must finish.
+
+The point is that promises don't write state at unpredictable times. In the sync graph, every reader sees a consistent state the moment a write returns. The async guarantee is weaker, but of the same kind: an async run always sees a snapshot that was consistent at some point in time, though not necessarily the latest one. If a run suspends on 10 tasks, it continues once all 10 have settled, each with a valid value.
 
 ### Manual versioning with `c.version()`
 
@@ -1355,9 +1372,9 @@ This is useful when you need the stale continuation to run (for cleanup, logging
 
 ## Limitations
 
-I have gone back and forth between global listeners, and a dedicated context object. After some turns, I finally settled on context over globals. The reason is that there is no way to truly support the async reactive graph without persisting the context beyond async boundaries. The awkward trade-off is that the `c` variable has to be passed as an argument through the system, and that it's a real footgun if you use the wrong context. Likely, this can be alleviated by an ESLint rule, or in the future, some stronger compile-time guarantee that protects you against shooting yourself in the foot.
+I went back and forth between a global listener and a context object, and settled on the context: a global can't follow a run across an `await`, and the async graph needs exactly that. The cost is that `c` has to be passed along, and reading through the wrong one, such as an outer `c` inside an inner callback, subscribes the wrong node. Naming the parameter `c` in every callback, as the examples here do, shadows the outer one. A lint rule, or a stronger compile-time check, could catch the rest.
 
-Alternatively, library authors can extend anod and expose the global listener as the default, sync mode, and only provide it when truly needed in the async callback.
+A library built on anod can still offer a global listener for sync code, and hand out the context only where an async callback needs it.
 
 anod uses the O(1) two-way slot binding that S.js uses: each link stores its index in the other node's list, so a receiver that is disposed, or that drops a dep on a re-run, is unlinked at once by moving the last entry into its slot. The cost is memory: `_subs` and `_deps` hold pairs, which doubles their length. Ownership lists are cheaper: a child disposed on its own stays in its owner's `_owned` list until the owner compacts the list, once the disposal has finished.
 
