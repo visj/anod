@@ -382,6 +382,30 @@ export interface ResourceContext {
 
 export type Sender<T = any> = Signal<T> | MutableSignal<T> | Resource<T> | Compute<T> | Task<T>;
 export type AsyncSender<T = any> = Resource<T> | Task<T>;
+/**
+ * What suspend() gives for one of its inputs: a sender's or a promise's
+ * value, or a plain value as it is.
+ */
+export type Settled<T> = T extends AsyncSender<infer U>
+	? U
+	: T extends PromiseLike<infer U>
+		? U
+		: T;
+
+declare const STEP: unique symbol;
+/**
+ * What a callback-form suspend returns, for the type checker only: at run
+ * time it is undefined. Return it from the fn or a callback, and the task
+ * is typed with the value the steps settle with.
+ */
+export interface Step<T> {
+	readonly [STEP]: T;
+}
+/**
+ * What a run settles with when a callback returns R: a step's value, what
+ * a promise or async iterable gives, or R as it is.
+ */
+export type Outcome<R> = R extends Step<infer U> ? U : Resolve<R>;
 export type Receiver = Compute | Effect | Action;
 export type Owner = Root | Effect;
 export type Disposer = Sender | Receiver | Root;
@@ -469,26 +493,29 @@ export interface ActionReader extends ActionContext, Reader {}
 
 /** Bound task callback context. */
 export interface TaskContext extends ComputeContext {
-	suspend<T>(promise: Promise<T>): Promise<T>;
+	suspend<T>(promise: PromiseLike<T>): Promise<T>;
 	suspend<T>(sender: AsyncSender<T>): T | Promise<T>;
-	suspend<T>(
-		sender: AsyncSender<T>,
-		onResolve: (value: T) => void,
-		onReject?: (error: any) => void
-	): void;
-	suspend<T extends readonly AsyncSender<any>[]>(
-		senders: [...T]
-	): Promise<{ [K in keyof T]: T[K] extends AsyncSender<infer U> ? U : never }>;
-	suspend<T extends readonly AsyncSender<any>[]>(
-		senders: [...T],
-		onResolve: (values: {
-			[K in keyof T]: T[K] extends AsyncSender<infer U> ? U : never;
-		}) => void,
-		onReject?: (error: any) => void
-	): void;
-	suspend(
-		fn: (resolve: (value?: any) => void, reject: (error?: any) => void) => void
-	): void;
+	/**
+	 * Waits through callbacks. A suspend made in a callback is the run's
+	 * next step, and a promise a callback returns is adopted. Return the
+	 * step to type the run's value.
+	 */
+	suspend<T, R, E = never>(
+		input: AsyncSender<T> | PromiseLike<T>,
+		onResolve: (value: T) => R,
+		onReject?: (error: any) => E
+	): Step<Outcome<R> | Outcome<E>>;
+	suspend<T extends readonly unknown[]>(
+		inputs: [...T]
+	): Promise<{ [K in keyof T]: Settled<T[K]> }>;
+	suspend<T extends readonly unknown[], R, E = never>(
+		inputs: [...T],
+		onResolve: (values: { [K in keyof T]: Settled<T[K]> }) => R,
+		onReject?: (error: any) => E
+	): Step<Outcome<R> | Outcome<E>>;
+	suspend<T = any>(
+		fn: (resolve: (value?: T) => void, reject: (error?: any) => void) => void
+	): Step<T>;
 }
 
 /** Unbound task callback context. */
@@ -496,26 +523,29 @@ export interface TaskReader extends TaskContext, Reader {}
 
 /** Bound spawn callback context. */
 export interface SpawnContext extends EffectContext {
-	suspend<T>(promise: Promise<T>): Promise<T>;
+	suspend<T>(promise: PromiseLike<T>): Promise<T>;
 	suspend<T>(sender: AsyncSender<T>): T | Promise<T>;
-	suspend<T>(
-		sender: AsyncSender<T>,
-		onResolve: (value: T) => void,
-		onReject?: (error: any) => void
-	): void;
-	suspend<T extends readonly AsyncSender<any>[]>(
-		senders: [...T]
-	): Promise<{ [K in keyof T]: T[K] extends AsyncSender<infer U> ? U : never }>;
-	suspend<T extends readonly AsyncSender<any>[]>(
-		senders: [...T],
-		onResolve: (values: {
-			[K in keyof T]: T[K] extends AsyncSender<infer U> ? U : never;
-		}) => void,
-		onReject?: (error: any) => void
-	): void;
-	suspend(
-		fn: (resolve: (value?: any) => void, reject: (error?: any) => void) => void
-	): void;
+	/**
+	 * Waits through callbacks. A suspend made in a callback is the run's
+	 * next step, and a promise a callback returns is adopted. Return the
+	 * step to type the run's value.
+	 */
+	suspend<T, R, E = never>(
+		input: AsyncSender<T> | PromiseLike<T>,
+		onResolve: (value: T) => R,
+		onReject?: (error: any) => E
+	): Step<Outcome<R> | Outcome<E>>;
+	suspend<T extends readonly unknown[]>(
+		inputs: [...T]
+	): Promise<{ [K in keyof T]: Settled<T[K]> }>;
+	suspend<T extends readonly unknown[], R, E = never>(
+		inputs: [...T],
+		onResolve: (values: { [K in keyof T]: Settled<T[K]> }) => R,
+		onReject?: (error: any) => E
+	): Step<Outcome<R> | Outcome<E>>;
+	suspend<T = any>(
+		fn: (resolve: (value?: T) => void, reject: (error?: any) => void) => void
+	): Step<T>;
 }
 
 /** Unbound spawn callback context. */
@@ -558,23 +588,41 @@ export interface Factory {
 
 	// Unbound task
 	task<U>(
-		fn: (c: TaskReader, prev: Resolve<U>) => Promise<U>,
+		fn: (c: TaskReader, prev: Resolve<U>) => Promise<U> | Step<U>,
 		seed?: Resolve<U>,
 		opts?: Option
 	): Task<Resolve<U>>;
 	task<U, W>(
-		fn: (c: TaskReader, prev: Resolve<U>, args: W) => Promise<U>,
+		fn: (c: TaskReader, prev: Resolve<U>, args: W) => Promise<U> | Step<U>,
 		seed?: Resolve<U>,
 		opts?: Option,
 		args?: W
 	): Task<Resolve<U>>;
+	/** A callback-form fn that doesn't return its step: name U. */
+	task<U>(
+		fn: (c: TaskReader, prev: U) => void,
+		seed?: U,
+		opts?: Option
+	): Task<U>;
+	task<U, W>(
+		fn: (c: TaskReader, prev: U, args: W) => void,
+		seed?: U,
+		opts?: Option,
+		args?: W
+	): Task<U>;
 	// Bound task
 	task<T, U>(
 		dep: Sender<T>,
-		fn: (val: T, c: TaskContext, prev: Resolve<U>) => Promise<U>,
+		fn: (val: T, c: TaskContext, prev: Resolve<U>) => Promise<U> | Step<U>,
 		seed?: Resolve<U>,
 		opts?: Option
 	): Task<Resolve<U>>;
+	task<T, U>(
+		dep: Sender<T>,
+		fn: (val: T, c: TaskContext, prev: U) => void,
+		seed?: U,
+		opts?: Option
+	): Task<U>;
 
 	// Unbound effect
 	effect(fn: (c: EffectReader) => void, opts?: EffectOption): Effect;
@@ -591,16 +639,19 @@ export interface Factory {
 	): Effect;
 
 	// Unbound spawn
-	spawn(fn: (c: SpawnReader) => Promise<void>, opts?: EffectOption): Spawn;
+	spawn(
+		fn: (c: SpawnReader) => Promise<void> | Step<unknown> | void,
+		opts?: EffectOption
+	): Spawn;
 	spawn<W>(
-		fn: (c: SpawnReader, args: W) => Promise<void>,
+		fn: (c: SpawnReader, args: W) => Promise<void> | Step<unknown> | void,
 		opts?: EffectOption,
 		args?: W
 	): Spawn;
 	// Bound spawn
 	spawn<T>(
 		dep: Sender<T>,
-		fn: (val: T, c: SpawnContext) => Promise<void>,
+		fn: (val: T, c: SpawnContext) => Promise<void> | Step<unknown> | void,
 		opts?: EffectOption
 	): Spawn;
 

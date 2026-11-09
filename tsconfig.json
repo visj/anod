@@ -12,6 +12,7 @@
   "include": [
     "src/**.js",
     "types/*.d.ts",
+    "test/types.ts",
     "global.d.ts"
   ]
 }

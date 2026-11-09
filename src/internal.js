@@ -249,6 +249,14 @@ var HELD = [];
 var HELD_COUNT = 0;
 
 /**
+ * The node whose suspend callback is running, or null. A suspend made
+ * inside the callback is the run's next step, and is held like one made
+ * in the fn (see runStep).
+ * @type {AsyncReceiver | null}
+ */
+var STEP = null;
+
+/**
  * The shields that hold each node, while any are active (D10). A node's
  * count is four times the number of shielded effects below it, plus two
  * if its disposal waits for them (HELD_DISPOSE), plus one if it is
@@ -793,12 +801,17 @@ function _runAsync(node, asyncFn, prev) {
 					} else {
 						node._settle(held);
 					}
+				} else if (!(flag & FLAG_LOADING)) {
+					startLoading(node);
 				}
 			}
 		}
 		return;
 	}
 	if (startAsync(node, result, time)) {
+		if (!(flag & FLAG_LOADING)) {
+			startLoading(node);
+		}
 		return;
 	}
 	if (
@@ -813,6 +826,19 @@ function _runAsync(node, asyncFn, prev) {
 	} else if (flag & FLAG_LOADING) {
 		node._settle(node._value);
 	}
+}
+
+/**
+ * Tells a resource's readers that an async write has made it loading,
+ * so that a reader of c.pending() or c.rejected() sees it. They can't
+ * be told apart from the readers of its value, which run again too and
+ * read the value it had. Already loading, its readers know.
+ * @param {AsyncSender} node
+ * @returns {void}
+ */
+function startLoading(node) {
+	notify(node, FLAG_STALE);
+	flush();
 }
 
 /**
@@ -1404,7 +1430,14 @@ function root(fn) {
 			resolvePromise(this, promiseOrTask, this._time);
 			return;
 		}
-		this._flag |= FLAG_SUSPEND;
+		/** In a step's callback, an await is the callback's own: the
+		 *  promise it returns is adopted, so it isn't the step's suspend. */
+		if (STEP !== this) {
+			this._flag |= FLAG_SUSPEND;
+		}
+		if (promiseOrTask === null || typeof promiseOrTask !== "object") {
+			return promiseOrTask;
+		}
 		if (typeof promiseOrTask.then === "function") {
 			/** Promise path — wrap with staleness guard. A thenable is
 			 *  adopted first, since its then() need not return a promise.
@@ -1441,6 +1474,10 @@ function root(fn) {
 		/** Branch: array of tasks → concurrent await. */
 		if (Array.isArray(promiseOrTask)) {
 			return _suspendArray(this, promiseOrTask);
+		}
+		/** A plain value is its own result, as `await value` is. */
+		if (promiseOrTask._flag === void 0) {
+			return promiseOrTask;
 		}
 		/** Branch: Compute node with FLAG_ASYNC → task-await path. */
 		return _suspendTask(this, /** @type {AsyncSender<T>} */(promiseOrTask));
@@ -1569,6 +1606,8 @@ function root(fn) {
 
 		/** Fast-path: try to collect everything synchronously. A
 		 *  failing member throws, after subscribing like a single task. */
+		/** Promises and plain values are waited on as resources. */
+		tasks = toSenders(tasks);
 		let allSettled = true;
 		for (let i = 0; i < count; i++) {
 			let task = tasks[i];
@@ -1726,25 +1765,40 @@ function root(fn) {
 	 * An error with no onReject fails the node, as a throwing await
 	 * would. A re-run or dispose before the task settles drops the
 	 * waiter, so a stale callback never runs.
+	 *
+	 * A callback continues the run (see runStep): a suspend made inside
+	 * it is the next step, and a promise it returns is adopted. A promise
+	 * or a plain value is waited on as a resource
+	 * (see toSender).
 	 * @param {AsyncReceiver} node
-	 * @param {AsyncSender | Array<AsyncSender>} input
+	 * @param {*} input
 	 * @param {function(*): *} onResolve
 	 * @param {(function(*): *) | null} onReject
 	 * @returns {void}
 	 */
 	function suspendTo(node, input, onResolve, onReject) {
-		/** After an await, or after another callback suspend in this run
-		 *  (FLAG_CALLBACK, which a promise suspend does not set). */
+		/** After another callback suspend in this run or step, after an
+		 *  await, or once the run is over: only the fn and a step's
+		 *  callback may suspend with callbacks. */
 		let flag = node._flag;
-		if (flag & FLAG_SUSPEND && flag & (FLAG_LOADING | FLAG_CALLBACK)) {
+		if (
+			flag & FLAG_SUSPEND
+				? flag & (FLAG_LOADING | FLAG_CALLBACK)
+				: flag & FLAG_LOADING && STEP !== node
+		) {
 			throw new Error(SUSPEND_TWICE);
 		}
 		let value;
 		let failed = false;
 		try {
-			value = Array.isArray(input)
-				? _suspendArray(node, input, onResolve, onReject)
-				: _suspendTask(node, /** @type {AsyncSender} */(input), onResolve, onReject);
+			if (Array.isArray(input)) {
+				value = _suspendArray(node, input, onResolve, onReject);
+			} else {
+				if (input === null || typeof input !== "object" || input._flag === void 0) {
+					input = toSender(input);
+				}
+				value = _suspendTask(node, /** @type {AsyncSender} */(input), onResolve, onReject);
+			}
 		} catch (err) {
 			if (onReject === null) {
 				throw err;
@@ -1755,20 +1809,11 @@ function root(fn) {
 		if (value === REGRET) {
 			return;
 		}
-		/** Settled: the callback still waits for the fn to return, as it
-		 *  would for a loading task, so the code after c.suspend() runs
-		 *  first either way. */
-		if (!(node._flag & FLAG_LOADING)) {
-			node._flag |= FLAG_SUSPEND | FLAG_CALLBACK;
-			hold(node, failed ? onReject : onResolve, value);
-			return;
-		}
-		/** In a continuation the run is over, so the callback runs now,
-		 *  and a task settles with its result. */
-		let result = failed ? onReject(value) : onResolve(value);
-		if (node._flag & FLAG_ASYNC && node instanceof Compute) {
-			node._settle(result);
-		}
+		/** Settled: the callback still waits for the fn or the step's
+		 *  callback to return, as it would for a loading task, so the
+		 *  code after c.suspend() runs first either way. */
+		node._flag |= FLAG_SUSPEND | FLAG_CALLBACK;
+		hold(node, failed ? onReject : onResolve, value);
 	}
 
 	ComputeProto.suspend = EffectProto.suspend = suspend;
@@ -2777,39 +2822,7 @@ function root(fn) {
 					this._flag = (flag | FLAG_LOADING) & ~FLAG_CALLBACK;
 					return;
 				}
-				/** Delivered while the fn ran: the run ends with it, and the
-				 *  fn's return value is ignored, as on any callback suspend.
-				 *  A task callback runs now, loading, so that its reads link
-				 *  like reads after an await. FLAG_CALLBACK stays set while
-				 *  it settles, so _settle writes as part of this run. */
-				let fn = HELD[i + 1];
-				let held = HELD[i + 2];
-				dropHeld(i);
-				this._flag &= ~(FLAG_SUSPEND | FLAG_RELAY);
-				if (fn !== void 0 && fn !== null) {
-					this._flag |= FLAG_LOADING;
-					try {
-						held = fn(held);
-						fn = void 0;
-					} catch (err) {
-						held = err;
-						fn = null;
-					}
-				}
-				if (fn === null) {
-					this._error(held);
-				} else {
-					this._settle(held);
-				}
-				this._flag &= ~FLAG_CALLBACK;
-				if (this._flag & FLAG_CHANNEL) {
-					if (this._chan._defers !== null) {
-						settleDefers(this);
-					}
-					if (this._flag & FLAG_WAITER) {
-						settleNotify(this, true);
-					}
-				}
+				settleHeld(this, i);
 				return;
 			}
 			if (startAsync(this, value, time)) {
@@ -3042,30 +3055,7 @@ function root(fn) {
 				if (i < 0) {
 					return;
 				}
-				/** Delivered while the fn ran: the activation settles now,
-				 *  and the fn's return value is ignored, as on any callback
-				 *  suspend. A task callback runs first, loading, so that its
-				 *  reads link like reads after an await. A rejection, or a
-				 *  throw from the callback, fails the run as a throw in the
-				 *  body does: the creator or c.recover() gets it. */
-				let fn = HELD[i + 1];
-				let held = HELD[i + 2];
-				dropHeld(i);
-				this._flag &= ~FLAG_RELAY;
-				if (fn !== void 0 && fn !== null) {
-					try {
-						fn(held);
-						fn = void 0;
-					} catch (err) {
-						held = err;
-						fn = null;
-					}
-				}
-				if (fn === null) {
-					this._flag &= ~(FLAG_LOADING | FLAG_SUSPEND);
-					throw held;
-				}
-				this._settle();
+				settleHeldEffect(this, i);
 				return;
 			}
 			if (flag & FLAG_ASYNC && startAsync(this, value, time)) {
@@ -4990,12 +4980,207 @@ function relay(node, fn, value, isError) {
 	}
 	let result;
 	try {
-		result = fn(isError ? defect(value) : value);
+		result = runStep(node, fn, isError ? defect(value) : value);
 	} catch (err) {
+		node._flag &= ~FLAG_CALLBACK;
+		dropStep(node);
 		node._error(err);
 		return;
 	}
-	node._settle(result);
+	node._flag &= ~FLAG_CALLBACK;
+	if (result !== REGRET) {
+		node._settle(result);
+	}
+}
+
+/**
+ * Finishes a task's run with what a callback suspend delivered while
+ * its fn ran (HELD entry i): the run ends with it, and the fn's return
+ * value is ignored, as on any callback suspend. A callback runs now,
+ * loading, so that its reads link like reads after an await, and the
+ * steps it continues with run too (see runStep). FLAG_CALLBACK stays
+ * set while it settles, so _settle writes as part of this run. A step
+ * that waits leaves the task loading, to settle through relay().
+ * @param {Compute} node
+ * @param {number} i
+ * @returns {void}
+ */
+function settleHeld(node, i) {
+	let fn = HELD[i + 1];
+	let held = HELD[i + 2];
+	let failed = false;
+	dropHeld(i);
+	try {
+		held = runStep(node, fn, held);
+	} catch (err) {
+		dropStep(node);
+		held = err;
+		failed = true;
+	}
+	if (held === REGRET && !failed) {
+		node._flag &= ~FLAG_CALLBACK;
+		return;
+	}
+	if (failed) {
+		node._error(held);
+	} else {
+		node._settle(held);
+	}
+	node._flag &= ~FLAG_CALLBACK;
+	if (node._flag & FLAG_CHANNEL) {
+		if (node._chan._defers !== null) {
+			settleDefers(node);
+		}
+		if (node._flag & FLAG_WAITER) {
+			settleNotify(node, true);
+		}
+	}
+}
+
+/**
+ * Finishes an effect's run with what a callback suspend delivered while
+ * its fn ran (HELD entry i), as settleHeld() does for a task. A
+ * rejection, or a throw from a callback, fails the run as a throw in
+ * the body does: the creator or c.recover() gets it.
+ * @param {Effect} node
+ * @param {number} i
+ * @returns {void}
+ */
+function settleHeldEffect(node, i) {
+	let fn = HELD[i + 1];
+	let held = HELD[i + 2];
+	dropHeld(i);
+	try {
+		held = runStep(node, fn, held);
+	} catch (err) {
+		dropStep(node);
+		node._flag &= ~(FLAG_LOADING | FLAG_SUSPEND | FLAG_CALLBACK);
+		throw err;
+	}
+	node._flag &= ~FLAG_CALLBACK;
+	if (held !== REGRET) {
+		node._settle();
+	}
+}
+
+/**
+ * Runs a callback suspend's callback, and the steps it continues with,
+ * until the run settles or waits. The callback runs as STEP, loading,
+ * with FLAG_CALLBACK set, so that a suspend made in it is held like one
+ * made in the fn. Then:
+ *
+ * - It suspended again: the new suspend is the run's next step, and the
+ *   callback's return value is ignored. A step that has settled runs
+ *   here, in a loop rather than recursively, so a long chain of settled
+ *   steps runs in constant stack. One that is loading resumes the run
+ *   through relay() when it settles.
+ * - It returned a promise or an async iterable: the run settles with
+ *   what that gives, as when the fn returns one.
+ * - Otherwise, the run settles with what it returned, a task or a
+ *   resource included, as when the fn returns one.
+ *
+ * Only an async node (task or spawn) adopts what a callback returns, as
+ * only an async node adopts what its fn returns.
+ *
+ * fn is undefined to settle with value, or null to fail with it, as a
+ * HELD entry's. The caller clears FLAG_CALLBACK, and settles the node
+ * with the result, or fails it with what this throws.
+ * @param {AsyncReceiver} node
+ * @param {Function | null | undefined} fn
+ * @param {*} value
+ * @returns {*} the result, or REGRET while the run waits
+ */
+function runStep(node, fn, value) {
+	for (;;) {
+		node._flag &= ~(FLAG_SUSPEND | FLAG_RELAY);
+		if (fn === void 0) {
+			return value;
+		}
+		if (fn === null) {
+			throw value;
+		}
+		node._flag |= FLAG_LOADING | FLAG_CALLBACK;
+		let prev = STEP;
+		STEP = node;
+		try {
+			value = fn(value);
+		} finally {
+			STEP = prev;
+		}
+		if (!(node._flag & FLAG_SUSPEND)) {
+			if (
+				node._flag & FLAG_ASYNC &&
+				startAsync(node, value, node._time)
+			) {
+				return REGRET;
+			}
+			return value;
+		}
+		let i = HELD_COUNT > 0 ? findHeld(node) : -1;
+		if (i < 0) {
+			return REGRET;
+		}
+		fn = HELD[i + 1];
+		value = HELD[i + 2];
+		dropHeld(i);
+	}
+}
+
+/**
+ * Drops what a step that threw had started: a delivery held for it, and
+ * its waits on the senders of its next step.
+ * @param {AsyncReceiver} node
+ * @returns {void}
+ */
+function dropStep(node) {
+	unhold(node);
+	if (node._flag & FLAG_CHANNEL) {
+		let chan = node._chan;
+		if (chan._res1 !== null || chan._responds !== null) {
+			clearChannel(chan, node);
+		}
+	}
+	node._flag &= ~(FLAG_SUSPEND | FLAG_RELAY | FLAG_BLOCKED);
+}
+
+/**
+ * The sender that a suspend waits on for a promise or a plain value: a
+ * resource that no one owns, loading until the promise settles, or
+ * holding the value. It is only reachable through the waiter's deps,
+ * so it goes away with them.
+ * @param {*} value
+ * @returns {Cell}
+ */
+function toSender(value) {
+	if (value !== null && typeof value === "object" && typeof value.then === "function") {
+		let cell = new Cell(void 0, FLAG_ASYNC | FLAG_LOADING, null);
+		resolvePromise(cell, value, 0);
+		return cell;
+	}
+	return new Cell(value, FLAG_ASYNC, null);
+}
+
+/**
+ * A suspend array with each promise or plain value made a sender (see
+ * toSender): the array itself if it has none, or else a copy, so the
+ * caller's array is left as it was.
+ * @param {Array<*>} tasks
+ * @returns {Array<AsyncSender>}
+ */
+function toSenders(tasks) {
+	let count = tasks.length;
+	/** @type {Array<*> | null} */
+	let senders = null;
+	for (let i = 0; i < count; i++) {
+		let task = tasks[i];
+		if (task === null || typeof task !== "object" || task._flag === void 0) {
+			if (senders === null) {
+				senders = tasks.slice();
+			}
+			senders[i] = toSender(task);
+		}
+	}
+	return senders !== null ? senders : tasks;
 }
 
 /**

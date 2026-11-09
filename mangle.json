@@ -209,7 +209,16 @@
       "$settleLater": "pl",
       "$errorLater": "bl",
       "$Action": "kl",
-      "$unmarkDeps": "El"
+      "$unmarkDeps": "El",
+      "$STEP": "_l",
+      "$ADOPT": "ml",
+      "$startLoading": "jl",
+      "$settleHeld": "Al",
+      "$settleHeldEffect": "Cl",
+      "$runStep": "Ml",
+      "$dropStep": "Pl",
+      "$toSender": "ql",
+      "$toSenders": "Sl"
     }
   },
   "props": {
