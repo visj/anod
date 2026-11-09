@@ -5687,23 +5687,26 @@ function startCompute(node) {
  * @returns {void}
  */
 function startEffect(node) {
-	let idle = IDLE;
-	if (idle) {
+	if (IDLE) {
 		IDLE = false;
-		FENCE = SEED;
-	}
-	try {
+		try {
+			FENCE = SEED;
+			try {
+				node._update(TIME);
+			} catch (error) {
+				failStart(node, error);
+			}
+			if (SENDER_COUNT > 0 || DISPOSER_COUNT > 0) {
+				flush();
+			}
+		} finally {
+			IDLE = true;
+		}
+	} else {
 		try {
 			node._update(TIME);
 		} catch (error) {
 			failStart(node, error);
-		}
-		if (idle && (SENDER_COUNT > 0 || DISPOSER_COUNT > 0)) {
-			flush();
-		}
-	} finally {
-		if (idle) {
-			IDLE = true;
 		}
 	}
 }
