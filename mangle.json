@@ -227,7 +227,12 @@
       "$postFlush": "Bl",
       "$settleIf": "vn",
       "$settleOrQueue": "pn",
-      "$notifyMarked": "bn"
+      "$notifyMarked": "bn",
+      "$checkRecover": "kn",
+      "$suspendWith": "En",
+      "$startOwned": "mn",
+      "$abortRun": "_n",
+      "$endRun": "jn"
     }
   },
   "props": {

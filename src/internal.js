@@ -64,7 +64,7 @@ const FLAG_BOUND = 1 << 15;
 const FLAG_WAITER = 1 << 16;
 /** _chan holds a Channel (see _channel). */
 const FLAG_CHANNEL = 1 << 17;
-/** Walking an array await (_stepArray): settleNotify neither subscribes
+/** Walking an array await (stepArray): settleNotify neither subscribes
  *  nor wakes it, and deliver() calls the re-scan directly. */
 const FLAG_BLOCKED = 1 << 18;
 /** Held by a shield, its own or one below it (D10): its re-run and its
@@ -485,15 +485,15 @@ Cell.prototype = Object.create(Signal.prototype);
  * @constructor
  * @template T, U, W
  * @param {(function(U, T, W): T) | (function(T, W): T)} fn
- * @param {number} opts
+ * @param {number} flag - FLAG_ASYNC, the setup or bound flags, and the options
  * @param {Sender<U> | null} dep1
  * @param {T=} seed
  * @param {W=} args
  * @implements {ICompute<T>}
  */
-function Compute(fn, opts, dep1, seed, args) {
+function Compute(fn, flag, dep1, seed, args) {
 	/** @type {number} */
-	this._flag = FLAG_INIT | FLAG_STALE | opts;
+	this._flag = FLAG_INIT | FLAG_STALE | flag;
 	/** @type {T} */
 	this._value = seed;
 	/** @type {number} */
@@ -525,16 +525,16 @@ function Compute(fn, opts, dep1, seed, args) {
 /**
  * @constructor
  * @template U, W
- * @param {number} opts
+ * @param {number} flag - FLAG_ASYNC, the setup or bound flags, and the options
  * @param {(function(U,W): void) | (function(W): void)} fn
  * @param {Sender<U> | null} dep1
  * @param {Owner | null} owner
  * @param {W=} args
  * @implements {IEffect}
  */
-function Effect(opts, fn, dep1, owner, args) {
+function Effect(flag, fn, dep1, owner, args) {
 	/** @type {number} */
-	this._flag = FLAG_INIT | FLAG_OWNER | (0 | opts);
+	this._flag = FLAG_INIT | FLAG_OWNER | flag;
 	/** @type {(function(U,W): void) | (function(W): void) | null} */
 	this._fn = fn;
 	/** @type {Sender<U> | null} */
@@ -570,16 +570,16 @@ function Effect(opts, fn, dep1, owner, args) {
  * owner, which disposes it and recovers its errors.
  * @constructor
  * @template U, W
- * @param {number} opts
+ * @param {number} flag - the setup or bound flags, and the options
  * @param {(function(U,W): void) | (function(W): void)} fn
  * @param {Sender<U> | null} dep1
  * @param {Owner | null} owner
  * @param {W=} args
  * @implements {IAction}
  */
-function Action(opts, fn, dep1, owner, args) {
+function Action(flag, fn, dep1, owner, args) {
 	/** @type {number} */
-	this._flag = 0 | opts;
+	this._flag = flag;
 	/** @type {(function(U,W): void) | (function(W): void) | null} */
 	this._fn = fn;
 	/** @type {Sender<U> | null} */
@@ -942,10 +942,9 @@ function startLoading(node) {
  * @template T
  * @param {Sender<T>} node
  * @param {T | (function(T): T)} value
- * @param {number} time
  * @returns {void}
  */
-function assign(node, value, time) {
+function assign(node, value) {
 	let _value;
 	let write = true;
 	if (typeof value === "function") {
@@ -982,10 +981,9 @@ function assign(node, value, time) {
  * @template T
  * @param {AsyncSender<T>} node
  * @param {{ _value: T, _fn: (function(AsyncSender<T>, T): (T | Promise<T>)) }} payload
- * @param {number} time
  */
-function asyncAssign(node, payload, time) {
-	assign(node, payload._value, time);
+function asyncAssign(node, payload) {
+	assign(node, payload._value);
 	_runAsync(node, payload._fn, node._value);
 }
 
@@ -997,9 +995,8 @@ function asyncAssign(node, payload, time) {
  * @template T
  * @param {AsyncSender<T>} node
  * @param {function(AsyncSender<T>, T): (T | Promise<T>)} fn
- * @param {number} time
  */
-function asyncRun(node, fn, time) {
+function asyncRun(node, fn) {
 	_runAsync(node, fn, node._value);
 }
 
@@ -1032,10 +1029,8 @@ function releaseWeak(node) {
  * FLAG_SCHEDULED and notifies subscribers.
  * @template T
  * @param {Sender<T>} node
- * @param {T} _
- * @param {number} time
  */
-function poke(node, _, time) {
+function poke(node) {
 	if (node._flag & FLAG_SCHEDULED) {
 		node._flag &= ~FLAG_SCHEDULED;
 		notify(node, FLAG_STALE);
@@ -1158,13 +1153,9 @@ function _readAsync(sender, safe) {
 	if (sender._flag & (FLAG_STALE | FLAG_PENDING)) {
 		sender._refresh();
 	}
-	if ((this._flag & (FLAG_STABLE | FLAG_SETUP)) === FLAG_STABLE) {
-		if (!safe && sender._flag & FLAG_ERROR) {
-			throw sender._value;
-		}
-		return sender._value;
+	if ((this._flag & (FLAG_STABLE | FLAG_SETUP)) !== FLAG_STABLE) {
+		subscribe(this, sender);
 	}
-	subscribe(this, sender);
 	if (!safe && sender._flag & FLAG_ERROR) {
 		throw sender._value;
 	}
@@ -1183,15 +1174,14 @@ function _readAsync(sender, safe) {
  * @returns {Signal<T> | Cell<T>}
  */
 function signal(value, equal) {
-	if (equal === false) {
-		let node = new Signal(value);
-		node._flag = FLAG_MUTABLE;
-		return node;
-	}
 	if (typeof equal === "function") {
 		return new Cell(value, 0, equal);
 	}
-	return new Signal(value);
+	let node = new Signal(value);
+	if (equal === false) {
+		node._flag = FLAG_MUTABLE;
+	}
+	return node;
 }
 
 /**
@@ -1203,10 +1193,11 @@ function signal(value, equal) {
  * @returns {Cell<T>}
  */
 function resource(value, equal) {
-	if (equal === false) {
-		return new Cell(value, FLAG_ASYNC | FLAG_MUTABLE, null);
-	}
-	return new Cell(value, FLAG_ASYNC, typeof equal === "function" ? equal : null);
+	return new Cell(
+		value,
+		equal === false ? FLAG_ASYNC | FLAG_MUTABLE : FLAG_ASYNC,
+		typeof equal === "function" ? equal : null
+	);
 }
 
 /**
@@ -1529,17 +1520,8 @@ function root(fn) {
 			suspendTo(this, promiseOrTask, onResolve, onReject === void 0 ? null : onReject);
 			return;
 		}
-		/** Branch: setup function → callback constructor path.
-		 *  Sets FLAG_SUSPEND so _update knows the node is waiting
-		 *  for a callback-driven settlement, not a returned promise.
-		 *  A resolve or reject from inside the setup fn is held until
-		 *  the node's fn returns (callbackFlags). */
 		if (typeof promiseOrTask === "function") {
-			if (this._flag & FLAG_SUSPEND) {
-				throw new Error(SUSPEND_TWICE);
-			}
-			this._flag |= callbackFlags(this);
-			resolvePromise(this, promiseOrTask, this._time);
+			suspendWith(this, promiseOrTask);
 			return;
 		}
 		/** In a step's callback, an await is the callback's own: the
@@ -1685,7 +1667,7 @@ function root(fn) {
 	/**
 	 * Awaits an array of tasks, promises and plain values, allocating
 	 * one Promise at most. Settled members are collected synchronously.
-	 * At the first loading one, _stepArray binds a waiter to it, and
+	 * At the first loading one, waitArray binds a waiter to it, and
 	 * each wake-up rescans the whole array from the start.
 	 *
 	 * FLAG_BLOCKED keeps settleNotify from subscribing or waking the
@@ -1708,125 +1690,123 @@ function root(fn) {
 			return [];
 		}
 		let results = new Array(count);
-
 		/** Promises and plain values are waited on as resources. */
 		tasks = toSenders(tasks);
-		/** Fast-path: try to collect everything synchronously. A
-		 *  failing member throws, after subscribing like a single task. */
-		let allSettled = true;
+		/** Fast path: collect everything synchronously. A failing member
+		 *  throws, after subscribing like a single task. */
+		let sync = !(node._flag & FLAG_LOADING);
+		let blocked;
+		try {
+			blocked = scanArray(node, tasks, results);
+		} catch (error) {
+			subscribeArray(node, tasks, sync);
+			throw error;
+		}
+		if (blocked === -1) {
+			subscribeArray(node, tasks, sync);
+			return results;
+		}
+		node._flag |= FLAG_BLOCKED;
+		if (resolve !== void 0) {
+			node._flag |= callbackFlags(node) | FLAG_RELAY;
+			waitArray(node, tasks, results, blocked, resolve, reject);
+			return REGRET;
+		}
+		/** At least one is loading: allocate one Promise. */
+		return guardAwait(node, new Promise(function (resolve, reject) {
+			waitArray(node, tasks, results, blocked, resolve, reject);
+		}));
+	}
+
+	/**
+	 * One scan of an array await: collects the settled members into
+	 * results, in order, and stops at the first loading one. A member
+	 * that rejected, was disposed, is the node itself, or would close an
+	 * await cycle throws.
+	 * @param {AsyncReceiver} node
+	 * @param {Array<AsyncSender>} tasks
+	 * @param {Array} results
+	 * @returns {number} the index of the first loading member, or -1
+	 */
+	function scanArray(node, tasks, results) {
+		let count = tasks.length;
 		for (let i = 0; i < count; i++) {
 			let task = tasks[i];
 			if (task._flag & FLAG_DISPOSED || task === node) {
-				subscribeArray(node, tasks, !(node._flag & FLAG_LOADING));
 				throw new Error(ILLEGAL_READ);
 			}
 			if (task._flag & (FLAG_STALE | FLAG_PENDING)) {
 				task._refresh();
 			}
 			if (task._flag & FLAG_LOADING) {
-				allSettled = false;
-				break;
+				if (awaits(task, node)) {
+					throw new Error(CYCLE);
+				}
+				return i;
 			}
 			if (task._flag & FLAG_ERROR) {
-				subscribeArray(node, tasks, !(node._flag & FLAG_LOADING));
 				throw task._value;
 			}
 			results[i] = task._value;
 		}
-
-		if (allSettled) {
-			subscribeArray(node, tasks, !(node._flag & FLAG_LOADING));
-			return results;
-		}
-		node._flag |= FLAG_BLOCKED;
-		if (resolve !== void 0) {
-			node._flag |= callbackFlags(node) | FLAG_RELAY;
-			_stepArray(node, tasks, results, resolve, reject);
-			return REGRET;
-		}
-
-		/** At least one is loading — allocate one Promise.
-		 *  _stepArray re-scans from scratch on each wake-up,
-		 *  guaranteeing a consistent snapshot when it resolves. */
-		return guardAwait(node, new Promise(function (resolve, reject) {
-			_stepArray(node, tasks, results, resolve, reject);
-		}));
+		return -1;
 	}
 
 	/**
-	 * Scan all tasks for a consistent settled snapshot. Walks every
-	 * task — if any is loading, binds a waiter that re-scans from
-	 * scratch when it settles. Only resolves when a full scan finds
-	 * zero loading tasks, guaranteeing a consistent snapshot (all
-	 * values from the same moment). Mirrors c.pending() semantics.
-	 * A member that rejected, or was disposed, fails the await when
-	 * the scan reaches it.
+	 * Rescans an array await when a member it waited on settles. Only a
+	 * full scan that finds nothing loading resolves it, so the values
+	 * are a consistent snapshot, as c.pending() would see them; a member
+	 * that rejected, or was disposed, fails it. Either way the awaiter
+	 * subscribes to every member first.
 	 * @param {AsyncReceiver} node
 	 * @param {Array<AsyncSender>} tasks
 	 * @param {Array} results
 	 * @param {function(Array): void} resolve
 	 * @param {function(*): void} reject
+	 * @returns {void}
 	 */
-	function _stepArray(node, tasks, results, resolve, reject) {
-		let count = tasks.length;
-		let blocked = -1;
-		/** @type {*} */
-		let error = null;
-		let failed = false;
-		for (let i = 0; i < count; i++) {
-			let task = tasks[i];
-			if (task._flag & FLAG_DISPOSED || task === node) {
-				error = new Error(ILLEGAL_READ);
-				failed = true;
-				break;
-			}
-			if (task._flag & (FLAG_STALE | FLAG_PENDING)) {
-				task._refresh();
-			}
-			if (task._flag & FLAG_LOADING) {
-				if (awaits(task, node)) {
-					error = new Error(CYCLE);
-					failed = true;
-				} else {
-					blocked = i;
-				}
-				break;
-			}
-			if (task._flag & FLAG_ERROR) {
-				error = task._value;
-				failed = true;
-				break;
-			}
-			results[i] = task._value;
+	function stepArray(node, tasks, results, resolve, reject) {
+		let blocked;
+		try {
+			blocked = scanArray(node, tasks, results);
+		} catch (error) {
+			node._flag &= ~FLAG_BLOCKED;
+			subscribeArray(node, tasks, false);
+			deliver(node, reject, error, true);
+			return;
 		}
-
-		/** All settled, or a member failed — subscribe and settle
-		 *  the await with a consistent snapshot. */
 		if (blocked === -1) {
 			node._flag &= ~FLAG_BLOCKED;
 			subscribeArray(node, tasks, false);
-			if (failed) {
-				deliver(node, reject, error, true);
-			} else {
-				deliver(node, resolve, results, false);
-			}
+			deliver(node, resolve, results, false);
 			return;
 		}
+		waitArray(node, tasks, results, blocked, resolve, reject);
+	}
 
-		/** Peek remaining tasks so they're current. */
-		for (let j = blocked + 1; j < count; j++) {
-			let task = tasks[j];
+	/**
+	 * Waits on the first loading member of an array await. The members
+	 * after it are refreshed, so they are current, and the waiter
+	 * rescans from the start when the member settles, rejects or is
+	 * disposed: a member that had settled may be loading again.
+	 * @param {AsyncReceiver} node
+	 * @param {Array<AsyncSender>} tasks
+	 * @param {Array} results
+	 * @param {number} blocked
+	 * @param {function(Array): void} resolve
+	 * @param {function(*): void} reject
+	 * @returns {void}
+	 */
+	function waitArray(node, tasks, results, blocked, resolve, reject) {
+		let count = tasks.length;
+		for (let i = blocked + 1; i < count; i++) {
+			let task = tasks[i];
 			if (task._flag & (FLAG_STALE | FLAG_PENDING)) {
 				task._refresh();
 			}
 		}
-
-		/** Bind waiter to the blocked task. On settle, re-scan
-		 *  ALL tasks from scratch — a previously settled task may
-		 *  have gone back to loading. A rejection or dispose wakes
-		 *  the scan too, which then fails the await. */
 		let step = function () {
-			_stepArray(node, tasks, results, resolve, reject);
+			stepArray(node, tasks, results, resolve, reject);
 		};
 		send(node, tasks[blocked], step, step);
 	}
@@ -1935,18 +1915,16 @@ function root(fn) {
 		if ((flag & (FLAG_DISPOSED | FLAG_LOCKED)) === FLAG_DISPOSED) {
 			return;
 		}
-		let count = HOLDS.get(this);
-		if (count === void 0) {
-			count = 0;
-		} else if (count & HELD_SELF) {
+		/** A node not in HOLDS reads as 0. */
+		let count = HOLDS.get(this) | 0;
+		if (count & HELD_SELF) {
 			return;
 		}
 		HOLDS.set(this, count + HELD_SELF);
 		this._flag = flag | FLAG_LOCKED;
 		let owner = this._owner;
 		while (owner !== null && owner._flag & FLAG_OWNER) {
-			count = HOLDS.get(owner);
-			HOLDS.set(owner, count === void 0 ? HELD_BELOW : count + HELD_BELOW);
+			HOLDS.set(owner, (HOLDS.get(owner) | 0) + HELD_BELOW);
 			owner._flag |= FLAG_LOCKED;
 			owner = owner._owner;
 		}
@@ -2041,21 +2019,16 @@ function root(fn) {
 	 * @returns {boolean} true if any task has FLAG_LOADING set
 	 */
 	function pending(tasks) {
-		let loading = false;
-		if (Array.isArray(tasks)) {
-			/** Array of tasks. */
-			let count = tasks.length;
-			for (let i = 0; i < count; i++) {
-				let task = tasks[i];
-				this.rejected(task);
-				if (task._flag & FLAG_LOADING) {
-					loading = true;
-				}
-			}
-		} else {
-			/** Single task. */
+		if (!Array.isArray(tasks)) {
 			this.rejected(tasks);
-			if (tasks._flag & FLAG_LOADING) {
+			return (tasks._flag & FLAG_LOADING) !== 0;
+		}
+		let loading = false;
+		let count = tasks.length;
+		for (let i = 0; i < count; i++) {
+			let task = tasks[i];
+			this.rejected(task);
+			if (task._flag & FLAG_LOADING) {
 				loading = true;
 			}
 		}
@@ -2129,11 +2102,7 @@ function root(fn) {
 	 */
 	CellProto.suspend = function (promiseOrFn) {
 		if (typeof promiseOrFn === "function") {
-			if (this._flag & FLAG_SUSPEND) {
-				throw new Error(SUSPEND_TWICE);
-			}
-			this._flag |= callbackFlags(this);
-			resolvePromise(this, promiseOrFn, this._time);
+			suspendWith(this, promiseOrFn);
 			return;
 		}
 		/** Promise path — wrap with staleness guard, inline as in
@@ -2445,20 +2414,19 @@ function root(fn) {
 	 * @template T
 	 * @param {Sender<T>} node
 	 * @param {{ _value: T, _fn: (function(AsyncSender<T>, T): (T | Promise<T>)) | undefined, _recv: Receiver }} payload
-	 * @param {number} time
 	 */
-	function guardedAssign(node, payload, time) {
+	function guardedAssign(node, payload) {
 		let receiver = payload._recv;
 		let flag = receiver._flag;
 		let scheduled = node._flag & FLAG_SCHEDULED;
 		receiver._flag = flag | FLAG_PAUSED;
 		try {
 			if (payload._fn !== void 0) {
-				asyncAssign(/** @type {AsyncSender<T>} */(node), payload, time);
+				asyncAssign(/** @type {AsyncSender<T>} */(node), payload);
 			} else if (node._flag & FLAG_ASYNC) {
 				writeResource(/** @type {AsyncSender<T>} */(node), payload._value);
 			} else {
-				assign(node, payload._value, time);
+				assign(node, payload._value);
 			}
 		} finally {
 			unguard(receiver, flag);
@@ -3149,13 +3117,7 @@ function root(fn) {
 			if (this._finalize !== null) {
 				clearFinalize(this);
 			}
-			let result = tryRecover(this, err);
-			if (result !== RECOVER_SELF) {
-				teardown(this);
-			}
-			if (flag & FLAG_LOCKED) {
-				unshield(this);
-			}
+			endRun(this, tryRecover(this, err));
 			return;
 		}
 
@@ -3428,15 +3390,7 @@ function root(fn) {
 			SCOPES.push([]);
 		}
 		node._level = level;
-		if (owner._flag & FLAG_OWNER) {
-			addOwned(owner, node);
-		}
-		if ((flag & (FLAG_DEFER | FLAG_BOUND)) === (FLAG_DEFER | FLAG_BOUND)) {
-			deferEffect(node);
-		} else {
-			startEffect(node);
-		}
-		return node;
+		return startOwned(owner, node, flag);
 	}
 
 	/** @this {Owner} */
@@ -3487,15 +3441,7 @@ function root(fn) {
 			node = new Action(flag, /** @type {!Function} */(fnOrOpts), depOrFn, this, args);
 			node._dep1slot = connect(depOrFn, node, -1);
 		}
-		if (this._flag & FLAG_OWNER) {
-			addOwned(this, node);
-		}
-		if ((flag & (FLAG_DEFER | FLAG_BOUND)) === (FLAG_DEFER | FLAG_BOUND)) {
-			deferEffect(node);
-		} else {
-			startEffect(node);
-		}
-		return node;
+		return startOwned(this, node, flag);
 	}
 
 	/** Install factory methods on Root, Effect, and Clock prototypes */
@@ -3739,7 +3685,7 @@ function clearFinalize(node) {
 		try {
 			finalize();
 		} catch (error) {
-			/* swallow — finally semantics */
+			/* swallow: a finalizer never replaces the run's outcome */
 		}
 	} else {
 		let count = finalize.length;
@@ -3906,24 +3852,22 @@ function purgeOwned(owner) {
 }
 
 /**
- * Checks a single owner's _recover handlers.
+ * Asks one owner's recover handlers, in registration order, until one
+ * returns true.
  * @param {Owner} owner
  * @param {?} error
- * @returns {boolean}
+ * @returns {boolean} whether a handler took the error
  */
-function _checkRecover(owner, error) {
+function checkRecover(owner, error) {
 	let recover = owner._recover;
+	if (typeof recover === "function") {
+		return recover(error) === true;
+	}
 	if (recover !== null) {
-		if (typeof recover === "function") {
-			if (recover(error) === true) {
+		let count = recover.length;
+		for (let i = 0; i < count; i++) {
+			if (recover[i](error) === true) {
 				return true;
-			}
-		} else {
-			let count = recover.length;
-			for (let i = 0; i < count; i++) {
-				if (recover[i](error) === true) {
-					return true;
-				}
 			}
 		}
 	}
@@ -3959,13 +3903,13 @@ function tryRecover(node, error) {
 	}
 	try {
 		/** Self-recovery: node stays alive. */
-		if (node._recover !== null && _checkRecover(node, error)) {
+		if (checkRecover(node, error)) {
 			return RECOVER_SELF;
 		}
 		/** Bubble up the owner chain. Node will be disposed by caller. */
 		let owner = node._owner;
 		while (owner !== null) {
-			if (_checkRecover(owner, error)) {
+			if (checkRecover(owner, error)) {
 				return RECOVER_OWNER;
 			}
 			owner = owner._owner;
@@ -4831,6 +4775,23 @@ function notifyMarked(sub, quiet) {
 			}
 		}
 	}
+}
+
+/**
+ * c.suspend(setup): the callback form, setup(resolve, reject). Sets
+ * FLAG_SUSPEND, so the run knows the node waits for a callback, not a
+ * returned promise. A resolve or reject made before the node's fn
+ * returns is held until it does (callbackFlags). Once per step.
+ * @param {AsyncReceiver | AsyncSender} node
+ * @param {function(function(*): void, function(*): void)} setup
+ * @returns {void}
+ */
+function suspendWith(node, setup) {
+	if (node._flag & FLAG_SUSPEND) {
+		throw new Error(SUSPEND_TWICE);
+	}
+	node._flag |= callbackFlags(node);
+	resolvePromise(node, setup, node._time);
 }
 
 /**
@@ -5776,28 +5737,46 @@ function startCompute(node) {
  * @returns {void}
  */
 function startEffect(node) {
-	if (IDLE) {
+	let idle = IDLE;
+	if (idle) {
 		IDLE = false;
-		try {
-			FENCE = SEED;
-			try {
-				node._update(TIME);
-			} catch (error) {
-				failStart(node, error);
-			}
-			if (SENDER_COUNT > 0 || DISPOSER_COUNT > 0) {
-				flush();
-			}
-		} finally {
-			IDLE = true;
-		}
-	} else {
+		FENCE = SEED;
+	}
+	try {
 		try {
 			node._update(TIME);
 		} catch (error) {
 			failStart(node, error);
 		}
+		if (idle && (SENDER_COUNT > 0 || DISPOSER_COUNT > 0)) {
+			flush();
+		}
+	} finally {
+		if (idle) {
+			IDLE = true;
+		}
 	}
+}
+
+/**
+ * Adds a new effect or action to its owner, and starts it: a bound one
+ * created with DEFER waits for its dep's first change, any other runs.
+ * @template T
+ * @param {Owner} owner
+ * @param {T} node
+ * @param {number} flag
+ * @returns {T}
+ */
+function startOwned(owner, node, flag) {
+	if (owner._flag & FLAG_OWNER) {
+		addOwned(owner, node);
+	}
+	if ((flag & (FLAG_DEFER | FLAG_BOUND)) === (FLAG_DEFER | FLAG_BOUND)) {
+		deferEffect(node);
+	} else {
+		startEffect(node);
+	}
+	return node;
 }
 
 /**
@@ -5830,25 +5809,53 @@ function requeue(queue, count, total) {
  * @returns {void}
  */
 function failStart(node, error) {
-	if (node._flag & FLAG_CALLBACK) {
-		unhold(node);
-	}
-	node._flag &= ~(FLAG_SUSPEND | FLAG_CALLBACK);
-	if (node._finalize !== null) {
-		clearFinalize(node);
-	}
 	let err = defect(error);
-	let result = tryRecover(node, err);
-	if (result !== RECOVER_SELF) {
-		teardown(node);
-	}
-	if (node._flag & FLAG_LOCKED) {
-		unshield(node);
-	}
+	let result = abortRun(node, err, 0);
+	endRun(node, result);
 	if (result === RECOVER_NONE) {
 		UNHANDLED = err;
 		UNHANDLED_NODE = node;
 		throw err;
+	}
+}
+
+/**
+ * Aborts an effect's run that threw: drops a held delivery, clears the
+ * run's flags and `mask`, runs its finalizers, and asks its handlers
+ * and its owners to recover.
+ * @param {Effect | Action} node
+ * @param {Defect} err
+ * @param {number} mask
+ * @returns {number} the result of tryRecover()
+ */
+function abortRun(node, err, mask) {
+	if (node._flag & FLAG_CALLBACK) {
+		unhold(node);
+	}
+	node._flag &= ~(mask | FLAG_SUSPEND | FLAG_CALLBACK);
+	if (node._finalize !== null) {
+		clearFinalize(node);
+	}
+	return tryRecover(node, err);
+}
+
+/**
+ * Ends an effect's failed activation: disposes the effect unless it
+ * recovered itself, and ends its shield. A locked effect's disposal
+ * waits for the shield, which a throwing teardown does not skip.
+ * @param {Effect | Action} node
+ * @param {number} result - from tryRecover()
+ * @returns {void}
+ */
+function endRun(node, result) {
+	try {
+		if (result !== RECOVER_SELF) {
+			teardown(node);
+		}
+	} finally {
+		if (node._flag & FLAG_LOCKED) {
+			unshield(node);
+		}
 	}
 }
 
@@ -5919,32 +5926,18 @@ function flushEffects(queue, count, time) {
 			/** A throw before the run, or a cleanup that throws, aborts it
 			 *  before it clears these, and a throw ends a callback
 			 *  suspend's activation. */
-			if (node._flag & FLAG_CALLBACK) {
-				unhold(node);
-			}
-			node._flag &= ~(FLAG_STALE | FLAG_PENDING | FLAG_SUSPEND | FLAG_CALLBACK);
-			if (node._finalize !== null) {
-				clearFinalize(node);
-			}
 			let err = defect(error);
-			let result = tryRecover(node, err);
+			let result = abortRun(node, err, FLAG_STALE | FLAG_PENDING);
 			if (thrown === null && result === RECOVER_NONE) {
 				thrown = err;
 			}
 			/** The throw ends the activation, and its shield: a locked
 			 *  node is disposed once that releases. */
-			if (result !== RECOVER_SELF || node._flag & FLAG_LOCKED) {
-				try {
-					if (result !== RECOVER_SELF) {
-						node._dispose();
-					}
-					if (node._flag & FLAG_LOCKED) {
-						unshield(node);
-					}
-				} catch (cleanupError) {
-					if (thrown === null) {
-						thrown = defect(cleanupError);
-					}
+			try {
+				endRun(node, result);
+			} catch (cleanupError) {
+				if (thrown === null) {
+					thrown = defect(cleanupError);
 				}
 			}
 		}
