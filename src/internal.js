@@ -3345,7 +3345,15 @@ function root(fn) {
 			SCOPES.push([]);
 		}
 		node._level = level;
-		return startOwned(owner, node, flag);
+		if (owner._flag & FLAG_OWNER) {
+			addOwned(owner, node);
+		}
+		if ((flag & (FLAG_DEFER | FLAG_BOUND)) === (FLAG_DEFER | FLAG_BOUND)) {
+			deferEffect(node);
+		} else {
+			startEffect(node);
+		}
+		return node;
 	}
 
 	/** @this {Owner} */
@@ -3396,7 +3404,15 @@ function root(fn) {
 			node = new Action(flag, /** @type {!Function} */(fnOrOpts), depOrFn, this, args);
 			node._dep1slot = connect(depOrFn, node, -1);
 		}
-		return startOwned(this, node, flag);
+		if (this._flag & FLAG_OWNER) {
+			addOwned(this, node);
+		}
+		if ((flag & (FLAG_DEFER | FLAG_BOUND)) === (FLAG_DEFER | FLAG_BOUND)) {
+			deferEffect(node);
+		} else {
+			startEffect(node);
+		}
+		return node;
 	}
 
 	/** Install factory methods on Root, Effect, and Clock prototypes */
@@ -5709,27 +5725,6 @@ function startEffect(node) {
 			failStart(node, error);
 		}
 	}
-}
-
-/**
- * Adds a new effect or action to its owner, and starts it: a bound one
- * created with DEFER waits for its dep's first change, any other runs.
- * @template T
- * @param {Owner} owner
- * @param {T} node
- * @param {number} flag
- * @returns {T}
- */
-function startOwned(owner, node, flag) {
-	if (owner._flag & FLAG_OWNER) {
-		addOwned(owner, node);
-	}
-	if ((flag & (FLAG_DEFER | FLAG_BOUND)) === (FLAG_DEFER | FLAG_BOUND)) {
-		deferEffect(node);
-	} else {
-		startEffect(node);
-	}
-	return node;
 }
 
 /**
