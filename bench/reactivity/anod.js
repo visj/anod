@@ -28,7 +28,7 @@ function setupDeep() {
         });
     }
     const tail = current;
-    c.effect(tail, val => {
+    c.action(tail, val => {
         counter++;
         sink += val;
     });
@@ -49,7 +49,7 @@ function setupBroad() {
             counter++;
             return val + 1;
         });
-        c.effect(current2, val => {
+        c.action(current2, val => {
             counter++;
             sink += val;
         });
@@ -74,7 +74,7 @@ function setupDiamond() {
         counter++;
         return branches.reduce((a, b) => a + cx.val(b), 0);
     });
-    c.effect(sum, val => {
+    c.action(sum, val => {
         counter++;
         sink += val;
     });
@@ -102,7 +102,7 @@ function setupTriangle() {
         counter++;
         return list.reduce((a, b) => a + cx.val(b), 0);
     });
-    c.effect(sum, val => {
+    c.action(sum, val => {
         counter++;
         sink += val;
     });
@@ -128,7 +128,7 @@ function setupMux() {
             return val + 1;
         }));
     for (const x of split) {
-        c.effect(x, val => {
+        c.action(x, val => {
             counter++;
             sink += val;
         });
@@ -158,7 +158,7 @@ function setupUnstable() {
         }
         return result;
     });
-    c.effect(current, val => {
+    c.action(current, val => {
         counter++;
         sink += val;
     });
@@ -190,7 +190,7 @@ function setupAvoidable() {
         counter++;
         return val + 3;
     });
-    c.effect(computed5, val => {
+    c.action(computed5, val => {
         counter++;
         sink += val;
     });
@@ -211,7 +211,7 @@ function setupRepeatedObservers() {
         }
         return result;
     });
-    c.effect(current, val => {
+    c.action(current, val => {
         counter++;
         sink += val;
     });
@@ -251,14 +251,14 @@ function setupCellx(layers) {
                 return val;
             }),
         };
-        c.effect(s.prop1, val => { counter++; sink += val; });
-        c.effect(s.prop2, val => { counter++; sink += val; });
-        c.effect(s.prop3, val => { counter++; sink += val; });
-        c.effect(s.prop4, val => { counter++; sink += val; });
-        c.effect(s.prop1, val => { counter++; sink += val; });
-        c.effect(s.prop2, val => { counter++; sink += val; });
-        c.effect(s.prop3, val => { counter++; sink += val; });
-        c.effect(s.prop4, val => { counter++; sink += val; });
+        c.action(s.prop1, val => { counter++; sink += val; });
+        c.action(s.prop2, val => { counter++; sink += val; });
+        c.action(s.prop3, val => { counter++; sink += val; });
+        c.action(s.prop4, val => { counter++; sink += val; });
+        c.action(s.prop1, val => { counter++; sink += val; });
+        c.action(s.prop2, val => { counter++; sink += val; });
+        c.action(s.prop3, val => { counter++; sink += val; });
+        c.action(s.prop4, val => { counter++; sink += val; });
         layer = s;
     }
     const end = layer;
@@ -304,15 +304,15 @@ function setupMolWire() {
         counter++;
         return cx.val(C) + (cx.val(C) || cx.val(E) % 2) + cx.val(D)[4].x + cx.val(F);
     });
-    c.effect(G, val => {
+    c.action(G, val => {
         counter++;
         sink += hard(val, 'H');
     });
-    c.effect(G, val => {
+    c.action(G, val => {
         counter++;
         sink += val;
     });
-    c.effect(F, val => {
+    c.action(F, val => {
         counter++;
         sink += hard(val, 'J');
     });
@@ -350,7 +350,7 @@ function benchCreateComputations(count) {
                 counter++;
                 return val;
             });
-            c.effect(comp, val => {
+            c.action(comp, val => {
                 counter++;
                 sink += val;
             });

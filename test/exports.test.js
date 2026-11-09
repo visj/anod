@@ -75,7 +75,7 @@ describe("declarations", () => {
 
     test("anod/internal declares the constructors", () => {
         const { diagnostics } = compile(`
-            import { Compute, Effect, Root, connect, addOwned, startEffect, signal } from "./internal.js";
+            import { Compute, Effect, Action, Root, connect, addOwned, startEffect, signal } from "./internal.js";
             const s = signal(1);
             const owner = new Root();
             const node = new Effect(0, (v: number, c) => {}, s, owner);
@@ -87,6 +87,10 @@ describe("declarations", () => {
                 Effect.call(this, 0, (c) => { c.val(s); }, null, null);
             }
             Derived.prototype = Object.create(Effect.prototype);
+            const act = new Action(0, (v: number, c) => { c.is(0 as any); }, s, owner);
+            connect(s, act);
+            addOwned(owner, act);
+            startEffect(act);
         `);
         expect(diagnostics).toEqual([]);
     });
@@ -111,6 +115,12 @@ describe("declarations", () => {
             c.effect((cx) => { cx.is(STABLE); }, DEFER);
             c.spawn(async (cx) => { cx.is(LOADING); }, STABLE);
             c.task(async (cx) => 1, void 0, EAGER);
+            const a = c.action((cx) => { cx.set(s, cx.val(s) + 1); cx.pending(n); cx.rejected(n); cx.is(SETUP); }, STABLE);
+            c.action(s, (v: number, cx) => { cx.post(s, v); }, DEFER);
+            c.action(s, (v, cx, args: string) => {}, SETUP, "x");
+            root((cx) => cx.action((cx) => {}));
+            a.is(DISPOSED);
+            a.dispose();
             n.is(STABLE);
             n.is(LOADING);
             s.is(ERROR);
@@ -138,7 +148,16 @@ describe("declarations", () => {
             "n.eager();",
             "n.disposed;",
             "n.loading;",
-            "n.error;"
+            "n.error;",
+            "c.action(() => {}, WEAK);",
+            "c.action(() => {}, LOADING);",
+            "c.action((cx) => { cx.cleanup(() => {}); });",
+            "c.action((cx) => { cx.recover(() => true); });",
+            "c.action(n, (v, cx) => { cx.finalize(() => {}); });",
+            "c.action((cx) => { cx.effect(() => {}); });",
+            "c.action((cx) => { cx.controller(); });",
+            "c.action(() => {}).pause();",
+            "c.action(() => {}).cleanup(() => {});"
         ];
         const header = [
             `import { c, STABLE, WEAK, EAGER, LOADING, ERROR, REFUSE, PANIC, Defect } from "./index.js";`,

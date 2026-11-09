@@ -7,7 +7,9 @@ const outputDir = './dist';
 /**
  * Terser's name cache, kept in the repo so mangled names stay the same across
  * builds and releases. It is shipped, so libraries that reach into anod's
- * internals can mangle their own builds with the same names.
+ * internals can mangle their own builds with the same names. Never delete or
+ * regenerate it: each build only adds names, and a name that changed would
+ * break every downstream build made against the old one.
  */
 const nameCachePath = path.resolve('./mangle.json');
 const typeFiles = ['./types/index.d.ts', './types/internal.d.ts'];

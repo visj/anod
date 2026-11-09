@@ -599,11 +599,12 @@ describe("resource", () => {
                     return await c.suspend(Promise.resolve({ id: 1, name: "alice" }));
                 });
             });
-            /** Optimistic write: same value per custom equal, no notify. */
-            expect(notifyCount).toBe(0);
+            /** Optimistic write: same value per custom equal, but the
+             *  async write makes it loading, which notifies once. */
+            expect(notifyCount).toBe(1);
             await settle();
             /** Settle always notifies (loading state changed). */
-            expect(notifyCount).toBe(1);
+            expect(notifyCount).toBe(2);
         });
 
         test("task awaits a loading resource", async () => {

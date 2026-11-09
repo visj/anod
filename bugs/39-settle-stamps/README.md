@@ -58,3 +58,7 @@ Two cold-path helpers:
 ## Related
 
 Bug 40 queues a settle made while the engine is busy, as `set()` queues a write, so after it these settle functions no longer run inside another node's run through a resolve. `settleDefers` still does, when a task settles in its own run while another node pulls it. The saves cost nothing when no stamp is above FENCE, and they keep the settle paths safe whichever way they are reached.
+
+## Later: marks instead of stamps
+
+On `feat/action`, the three settle functions stopped using stamps altogether. `settleNotify`, `settleDeps` and `settleDefers` now mark the nodes they dedupe with FLAG_VISIT and clear the marks before they return, as `checkCycle` and `awaits` already did; nothing between the mark and the clear runs user code. A settle then never touches a stamp a running node tracks with, so `stampSaved` and `restoreStamps` are removed, and a receiver no longer needs a `_stamp` field: Effect drops it, and Action never had one. `test/visit.test.js` drives each marking path and checks that no node keeps the mark.

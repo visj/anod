@@ -160,7 +160,7 @@ class AsyncSender extends Sender {
 }
 
 /**
- * Value-consuming node — Compute and Effect.
+ * Value-consuming node — Compute, Effect and Action.
  * @interface
  * @extends {Disposer}
  */
@@ -175,8 +175,6 @@ class Receiver extends Disposer {
 		this._deps;
 		/** @type {number} */
 		this._time;
-		/** @type {number} */
-		this._stamp;
 		/** @type {Function | null} */
 		this._fn;
 		/** @type {*} */
@@ -328,8 +326,6 @@ class IEffect extends Owner {
 		this._deps = null;
 		/** @type {number} */
 		this._time = 0;
-		/** @type {number} */
-		this._stamp = 0;
 		/** @type {Function | null} */
 		this._fn = null;
 		/** @type {IChannel | null} */
@@ -366,11 +362,59 @@ class IEffect extends Owner {
 	dispose() { }
 }
 
+/**
+ * Action interface — a sync Receiver that owns nothing. It keeps its
+ * owner for disposal and recovery, but has no cleanup, recover,
+ * finalize or channel, and creates no children, so
+ * its context carries only val, pending, rejected, set, post, is and
+ * dispose.
+ * @interface
+ * @extends {Receiver}
+ */
+class IAction extends Receiver {
+	constructor() {
+		super();
+		/** @type {Sender | null} */
+		this._dep1 = null;
+		/** @type {number} */
+		this._dep1slot = -1;
+		/** @type {Array<Sender | number> | null} */
+		this._deps = null;
+		/** @type {number} */
+		this._time = 0;
+		/** @type {Function | null} */
+		this._fn = null;
+		/** @type {*} */
+		this._args = void 0;
+	}
+	/**
+	 * @param {number} time
+	 * @returns {void}
+	 */
+	_update(time) { }
+	/** @returns {void} */
+	_receive() { }
+	/**
+	 * @param {Sender} sender
+	 * @param {number} stamp
+	 * @returns {void}
+	 */
+	_read(sender, stamp) { }
+	/**
+	 * @template T
+	 * @param {Sender<T>} sender
+	 * @returns {T}
+	 */
+	val(sender) { }
+	/** @returns {void} */
+	dispose() { }
+}
+
 export {
 	Disposer, Owner,
 	AsyncDisposer, Factory,
 	Sender, AsyncSender,
 	Receiver, AsyncReceiver,
 	IChannel, Resolver,
-	ICompute, IEffect
+	ICompute, IEffect, IAction
 };

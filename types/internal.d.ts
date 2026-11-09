@@ -23,7 +23,8 @@ export type Resolve<T> =
 				: T;
 
 /* Sender flags (bits 0-6) — readable on any Sender (Signal or Compute).
- * Bits 7+ on a plain Signal are free for extension. */
+ * Bits 7+ on a plain Signal are free for extension, except FLAG_VISIT,
+ * a scratch mark the engine sets and clears within one call. */
 export declare const FLAG_STALE: number;
 export declare const FLAG_PENDING: number;
 export declare const FLAG_SCHEDULED: number;
@@ -54,6 +55,8 @@ export declare const FLAG_PURGE: number;
 export declare const FLAG_PAUSED: number;
 export declare const FLAG_OWNER: number;
 export declare const FLAG_CALLBACK: number;
+/** A scratch mark on any node, set and cleared within one engine call:
+ *  cycle checks and the dedupe passes of an async settle. */
 export declare const FLAG_VISIT: number;
 export declare const FLAG_REFUSE: number;
 
@@ -308,6 +311,54 @@ export declare var Effect: EffectConstructor;
 
 export interface Spawn extends Effect {}
 
+/**
+ * A slim sync effect: it runs its fn when its deps change, and nothing
+ * else. It owns nothing and takes no cleanup, recover or finalize; the
+ * root or effect that creates it disposes it and recovers its errors.
+ */
+export interface Action {
+	/** Whether the node has `flag` set: a creation option or a state. */
+	is(flag: Option | State): boolean;
+	dispose(): void;
+}
+
+/** Pass `null` as `dep1` for an unbound action, or a sender to bind it. */
+export interface ActionConstructor {
+	new <W = undefined>(
+		opts: number,
+		fn: (c: ActionReader, args: W) => void,
+		dep1: null,
+		owner: Owner | null,
+		args?: W
+	): Action;
+	new <T, W = undefined>(
+		opts: number,
+		fn: (val: T, c: ActionContext, args: W) => void,
+		dep1: Sender<T>,
+		owner: Owner | null,
+		args?: W
+	): Action;
+	call<W = undefined>(
+		self: Action,
+		opts: number,
+		fn: (c: ActionReader, args: W) => void,
+		dep1: null,
+		owner: Owner | null,
+		args?: W
+	): void;
+	call<T, W = undefined>(
+		self: Action,
+		opts: number,
+		fn: (val: T, c: ActionContext, args: W) => void,
+		dep1: Sender<T>,
+		owner: Owner | null,
+		args?: W
+	): void;
+	readonly prototype: Action;
+}
+
+export declare var Action: ActionConstructor;
+
 /** Async coordination state of a node, allocated on first use. */
 export interface Channel {}
 
@@ -331,17 +382,39 @@ export interface ResourceContext {
 
 export type Sender<T = any> = Signal<T> | MutableSignal<T> | Resource<T> | Compute<T> | Task<T>;
 export type AsyncSender<T = any> = Resource<T> | Task<T>;
-export type Receiver = Compute | Effect;
+/**
+ * What suspend() gives for one of its inputs: a sender's or a promise's
+ * value, or a plain value as it is.
+ */
+export type Settled<T> = T extends AsyncSender<infer U>
+	? U
+	: T extends PromiseLike<infer U>
+		? U
+		: T;
+
+declare const STEP: unique symbol;
+/**
+ * What a callback-form suspend returns, for the type checker only: at run
+ * time it is undefined. Return it from the fn or a callback, and the task
+ * is typed with the value the steps settle with.
+ */
+export interface Step<T> {
+	readonly [STEP]: T;
+}
+/**
+ * What a run settles with when a callback returns R: a step's value, what
+ * a promise or async iterable gives, or R as it is.
+ */
+export type Outcome<R> = R extends Step<infer U> ? U : Resolve<R>;
+export type Receiver = Compute | Effect | Action;
 export type Owner = Root | Effect;
 export type Disposer = Sender | Receiver | Root;
 
 /**
- * Base context available on all receiver callbacks.
- * Includes callback-based suspend, controller, defer,
- * pending/rejected checks, and contextual set/post.
+ * Bound action callback context: contextual set/post, pending/rejected
+ * checks and is(). The base of every other receiver context.
  */
-export interface Context {
-	cleanup(fn: () => void): void;
+export interface ActionContext {
 	set<T>(sender: Sender<T>, value: T | ((prev: T) => T)): void;
 	set<T>(
 		sender: Resource<T>,
@@ -356,11 +429,19 @@ export interface Context {
 	): void;
 	pending(senders: Sender | Sender[]): boolean;
 	rejected(sender: Sender): Defect | null;
+	/** Whether this node has `flag` set: a creation option or a state. */
+	is(flag: Option | State): boolean;
+}
+
+/**
+ * Base context available on compute, task, effect and spawn callbacks.
+ * Adds cleanups, the activation's version, controller and defer.
+ */
+export interface Context extends ActionContext {
+	cleanup(fn: () => void): void;
 	version(): number;
 	controller(): AbortController;
 	defer<R>(sender: Sender<R>): R;
-	/** Whether this node has `flag` set: a creation option or a state. */
-	is(flag: Option | State): boolean;
 }
 
 /** Dependency tracking — adds val() for reading and subscribing. */
@@ -407,28 +488,34 @@ export interface EffectContext extends RootContext, Context {
 /** Unbound effect callback context. */
 export interface EffectReader extends EffectContext, Reader {}
 
+/** Unbound action callback context. */
+export interface ActionReader extends ActionContext, Reader {}
+
 /** Bound task callback context. */
 export interface TaskContext extends ComputeContext {
-	suspend<T>(promise: Promise<T>): Promise<T>;
+	suspend<T>(promise: PromiseLike<T>): Promise<T>;
 	suspend<T>(sender: AsyncSender<T>): T | Promise<T>;
-	suspend<T>(
-		sender: AsyncSender<T>,
-		onResolve: (value: T) => void,
-		onReject?: (error: any) => void
-	): void;
-	suspend<T extends readonly AsyncSender<any>[]>(
-		senders: [...T]
-	): Promise<{ [K in keyof T]: T[K] extends AsyncSender<infer U> ? U : never }>;
-	suspend<T extends readonly AsyncSender<any>[]>(
-		senders: [...T],
-		onResolve: (values: {
-			[K in keyof T]: T[K] extends AsyncSender<infer U> ? U : never;
-		}) => void,
-		onReject?: (error: any) => void
-	): void;
-	suspend(
-		fn: (resolve: (value?: any) => void, reject: (error?: any) => void) => void
-	): void;
+	/**
+	 * Waits through callbacks. A suspend made in a callback is the run's
+	 * next step, and a promise a callback returns is adopted. Return the
+	 * step to type the run's value.
+	 */
+	suspend<T, R, E = never>(
+		input: AsyncSender<T> | PromiseLike<T>,
+		onResolve: (value: T) => R,
+		onReject?: (error: any) => E
+	): Step<Outcome<R> | Outcome<E>>;
+	suspend<T extends readonly unknown[]>(
+		inputs: [...T]
+	): Promise<{ [K in keyof T]: Settled<T[K]> }>;
+	suspend<T extends readonly unknown[], R, E = never>(
+		inputs: [...T],
+		onResolve: (values: { [K in keyof T]: Settled<T[K]> }) => R,
+		onReject?: (error: any) => E
+	): Step<Outcome<R> | Outcome<E>>;
+	suspend<T = any>(
+		fn: (resolve: (value?: T) => void, reject: (error?: any) => void) => void
+	): Step<T>;
 }
 
 /** Unbound task callback context. */
@@ -436,26 +523,29 @@ export interface TaskReader extends TaskContext, Reader {}
 
 /** Bound spawn callback context. */
 export interface SpawnContext extends EffectContext {
-	suspend<T>(promise: Promise<T>): Promise<T>;
+	suspend<T>(promise: PromiseLike<T>): Promise<T>;
 	suspend<T>(sender: AsyncSender<T>): T | Promise<T>;
-	suspend<T>(
-		sender: AsyncSender<T>,
-		onResolve: (value: T) => void,
-		onReject?: (error: any) => void
-	): void;
-	suspend<T extends readonly AsyncSender<any>[]>(
-		senders: [...T]
-	): Promise<{ [K in keyof T]: T[K] extends AsyncSender<infer U> ? U : never }>;
-	suspend<T extends readonly AsyncSender<any>[]>(
-		senders: [...T],
-		onResolve: (values: {
-			[K in keyof T]: T[K] extends AsyncSender<infer U> ? U : never;
-		}) => void,
-		onReject?: (error: any) => void
-	): void;
-	suspend(
-		fn: (resolve: (value?: any) => void, reject: (error?: any) => void) => void
-	): void;
+	/**
+	 * Waits through callbacks. A suspend made in a callback is the run's
+	 * next step, and a promise a callback returns is adopted. Return the
+	 * step to type the run's value.
+	 */
+	suspend<T, R, E = never>(
+		input: AsyncSender<T> | PromiseLike<T>,
+		onResolve: (value: T) => R,
+		onReject?: (error: any) => E
+	): Step<Outcome<R> | Outcome<E>>;
+	suspend<T extends readonly unknown[]>(
+		inputs: [...T]
+	): Promise<{ [K in keyof T]: Settled<T[K]> }>;
+	suspend<T extends readonly unknown[], R, E = never>(
+		inputs: [...T],
+		onResolve: (values: { [K in keyof T]: Settled<T[K]> }) => R,
+		onReject?: (error: any) => E
+	): Step<Outcome<R> | Outcome<E>>;
+	suspend<T = any>(
+		fn: (resolve: (value?: T) => void, reject: (error?: any) => void) => void
+	): Step<T>;
 }
 
 /** Unbound spawn callback context. */
@@ -498,23 +588,41 @@ export interface Factory {
 
 	// Unbound task
 	task<U>(
-		fn: (c: TaskReader, prev: Resolve<U>) => Promise<U>,
+		fn: (c: TaskReader, prev: Resolve<U>) => Promise<U> | Step<U>,
 		seed?: Resolve<U>,
 		opts?: Option
 	): Task<Resolve<U>>;
 	task<U, W>(
-		fn: (c: TaskReader, prev: Resolve<U>, args: W) => Promise<U>,
+		fn: (c: TaskReader, prev: Resolve<U>, args: W) => Promise<U> | Step<U>,
 		seed?: Resolve<U>,
 		opts?: Option,
 		args?: W
 	): Task<Resolve<U>>;
+	/** A callback-form fn that doesn't return its step: name U. */
+	task<U>(
+		fn: (c: TaskReader, prev: U) => void,
+		seed?: U,
+		opts?: Option
+	): Task<U>;
+	task<U, W>(
+		fn: (c: TaskReader, prev: U, args: W) => void,
+		seed?: U,
+		opts?: Option,
+		args?: W
+	): Task<U>;
 	// Bound task
 	task<T, U>(
 		dep: Sender<T>,
-		fn: (val: T, c: TaskContext, prev: Resolve<U>) => Promise<U>,
+		fn: (val: T, c: TaskContext, prev: Resolve<U>) => Promise<U> | Step<U>,
 		seed?: Resolve<U>,
 		opts?: Option
 	): Task<Resolve<U>>;
+	task<T, U>(
+		dep: Sender<T>,
+		fn: (val: T, c: TaskContext, prev: U) => void,
+		seed?: U,
+		opts?: Option
+	): Task<U>;
 
 	// Unbound effect
 	effect(fn: (c: EffectReader) => void, opts?: EffectOption): Effect;
@@ -531,18 +639,41 @@ export interface Factory {
 	): Effect;
 
 	// Unbound spawn
-	spawn(fn: (c: SpawnReader) => Promise<void>, opts?: EffectOption): Spawn;
+	spawn(
+		fn: (c: SpawnReader) => Promise<void> | Step<unknown> | void,
+		opts?: EffectOption
+	): Spawn;
 	spawn<W>(
-		fn: (c: SpawnReader, args: W) => Promise<void>,
+		fn: (c: SpawnReader, args: W) => Promise<void> | Step<unknown> | void,
 		opts?: EffectOption,
 		args?: W
 	): Spawn;
 	// Bound spawn
 	spawn<T>(
 		dep: Sender<T>,
-		fn: (val: T, c: SpawnContext) => Promise<void>,
+		fn: (val: T, c: SpawnContext) => Promise<void> | Step<unknown> | void,
 		opts?: EffectOption
 	): Spawn;
+
+	// Unbound action
+	action(fn: (c: ActionReader) => void, opts?: EffectOption): Action;
+	action<W>(
+		fn: (c: ActionReader, args: W) => void,
+		opts?: EffectOption,
+		args?: W
+	): Action;
+	// Bound action
+	action<T>(
+		dep: Sender<T>,
+		fn: (val: T, c: ActionContext) => void,
+		opts?: EffectOption
+	): Action;
+	action<T, W>(
+		dep: Sender<T>,
+		fn: (val: T, c: ActionContext, args: W) => void,
+		opts?: EffectOption,
+		args?: W
+	): Action;
 }
 
 /** Unowned factory — nodes created through it live until GC or dispose. */
@@ -587,21 +718,21 @@ export declare var COMPUTE_COUNT: number;
 export declare const LEVELS: Array<number>;
 export declare const SCOPES: Array<Array<Effect>>;
 export declare var SCOPE_COUNT: number;
-export declare const RECEIVERS: Array<Effect>;
+export declare const RECEIVERS: Array<Effect | Action>;
 export declare var RECEIVER_COUNT: number;
 export declare const PURGES: Array<Owner>;
 export declare var PURGE_COUNT: number;
 
 /* What the factories do once a node is constructed: connect() a bound
  * node to its dep, addOwned() it to an owning root or effect, then run it
- * with startCompute() or startEffect(). An effect also takes its owner's
- * level + 1, growing LEVELS and SCOPES to fit. root() is startRoot() on
+ * with startCompute() or startEffect() (an action too). An effect also
+ * takes its owner's level + 1, growing LEVELS and SCOPES to fit. root() is startRoot() on
  * a new Root. */
 export declare function connect(send: Sender, receiver: Receiver): void;
 export declare function addOwned(owner: Owner, child: Receiver): void;
 export declare function startRoot(root: Root, fn: (c: RootContext) => void): void;
 export declare function startCompute(node: Compute): void;
-export declare function startEffect(node: Effect): void;
+export declare function startEffect(node: Effect | Action): void;
 
 export declare function signal<T>(value: T): Signal<T>;
 export declare function signal<T>(

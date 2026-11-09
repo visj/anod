@@ -1,9 +1,11 @@
 /**
  * App benchmark for anod. Single-dep computes and DOM writes use the
- * bound API (c.compute(dep, fn), c.effect(dep, fn)), as katode emits,
+ * bound API (c.compute(dep, fn), c.action(dep, fn)), as katode emits,
  * and the ROWS-wide count is created STABLE. ANOD_API=unbound builds every
  * node with the unbound API and leaves out STABLE, which the other
- * libraries have no equivalent of.
+ * libraries have no equivalent of. Side effects are actions: none of
+ * them owns nodes or registers cleanups, and each row's root disposes
+ * its own.
  */
 import { bench, run } from 'mitata';
 import { signal, root, batch, STABLE } from '../../dist/index.js';
@@ -32,7 +34,7 @@ function createStore(n) {
 
 /**
  * A keyed selector, like Solid 1's createSelector: one signal per id, and
- * one effect that flips the previous and the next id's signal. A select
+ * one action that flips the previous and the next id's signal. A select
  * then reruns two rows instead of every row. anod has no built-in one;
  * this is the helper an app would write.
  * @returns {function(number): Signal<boolean>}
@@ -40,7 +42,7 @@ function createStore(n) {
 function createSelector(r, source) {
     const keys = new Map();
     let prev = source.get();
-    r.effect(source, (id) => {
+    r.action(source, (id) => {
         const old = keys.get(prev);
         if (old !== void 0) {
             old.set(false);
@@ -93,17 +95,17 @@ function mountRow(r, store, row, el, isSelected) {
         return (cx.val(selected) ? 'row selected ' : 'row ') + cx.val(store.theme);
     });
     if (BOUND) {
-        r.effect(text, (v) => { effects++; el.textContent = v; });
-        r.effect(visible, (v) => { effects++; el.hidden = !v; });
-        r.effect(cls, (v) => { effects++; el.className = v; });
-        r.effect(row.done, (v) => { effects++; el.checked = v; });
+        r.action(text, (v) => { effects++; el.textContent = v; });
+        r.action(visible, (v) => { effects++; el.hidden = !v; });
+        r.action(cls, (v) => { effects++; el.className = v; });
+        r.action(row.done, (v) => { effects++; el.checked = v; });
     } else {
-        r.effect((cx) => { effects++; el.textContent = cx.val(text); });
-        r.effect((cx) => { effects++; el.hidden = !cx.val(visible); });
-        r.effect((cx) => { effects++; el.className = cx.val(cls); });
-        r.effect((cx) => { effects++; el.checked = cx.val(row.done); });
+        r.action((cx) => { effects++; el.textContent = cx.val(text); });
+        r.action((cx) => { effects++; el.hidden = !cx.val(visible); });
+        r.action((cx) => { effects++; el.className = cx.val(cls); });
+        r.action((cx) => { effects++; el.checked = cx.val(row.done); });
     }
-    r.effect((cx) => {
+    r.action((cx) => {
         effects++;
         el.title = cx.val(selected) ? cx.val(text) + ' *' : cx.val(text);
     });
@@ -124,11 +126,11 @@ function mountApp(r, store, footer) {
         return n;
     }, void 0, BOUND ? STABLE : 0);
     if (BOUND) {
-        r.effect(doneCount, (v) => { effects++; footer.textContent = v + ' done'; });
-        r.effect(store.filter, (v) => { effects++; storage = v; });
+        r.action(doneCount, (v) => { effects++; footer.textContent = v + ' done'; });
+        r.action(store.filter, (v) => { effects++; storage = v; });
     } else {
-        r.effect((cx) => { effects++; footer.textContent = cx.val(doneCount) + ' done'; });
-        r.effect((cx) => { effects++; storage = cx.val(store.filter); });
+        r.action((cx) => { effects++; footer.textContent = cx.val(doneCount) + ' done'; });
+        r.action((cx) => { effects++; storage = cx.val(store.filter); });
     }
 }
 

@@ -37,9 +37,13 @@ export type {
 	Root,
 	Effect,
 	Spawn,
+	Action,
 	ResourceContext,
 	Sender,
 	AsyncSender,
+	Settled,
+	Step,
+	Outcome,
 	Context,
 	Reader,
 	ComputeContext,
@@ -51,5 +55,7 @@ export type {
 	TaskReader,
 	SpawnContext,
 	SpawnReader,
+	ActionContext,
+	ActionReader,
 	Factory
 } from "./internal.js";

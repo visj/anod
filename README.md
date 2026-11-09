@@ -17,6 +17,7 @@ anod is a reactive state management library. It has built-in support for both sy
 		- [Signal](#signal)
 		- [Compute](#compute)
 		- [Effect](#effect)
+		- [Action](#action)
 	- [Async reactivity](#async-reactivity)
 		- [Resource](#resource)
 		- [Task](#task)
@@ -279,6 +280,28 @@ root((c) => {
 });
 ```
 
+#### Action
+
+An action is a slim effect for the common case of a function that runs when its dependencies change and does nothing else, like writing a value to the DOM. It takes the same arguments and options as `c.effect()`, and its context keeps `c.val()`, `c.pending()`, `c.rejected()`, `c.set()`, `c.post()` and `c.is()`.
+
+```ts
+import { root, signal } from "anod";
+root((c) => {
+	const name = signal("anod");
+	const el = document.createElement("span");
+	c.action(name, (val) => {
+		el.textContent = val;
+	});
+	c.action((c) => {
+		el.title = `Hello ${c.val(name)}`;
+	});
+});
+```
+
+An action owns nothing, and has no `c.cleanup()`, `c.recover()`, `c.finalize()`, async variant or child nodes. That makes it about half the size of an effect: 8 fields instead of 14. It still tracks dynamic dependencies, as an effect does, and takes `STABLE`, `SETUP` and `DEFER`. The root or effect that creates it disposes it, pauses it with `pause()`, and recovers its errors: an error in an action, or in a compute it reads, goes to its owner's `c.recover()` handlers, and the action is disposed, as an effect would be.
+
+Use an effect for anything that needs cleanups, children of its own or async work.
+
 ### Async reactivity
 
 anod aims to bridge the gap between sync and async signal reactivity. Each sync primitive has an async counterpart:
@@ -321,7 +344,7 @@ root((c) => {
 });
 ```
 
-The async callback receives the resource as `c` (with `suspend` for staleness protection) and the current/optimistic value. If the callback returns a sync value, it settles immediately with no loading state. If it returns a promise, `is(LOADING)` is true until it resolves.
+The async callback receives the resource as `c` (with `suspend` for staleness protection) and the current/optimistic value. If the callback returns a sync value, it settles immediately with no loading state. If it returns a promise or suspends, `is(LOADING)` is true until it settles, and its readers are told when it starts loading, so a reader of `c.pending(resource)` sees it. Readers of its value run again then too, and read the value it had.
 
 When a new `set()` fires while a previous async callback is still in flight, the old promise still resolves normally, but `suspend()` detects that the resource has moved on and simply doesn't yield back into the callback. The continuation after `await` never runs, so the stale result never reaches the `return` . Only the latest activation's callback gets to settle the resource.
 
@@ -1009,7 +1032,7 @@ root((c) => {
 
 #### 2. Await with `c.suspend()`
 
-`c.suspend()` is the primary async delivery mechanism. It accepts a promise, a task, or an array of tasks.
+`c.suspend()` is the primary async delivery mechanism. It accepts a promise, a task or resource, or an array that mixes them. A plain value passes through, as `await value` would.
 
 **Promise**: wraps the promise so that if the node is disposed or re-run before it resolves, the continuation is silently dropped.
 
@@ -1050,7 +1073,7 @@ root((c) => {
 
 A task that awaits a task which, directly or through other tasks, awaits it back would never settle. The await that closes such a cycle throws `"Cycle detected"` instead, so the tasks fail rather than stay loading.
 
-**Array of tasks**: awaits multiple tasks concurrently. Returns when all tasks have settled.
+**Array**: awaits multiple tasks, resources and promises concurrently. Returns when all of them have settled, with the values in the same order. A plain value in the array is returned as it is. A promise is waited on like a task, so a rejection reaches you as a `Defect`, and an array with a promise in it always takes at least a microtask, since a promise can't be read synchronously.
 
 ```ts
 import { root } from "anod";
@@ -1112,15 +1135,17 @@ root((c) => {
 
 Note the spawn body is sync — no `async` keyword, no promise allocation. The setup function controls when the node settles. If `url` changes, the spawn re-runs: the child effect is disposed, `cleanup` closes the old websocket, and the old `resolve` becomes stale and is silently ignored.
 
-You can only call `c.suspend()` with a setup function or with callbacks once per activation. Calling it again throws an error. This prevents ambiguous double-settlement.
+You can only call `c.suspend()` with a setup function or with callbacks once per step: once in the fn, and once in each callback that continues the run (see [task callbacks](#4-task-callbacks-with-csuspendtask-onresolve-onreject)). Calling it twice in the same place throws an error. This prevents ambiguous double-settlement.
 
 #### 4. Task callbacks with `c.suspend(task, onResolve, onReject)`
 
-`c.suspend(task, onResolve, onReject)` reads a task, or an array of tasks, through callbacks instead of `await`. It works like `.then(onResolve, onReject)`, without the promise:
+`c.suspend(task, onResolve, onReject)` reads a task, a resource, a promise, or an array of them, through callbacks instead of `await`. It works like `.then(onResolve, onReject)`, without the promise:
 
 * **Settled task**: `onResolve(value)` is called as soon as your fn returns, so the code after `c.suspend()` runs first, as it does for a loading task. There is still no microtask: the node finishes in the same run. Reads inside the callback are tracked like reads after an `await`.
 * **Loading task**: the callbacks are stored on the task, and the node is loading until one of them runs. When the task settles, the callback runs synchronously, in the same tick, after everything that depends on the task has been marked stale. So a read inside the callback sees the graph as it is after the settle. A task that settles while your fn is still running is treated like a settled one.
 * **Tasks settle with the result**: in a task, what the callback returns becomes the task's value, and what it throws becomes its error. In a spawn, the return value is ignored.
+* **A callback continues the run**: a `c.suspend()` made inside a callback is the run's next step, and the run settles with the last step's result. A promise that a task's or spawn's callback returns is adopted, as when the fn returns one: the run stays loading and settles with what it gives. A returned task or resource is the value, as it would be from the fn; to wait for one, suspend on it. A step whose input has settled runs at once, in the same run, so a chain over settled tasks finishes without a microtask, in constant stack however long it is.
+* **Promises**: a promise, alone or in an array, is waited on like a task that settles when it does. It always takes at least a microtask.
 * **Errors**: a failing task calls `onReject(error)` with the anod error (a `Defect`). If `onReject` returns, a task settles with that value, as with `.then`. Without `onReject`, the error fails the node, as a throwing `await` would, so it reaches `c.recover()`.
 * **Staleness**: if the node re-runs or is disposed before the task settles, the callbacks are dropped and never run.
 
@@ -1134,9 +1159,9 @@ root((c) => {
 	});
 
 	/** A task built from another task: settles with what onResolve returns. */
-	const greeting = c.task((c) => {
-		c.suspend(user, (u) => "Hello, " + u.name, () => "Hello, guest");
-	});
+	const greeting = c.task((c) =>
+		c.suspend(user, (u) => "Hello, " + u.name, () => "Hello, guest")
+	);
 
 	/** A sync spawn: no async keyword, no promise, no microtask. */
 	c.spawn((c) => {
@@ -1149,9 +1174,36 @@ root((c) => {
 
 Whether the callback runs now or later depends on whether the task has settled, so don't rely on code after `c.suspend()` running before or after it.
 
+A step waits for a value computed by the step before it, which `await` would do with a promise and a microtask per step:
+
+```ts
+import { root, signal } from "anod";
+root((c) => {
+	const order = signal({ address: "Main St 1", coupon: "SPRING" });
+	const getShipping = (address) => Promise.resolve([{ id: "q1", price: 10 }]);
+	const getTax = (quote) => Promise.resolve(2);
+	const getDiscount = (quote, coupon) => Promise.resolve(1);
+
+	const total = c.task((c) =>
+		c.suspend(getShipping(c.val(order).address), (quotes) => {
+			const quote = quotes[0];
+			/** The next step: both requests start together. */
+			return c.suspend(
+				[getTax(quote.id), getDiscount(quote.id, c.val(order).coupon)],
+				([tax, discount]) => quote.price + tax - discount
+			);
+		})
+	);
+});
+```
+
+If `order` changes, the task re-runs, and the steps the old run hadn't reached are dropped. Each step is guarded the way an `await` is: a dropped step never runs, and what it would have received is discarded.
+
+In TypeScript, a callback-form `c.suspend()` returns a `Step<T>`, where `T` is what its callbacks settle with. It exists only for the type checker: at run time it is `undefined`, and anod ignores it. Return it from the fn and from each callback that continues the run, as above, and the task is typed from the last step: `total` is a `Task<number>`. A fn that doesn't return its step needs the type named, as in `c.task<number>((c) => { c.suspend(...); })`.
+
 The node subscribes to the task, the same as with `await`. When the task settles again, the node re-runs and calls `c.suspend()` again.
 
-Use one suspend per activation. A callback suspend can't be added while another suspend is pending, so an async spawn can't use it after an `await`. Either case throws.
+Use one suspend per step: the fn makes the first, and each callback may make the next. A second suspend in the same fn or callback throws, and so does a callback suspend in an async fn after an `await`. Wait on several things at once with an array.
 
 ### Deferred dependencies with `c.defer()`
 

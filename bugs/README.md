@@ -75,6 +75,7 @@ Branch `fix/settle-stamps` fixes bugs 39 and 40. An async settle no longer overw
 | [38](38-bound-effect-double-link/README.md) | A bound effect with `OPT_SETUP` that reads its own dep is linked twice | 1 | — | fixed |
 | [39](39-settle-stamps/README.md) | A settle inside another node's run overwrites its dependency stamps | 5 | 24, 40 | fixed on `fix/settle-stamps` |
 | [40](40-settle-in-run/README.md) | A settle inside another node's run is lost on its readers | 5 | 16, 39 | fixed on `fix/settle-stamps` |
+| [41](41-suspend-steps/README.md) | Callback suspends can't chain, adopt, or wait on promises, and an async write hides its loading | 39 | 24, D9 | fixed on `feat/suspend-all` |
 
 Suggested grouping for fix branches, by the code they touch:
 
@@ -85,6 +86,7 @@ Suggested grouping for fix branches, by the code they touch:
 - **Teardown:** 35, together with D2. Fixed.
 - **Independent:** 29, 32, 33, 37 and 38.
 - **Settle in a run:** 39 and 40 (`settleDeps`, `settleDefers`, `settleNotify`, `resolvePromise`).
+- **Steps:** 41 (`suspendTo`, `relay`, the held paths, `_runAsync`).
 
 ### Simplification
 

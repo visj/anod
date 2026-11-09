@@ -207,7 +207,18 @@
       "$restoreStamps": "dl",
       "$postSettle": "vl",
       "$settleLater": "pl",
-      "$errorLater": "bl"
+      "$errorLater": "bl",
+      "$Action": "kl",
+      "$unmarkDeps": "El",
+      "$STEP": "_l",
+      "$ADOPT": "ml",
+      "$startLoading": "jl",
+      "$settleHeld": "Al",
+      "$settleHeldEffect": "Cl",
+      "$runStep": "Ml",
+      "$dropStep": "Pl",
+      "$toSender": "ql",
+      "$toSenders": "Sl"
     }
   },
   "props": {
