@@ -878,7 +878,7 @@ function _runAsync(node, asyncFn, prev) {
 		 *  made during asyncFn superseded the activation. */
 		if (node._flag & FLAG_CALLBACK) {
 			node._flag &= ~FLAG_CALLBACK;
-			let i = HELD_COUNT > 0 ? findHeld(node) : -1;
+			let i = findHeld(node);
 			let fn;
 			let held;
 			if (i >= 0) {
@@ -2179,12 +2179,15 @@ function root(fn) {
 	};
 
 	/**
-	 * Settles an async resource or compute with an error. Wraps as FATAL
-	 * unless anod created it, sets FLAG_ERROR, and delegates to _settle.
-	 * @this {Cell | Compute}
+	 * Settles an async resource, compute or effect with an error. Wraps
+	 * as FATAL unless anod created it, sets FLAG_ERROR, and delegates to
+	 * _settle. A callback that rejects while the fn still runs is held,
+	 * and _update throws it once the fn has returned, as a throw in the
+	 * body would.
+	 * @this {Cell | Compute | Effect}
 	 * @param {*} err
 	 */
-	CellProto._error = ComputeProto._error = function (err) {
+	CellProto._error = ComputeProto._error = EffectProto._error = function (err) {
 		if (isHolding(this)) {
 			hold(this, null, err);
 			return;
@@ -2205,19 +2208,10 @@ function root(fn) {
 			return;
 		}
 		this._flag = FLAG_DISPOSED;
-		/** Children first, then cleanups (D2). */
 		try {
-			if (this._owned !== null) {
-				clearOwned(this);
-			}
+			clearRun(this);
 		} finally {
-			try {
-				if (this._cleanup !== null) {
-					clearCleanup(this);
-				}
-			} finally {
-				this._owned = this._recover = null;
-			}
+			this._owned = this._recover = null;
 		}
 	};
 
@@ -2668,17 +2662,11 @@ function root(fn) {
 		clearSubs(this);
 		clearDeps(this);
 		if (flag & FLAG_CHANNEL) {
-			let chan = this._chan;
-			if (chan._controller !== null) {
-				chan._controller.abort();
-			}
+			resetChannel(this);
 			/** Reject any nodes awaiting this task. */
+			let chan = this._chan;
 			if (chan._waiters !== null) {
 				rejectWaiters(this, chan, new Defect(new Error("Awaited task was disposed"), PANIC));
-			}
-			/** Remove ourselves from any responders we were awaiting. */
-			if (chan._res1 !== null || chan._responds !== null) {
-				clearChannel(chan, this);
 			}
 		}
 		try {
@@ -2860,7 +2848,7 @@ function root(fn) {
 				return;
 			}
 			if (flag & FLAG_CALLBACK) {
-				let i = HELD_COUNT > 0 ? findHeld(this) : -1;
+				let i = findHeld(this);
 				/** Nothing delivered yet: loading from here on. Like the
 				 *  promise path, FLAG_INIT is kept for _settle, so the first
 				 *  settle notifies even if it resolves to the seed. */
@@ -3096,7 +3084,7 @@ function root(fn) {
 			if (flag & FLAG_CALLBACK) {
 				/** Loading from here on, until the callback delivers. */
 				this._flag = (flag | FLAG_LOADING) & ~(FLAG_INIT | FLAG_CALLBACK);
-				let i = HELD_COUNT > 0 ? findHeld(this) : -1;
+				let i = findHeld(this);
 				if (i < 0) {
 					return;
 				}
@@ -3196,23 +3184,6 @@ function root(fn) {
 	};
 
 	/**
-	 * Settles an async effect with an error. Wraps as FATAL unless
-	 * anod created it, sets FLAG_ERROR, and delegates to _settle. A
-	 * callback that rejects while the fn still runs is held, and _update
-	 * throws it once the fn has returned, as a throw in the body would.
-	 * @this {Effect}
-	 * @param {*} err
-	 */
-	EffectProto._error = function (err) {
-		if (isHolding(this)) {
-			hold(this, null, err);
-			return;
-		}
-		this._flag |= FLAG_ERROR;
-		this._settle(defect(err));
-	};
-
-	/**
 	 * @this {Effect}
 	 * @returns {void}
 	 */
@@ -3227,36 +3198,22 @@ function root(fn) {
 			clearFinalize(this);
 		}
 		clearDeps(this);
-		/** Children first, then cleanups (D2). A throwing cleanup, here or
-		 *  in a child, still finishes the disposal. */
+		/** A throwing cleanup, here or in a child, still finishes the
+		 *  disposal. */
 		try {
-			if (this._owned !== null) {
-				clearOwned(this);
-			}
+			clearRun(this);
 		} finally {
-			try {
-				if (this._cleanup !== null) {
-					clearCleanup(this);
-				}
-			} finally {
-				if (flag & FLAG_CHANNEL) {
-					let chan = this._chan;
-					if (chan._controller !== null) {
-						chan._controller.abort();
-					}
-					if (chan._res1 !== null || chan._responds !== null) {
-						clearChannel(chan, this);
-					}
-				}
-				this._fn =
-					this._args =
-					this._chan =
-					this._owned =
-					this._owner =
-					this._recover =
-					this._finalize =
-					null;
+			if (flag & FLAG_CHANNEL) {
+				resetChannel(this);
 			}
+			this._fn =
+				this._args =
+				this._chan =
+				this._owned =
+				this._owner =
+				this._recover =
+				this._finalize =
+				null;
 		}
 	};
 
@@ -3856,18 +3813,21 @@ function clearOwned(owner) {
 }
 
 /**
- * Tears down the previous run of an owner that has both children and
- * cleanups: the children first, then the cleanups (D2). A throw in one
- * still runs the other; if both throw, the cleanup's error wins, as
- * with nested `finally` blocks.
+ * Tears down what an owner's run made: its children first, then its
+ * cleanups (D2). A throw in one still runs the other; if both throw,
+ * the cleanup's error wins, as with nested `finally` blocks.
  * @param {Owner} owner
  * @returns {void}
  */
 function clearRun(owner) {
 	try {
-		clearOwned(owner);
+		if (owner._owned !== null) {
+			clearOwned(owner);
+		}
 	} finally {
-		clearCleanup(owner);
+		if (owner._cleanup !== null) {
+			clearCleanup(owner);
+		}
 	}
 }
 
@@ -4629,29 +4589,59 @@ function postSettle(node, payload, fn) {
 }
 
 /**
- * Drain handler for a queued resolve, if the activation that made it
- * is still current.
+ * Settles, or fails, `node` with `value`, if the activation started at
+ * `time` is still current.
+ * @param {AsyncDisposer} node
+ * @param {*} value
+ * @param {number} time
+ * @param {boolean} failed
+ * @returns {void}
+ */
+function settleIf(node, value, time, failed) {
+	if (isCurrent(node, time)) {
+		if (failed) {
+			node._error(value);
+		} else {
+			node._settle(value);
+		}
+	}
+}
+
+/**
+ * Settles, or fails, `node` now when the engine is idle or the node's
+ * own fn runs, and otherwise queues the settle for the drain.
+ * @param {AsyncDisposer} node
+ * @param {*} value
+ * @param {number} time
+ * @param {boolean} failed
+ * @returns {void}
+ */
+function settleOrQueue(node, value, time, failed) {
+	if (IDLE || node._flag & FLAG_CALLBACK) {
+		settleIf(node, value, time, failed);
+	} else {
+		postSettle(node, { _value: value, _time: time }, failed ? errorLater : settleLater);
+	}
+}
+
+/**
+ * Drain handler for a queued resolve.
  * @param {AsyncDisposer} node
  * @param {{ _value: *, _time: number }} payload
  * @returns {void}
  */
 function settleLater(node, payload) {
-	if (isCurrent(node, payload._time)) {
-		node._settle(payload._value);
-	}
+	settleIf(node, payload._value, payload._time, false);
 }
 
 /**
- * Drain handler for a queued reject, if the activation that made it
- * is still current.
+ * Drain handler for a queued reject.
  * @param {AsyncDisposer} node
  * @param {{ _value: *, _time: number }} payload
  * @returns {void}
  */
 function errorLater(node, payload) {
-	if (isCurrent(node, payload._time)) {
-		node._error(payload._value);
-	}
+	settleIf(node, payload._value, payload._time, true);
 }
 
 /**
@@ -4671,26 +4661,14 @@ function resolvePromise(node, source, time) {
 	let resolve = function (val) {
 		if (!done) {
 			done = true;
-			if (IDLE || node._flag & FLAG_CALLBACK) {
-				if (isCurrent(node, time)) {
-					node._settle(val);
-				}
-			} else {
-				postSettle(node, { _value: val, _time: time }, settleLater);
-			}
+			settleOrQueue(node, val, time, false);
 		}
 	};
 	/** @param {*} err */
 	let reject = function (err) {
 		if (!done) {
 			done = true;
-			if (IDLE || node._flag & FLAG_CALLBACK) {
-				if (isCurrent(node, time)) {
-					node._error(err);
-				}
-			} else {
-				postSettle(node, { _value: err, _time: time }, errorLater);
-			}
+			settleOrQueue(node, err, time, true);
 		}
 	};
 	if (typeof source === "function") {
@@ -4742,9 +4720,7 @@ function resolveIterator(node, iterator, time) {
 
 	/** @param {*} err */
 	let onError = (err) => {
-		if (isCurrent(node, time)) {
-			node._error(err);
-		}
+		settleIf(node, err, time, true);
 	};
 
 	iterator.next().then(onNext, onError);
@@ -4811,37 +4787,16 @@ function settleNotify(node, quiet) {
 		clearRespond(awaiter, node);
 	}
 
-	/** Pass 3: unmark, and inline notify the subs that are not waiters.
-	 *  A waiter subscribed in pass 2 was never marked. */
+	/** Pass 3: unmark, and notify the subs that are not waiters. A
+	 *  waiter subscribed in pass 2 was never marked. */
 	if (sub !== null) {
-		let flags = sub._flag;
-		if (flags & FLAG_VISIT) {
-			sub._flag = flags & ~FLAG_VISIT;
-			if (!quiet) {
-				sub._flag |= FLAG_STALE;
-				if (!(flags & (FLAG_PENDING | FLAG_STALE | FLAG_BLOCKED | FLAG_DISPOSED | FLAG_PAUSED))) {
-					sub._receive();
-				}
-			}
-		}
+		notifyMarked(sub, quiet);
 	}
 	subs = node._subs;
 	if (subs !== null) {
 		let count = subs.length;
 		for (let i = 0; i < count; i += 2) {
-			sub = subs[i];
-			let flags = sub._flag;
-			if (flags & FLAG_VISIT) {
-				sub._flag = flags & ~FLAG_VISIT;
-				if (!quiet) {
-					sub._flag |= FLAG_STALE;
-					if (
-						!(flags & (FLAG_PENDING | FLAG_STALE | FLAG_BLOCKED | FLAG_DISPOSED | FLAG_PAUSED))
-					) {
-						sub._receive();
-					}
-				}
-			}
+			notifyMarked(subs[i], quiet);
 		}
 	}
 
@@ -4853,6 +4808,28 @@ function settleNotify(node, quiet) {
 			value,
 			isError
 		);
+	}
+}
+
+/**
+ * Pass 3 of settleNotify() for one sub: unmarks it, and unless quiet,
+ * marks it stale and wakes it. An unmarked sub is a waiter, which pass
+ * 4 resumes instead. An array-awaiting sub (FLAG_BLOCKED) is marked
+ * but not woken: its re-scan reads the value.
+ * @param {Receiver} sub
+ * @param {boolean} quiet
+ * @returns {void}
+ */
+function notifyMarked(sub, quiet) {
+	let flags = sub._flag;
+	if (flags & FLAG_VISIT) {
+		sub._flag = flags & ~FLAG_VISIT;
+		if (!quiet) {
+			sub._flag |= FLAG_STALE;
+			if (!(flags & (FLAG_PENDING | FLAG_STALE | FLAG_BLOCKED | FLAG_DISPOSED | FLAG_PAUSED))) {
+				sub._receive();
+			}
+		}
 	}
 }
 
@@ -4888,10 +4865,8 @@ function isHolding(node) {
  * @returns {void}
  */
 function hold(node, fn, value) {
-	for (let i = 0; i < HELD_COUNT; i += 3) {
-		if (HELD[i] === node) {
-			return;
-		}
+	if (findHeld(node) >= 0) {
+		return;
 	}
 	HELD[HELD_COUNT++] = node;
 	HELD[HELD_COUNT++] = fn;
@@ -4935,7 +4910,7 @@ function dropHeld(i) {
  * @returns {void}
  */
 function unhold(node) {
-	let i = HELD_COUNT > 0 ? findHeld(node) : -1;
+	let i = findHeld(node);
 	if (i >= 0) {
 		dropHeld(i);
 	}
@@ -5130,7 +5105,7 @@ function runStep(node, fn, value) {
 			}
 			return value;
 		}
-		let i = HELD_COUNT > 0 ? findHeld(node) : -1;
+		let i = findHeld(node);
 		if (i < 0) {
 			return REGRET;
 		}
@@ -5149,10 +5124,7 @@ function runStep(node, fn, value) {
 function dropStep(node) {
 	unhold(node);
 	if (node._flag & FLAG_CHANNEL) {
-		let chan = node._chan;
-		if (chan._res1 !== null || chan._responds !== null) {
-			clearChannel(chan, node);
-		}
+		clearChannel(node._chan, node);
 	}
 	node._flag &= ~(FLAG_SUSPEND | FLAG_RELAY | FLAG_BLOCKED);
 }
@@ -5290,8 +5262,8 @@ function unmarkDeps(node) {
  * Ends the previous activation's async state before a re-run: aborts
  * its controller, drops its deferred reads, and unbinds its waits,
  * abandoning an array await (FLAG_BLOCKED) and a pending relay
- * (FLAG_RELAY) with them. Shared between Compute and Effect _update
- * paths.
+ * (FLAG_RELAY) with them. Used by a re-run, and by the disposal of a
+ * task or spawn.
  * @param {AsyncReceiver} node
  * @returns {void}
  */
@@ -5302,9 +5274,7 @@ function resetChannel(node) {
 		chan._controller = null;
 	}
 	chan._defers = null;
-	if (chan._res1 !== null || chan._responds !== null) {
-		clearChannel(chan, node);
-	}
+	clearChannel(chan, node);
 	node._flag &= ~(FLAG_BLOCKED | FLAG_RELAY);
 }
 
@@ -5394,11 +5364,11 @@ function awaits(task, node) {
  * Linear scan for identity match, then 3-stride swap-with-last.
  * Clears FLAG_WAITER on the responder when the last waiter is removed.
  * @param {AsyncSender} responder
- * @param {Resolver} responderCh
  * @param {AsyncReceiver} awaiter
  * @returns {void}
  */
-function removeWaiter(responder, responderCh, awaiter) {
+function removeWaiter(responder, awaiter) {
+	let responderCh = responder._chan;
 	let waiters = responderCh._waiters;
 	let count = waiters.length;
 	for (let i = 0; i < count; i += 3) {
@@ -5431,7 +5401,7 @@ function clearChannel(channel, awaiter) {
 	let res = channel._res1;
 	if (res !== null) {
 		channel._res1 = null;
-		removeWaiter(res, res._chan, awaiter);
+		removeWaiter(res, awaiter);
 	}
 	let responds = channel._responds;
 	if (responds !== null) {
@@ -5439,7 +5409,7 @@ function clearChannel(channel, awaiter) {
 		for (let i = 0; i < responds.length; i++) {
 			let responder = responds[i];
 			if (responder !== null) {
-				removeWaiter(responder, responder._chan, awaiter);
+				removeWaiter(responder, awaiter);
 			}
 		}
 	}

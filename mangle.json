@@ -224,7 +224,10 @@
       "$resolveValue": "Rl",
       "$writeValue": "gl",
       "$scheduleResource": "zl",
-      "$postFlush": "Bl"
+      "$postFlush": "Bl",
+      "$settleIf": "vn",
+      "$settleOrQueue": "pn",
+      "$notifyMarked": "bn"
     }
   },
   "props": {
