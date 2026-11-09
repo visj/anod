@@ -2717,21 +2717,21 @@ function root(fn) {
 			}
 		} else {
 			/** Setup or dynamic: bump STAMP for dep tracking */
-			let prevRVer = STAMP;
+			let current = STAMP;
 			let version = (SEED += 2);
 			STAMP = version;
 			let saveStart = VCOUNT;
 			let depsLen = 0;
 			let depCount = 0;
 			/** @type {number} */
-			let prevDBase;
+			let dbase;
 			/** @type {number} */
-			let prevReused;
+			let reused;
 			if (flag & FLAG_SETUP) {
-				prevDBase = DBASE;
+				dbase = DBASE;
 				DBASE = DCOUNT;
 			} else {
-				prevReused = REUSED;
+				reused = REUSED;
 				REUSED = 0;
 				depCount = sweepDeps(version - 1, this._dep1, this._deps);
 				depsLen = this._deps !== null ? this._deps.length : 0;
@@ -2781,13 +2781,13 @@ function root(fn) {
 				} else if (this._dep1 !== null) {
 					this._flag |= FLAG_SINGLE;
 				}
-				DBASE = prevDBase;
+				DBASE = dbase;
 			} else {
 				let newLen = this._deps !== null ? this._deps.length : 0;
 				if (REUSED !== depCount || newLen !== depsLen) {
 					patchDeps(this, version, depCount, newLen);
 				}
-				REUSED = prevReused;
+				REUSED = reused;
 			}
 
 			if (VCOUNT > saveStart) {
@@ -2799,7 +2799,7 @@ function root(fn) {
 				}
 				VCOUNT = saveStart;
 			}
-			STAMP = prevRVer;
+			STAMP = current;
 		}
 
 		this._flag &= ~(FLAG_STALE | FLAG_PENDING | FLAG_SETUP);
@@ -3510,19 +3510,19 @@ function subscribe(receiver, sender) {
  * matching pair on the other side, or -1 for _sub1/_dep1. Either side
  * can then unlink in O(1) by swapping its last pair into the hole.
  * _sub1 needs no slot: it never moves, and unlinking it only clears it.
- * @param {Sender} send
+ * @param {Sender} sender
  * @param {Receiver} receiver
  * @param {number} depslot - index of the pair in receiver's _deps, -1 for _dep1
- * @returns {number} subslot - index of the pair in send's _subs, -1 for _sub1
+ * @returns {number} subslot - index of the pair in sender's _subs, -1 for _sub1
  */
-function connect(send, receiver, depslot) {
-	if (send._sub1 === null) {
-		send._sub1 = receiver;
+function connect(sender, receiver, depslot) {
+	if (sender._sub1 === null) {
+		sender._sub1 = receiver;
 		return -1;
 	}
-	let subs = send._subs;
+	let subs = sender._subs;
 	if (subs === null) {
-		send._subs = [receiver, depslot];
+		sender._subs = [receiver, depslot];
 		return 0;
 	}
 	let subslot = subs.length;
@@ -3531,22 +3531,22 @@ function connect(send, receiver, depslot) {
 }
 
 /**
- * Removes the receiver at subslot from send's subscriber list.
+ * Removes the receiver at subslot from sender's subscriber list.
  * Swap-with-last O(1), then points the moved receiver's dep pair at
  * its new index.
  * Disposed senders have already dropped their subscribers.
- * @param {Sender} send
+ * @param {Sender} sender
  * @param {number} subslot
  * @returns {void}
  */
-function clearReceiver(send, subslot) {
-	if (send._flag & FLAG_DISPOSED) {
+function clearReceiver(sender, subslot) {
+	if (sender._flag & FLAG_DISPOSED) {
 		return;
 	}
 	if (subslot === -1) {
-		send._sub1 = null;
+		sender._sub1 = null;
 	} else {
-		let subs = send._subs;
+		let subs = sender._subs;
 		let lastSlot = /** @type {number} */ (subs.pop());
 		let lastNode = /** @type {Receiver} */ (subs.pop());
 		if (subslot !== subs.length) {
@@ -3560,11 +3560,11 @@ function clearReceiver(send, subslot) {
 		}
 	}
 	if (
-		send._flag & FLAG_WEAK &&
-		send._sub1 === null &&
-		(send._subs === null || send._subs.length === 0)
+		sender._flag & FLAG_WEAK &&
+		sender._sub1 === null &&
+		(sender._subs === null || sender._subs.length === 0)
 	) {
-		send._drop();
+		sender._drop();
 	}
 }
 
@@ -3573,14 +3573,14 @@ function clearReceiver(send, subslot) {
  * receiver's _deps (or to _dep1, for -1). A receiver in _sub1 has no
  * pair to update, and neither has a disposed sender, whose lists
  * clearSubs dropped.
- * @param {Sender} send
+ * @param {Sender} sender
  * @param {number} subslot
  * @param {number} depslot
  * @returns {void}
  */
-function moveDep(send, subslot, depslot) {
-	if (subslot !== -1 && send._subs !== null) {
-		send._subs[subslot + 1] = depslot;
+function moveDep(sender, subslot, depslot) {
+	if (subslot !== -1 && sender._subs !== null) {
+		sender._subs[subslot + 1] = depslot;
 	}
 }
 
@@ -3606,16 +3606,16 @@ function removeDep(deps, i) {
 }
 
 /**
- * Removes receive from all its deps' subscriber lists.
- * @param {Receiver} receive
+ * Removes receiver from all its deps' subscriber lists.
+ * @param {Receiver} receiver
  * @returns {void}
  */
-function clearDeps(receive) {
-	if (receive._dep1 !== null) {
-		clearReceiver(receive._dep1, receive._dep1slot);
-		receive._dep1 = null;
+function clearDeps(receiver) {
+	if (receiver._dep1 !== null) {
+		clearReceiver(receiver._dep1, receiver._dep1slot);
+		receiver._dep1 = null;
 	}
-	let deps = receive._deps;
+	let deps = receiver._deps;
 	if (deps !== null) {
 		let count = deps.length;
 		for (let i = 0; i < count; i += 2) {
@@ -3624,7 +3624,7 @@ function clearDeps(receive) {
 				/** @type {number} */ (deps[i + 1])
 			);
 		}
-		receive._deps = null;
+		receiver._deps = null;
 	}
 }
 
@@ -3634,12 +3634,12 @@ function clearDeps(receive) {
  * patchDeps on next re-run, and a disposed sender never notifies its
  * stable receivers again. clearReceiver skips disposed senders, so
  * their pairs need no unlinking.
- * @param {Sender} send
+ * @param {Sender} sender
  * @returns {void}
  */
-function clearSubs(send) {
-	send._sub1 = null;
-	send._subs = null;
+function clearSubs(sender) {
+	sender._sub1 = null;
+	sender._subs = null;
 }
 
 /**
