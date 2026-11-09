@@ -54,7 +54,7 @@ const FLAG_CALLBACK = 1 << 27;
 const FLAG_REFUSE = 1 << 28;
 /** A scratch mark, set and cleared within one call that runs no user
  *  code: checkCycle and awaits() mark the nodes they walk, and the
- *  settle passes (settleNotify, settleDeps, settleDefers) mark the nodes
+ *  settle passes (settleNotify, settleDeps) mark the nodes
  *  they dedupe. Any node can carry it, a plain signal too.
  *  It is the last bit: 1 << 30 is outside V8's 31-bit Smi range under
  *  pointer compression. */
@@ -1226,14 +1226,7 @@ function root(fn) {
 	 * @returns {void}
 	 */
 	function cleanup(fn) {
-		let cleanup = this._cleanup;
-		if (cleanup === null) {
-			this._cleanup = fn;
-		} else if (typeof cleanup === "function") {
-			this._cleanup = [cleanup, fn];
-		} else {
-			cleanup.push(fn);
-		}
+		this._cleanup = append(this._cleanup, fn);
 	}
 
 	/**
@@ -1243,14 +1236,7 @@ function root(fn) {
 	 * @returns {void}
 	 */
 	function recover(fn) {
-		let recover = this._recover;
-		if (recover === null) {
-			this._recover = fn;
-		} else if (typeof recover === "function") {
-			this._recover = [recover, fn];
-		} else {
-			recover.push(fn);
-		}
+		this._recover = append(this._recover, fn);
 	}
 
 	/**
@@ -1277,14 +1263,7 @@ function root(fn) {
 	 * @param {function(): void} fn
 	 */
 	EffectProto.finalize = function (fn) {
-		let finalize = this._finalize;
-		if (finalize === null) {
-			this._finalize = fn;
-		} else if (typeof finalize === "function") {
-			this._finalize = [finalize, fn];
-		} else {
-			finalize.push(fn);
-		}
+		this._finalize = append(this._finalize, fn);
 	};
 
 	ComputeProto.equal = equal;
@@ -1451,20 +1430,14 @@ function root(fn) {
 			return Promise.resolve(promiseOrTask).then(
 				/** @param {*} val */
 				function (val) {
-					if (
-						node._time === time &&
-						(!(node._flag & FLAG_DISPOSED) || node._flag & FLAG_LOCKED)
-					) {
+					if (isLive(node, time)) {
 						return val;
 					}
 					return REGRET;
 				},
 				/** @param {*} error */
 				function (error) {
-					if (
-						node._time === time &&
-						(!(node._flag & FLAG_DISPOSED) || node._flag & FLAG_LOCKED)
-					) {
+					if (isLive(node, time)) {
 						throw error;
 					}
 					return REGRET;
@@ -1556,20 +1529,14 @@ function root(fn) {
 		return promise.then(
 			/** @param {T} val */
 			function (val) {
-				if (
-					node._time === time &&
-					(!(node._flag & FLAG_DISPOSED) || node._flag & FLAG_LOCKED)
-				) {
+				if (isLive(node, time)) {
 					return val;
 				}
 				return REGRET;
 			},
 			/** @param {*} error */
 			function (error) {
-				if (
-					node._time === time &&
-					(!(node._flag & FLAG_DISPOSED) || node._flag & FLAG_LOCKED)
-				) {
+				if (isLive(node, time)) {
 					throw error;
 				}
 				return REGRET;
@@ -2836,7 +2803,7 @@ function root(fn) {
 				this._flag & FLAG_CHANNEL &&
 				this._chan._defers !== null
 			) {
-				settleDefers(this);
+				settleDeps(this);
 			}
 		}
 
@@ -3066,7 +3033,7 @@ function root(fn) {
 				this._flag & FLAG_CHANNEL &&
 				this._chan._defers !== null
 			) {
-				settleDefers(this);
+				settleDeps(this);
 			}
 			/** It ends here, and so does its shield. A node locked only
 			 *  by a shield below it keeps the lock. */
@@ -3357,11 +3324,12 @@ function root(fn) {
 	};
 
 	/**
-	 * Creates a sync compute node.
+	 * Creates a compute, or a task when async is FLAG_ASYNC.
 	 * Unbound: compute(fn, seed?, opts?, args?)
 	 * Bound:   compute(dep, fn, seed?, opts?, args?)
-	 * @this {Owner}
 	 * @template T, U, W
+	 * @param {Owner} owner
+	 * @param {number} async
 	 * @param {Sender<U> | (function(T, W): T)} depOrFn
 	 * @param {(function(U, T, W): T) | T=} fnOrSeed
 	 * @param {number | T=} optsOrSeed
@@ -3369,22 +3337,21 @@ function root(fn) {
 	 * @param {W=} args
 	 * @returns {Compute<T, U, W>}
 	 */
-	function compute(depOrFn, fnOrSeed, optsOrSeed, argsOrOpts, args) {
-		if (this._flag & FLAG_DISPOSED) {
+	function makeCompute(owner, async, depOrFn, fnOrSeed, optsOrSeed, argsOrOpts, args) {
+		if (owner._flag & FLAG_DISPOSED) {
 			throw new Error(ILLEGAL_READ);
 		}
 		let flag, node;
 		if (typeof depOrFn === "function") {
-			flag = FLAG_SETUP | ((0 | optsOrSeed) & OPTIONS);
+			flag = async | FLAG_SETUP | ((0 | optsOrSeed) & OPTIONS);
 			node = new Compute(depOrFn, flag, null, fnOrSeed, argsOrOpts);
 		} else {
-			flag =
-				FLAG_STABLE | FLAG_BOUND | FLAG_SINGLE | ((0 | argsOrOpts) & OPTIONS);
+			flag = async | FLAG_STABLE | FLAG_BOUND | FLAG_SINGLE | ((0 | argsOrOpts) & OPTIONS);
 			node = new Compute(/** @type {!Function} */(fnOrSeed), flag, depOrFn, optsOrSeed, args);
 			node._dep1slot = connect(depOrFn, node, -1);
 		}
-		if (this._flag & FLAG_OWNER) {
-			addOwned(this, node);
+		if (owner._flag & FLAG_OWNER) {
+			addOwned(owner, node);
 		}
 		if (!(flag & FLAG_DEFER)) {
 			startCompute(node);
@@ -3393,79 +3360,39 @@ function root(fn) {
 	}
 
 	/**
-	 * Creates an async compute node (task).
-	 * Unbound: task(fn, seed?, opts?, args?)
-	 * Bound:   task(dep, fn, seed?, opts?, args?)
-	 * @this {Owner}
-	 * @template T, U, W
-	 * @param {Sender<U> | (function(T, W): T)} depOrFn
-	 * @param {(function(U, T, W): T) | T=} fnOrSeed
-	 * @param {number | T=} optsOrSeed
-	 * @param {number | W=} argsOrOpts
-	 * @param {W=} args
-	 * @returns {Compute<T, U, W>}
-	 */
-	function task(depOrFn, fnOrSeed, optsOrSeed, argsOrOpts, args) {
-		if (this._flag & FLAG_DISPOSED) {
-			throw new Error(ILLEGAL_READ);
-		}
-		let flag, node;
-		if (typeof depOrFn === "function") {
-			flag = FLAG_ASYNC | FLAG_SETUP | ((0 | optsOrSeed) & OPTIONS);
-			node = new Compute(depOrFn, flag, null, fnOrSeed, argsOrOpts);
-		} else {
-			flag =
-				FLAG_ASYNC |
-				FLAG_STABLE |
-				FLAG_BOUND |
-				FLAG_SINGLE |
-				((0 | argsOrOpts) & OPTIONS);
-			node = new Compute(fnOrSeed, flag, depOrFn, optsOrSeed, args);
-			node._dep1slot = connect(depOrFn, node, -1);
-		}
-		if (this._flag & FLAG_OWNER) {
-			addOwned(this, node);
-		}
-		if (!(flag & FLAG_DEFER)) {
-			startCompute(node);
-		}
-		return node;
-	}
-
-	/**
-	 * Creates a sync effect node.
+	 * Creates an effect, or a spawn when async is FLAG_ASYNC.
 	 * Unbound: effect(fn, opts?, args?)
 	 * Bound:   effect(dep, fn, opts?, args?)
-	 * @this {Owner}
 	 * @template U, W
+	 * @param {Owner} owner
+	 * @param {number} async
 	 * @param {Sender<U> | (function(W): void)} depOrFn
 	 * @param {(function(U, W): void) | number=} fnOrOpts
 	 * @param {number | W=} optsOrArgs
 	 * @param {W=} args
 	 * @returns {Effect<U, W>}
 	 */
-	function effect(depOrFn, fnOrOpts, optsOrArgs, args) {
-		if (this._flag & FLAG_DISPOSED) {
+	function makeEffect(owner, async, depOrFn, fnOrOpts, optsOrArgs, args) {
+		if (owner._flag & FLAG_DISPOSED) {
 			throw new Error(ILLEGAL_READ);
 		}
 		let flag, node;
 		if (typeof depOrFn === "function") {
-			flag = FLAG_SETUP | ((0 | fnOrOpts) & OPTIONS);
-			node = new Effect(flag, depOrFn, null, this, optsOrArgs);
+			flag = async | FLAG_SETUP | ((0 | fnOrOpts) & OPTIONS);
+			node = new Effect(flag, depOrFn, null, owner, optsOrArgs);
 		} else {
-			flag =
-				FLAG_STABLE | FLAG_BOUND | FLAG_SINGLE | ((0 | optsOrArgs) & OPTIONS);
-			node = new Effect(flag, /** @type {!Function} */(fnOrOpts), depOrFn, this, args);
+			flag = async | FLAG_STABLE | FLAG_BOUND | FLAG_SINGLE | ((0 | optsOrArgs) & OPTIONS);
+			node = new Effect(flag, /** @type {!Function} */(fnOrOpts), depOrFn, owner, args);
 			node._dep1slot = connect(depOrFn, node, -1);
 		}
-		let level = this._level + 1;
-		if (this._level > 2 && level >= LEVELS.length) {
+		let level = owner._level + 1;
+		if (owner._level > 2 && level >= LEVELS.length) {
 			LEVELS.push(0);
 			SCOPES.push([]);
 		}
 		node._level = level;
-		if (this._flag & FLAG_OWNER) {
-			addOwned(this, node);
+		if (owner._flag & FLAG_OWNER) {
+			addOwned(owner, node);
 		}
 		if ((flag & (FLAG_DEFER | FLAG_BOUND)) === (FLAG_DEFER | FLAG_BOUND)) {
 			deferEffect(node);
@@ -3475,51 +3402,24 @@ function root(fn) {
 		return node;
 	}
 
-	/**
-	 * Creates an async effect node (spawn).
-	 * Unbound: spawn(fn, opts?, args?)
-	 * Bound:   spawn(dep, fn, opts?, args?)
-	 * @template U, W
-	 * @this {Owner}
-	 * @param {Sender<U> | (function(W): void)} depOrFn
-	 * @param {(function(U, W): void) | number=} fnOrOpts
-	 * @param {number | W=} optsOrArgs
-	 * @param {W=} args
-	 * @returns {Effect<U, W>}
-	 */
+	/** @this {Owner} */
+	function compute(depOrFn, fnOrSeed, optsOrSeed, argsOrOpts, args) {
+		return makeCompute(this, 0, depOrFn, fnOrSeed, optsOrSeed, argsOrOpts, args);
+	}
+
+	/** @this {Owner} */
+	function task(depOrFn, fnOrSeed, optsOrSeed, argsOrOpts, args) {
+		return makeCompute(this, FLAG_ASYNC, depOrFn, fnOrSeed, optsOrSeed, argsOrOpts, args);
+	}
+
+	/** @this {Owner} */
+	function effect(depOrFn, fnOrOpts, optsOrArgs, args) {
+		return makeEffect(this, 0, depOrFn, fnOrOpts, optsOrArgs, args);
+	}
+
+	/** @this {Owner} */
 	function spawn(depOrFn, fnOrOpts, optsOrArgs, args) {
-		if (this._flag & FLAG_DISPOSED) {
-			throw new Error(ILLEGAL_READ);
-		}
-		let flag, node;
-		if (typeof depOrFn === "function") {
-			flag = FLAG_ASYNC | FLAG_SETUP | ((0 | fnOrOpts) & OPTIONS);
-			node = new Effect(flag, depOrFn, null, this, optsOrArgs);
-		} else {
-			flag =
-				FLAG_ASYNC |
-				FLAG_STABLE |
-				FLAG_BOUND |
-				FLAG_SINGLE |
-				((0 | optsOrArgs) & OPTIONS);
-			node = new Effect(flag, /** @type {!Function} */(fnOrOpts), depOrFn, this, args);
-			node._dep1slot = connect(depOrFn, node, -1);
-		}
-		let level = this._level + 1;
-		if (this._level > 2 && level >= LEVELS.length) {
-			LEVELS.push(0);
-			SCOPES.push([]);
-		}
-		node._level = level;
-		if (this._flag & FLAG_OWNER) {
-			addOwned(this, node);
-		}
-		if ((flag & (FLAG_DEFER | FLAG_BOUND)) === (FLAG_DEFER | FLAG_BOUND)) {
-			deferEffect(node);
-		} else {
-			startEffect(node);
-		}
-		return node;
+		return makeEffect(this, FLAG_ASYNC, depOrFn, fnOrOpts, optsOrArgs, args);
 	}
 
 	/**
@@ -3824,6 +3724,24 @@ function clearFinalize(node) {
 			}
 		}
 	}
+}
+
+/**
+ * Adds fn to a list of callbacks, stored compactly: null, a single fn,
+ * then an array from the second on.
+ * @param {Function | Array<Function> | null} list
+ * @param {Function} fn
+ * @returns {Function | Array<Function>}
+ */
+function append(list, fn) {
+	if (list === null) {
+		return fn;
+	}
+	if (typeof list === "function") {
+		return [list, fn];
+	}
+	list.push(fn);
+	return list;
 }
 
 /**
@@ -4570,6 +4488,17 @@ function checkStale(node) {
 }
 
 /**
+ * Whether the activation started at `time` is still the node's, and
+ * the node is live: not disposed, or locked to run to its end (D10).
+ * @param {AsyncDisposer} node
+ * @param {number} time
+ * @returns {boolean}
+ */
+function isLive(node, time) {
+	return node._time === time && (node._flag & (FLAG_DISPOSED | FLAG_LOCKED)) !== FLAG_DISPOSED;
+}
+
+/**
  * Whether the activation started at `time` may still settle `node`. A
  * locked node always may. A disposed or stale one may not, and neither
  * may one whose pending deps have changed: that one is marked stale, so
@@ -4581,17 +4510,11 @@ function checkStale(node) {
  * @returns {boolean}
  */
 function isCurrent(node, time) {
-	if (node._time !== time) {
+	if (!isLive(node, time)) {
 		return false;
 	}
 	let flag = node._flag;
-	if (flag & FLAG_LOCKED) {
-		return true;
-	}
-	if (flag & FLAG_DISPOSED) {
-		return false;
-	}
-	if (flag & FLAG_CALLBACK) {
+	if (flag & (FLAG_LOCKED | FLAG_CALLBACK)) {
 		return true;
 	}
 	if (flag & FLAG_STALE) {
@@ -5029,7 +4952,7 @@ function settleHeld(node, i) {
 	node._flag &= ~FLAG_CALLBACK;
 	if (node._flag & FLAG_CHANNEL) {
 		if (node._chan._defers !== null) {
-			settleDefers(node);
+			settleDeps(node);
 		}
 		if (node._flag & FLAG_WAITER) {
 			settleNotify(node, true);
@@ -5188,6 +5111,9 @@ function toSenders(tasks) {
  * 1. Deduplicates _deps (val() across awaits can insert duplicates).
  * 2. If deferred deps exist, subscribes unique deferred senders and
  *    checks if any changed. Returns true if node needs to re-run.
+ * An async node whose fn returned a sync value settles here too, so
+ * its deferred deps are subscribed without ever loading; it read them
+ * in this same run, so the result is ignored.
  * Seen senders are marked with FLAG_VISIT, not stamped: a settle can
  * happen inside another node's run (a callback suspend resolved from
  * its fn), and a sender's stamp may be one that run tracks with. Every
@@ -5249,42 +5175,8 @@ function settleDeps(node) {
 }
 
 /**
- * Subscribes the deferred deps of an async node whose fn returned a
- * sync value, so the activation settles without ever loading. The
- * node's deps are marked, so a sender it already has is skipped, as in
- * settleDeps(). A deferred value was read in this same run, so there
- * is nothing to re-run for.
- * @param {AsyncReceiver} node
- * @returns {void}
- */
-function settleDefers(node) {
-	let chan = node._chan;
-	let defers = chan._defers;
-	chan._defers = null;
-	let dep1 = node._dep1;
-	if (dep1 !== null) {
-		dep1._flag |= FLAG_VISIT;
-	}
-	let deps = node._deps;
-	if (deps !== null) {
-		for (let i = 0; i < deps.length; i += 2) {
-			deps[i]._flag |= FLAG_VISIT;
-		}
-	}
-	let count = defers.length;
-	for (let i = 0; i < count; i += 2) {
-		let sender = /** @type {Sender} */(defers[i]);
-		if (!(sender._flag & (FLAG_DISPOSED | FLAG_VISIT))) {
-			sender._flag |= FLAG_VISIT;
-			subscribe(node, sender);
-		}
-	}
-	unmarkDeps(node);
-}
-
-/**
- * Clears the FLAG_VISIT marks settleDeps() and settleDefers() put on
- * the senders of `node`. Every sender they mark is one of its deps by
+ * Clears the FLAG_VISIT marks settleDeps() put on the senders of
+ * `node`. Every sender it marks is one of its deps by
  * then: a deferred one was subscribed.
  * @param {Receiver} node
  * @returns {void}
@@ -6271,39 +6163,7 @@ export {
 	REGRET,
 	NOOP,
 	ILLEGAL_READ,
-
-	VSTACK,
-	VCOUNT,
-	REUSED,
-	CSTACK,
-	CINDEX,
-	CTOP,
-	DSTACK,
-	DCOUNT,
-	DBASE,
-	TIME,
-	IDLE,
-	FLUSHING,
-	POSTING,
 	c,
-	SEED,
-	STAMP,
-	FENCE,
-	DISPOSES,
-	DISPOSER_COUNT,
-	SENDERS,
-	PAYLOADS,
-	UPDATES,
-	SENDER_COUNT,
-	COMPUTES,
-	COMPUTE_COUNT,
-	LEVELS,
-	SCOPES,
-	SCOPE_COUNT,
-	RECEIVERS,
-	RECEIVER_COUNT,
-	PURGES,
-	PURGE_COUNT,
 
 	Clock,
 	Root,

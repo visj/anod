@@ -687,46 +687,13 @@ export interface ClockConstructor {
 
 export declare var Clock: ClockConstructor;
 
-/* Engine state. The counters and stamps are live bindings: an importer
- * always reads the current value, but only anod can assign them. The
- * stacks and queues are fixed arrays, changed in place. */
-export declare const VSTACK: Array<Sender | number>;
-export declare var VCOUNT: number;
-export declare var REUSED: number;
-export declare const CSTACK: Array<Compute>;
-export declare const CINDEX: Array<number>;
-export declare var CTOP: number;
-export declare const DSTACK: Array<Sender>;
-export declare var DCOUNT: number;
-export declare var DBASE: number;
-export declare var TIME: number;
-export declare var IDLE: boolean;
-export declare var FLUSHING: boolean;
-export declare var POSTING: boolean;
+/** The global context: creates unowned nodes. */
 export declare const c: Factory;
-export declare var SEED: number;
-export declare var STAMP: number;
-export declare var FENCE: number;
-export declare const DISPOSES: Array<Disposer>;
-export declare var DISPOSER_COUNT: number;
-export declare const SENDERS: Array<Sender>;
-export declare const PAYLOADS: Array<any>;
-export declare const UPDATES: Array<((sender: Sender, payload: any, time: number) => void) | null>;
-export declare var SENDER_COUNT: number;
-export declare const COMPUTES: Array<Compute>;
-export declare var COMPUTE_COUNT: number;
-export declare const LEVELS: Array<number>;
-export declare const SCOPES: Array<Array<Effect>>;
-export declare var SCOPE_COUNT: number;
-export declare const RECEIVERS: Array<Effect | Action>;
-export declare var RECEIVER_COUNT: number;
-export declare const PURGES: Array<Owner>;
-export declare var PURGE_COUNT: number;
 
 /* What the factories do once a node is constructed: connect() a bound
  * node to its dep, addOwned() it to an owning root or effect, then run it
  * with startCompute() or startEffect() (an action too). An effect also
- * takes its owner's level + 1, growing LEVELS and SCOPES to fit. root() is startRoot() on
+ * takes its owner's level + 1. root() is startRoot() on
  * a new Root. */
 export declare function connect(send: Sender, receiver: Receiver): void;
 export declare function addOwned(owner: Owner, child: Receiver): void;

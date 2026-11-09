@@ -218,7 +218,9 @@
       "$runStep": "Ml",
       "$dropStep": "Pl",
       "$toSender": "ql",
-      "$toSenders": "Sl"
+      "$toSenders": "Sl",
+      "$isLive": "Ol",
+      "$append": "xl"
     }
   },
   "props": {
