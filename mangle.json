@@ -220,7 +220,11 @@
       "$toSender": "ql",
       "$toSenders": "Sl",
       "$isLive": "Ol",
-      "$append": "xl"
+      "$append": "xl",
+      "$resolveValue": "Rl",
+      "$writeValue": "gl",
+      "$scheduleResource": "zl",
+      "$postFlush": "Bl"
     }
   },
   "props": {

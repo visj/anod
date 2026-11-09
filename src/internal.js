@@ -762,6 +762,52 @@ function set(value) {
 }
 
 /**
+ * Resolves an updater against the sender's current value. A mutable
+ * sender's updater may change the value in place and return nothing,
+ * which keeps the current value, and still notifies.
+ * @template T
+ * @param {Sender<T>} node
+ * @param {T | (function(T): T)} value
+ * @returns {T}
+ */
+function resolveValue(node, value) {
+	if (typeof value !== "function") {
+		return value;
+	}
+	let next = value(node._value);
+	return next === void 0 && node._flag & FLAG_MUTABLE ? node._value : next;
+}
+
+/**
+ * Immediate write of a value: a contextual set() to a signal, or the
+ * optimistic value of r.set(value, fn). Cancels the writes posted
+ * before it, writes and notifies if the value changed. A failed
+ * resource counts as changed, so the equality function never sees the
+ * Defect. The caller flushes.
+ * @template T
+ * @param {Sender<T>} node
+ * @param {T | (function(T): T)} value
+ * @returns {boolean} whether subscribers were notified
+ */
+function writeValue(node, value) {
+	value = resolveValue(node, value);
+	/** Compared first, so a throwing equality function cancels no posts. */
+	let changed =
+		node._flag & (FLAG_MUTABLE | FLAG_ERROR) ||
+		(node._equal !== null
+			? !node._equal(node._value, value)
+			: node._value !== value);
+	if (node._flag & FLAG_SCHEDULED) {
+		supersede(node);
+	}
+	if (changed) {
+		node._value = value;
+		notify(node, FLAG_STALE);
+	}
+	return !!changed;
+}
+
+/**
  * Plain write to a resource, immediate or drained. Every plain write
  * supersedes the activation in flight, even one that is no longer
  * loading, such as a generator past its first yield: the new token
@@ -777,13 +823,7 @@ function set(value) {
  * @returns {boolean} whether subscribers were notified
  */
 function writeResource(node, value) {
-	if (typeof value === "function") {
-		value = value(node._value);
-		/** Mutable updater returning void — keep current value, still notify. */
-		if (value === void 0 && node._flag & FLAG_MUTABLE) {
-			value = node._value;
-		}
-	}
+	value = resolveValue(node, value);
 	let flag = node._flag;
 	/** Compared first, so a throwing equality function cancels no posts. */
 	let changed =
@@ -1021,6 +1061,34 @@ function schedule(node, payload, fn) {
 	SENDERS[index] = node;
 	PAYLOADS[index] = payload;
 	UPDATES[index] = fn;
+}
+
+/**
+ * Queues a write to a resource: an async write with an optimistic
+ * value, an async fn alone, or a plain value.
+ * @template T
+ * @param {AsyncSender<T>} node
+ * @param {T | (function(AsyncSender<T>, T): (T | Promise<T>))} value
+ * @param {(function(AsyncSender<T>, T): (T | Promise<T>))=} asyncFn
+ * @returns {void}
+ */
+function scheduleResource(node, value, asyncFn) {
+	if (asyncFn !== void 0) {
+		schedule(node, { _value: value, _fn: asyncFn }, asyncAssign);
+	} else {
+		schedule(node, value, typeof value === "function" ? asyncRun : writeResource);
+	}
+}
+
+/**
+ * Queues a microtask flush for posted writes, unless one is queued.
+ * @returns {void}
+ */
+function postFlush() {
+	if (!POSTING) {
+		POSTING = true;
+		queueMicrotask(microflush);
+	}
 }
 
 /**
@@ -2239,60 +2307,32 @@ function root(fn) {
 		if (!(this._flag & FLAG_ASYNC)) {
 			return set.call(this, value);
 		}
-		if (asyncFn === void 0) {
-			if (typeof value === "function") {
-				if (IDLE) {
-					if (this._flag & FLAG_SCHEDULED) {
-						supersede(this);
-					}
-					_runAsync(this, value, this._value);
-				} else {
-					schedule(this, value, asyncRun);
-				}
-				return true;
-			}
-			if (IDLE) {
-				if (writeResource(this, value)) {
-					flush();
-					return true;
-				}
-				return false;
-			}
-			schedule(this, value, writeResource);
+		if (!IDLE) {
+			scheduleResource(this, value, asyncFn);
 			return true;
 		}
-		if (IDLE) {
-			let _value = value;
-			if (typeof value === "function") {
-				_value = value(this._value);
-				/** Mutable updater returning void — keep current value, still notify. */
-				if (_value === void 0 && this._flag & FLAG_MUTABLE) {
-					_value = this._value;
-				}
-			}
-			/** The equality function never sees an error's Defect. */
-			let changed =
-				this._flag & (FLAG_MUTABLE | FLAG_ERROR) ||
-				(this._equal !== null
-					? !this._equal(this._value, _value)
-					: this._value !== _value);
-			if (this._flag & FLAG_SCHEDULED) {
-				supersede(this);
-			}
-			if (changed) {
-				this._value = _value;
-				notify(this, FLAG_STALE);
-			}
+		if (asyncFn !== void 0) {
+			let changed = writeValue(this, value);
 			/** Starts the activation before flushing, so that subscribers
 			 *  see the optimistic value as loading. */
-			_runAsync(this, asyncFn, _value);
+			_runAsync(this, asyncFn, this._value);
 			if (changed) {
 				flush();
 			}
-		} else {
-			schedule(this, { _value: value, _fn: asyncFn }, asyncAssign);
+			return true;
 		}
-		return true;
+		if (typeof value === "function") {
+			if (this._flag & FLAG_SCHEDULED) {
+				supersede(this);
+			}
+			_runAsync(this, value, this._value);
+			return true;
+		}
+		if (writeResource(this, value)) {
+			flush();
+			return true;
+		}
+		return false;
 	};
 
 	/**
@@ -2309,15 +2349,8 @@ function root(fn) {
 		if (!(this._flag & FLAG_ASYNC)) {
 			return post.call(this, value);
 		}
-		if (asyncFn !== void 0) {
-			schedule(this, { _value: value, _fn: asyncFn }, asyncAssign);
-		} else {
-			schedule(this, value, typeof value === "function" ? asyncRun : writeResource);
-		}
-		if (!POSTING) {
-			POSTING = true;
-			queueMicrotask(microflush);
-		}
+		scheduleResource(this, value, asyncFn);
+		postFlush();
 		return true;
 	};
 
@@ -2440,10 +2473,30 @@ function root(fn) {
 	}
 
 	/**
+	 * Queues a contextual write, for guardedAssign() to make at drain
+	 * time. A signal ignores asyncFn.
+	 * @template T
+	 * @param {Receiver} receiver
+	 * @param {Sender<T> | AsyncSender<T>} sender
+	 * @param {(function(T): T) | T} value
+	 * @param {function(AsyncSender<T>, T): (T | Promise<T>)=} asyncFn
+	 * @returns {void}
+	 */
+	function scheduleGuarded(receiver, sender, value, asyncFn) {
+		schedule(
+			sender,
+			{ _recv: receiver, _value: value, _fn: sender._flag & FLAG_ASYNC ? asyncFn : void 0 },
+			guardedAssign
+		);
+	}
+
+	/**
 	 * Contextual set — writes to a sender while pausing this receiver
 	 * so it ignores any notifications that propagate from the write.
-	 * When IDLE (e.g. inside an async continuation after await), mirrors
-	 * the immediate set() path. Supports asyncFn for resource senders.
+	 * When IDLE (e.g. inside an async continuation after await), it
+	 * writes at once as sender.set() would, and the receiver stays
+	 * paused until the async write has started, as in guardedAssign().
+	 * A signal ignores asyncFn.
 	 * @throws
 	 * @template T
 	 * @this {Receiver}
@@ -2453,60 +2506,27 @@ function root(fn) {
 	 * @returns {void}
 	 */
 	function contextSet(sender, value, asyncFn) {
-		if (IDLE) {
-			if (asyncFn === void 0 && sender._flag & FLAG_ASYNC) {
-				let flag = this._flag;
-				let changed = false;
-				this._flag = flag | FLAG_PAUSED;
-				try {
-					changed = writeResource(/** @type {AsyncSender<T>} */(sender), value);
-				} finally {
-					release(this, flag);
-				}
-				if (changed) {
-					flush();
-				}
-				return;
-			}
-			let _value;
-			let write = true;
-			if (typeof value === "function") {
-				_value = value(sender._value);
-				/** Mutable updater returning void — keep current value, still notify. */
-				if (_value === void 0 && sender._flag & FLAG_MUTABLE) {
-					write = false;
-				}
+		if (!IDLE) {
+			scheduleGuarded(this, sender, value, asyncFn);
+			return;
+		}
+		let flag = this._flag;
+		let changed;
+		this._flag = flag | FLAG_PAUSED;
+		try {
+			if (!(sender._flag & FLAG_ASYNC)) {
+				changed = writeValue(sender, value);
+			} else if (asyncFn === void 0) {
+				changed = writeResource(/** @type {AsyncSender<T>} */(sender), value);
 			} else {
-				_value = value;
+				changed = writeValue(sender, value);
+				_runAsync(/** @type {AsyncSender<T>} */(sender), asyncFn, sender._value);
 			}
-			/** Compared first, so a throwing equality function cancels no posts. */
-			let changed =
-				sender._flag & FLAG_MUTABLE ||
-				(sender._equal !== null
-					? !sender._equal(sender._value, _value)
-					: sender._value !== _value);
-			if (sender._flag & FLAG_SCHEDULED) {
-				supersede(sender);
-			}
-			if (changed) {
-				if (write) {
-					sender._value = _value;
-				}
-				let flag = this._flag;
-				this._flag = flag | FLAG_PAUSED;
-				notify(sender, FLAG_STALE);
-				release(this, flag);
-				flush();
-			}
-			if (asyncFn !== void 0 && sender._flag & FLAG_ASYNC) {
-				_runAsync(/** @type {AsyncSender} */(sender), asyncFn, _value);
-			}
-		} else {
-			schedule(
-				sender,
-				{ _recv: this, _value: value, _fn: sender._flag & FLAG_ASYNC ? asyncFn : void 0 },
-				guardedAssign
-			);
+		} finally {
+			release(this, flag);
+		}
+		if (changed) {
+			flush();
 		}
 	}
 
@@ -2524,15 +2544,8 @@ function root(fn) {
 	 * @returns {void}
 	 */
 	function contextPost(sender, value, asyncFn) {
-		schedule(
-			sender,
-			{ _recv: this, _value: value, _fn: sender._flag & FLAG_ASYNC ? asyncFn : void 0 },
-			guardedAssign
-		);
-		if (!POSTING) {
-			POSTING = true;
-			queueMicrotask(microflush);
-		}
+		scheduleGuarded(this, sender, value, asyncFn);
+		postFlush();
 	}
 
 	ComputeProto.set = contextSet;
