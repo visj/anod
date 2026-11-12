@@ -622,10 +622,9 @@ function Channel() {
  * when idle runs the drain for it at once: writes and disposes made by
  * cleanups join the same transaction and flush once the whole subtree is
  * disposed, so nothing being torn down re-runs. An effect's live owner
- * then drops it from `_owned`. A cleanup that throws is reported once the
- * disposal has finished, as an error of its node. A locked node waits for
- * the shields under it (D10); `force` ends them and disposes it now, also
- * after a plain dispose() it is waiting on.
+ * then drops it from `_owned`. A locked node waits for the shields under
+ * it (D10); `force` ends them and disposes it now, also after a plain
+ * dispose() it is waiting on.
  * @this {Disposer}
  * @param {boolean=} force
  * @returns {void}
@@ -976,9 +975,7 @@ function asyncRun(node, fn) {
 /**
  * Drain handler for a weak compute that lost its last reader in a
  * transaction (see ComputeProto._drop): runs its cleanups, unless it was
- * read again in the meantime, which ran them already. A throw is the
- * weak compute's error, not its reader's: the flush rethrows it once it
- * has drained.
+ * read again in the meantime, which ran them already.
  * @param {Compute} node
  * @returns {void}
  */
@@ -989,11 +986,7 @@ function releaseWeak(node) {
 		node._sub1 === null &&
 		(node._subs === null || node._subs.length === 0)
 	) {
-		try {
-			clearCleanup(node);
-		} catch (error) {
-			throw defect(error);
-		}
+		clearCleanup(node);
 	}
 }
 
@@ -2136,11 +2129,8 @@ function root(fn) {
 			return;
 		}
 		this._flag = FLAG_DISPOSED;
-		try {
-			clearRun(this);
-		} finally {
-			this._owned = this._recover = null;
-		}
+		clearRun(this);
+		this._owned = this._recover = null;
 	};
 
 	/**
@@ -2593,13 +2583,10 @@ function root(fn) {
 				rejectWaiters(this, chan, new Defect(new Error("Awaited task was disposed"), PANIC));
 			}
 		}
-		try {
-			if (this._cleanup !== null) {
-				clearCleanup(this);
-			}
-		} finally {
-			this._fn = this._value = this._args = this._chan = null;
+		if (this._cleanup !== null) {
+			clearCleanup(this);
 		}
+		this._fn = this._value = this._args = this._chan = null;
 	};
 
 	/**
@@ -2622,26 +2609,15 @@ function root(fn) {
 				FLAG_REFUSE
 			);
 
-		if (!(flag & FLAG_INIT) && this._cleanup !== null) {
-			try {
-				clearCleanup(this);
-			} catch (error) {
-				/** A throwing cleanup fails this run. The deps are kept,
-				 *  so the next change runs the compute again. */
-				if (flag & FLAG_CHANNEL) {
-					resetChannel(this);
-				}
-				this._flag = (this._flag | FLAG_ERROR) & ~FLAG_PENDING;
-				this._value = defect(error);
-				this._ctime = time;
-				return;
-			}
-		}
-
 		/** Reset channel state from previous activation. Handles both
-		 *  async nodes and sync nodes using controller/callback suspend. */
+		 *  async nodes and sync nodes using controller/callback suspend.
+		 *  The controller is aborted before the cleanups run. */
 		if (flag & FLAG_CHANNEL) {
 			resetChannel(this);
+		}
+		/** A new node has no cleanups, so its first run skips this too. */
+		if (this._cleanup !== null) {
+			clearCleanup(this);
 		}
 
 		let value;
@@ -2872,10 +2848,20 @@ function root(fn) {
 		}
 
 		this._time = time;
-		if (flag & FLAG_LOADING) {
-			this._flag &= ~(FLAG_LOADING | FLAG_SUSPEND);
+		/** FLAG_INIT only marks the first run, so it is cleared as that
+		 *  run starts. Kept until settle, an async run would skip the
+		 *  teardown of every run after it. */
+		if (flag & (FLAG_LOADING | FLAG_INIT)) {
+			this._flag &= ~(FLAG_LOADING | FLAG_SUSPEND | FLAG_INIT);
 		}
 		if (!(flag & FLAG_INIT)) {
+			/** The new run ends the previous one: its recover handlers
+			 *  are dropped, and its finalizers run if it was still in
+			 *  flight, after the abort and before the teardown. */
+			this._recover = null;
+			if (this._finalize !== null) {
+				clearFinalize(this);
+			}
 			if (this._owned !== null) {
 				if (this._cleanup !== null) {
 					clearRun(this);
@@ -2884,13 +2870,6 @@ function root(fn) {
 				}
 			} else if (this._cleanup !== null) {
 				clearCleanup(this);
-			}
-			/** The new run ends the previous one: its recover handlers
-			 *  are dropped, and its finalizers run if it was still in
-			 *  flight. */
-			this._recover = null;
-			if (this._finalize !== null) {
-				clearFinalize(this);
 			}
 		}
 
@@ -3027,7 +3006,6 @@ function root(fn) {
 			/** It ends here, and so does its shield. A node locked only
 			 *  by a shield below it keeps the lock. */
 			if (flag & FLAG_LOCKED) {
-				this._flag &= ~FLAG_INIT;
 				if (this._finalize !== null) {
 					clearFinalize(this);
 				}
@@ -3036,7 +3014,6 @@ function root(fn) {
 			}
 		}
 
-		this._flag &= ~FLAG_INIT;
 		if (this._finalize !== null) {
 			clearFinalize(this);
 		}
@@ -3111,27 +3088,24 @@ function root(fn) {
 		}
 		let flag = this._flag;
 		this._flag = FLAG_DISPOSED;
+		clearDeps(this);
+		/** As on a re-run: abort, then the finalizers of a run still in
+		 *  flight, then the children, then the cleanups. */
+		if (flag & FLAG_CHANNEL) {
+			resetChannel(this);
+		}
 		if (this._finalize !== null) {
 			clearFinalize(this);
 		}
-		clearDeps(this);
-		/** A throwing cleanup, here or in a child, still finishes the
-		 *  disposal. */
-		try {
-			clearRun(this);
-		} finally {
-			if (flag & FLAG_CHANNEL) {
-				resetChannel(this);
-			}
-			this._fn =
-				this._args =
-				this._chan =
-				this._owned =
-				this._owner =
-				this._recover =
-				this._finalize =
-				null;
-		}
+		clearRun(this);
+		this._fn =
+			this._args =
+			this._chan =
+			this._owned =
+			this._owner =
+			this._recover =
+			this._finalize =
+			null;
 	};
 
 	/**
@@ -3614,28 +3588,27 @@ function clearSubs(sender) {
 }
 
 /**
- * Runs the node's cleanups, last registered first. Each one is removed
- * before it runs, so it runs exactly once. A cleanup that throws does
- * not stop the rest; its error is rethrown once they have all run (the
- * last one if several throw, as with nested `finally` blocks).
+ * Runs the node's cleanups, last registered first. The list is taken
+ * off the node before any of them runs, so each runs exactly once. A
+ * cleanup's error is swallowed: it does not stop the rest, and it never
+ * fails the node, reaches a recover handler or replaces another error.
  * @param {Owner | Receiver} node
  */
 function clearCleanup(node) {
 	let cleanup = node._cleanup;
+	node._cleanup = null;
 	if (typeof cleanup === "function") {
-		node._cleanup = null;
-		cleanup();
-	} else {
-		/** array form */
-		let count = cleanup.length;
 		try {
-			while (count-- > 0) {
-				cleanup.pop()();
-			}
-		} finally {
-			/** Positive only after a throw: the cleanups still left to run. */
-			if (count > 0) {
-				clearCleanup(node);
+			cleanup();
+		} catch (error) {
+			/* swallow: a cleanup never changes an outcome */
+		}
+	} else {
+		for (let i = cleanup.length - 1; i >= 0; i--) {
+			try {
+				cleanup[i]();
+			} catch (error) {
+				/* swallow */
 			}
 		}
 	}
@@ -3705,46 +3678,33 @@ function addOwned(owner, child) {
 }
 
 /**
- * Disposes all owned children. Called before re-running an owner effect
- * and on disposal. Only call when `_owned !== null` — owned is lazy and
- * only allocated when an effect or root actually adopts children. A
- * child whose cleanup throws is still disposed, and so are its siblings.
- * The owner's recover handler is left to the caller, so that an error
- * in the teardown of a run reaches that run's handler.
+ * Disposes all owned children, last created first. Called before
+ * re-running an owner effect and on disposal. Only call when
+ * `_owned !== null` — owned is lazy and only allocated when an effect
+ * or root actually adopts children.
  * @param {Owner} owner
  * @returns {void}
  */
 function clearOwned(owner) {
 	let owned = owner._owned;
 	let count = owned.length;
-	try {
-		while (count-- > 0) {
-			owned.pop()._dispose();
-		}
-	} finally {
-		/** Positive only after a throw: the children still left to dispose. */
-		if (count > 0) {
-			clearOwned(owner);
-		}
+	while (count-- > 0) {
+		owned.pop()._dispose();
 	}
 }
 
 /**
  * Tears down what an owner's run made: its children first, then its
- * cleanups (D2). A throw in one still runs the other; if both throw,
- * the cleanup's error wins, as with nested `finally` blocks.
+ * cleanups (D2).
  * @param {Owner} owner
  * @returns {void}
  */
 function clearRun(owner) {
-	try {
-		if (owner._owned !== null) {
-			clearOwned(owner);
-		}
-	} finally {
-		if (owner._cleanup !== null) {
-			clearCleanup(owner);
-		}
+	if (owner._owned !== null) {
+		clearOwned(owner);
+	}
+	if (owner._cleanup !== null) {
+		clearCleanup(owner);
 	}
 }
 
@@ -5871,9 +5831,8 @@ function flushEffects(queue, count, time) {
 				node._flag &= ~(FLAG_STALE | FLAG_PENDING);
 			}
 		} catch (error) {
-			/** A throw before the run, or a cleanup that throws, aborts it
-			 *  before it clears these, and a throw ends a callback
-			 *  suspend's activation. */
+			/** A throw before the run aborts it before it clears these,
+			 *  and a throw ends a callback suspend's activation. */
 			let err = defect(error);
 			let result = abortRun(node, err, FLAG_STALE | FLAG_PENDING);
 			if (thrown === null && result === RECOVER_NONE) {
@@ -5881,13 +5840,7 @@ function flushEffects(queue, count, time) {
 			}
 			/** The throw ends the activation, and its shield: a locked
 			 *  node is disposed once that releases. */
-			try {
-				endRun(node, result);
-			} catch (cleanupError) {
-				if (thrown === null) {
-					thrown = defect(cleanupError);
-				}
-			}
+			endRun(node, result);
 		}
 	}
 	return thrown;
@@ -5928,15 +5881,7 @@ function flush() {
 						let node = DISPOSES[i];
 						let owner = node._owner;
 						DISPOSES[i] = null;
-						try {
-							node._dispose();
-						} catch (err) {
-							/** The node is disposed, but one of its cleanups threw. */
-							if (!thrown) {
-								error = defect(err);
-								thrown = true;
-							}
-						}
+						node._dispose();
 						if (owner !== null) {
 							purgeOwned(owner);
 						}

@@ -1134,12 +1134,11 @@ describe("D2: an owner's children are disposed before its cleanups run", () => {
     });
 
     /**
-     * A teardown error on re-run goes to the recover handler of the run
-     * being torn down, whether a child's cleanup or the node's own threw.
-     * On master, clearOwned reset the handler, so a child's error went
-     * past it to the owners.
+     * A teardown error on re-run used to go to the recover handler of
+     * the run being torn down. A cleanup error no longer takes part in
+     * recovery: the handler is not asked, and the parent re-runs.
      */
-    test("a child's cleanup error on re-run reaches the previous run's recover handler", () => {
+    test("a child's cleanup error on re-run does not reach the previous run's recover handler", () => {
         const s = signal(0);
         const caught = [];
         let runs = 0;
@@ -1158,13 +1157,12 @@ describe("D2: an owner's children are disposed before its cleanups run", () => {
                 });
             });
         });
-        try {
-            s.set(1);
-        } catch (err) {}
-        expect(caught).toEqual(["0:child cleanup"]);
+        s.set(1);
+        expect(caught).toEqual([]);
         expect(parent.is(DISPOSED)).toBe(false);
-        s.set(2);
         expect(runs).toBe(2);
+        s.set(2);
+        expect(runs).toBe(3);
     });
 });
 
@@ -1504,13 +1502,11 @@ describe("36: c.suspend(task) in a stable task drops the task", () => {
 
 describe("37: a cleanup error that is already a Defect is wrapped again", () => {
     /**
-     * Fix 07: a Defect travels on unchanged; only raw throws are wrapped
-     * as FATAL. ComputeProto._update stores a throwing cleanup's error as
-     * `new Defect(error, FATAL)` instead of `defect(error)`.
-     * Expected: the compute holds the PANIC Defect. Actual: a FATAL Defect
-     * whose error is the PANIC Defect.
+     * Fix 07 stored a throwing cleanup's Defect on the compute unchanged.
+     * A cleanup error no longer fails the compute at all: the re-run goes
+     * ahead.
      */
-    test("a compute whose cleanup panics holds the PANIC Defect, not a FATAL wrapper", () => {
+    test("a compute whose cleanup panics still re-runs", () => {
         const s = signal(0);
         const comp = c.compute((cx) => {
             const v = cx.val(s);
@@ -1523,10 +1519,8 @@ describe("37: a cleanup error that is already a Defect is wrapped again", () => 
         });
         comp.get();
         s.set(1);
-        const err = comp.get();
-        expect(comp.is(ERROR)).toBe(true);
-        expect(err.type).toBe(PANIC);
-        expect(err.error).toBe("bye");
+        expect(comp.is(ERROR)).toBe(false);
+        expect(comp.get()).toBe(1);
     });
 });
 
