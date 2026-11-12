@@ -1,5 +1,5 @@
 import { describe, test, expect } from "#test-runner";
-import { signal, root, batch } from "#anod";
+import { signal, resource, root, batch, panic, ERROR, LOADING } from "#anod";
 
 const tick = () => Promise.resolve();
 const settle = () => tick().then(tick).then(tick);
@@ -404,3 +404,100 @@ describe("optimistic update interceptor (async)", () => {
     });
 });
 
+
+describe("contextual write to a resource with an async fn", () => {
+    /** Runs fn(c) from a spawn after an await, when the engine is idle. */
+    function whenIdle(fn) {
+        root((c) => {
+            c.spawn(async (c) => {
+                await c.suspend(tick());
+                fn(c);
+            });
+        });
+        return settle();
+    }
+
+    test("a void updater on a mutable resource passes the mutated value as prev", async () => {
+        const obj = { n: 1 };
+        const r = resource(obj, false);
+        let prev = null;
+        await whenIdle((c) => {
+            c.set(r, (v) => { v.n++; }, (c, p) => { prev = p; return p; });
+        });
+        expect(prev).toBe(obj);
+        expect(obj.n).toBe(2);
+    });
+
+    test("writing to a failed resource does not show the error to equal", async () => {
+        const seen = [];
+        const r = resource(1, (a, b) => { seen.push(a); return a === b; });
+        r.set(async (c) => {
+            await c.suspend(tick());
+            throw panic("x");
+        });
+        await settle();
+        expect(r.is(ERROR)).toBe(true);
+        await whenIdle((c) => {
+            c.set(r, 2, (c, v) => v);
+        });
+        expect(seen.some((a) => a !== null && typeof a === "object")).toBe(false);
+        expect(r.get()).toBe(2);
+        expect(r.is(ERROR)).toBe(false);
+    });
+
+    test("readers see the optimistic value already loading, as with resource.set", async () => {
+        const viaSet = resource(0);
+        const viaCtx = resource(0);
+        const log = { set: [], ctx: [] };
+        root((c) => {
+            c.effect((c) => { log.set.push(c.val(viaSet) + ":" + c.pending(viaSet)); });
+            c.effect((c) => { log.ctx.push(c.val(viaCtx) + ":" + c.pending(viaCtx)); });
+        });
+        const slow = async (c, v) => { await c.suspend(settle()); return v; };
+        viaSet.set(5, slow);
+        await whenIdle((c) => {
+            c.set(viaCtx, 5, slow);
+        });
+        await settle();
+        expect(log.ctx).toEqual(log.set);
+        expect(log.set).toEqual(["0:false", "5:true", "5:false"]);
+    });
+
+    test("the writer does not run again because its own write started loading", async () => {
+        const r = resource(0);
+        let runs = 0;
+        root((c) => {
+            c.spawn(async (c) => {
+                runs++;
+                c.pending(r);
+                await c.suspend(tick());
+                if (runs === 1) {
+                    c.set(r, 1, async (c, v) => { await c.suspend(settle()); return v; });
+                }
+            });
+        });
+        await settle();
+        expect(r.is(LOADING)).toBe(true);
+        expect(runs).toBe(1);
+        await settle();
+        await settle();
+        expect(r.is(LOADING)).toBe(false);
+    });
+
+    test("inside a flush, it matches resource.set too", async () => {
+        const r = resource({ n: 1 }, false);
+        const trigger = signal(0);
+        let prev = null;
+        root((c) => {
+            c.effect(trigger, (t, c) => {
+                if (t === 1) {
+                    c.set(r, (v) => { v.n++; }, (c, p) => { prev = p; return p; });
+                }
+            });
+        });
+        trigger.set(1);
+        await settle();
+        expect(prev).toBe(r.get());
+        expect(r.get().n).toBe(2);
+    });
+});

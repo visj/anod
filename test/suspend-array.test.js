@@ -1,5 +1,5 @@
 import { describe, test, expect } from "#test-runner";
-import { signal, root, c } from "#anod";
+import { signal, root, c, ERROR } from "#anod";
 
 const tick = () => Promise.resolve();
 const settle = () => tick().then(tick).then(tick).then(tick).then(tick);
@@ -117,5 +117,52 @@ describe("suspend([tasks]) consistency", () => {
     expect(observed[0]).toBe("A1");
     expect(observed[1]).toBe("B");
     expect(observed[2]).toBe("C");
+  });
+});
+
+describe("suspend([tasks]) cycles", () => {
+  function later() {
+    let resolve;
+    const promise = new Promise((r) => { resolve = r; });
+    return { promise, resolve };
+  }
+
+  test("an array await that closes a cycle fails with a cycle error", async () => {
+    const gate = later();
+    const ready = signal(1);
+    let t2;
+    const t1 = c.task(async (c) => {
+      await c.suspend(gate.promise);
+      return c.suspend([ready, t2]);
+    }, 0);
+    t2 = c.task(async (c) => c.suspend(t1), 0);
+    gate.resolve();
+    await settle();
+    expect(t1.is(ERROR)).toBe(true);
+    expect(String(t1.get().error.message)).toBe("Cycle detected");
+  });
+
+  test("with callbacks, onReject receives the cycle error", async () => {
+    const gate = later();
+    const phase = signal(0);
+    const ready = signal(1);
+    let t2;
+    let rejected = null;
+    const t1 = c.task((c) => {
+      if (c.val(phase) === 0) {
+        return c.suspend(gate.promise, (v) => v);
+      }
+      return c.suspend([ready, t2], () => "resolved", (err) => {
+        rejected = err;
+        return "recovered";
+      });
+    }, 0);
+    t2 = c.task(async (c) => c.suspend(t1), 0);
+    phase.set(1);
+    t1.get();
+    await settle();
+    expect(rejected).not.toBe(null);
+    expect(String(rejected.error.message)).toBe("Cycle detected");
+    expect(t1.get()).toBe("recovered");
   });
 });

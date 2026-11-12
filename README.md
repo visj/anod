@@ -612,7 +612,7 @@ A few things to note:
 * Multiple `finalize` calls accumulate and run forward in registration order
 * Errors inside finalizers are swallowed, so a finalizer never replaces the run's result or error, unlike a throw inside a JS `finally`
 * `finalize` does not bubble to parent effects, it's scoped to the activation it was registered in
-* On re-run, any leftover finalize from the previous activation is cleared before the new run starts
+* When a re-run or dispose interrupts an activation still in flight, its finalizers run right after its controller is aborted, before its children are disposed and its cleanups run. A run that completes has run them already, so they always come before the teardown of the same activation
 * This differs from `cleanup`, which runs in reverse order (stack unwinding). Finalize is sequential post-completion work, not resource teardown
 
 ## Bundling
@@ -670,7 +670,9 @@ Runs a cleanup method every time the node updates, and finally when it disposes.
 
 The nodes an effect or root created are disposed before its own cleanups run, both on re-run and on dispose. A child was created after the parent acquired what it uses, so it lets go of it first. A cleanup that needs the value of a compute the node created keeps that value in a plain variable: by the time the cleanup runs, the compute is disposed, and reading it throws.
 
-A cleanup that throws doesn't stop the rest: every other cleanup still runs, and every child is still disposed. On re-run, the error counts as an error of the node, and goes to the `recover` handler of the run being torn down.
+Teardown always runs in the same order, on re-run and on dispose: the node's controller is aborted, the finalizers of a run still in flight run, the children are disposed, and then the node's own cleanups run. A cleanup always sees `c.controller().signal.aborted` as `true`. A compute has no finalizers or children, so it aborts and then runs its cleanups.
+
+A cleanup that throws doesn't stop the rest: every other cleanup still runs, and every child is still disposed. Its error never changes an outcome: the re-run goes ahead, no `recover` handler is asked, a run's own error is never replaced by it, and neither a write nor `dispose()` throws because of it.
 
 ```ts
 import { root, signal } from "anod";
@@ -734,7 +736,7 @@ root((c) => {
 
 `c.post(signal, value)` is the deferred variant — schedules the write for the next microtask flush, with the same self-notification guard.
 
-Both `c.set()` and `c.post()` also support writing to resources with an async callback: `c.set(resource, value, asyncFn)` .
+Both `c.set()` and `c.post()` also support writing to resources with an async callback: `c.set(resource, value, asyncFn)`. It writes as `resource.set(value, asyncFn)` would, optimistically and then async, and the node that writes is not run again by its own write, including the resource starting to load.
 
 ### Async state checks: `c.pending()` / `c.rejected()`
 
@@ -818,7 +820,7 @@ root((c) => {
 
 #### `WEAK`
 
-A weak compute releases its cached value and runs its cleanups when it loses all subscribers. The next read triggers a fresh recompute. When the last reader drops it during an update, the cleanups run once that update has settled the readers' dependencies, before the write returns. An error thrown by one of them is the weak compute's, not the reader's, and it is rethrown to the writer. This is useful for derived data that retains significant memory — parsed documents, decoded images, materialized query results — that can be safely dropped and recomputed on demand.
+A weak compute releases its cached value and runs its cleanups when it loses all subscribers. The next read triggers a fresh recompute. When the last reader drops it during an update, the cleanups run once that update has settled the readers' dependencies, before the write returns. This is useful for derived data that retains significant memory — parsed documents, decoded images, materialized query results — that can be safely dropped and recomputed on demand.
 
 ```ts
 import { root, signal, WEAK } from "anod";
@@ -1086,7 +1088,7 @@ root((c) => {
 });
 ```
 
-A task that awaits a task which, directly or through other tasks, awaits it back would never settle. The await that closes such a cycle throws `"Cycle detected"` instead, so the tasks fail rather than stay loading.
+A task that awaits a task which, directly or through other tasks, awaits it back would never settle. The await that closes such a cycle throws `"Cycle detected"` instead, so the tasks fail rather than stay loading. The same goes for an array await, and with callbacks, `onReject` receives the error.
 
 **Array**: awaits multiple tasks, resources and promises concurrently. Returns when all of them have settled, with the values in the same order. A plain value in the array is returned as it is. A promise is waited on like a task, so a rejection reaches you as a `Defect`, and an array with a promise in it always takes at least a microtask, since a promise can't be read synchronously.
 
@@ -1247,7 +1249,7 @@ root((c) => {
 
 ### Abort controller with `c.controller()`
 
-`c.controller()` returns an `AbortController` that is automatically aborted when the node re-runs or is disposed. Useful for cancelling fetch requests or other abortable operations.
+`c.controller()` returns an `AbortController` that is automatically aborted when the node re-runs or is disposed, before its cleanups run. Useful for cancelling fetch requests or other abortable operations.
 
 Every call within one activation returns the same controller, so several requests can share its signal. If you abort it yourself, the next call returns a fresh one.
 

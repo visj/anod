@@ -360,17 +360,11 @@ describe("cleanup and finalize", () => {
     });
 
     /**
-     * BUG (high). Expected: a cleanup that throws runs once, and the failure
-     * reaches the caller as an anod `{ error, type: FATAL }` like any other
-     * effect error. Actual: the cleanup runs twice and a raw Error escapes
-     * flush().
-     * Root cause: clearCleanup's single-fn form only nulls `_cleanup` after
-     * the call returns (src/internal.js:3070-3071). The throw escapes
-     * _update, flushEffects' catch disposes the node, and _dispose calls
-     * clearCleanup again (src/internal.js:2731). The second throw escapes
-     * the catch block of flushEffects (src/internal.js:4244-4256).
+     * A cleanup that throws runs once. Its error used to fail the effect;
+     * now it never changes an outcome, so the effect re-runs and the
+     * write does not throw.
      */
-    test("a cleanup that throws on re-run runs once and surfaces as a FATAL error", () => {
+    test("a cleanup that throws on re-run runs once and does not fail the effect", () => {
         const s = signal(0);
         let calls = 0;
         let e;
@@ -384,16 +378,9 @@ describe("cleanup and finalize", () => {
                 }
             });
         });
-        let caught = null;
-        try {
-            s.set(1);
-        } catch (err) {
-            caught = err;
-        }
+        expect(() => s.set(1)).not.toThrow();
         expect(calls).toBe(1);
-        expect(caught.type).toBe(FATAL);
-        expect(caught.error.message).toBe("cleanup boom");
-        expect(e.is(DISPOSED)).toBe(true);
+        expect(e.is(DISPOSED)).toBe(false);
     });
 
     /**
