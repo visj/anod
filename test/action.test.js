@@ -101,18 +101,18 @@ describe("action", () => {
     expect(Object.keys(e).length).toBe(14);
   });
 
-  test("has no ownership, cleanup or async methods", () => {
+  test("has no ownership, cleanup or async methods, and panics only", () => {
     let ctx;
     const a = c.action((cx) => { ctx = cx; });
     expect(ctx).toBe(a);
     for (const name of [
-      "cleanup", "recover", "finalize", "panic", "pause", "resume", "shield",
-      "suspend", "controller", "defer", "version",
+      "cleanup", "recover", "finalize", "refuse", "fatal", "pause", "resume", "shield",
+      "suspend", "controller", "defer", "version", "post",
       "compute", "task", "effect", "spawn", "action"
     ]) {
       expect(typeof a[name]).toBe("undefined");
     }
-    for (const name of ["val", "pending", "rejected", "set", "post", "is", "dispose"]) {
+    for (const name of ["val", "pending", "rejected", "set", "is", "dispose", "panic"]) {
       expect(typeof a[name]).toBe("function");
     }
   });
@@ -267,9 +267,9 @@ describe("action errors", () => {
         return true;
       });
       cx.effect((cx) => {
-        cx.recover(() => {
+        cx.recover((err) => {
           calls.push("effect");
-          return false;
+          throw err;
         });
         cx.action(s, (v) => {
           if (v === 2) {

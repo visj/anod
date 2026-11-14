@@ -160,5 +160,63 @@ describe("c.equal()", () => {
       expect(c1.get()).toBe(4);
       expect(runs).toBe(2);
     });
+
+    test("equal(false) is cleared between runs", () => {
+      const s1 = signal(1);
+      let runs = 0;
+      const c1 = c.compute((cx) => {
+        /** Only force when the input is odd. */
+        if (cx.val(s1) % 2 === 1) {
+          cx.equal(false);
+        }
+        return 42;
+      });
+      c.effect(c1, () => { runs++; });
+      expect(runs).toBe(1);
+
+      /** Even, no equal(false), 42 again → suppressed. */
+      s1.set(2);
+      expect(c1.get()).toBe(42);
+      expect(runs).toBe(1);
+
+      /** Odd: equal(false) forces it. */
+      s1.set(3);
+      expect(c1.get()).toBe(42);
+      expect(runs).toBe(2);
+
+      s1.set(4);
+      expect(c1.get()).toBe(42);
+      expect(runs).toBe(2);
+    });
+
+    test("equal(false) after an await is cleared for the next run", async () => {
+      const settle = () => Promise.resolve().then(() => {}).then(() => {});
+      const s1 = signal(1);
+      const t = c.task(async (cx) => {
+        const val = cx.val(s1);
+        await cx.suspend(Promise.resolve());
+        if (val % 2 === 1) {
+          cx.equal(false);
+        }
+        return 42;
+      });
+      await settle();
+      let runs = 0;
+      c.effect((cx) => {
+        cx.val(t);
+        runs++;
+      });
+      expect(runs).toBe(1);
+
+      s1.set(3);
+      t.get();
+      await settle();
+      expect(runs).toBe(2);
+
+      s1.set(4);
+      t.get();
+      await settle();
+      expect(runs).toBe(2);
+    });
   });
 });

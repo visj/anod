@@ -3,7 +3,15 @@
  * type is wrong. Nothing here runs.
  */
 import { root } from "../types/index.js";
-import type { Task, Resource, Spawn } from "../types/index.js";
+import type {
+	Task,
+	Resource,
+	Spawn,
+	Compute,
+	ReadonlySignal,
+	Context,
+	Reader,
+} from "../types/index.js";
 
 type Equal<A, B> =
 	(<G>() => G extends A ? 1 : 2) extends <G>() => G extends B ? 1 : 2
@@ -107,4 +115,42 @@ root((r) => {
 	// A wrong value is caught
 	// @ts-expect-error
 	expectType<Task<string>>()(r.task((c) => c.suspend(userId, (id) => id)));
+});
+
+// A ReadonlySignal is read wherever a node is read (bug 42)
+declare const count: ReadonlySignal<number>;
+function watch(c: Context & Reader) {
+	expectType<number>()(c.val(count));
+	expectType<number>()(c.defer(count));
+	expectType<boolean>()(c.pending(count));
+	expectType<boolean>()(c.pending([count, flag]));
+	c.rejected(count);
+	// A write still wants a writable node
+	// @ts-expect-error
+	c.set(count, 1);
+}
+root((r) => {
+	expectType<Compute<string>>()(r.compute(count, (n) => String(n)));
+	expectType<Task<number>>()(r.task(count, async (n) => n + 1));
+	r.effect(count, (n, c) => {
+		expectType<number>()(n);
+		expectType<number>()(c.defer(count));
+	});
+	r.spawn(count, async (n) => {
+		expectType<number>()(n);
+	});
+	r.action(count, (n) => {
+		expectType<number>()(n);
+	});
+	// A compute or task can't be written to
+	r.effect((c) => {
+		// @ts-expect-error
+		c.set(r.compute(count, (n) => n), 1);
+		// @ts-expect-error
+		c.set(userId, 1);
+		c.set(flag, true);
+	});
+	// A concrete node still gives its own value type
+	expectType<Compute<boolean>>()(r.compute(flag, (b) => !b));
+	expectType<Compute<number>>()(r.compute(userId, (id) => id * 2));
 });

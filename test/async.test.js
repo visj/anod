@@ -78,7 +78,7 @@ describe("async", () => {
       await settle();
 
       expect(c1.is(ERROR)).toBe(true);
-      expect(c1.get().type).toBe(3);
+      expect(c1.get().type).toBe(2);
       expect(c1.get().error.message).toBe("async error");
     });
 
@@ -254,7 +254,7 @@ describe("async", () => {
       await tick();
 
       expect(c1.is(ERROR)).toBe(true);
-      expect(c1.get().type).toBe(3);
+      expect(c1.get().type).toBe(2);
       expect(c1.get().error.message).toBe("iterator error");
     });
 
@@ -664,7 +664,7 @@ describe("async", () => {
       await settle();
 
       expect(c1.is(ERROR)).toBe(true);
-      expect(c1.get().type).toBe(3);
+      expect(c1.get().type).toBe(2);
       expect(c1.get().error.message).toBe("boom");
     });
 
@@ -1071,7 +1071,7 @@ describe("async", () => {
         await c.suspend(tick());
       });
       await settle();
-      expect(caught.type).toBe(3);
+      expect(caught.type).toBe(2);
       expect(caught.error).toBeInstanceOf(Error);
       expect(caught.error.message).toBe("fail");
     });

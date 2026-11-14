@@ -1,5 +1,5 @@
 import { describe, test, expect } from "#test-runner";
-import { signal, root, batch, c, WEAK, DISPOSED, ERROR, FATAL } from "#anod-src";
+import { signal, root, batch, c, WEAK, DISPOSED, ERROR, PANIC } from "#anod-src";
 
 describe("the controller is aborted before cleanups run", () => {
     test("compute re-run", () => {
@@ -104,8 +104,8 @@ describe("teardown runs abort, then finalize, then children, then cleanups", () 
     });
 });
 
-describe("a cleanup error never changes an outcome", () => {
-    test("every cleanup still runs, in reverse order", () => {
+describe("a cleanup error is a PANIC, raised once the teardown has finished", () => {
+    test("every cleanup still runs, in reverse order, and the first error is raised", () => {
         const s = signal(0);
         const log = [];
         c.effect((cx) => {
@@ -113,30 +113,49 @@ describe("a cleanup error never changes an outcome", () => {
             cx.cleanup(() => log.push(1));
             cx.cleanup(() => {
                 log.push(2);
-                throw new Error("boom");
+                throw new Error("second");
             });
-            cx.cleanup(() => log.push(3));
+            cx.cleanup(() => {
+                log.push(3);
+                throw new Error("first");
+            });
         });
-        s.set(1);
+        let caught = null;
+        try {
+            s.set(1);
+        } catch (err) {
+            caught = err;
+        }
         expect(log).toEqual([3, 2, 1]);
+        expect(caught.type).toBe(PANIC);
+        expect(caught.error.message).toBe("first");
     });
 
-    test("a compute's re-run is not failed by its cleanup", () => {
+    test("a compute's re-run fails before its fn, and the next change runs it again", () => {
         const s = signal(0);
+        let runs = 0;
         const comp = c.compute((cx) => {
+            runs++;
             const v = cx.val(s);
-            cx.cleanup(() => {
-                throw new Error("boom");
-            });
+            if (v === 0) {
+                cx.cleanup(() => {
+                    throw new Error("boom");
+                });
+            }
             return v * 10;
         });
         expect(comp.get()).toBe(0);
         s.set(1);
-        expect(comp.get()).toBe(10);
-        expect(comp.is(ERROR)).toBe(false);
+        expect(comp.get().type).toBe(PANIC);
+        expect(comp.is(ERROR)).toBe(true);
+        expect(comp.get().error.message).toBe("boom");
+        expect(runs).toBe(1);
+        s.set(2);
+        expect(comp.get()).toBe(20);
+        expect(runs).toBe(2);
     });
 
-    test("an effect's re-run goes ahead, and its recover handler is not asked", () => {
+    test("an effect's own recover handler catches it, and the effect re-runs", () => {
         const s = signal(0);
         const caught = [];
         let runs = 0;
@@ -144,8 +163,7 @@ describe("a cleanup error never changes an outcome", () => {
             runs++;
             const v = cx.val(s);
             cx.recover((err) => {
-                caught.push(err);
-                return true;
+                caught.push(v + ": " + err.error.message);
             });
             cx.cleanup(() => {
                 throw new Error("own " + v);
@@ -158,30 +176,38 @@ describe("a cleanup error never changes an outcome", () => {
         });
         s.set(1);
         expect(runs).toBe(2);
-        expect(caught).toEqual([]);
+        expect(caught).toEqual(["0: child 0"]);
         expect(e.is(DISPOSED)).toBe(false);
     });
 
-    test("an owner's recover handler is not asked either", () => {
+    test("an owner's handler gets what the effect's own handlers pass on, and the effect is disposed", () => {
         const s = signal(0);
         const caught = [];
+        let runs = 0;
+        let e;
         root((r) => {
             r.recover((err) => {
-                caught.push(err);
-                return true;
+                caught.push("root: " + err.error.message);
             });
-            r.effect((cx) => {
+            e = r.effect((cx) => {
+                runs++;
                 cx.val(s);
+                cx.recover((err) => {
+                    caught.push("own: " + err.error.message);
+                    throw err;
+                });
                 cx.cleanup(() => {
                     throw new Error("boom");
                 });
             });
         });
         s.set(1);
-        expect(caught).toEqual([]);
+        expect(caught).toEqual(["own: boom", "root: boom"]);
+        expect(runs).toBe(1);
+        expect(e.is(DISPOSED)).toBe(true);
     });
 
-    test("a write does not throw for a cleanup", () => {
+    test("an unhandled one reaches the writer", () => {
         const s = signal(0);
         c.effect((cx) => {
             cx.val(s);
@@ -189,11 +215,10 @@ describe("a cleanup error never changes an outcome", () => {
                 throw new Error("boom");
             });
         });
-        expect(() => s.set(1)).not.toThrow();
-        expect(() => batch(() => s.set(2))).not.toThrow();
+        expect(() => s.set(1)).toThrow();
     });
 
-    test("dispose() does not throw, and finishes the disposal", () => {
+    test("dispose() finishes the disposal, then throws what no handler took", () => {
         const log = [];
         const r = root((r) => {
             r.cleanup(() => log.push("root"));
@@ -204,12 +229,35 @@ describe("a cleanup error never changes an outcome", () => {
                 });
             });
         });
-        expect(() => r.dispose()).not.toThrow();
+        let caught = null;
+        try {
+            r.dispose();
+        } catch (err) {
+            caught = err;
+        }
         expect(log).toEqual(["child", "root"]);
         expect(r.is(DISPOSED)).toBe(true);
+        expect(caught.type).toBe(PANIC);
+        expect(caught.error.message).toBe("boom");
     });
 
-    test("a weak compute's cleanup error does not reach the writer", () => {
+    test("a disposed root's own handler takes its children's errors", () => {
+        const caught = [];
+        const r = root((r) => {
+            r.recover((err) => {
+                caught.push(err.error.message);
+            });
+            r.effect((cx) => {
+                cx.cleanup(() => {
+                    throw new Error("boom");
+                });
+            });
+        });
+        expect(() => r.dispose()).not.toThrow();
+        expect(caught).toEqual(["boom"]);
+    });
+
+    test("a weak compute's cleanup error reaches the writer", () => {
         const s = signal(0);
         const show = signal(true);
         let ran = 0;
@@ -226,7 +274,7 @@ describe("a cleanup error never changes an outcome", () => {
                 cx.val(weak);
             }
         });
-        expect(() => show.set(false)).not.toThrow();
+        expect(() => show.set(false)).toThrow();
         expect(ran).toBe(1);
     });
 
@@ -247,22 +295,23 @@ describe("a cleanup error never changes an outcome", () => {
         } catch (err) {
             caught = err;
         }
-        expect(caught.type).toBe(FATAL);
+        expect(caught.type).toBe(PANIC);
         expect(caught.error.message).toBe("run");
     });
 
-    test("a failed re-run keeps its own error when teardown throws", () => {
+    test("a failed re-run keeps its own error when its teardown throws", () => {
         const s = signal(0);
         const caught = [];
         root((r) => {
             r.recover((err) => {
                 caught.push(err.error.message);
-                return true;
             });
             r.effect((cx) => {
                 const v = cx.val(s);
                 cx.cleanup(() => {
-                    throw new Error("cleanup");
+                    if (v === 1) {
+                        throw new Error("cleanup");
+                    }
                 });
                 if (v === 1) {
                     throw new Error("run");
@@ -271,6 +320,29 @@ describe("a cleanup error never changes an outcome", () => {
         });
         s.set(1);
         expect(caught).toEqual(["run"]);
+    });
+
+    test("a finalizer that throws fails the run it ends", () => {
+        const s = signal(0);
+        const caught = [];
+        let e;
+        root((r) => {
+            r.recover((err) => {
+                caught.push(err.error.message);
+            });
+            e = r.effect((cx) => {
+                const v = cx.val(s);
+                cx.finalize(() => {
+                    if (v === 1) {
+                        throw new Error("finalize");
+                    }
+                });
+            });
+        });
+        expect(caught).toEqual([]);
+        s.set(1);
+        expect(caught).toEqual(["finalize"]);
+        expect(e.is(DISPOSED)).toBe(true);
     });
 });
 

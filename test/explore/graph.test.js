@@ -8,7 +8,6 @@ import {
     c,
     REFUSE,
     PANIC,
-    FATAL,
     DEFER,
     STABLE,
     SETUP,
@@ -794,7 +793,7 @@ describe("cycles", () => {
         s.set(1);
         const v = self.get();
         expect(self.is(ERROR)).toBe(true);
-        expect(v.type).toBe(FATAL);
+        expect(v.type).toBe(PANIC);
         expect(v.error.message).toBe("Cannot read a disposed node or yourself");
     });
 

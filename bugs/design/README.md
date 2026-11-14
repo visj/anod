@@ -294,14 +294,14 @@ r.spawn(async (cx) => {
 - **Mutual task awaits are rejected:** A awaits B and B awaits A. The await that closes the cycle is rejected, instead of both staying loading for good.
 
 **Mechanism:**
-- **Taking the hold:** `shield()` sets FLAG_LOCKED on the effect and walks up `_owner`, setting FLAG_LOCKED on each owner.
+- **Taking the hold:** `shield()` sets FLAG_SHIELD on the effect and walks up `_owner`, setting FLAG_SHIELD on each owner.
   - A module-level map, `HOLDS`, counts the shields that hold each node, and only has entries while a shield is active.
   - A node's count is four times the number of shields below it, plus two if its disposal waits, plus one if it is shielded itself.
   - No node gets a new field. There is no free flag bit (0–29 are taken).
   - A waiting disposal is recorded in `HOLDS`, not with FLAG_DISPOSED, so the node isn't disposed until its teardown runs. Its reads and new children work meanwhile (D6 a).
-- **The existing lock paths handle a held owner,** because FLAG_LOCKED on an owner means "can't be interrupted now": `_update` and `_receive` return early, `notify` skips the node, and `_dispose` records the request in `HOLDS`. No teardown can reach a shielded node, since every owner above it is locked.
+- **The existing lock paths handle a held owner,** because FLAG_SHIELD on an owner means "can't be interrupted now": `_update` and `_receive` return early, `notify` skips the node, and `_dispose` records the request in `HOLDS`. No teardown can reach a shielded node, since every owner above it is locked.
 - **The freeze reuses pause:** a paused effect keeps its stale flags but doesn't run. `resume()` inside a disposing subtree does nothing.
-- **The release:** when the activation completes, `unshield` walks the same path, counting down. A node that reaches zero loses FLAG_LOCKED. Of the nodes it frees, the topmost one with a deferred request replays it:
+- **The release:** when the activation completes, `unshield` walks the same path, counting down. A node that reaches zero loses FLAG_SHIELD. Of the nodes it frees, the topmost one with a deferred request replays it:
   - a deferred dispose tears its subtree down;
   - a deferred re-run re-runs it, unless an ancestor's dispose is still waiting, in which case the re-run is dropped.
 - **`dispose(true)`:**
@@ -311,7 +311,7 @@ r.spawn(async (cx) => {
   - an ancestor that it frees replays its own deferred request.
 - **Hot path:**
   - computes lose their lock code, including the check at the top of `ComputeProto._update`;
-  - the sync release adds FLAG_LOCKED to the mask that `EffectProto._update`'s tail already tests, and that costs nothing.
+  - the sync release adds FLAG_SHIELD to the mask that `EffectProto._update`'s tail already tests, and that costs nothing.
 
 **Implemented** on `fix/25-shield`, with bug 25 (see its Fix section). **Known gap:** a child that a shielded continuation creates after the disposal froze the subtree starts unpaused. It reacts until the continuation's shield releases, and is paused then. D3 would close it.
 

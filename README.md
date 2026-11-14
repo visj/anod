@@ -108,7 +108,7 @@ root((c) => {
 		- [Spawn](#spawn)
 		- [`c.suspend()`](#csuspend)
 	- [Error handling](#error-handling)
-		- [c.recover(), REFUSE, PANIC, FATAL](#crecover-refuse-panic-fatal)
+		- [c.recover(), REFUSE, PANIC, c.fatal()](#crecover-refuse-panic-cfatal)
 		- [c.finalize()](#cfinalize)
 - [Bundling](#bundling)
 - [The reactive graph in depth](#the-reactive-graph-in-depth)
@@ -117,7 +117,7 @@ root((c) => {
 	- [Contextual helpers](#contextual-helpers)
 		- [`c.equal()`](#cequal)
 		- [`c.cleanup()`](#ccleanup)
-	- [Contextual writes: `c.set()` / `c.post()`](#contextual-writes-cset--cpost)
+	- [Contextual writes: `c.set()`](#contextual-writes-cset)
 	- [Async state checks: `c.pending()` / `c.rejected()`](#async-state-checks-cpending--crejected)
 	- [Evaluation helpers](#evaluation-helpers)
 		- [`STABLE`](#stable)
@@ -127,6 +127,7 @@ root((c) => {
 		- [`pause()` / `resume()`](#pause--resume)
 	- [Error recovery in depth](#error-recovery-in-depth)
 		- [Recovery](#recovery)
+		- [Fatal errors](#fatal-errors)
 - [Async reactivity in depth](#async-reactivity-in-depth)
 	- [The four delivery paths](#the-four-delivery-paths)
 		- [1. Sync check with `c.pending()`](#1-sync-check-with-cpending)
@@ -266,7 +267,7 @@ root((c) => {
 });
 ```
 
-All reactive receivers also accept a single dependency signature, `compute(dep: Sender<T>, (val: T, c: Context) => T)` . For single dependency, this is the preferred way of creating receivers, as it both greatly improves performance and simplifies callback logic.
+All reactive receivers also accept a single dependency signature, `compute(dep: ReadonlySignal<T>, (val: T, c: Context) => T)` . For single dependency, this is the preferred way of creating receivers, as it both greatly improves performance and simplifies callback logic.
 
 ```ts
 import { root, signal } from "anod";
@@ -325,7 +326,7 @@ root((c) => {
 
 #### Action
 
-An action is a slim effect for the common case of a function that runs when its dependencies change and does nothing else, like writing a value to the DOM. It takes the same arguments and options as `c.effect()`, and its context keeps `c.val()`, `c.pending()`, `c.rejected()`, `c.set()`, `c.post()` and `c.is()`.
+An action is a slim effect for the common case of a function that runs when its dependencies change and does nothing else, like writing a value to the DOM. It takes the same arguments and options as `c.effect()`, and its context keeps `c.val()`, `c.pending()`, `c.rejected()`, `c.set()` and `c.is()`.
 
 ```ts
 import { root, signal } from "anod";
@@ -341,7 +342,7 @@ root((c) => {
 });
 ```
 
-An action owns nothing, and has no `c.cleanup()`, `c.recover()`, `c.finalize()`, async variant or child nodes. That makes it about half the size of an effect: 8 fields instead of 14. It still tracks dynamic dependencies, as an effect does, and takes `STABLE`, `SETUP` and `DEFER`. The root or effect that creates it disposes it, pauses it with `pause()`, and recovers its errors: an error in an action, or in a compute it reads, goes to its owner's `c.recover()` handlers, and the action is disposed, as an effect would be.
+An action owns nothing, and has no `c.cleanup()`, `c.recover()`, `c.finalize()`, async variant or child nodes. That makes it about half the size of an effect: 8 fields instead of 14. It still tracks dynamic dependencies, as an effect does, and takes `STABLE`, `SETUP` and `DEFER`. The root or effect that creates it disposes it, pauses it with `pause()`, and recovers its errors: an error in an action, or in a compute it reads, goes to its owner's `c.recover()` handlers, and the action is disposed, as an effect would be. It can fail its run with `c.panic()`, but has no `c.fatal()`: it is not an owner, so it has no tree to tear down.
 
 Use an effect for anything that needs cleanups, children of its own or async work.
 
@@ -368,32 +369,7 @@ root((c) => {
 });
 ```
 
-Signals also expose `.post()` which defers the write to a microtask. Nothing is written immediately, instead, the value is scheduled and applied when the microtask flush runs. Multiple `.post()` calls are run in sequence, and applied one by one during the microtask flush.
-
-```ts
-import { signal } from "anod";
-const counter = signal(0);
-counter.post(1); // scheduled, not written yet
-counter.post(2); // same tick, both scheduled, one flush
-counter.post((prev) => prev + 1); // updater resolved at flush time
-console.log(counter.get()); // still 0 — flush hasn't run
-// after microtask: counter is 3
-```
-
-Both `.set()` and `.post()` accept an updater function `(prev) => next` . For `.set()` , the updater is called immediately when idle, or deferred to drain time when inside a flush cycle. For `.post()` , the updater is always deferred to flush time, so it sees the latest value at that point.
-
-When you mix the two, a later `.set()` takes precedence over earlier posts to the same signal. It cancels them, so their updaters never run, then writes and flushes. Posts to other signals stay queued and flush along with it. A `.post()` after the `.set()` is a new write, applied on the next microtask.
-
-```ts
-import { signal } from "anod";
-const count = signal(0);
-count.post(1); // scheduled
-count.set(2); // cancels the post, count is 2
-count.post(3); // scheduled again
-// after microtask: count is 3
-```
-
-An idle updater `.set(fn)` sees the committed value, since the posts it supersedes never run. If the updater throws, the posts stay queued. Inside a batch or a flush, `.set()` is queued as well, behind the earlier posts, so the last write wins.
+`.set()` accepts an updater function `(prev) => next`. At idle, the updater is called immediately. Inside a batch or a flush, the write is queued and the updater runs at drain time, so it sees the writes queued before it, and the last write wins.
 
 ### Async reactivity
 
@@ -435,7 +411,7 @@ The async callback receives the resource as `c` (with `suspend` for staleness pr
 
 When a new `set()` fires while a previous async callback is still in flight, the old promise still resolves normally, but `suspend()` detects that the resource has moved on and simply doesn't yield back into the callback. The continuation after `await` never runs, so the stale result never reaches the `return` . Only the latest activation's callback gets to settle the resource.
 
-A plain write counts as a new `set()` too, however it is made: `.set()`, `.post()`, inside a batch, or `c.set()` from a node. It discards whatever the callback in flight produces later, including the next `yield` of a generator or a later `resolve`. A plain write to a resource that is loading or failed settles it with the written value, even an equal one, so `is(LOADING)` and `is(ERROR)` turn false and the nodes waiting on it resume. Since every plain write ends the work in flight, `.post()` queues one even when the value is unchanged.
+A plain write counts as a new `set()` too, however it is made: `.set()`, inside a batch, or `c.set()` from a node. It discards whatever the callback in flight produces later, including the next `yield` of a generator or a later `resolve`. A plain write to a resource that is loading or failed settles it with the written value, even an equal one, so `is(LOADING)` and `is(ERROR)` turn false and the nodes waiting on it resume. Since every plain write ends the work in flight, a batched one is queued even when the value is unchanged.
 
 #### Task
 
@@ -538,33 +514,41 @@ root((c) => {
 
 ### Error handling
 
-#### c.recover(), REFUSE, PANIC, FATAL
+#### c.recover(), REFUSE, PANIC, c.fatal()
 
-Every error in anod is a `Defect`: an object with an `error` field (the value) and a `type` field, one of three constants: `REFUSE` , `PANIC` , and `FATAL` . This lets you cleanly separate expected errors from unexpected crashes.
+A node that can't produce a value, or can't finish its run, fails with a `Defect`: an object with an `error` field (the value, anything you like) and a `type` field, `REFUSE` or `PANIC`. An owner can also end its whole tree with `c.fatal(x)`. What a node can do depends on its context, as everything else it does goes through `c`:
 
-* **`c.refuse(val)`** — non-throwing expected error for computes. Usage: `return c.refuse("invalid")`.
-* **`c.panic(val)`** — throwing expected error for computes and effects. Aborts the current run.
-* **`FATAL`** — any unexpected throw is automatically wrapped as a `Defect` with `type: FATAL`.
+| Context | Can do |
+| --- | --- |
+| compute, task | `return c.refuse(x)`, or `c.panic(x)` |
+| root, effect, spawn | `c.panic(x)`, or `c.fatal(x)` |
+| action | `c.panic(x)` |
+| the global `c` | nothing: wrap your app in a `root()` for error handling |
+| anywhere | any other `throw` is a `PANIC` |
 
-Effects and spawns support `c.recover()` to intercept errors. The handler receives the `Defect` and can branch on the type. Return `true` to swallow, `false` to propagate.
+* **`c.refuse(x)`**: a compute can't produce a value. It doesn't throw, so `return c.refuse(x)` costs no `try`/`catch`.
+* **`c.panic(x)`**: the run fails. A thrown error, an engine error and a rejected promise are panics too.
+* **`c.fatal(x)`**: the tree can't go on. It ends the tree at once: no handler is asked, the tree is torn down, and the flush throws a `Fatal`.
+
+Expected errors that are part of your data are better as plain values, such as `{ ok: true, value } | { ok: false, error }`: anod never looks inside a returned value.
+
+Roots, effects and spawns take `c.recover()` handlers. A handler that returns has handled the error. One that throws passes what it throws on: `throw err` passes the same error to the next handler and up the owners, `c.panic(x)` a new one, and `c.fatal(err)` escalates it. An effect has no value to refuse, so a `REFUSE` that reaches it, by reading a refused compute, becomes a `PANIC` with the same error: a handler only ever sees `PANIC`.
 
 ```ts
-import { root, signal, REFUSE, PANIC, FATAL } from "anod";
+import { root, signal } from "anod";
 root((c) => {
-	// Root-level handler: only log truly unexpected crashes
+	// Root-level handler: report what nothing below handled
 	c.recover((err) => {
-		if (err.type === FATAL) {
-			console.error("Bug detected:", err.error);
-		}
-		return true;
+		console.error("Unhandled:", err.error);
 	});
 
 	const url = signal("/api/data");
 	c.spawn(async (c) => {
 		c.recover((err) => {
-			if (err.type === FATAL) return false; // bubble FATAL to root
-			console.warn("Stale data, retrying on next change");
-			return true; // swallow, stay alive
+			if (!(err.error instanceof TypeError)) {
+				throw err; // not ours: pass it on to the root
+			}
+			console.warn("Network error, retrying on next change");
 		});
 		const res = await c.suspend(fetch(c.val(url)));
 		if (!res.ok) {
@@ -582,7 +566,7 @@ Effects and spawns support `c.finalize()` for guaranteed cleanup at the end of t
 The primary use case is async effects that acquire resources mid-activation and need guaranteed release. Without `finalize` , you'd have to duplicate cleanup logic in both the normal path and `recover` .
 
 ```ts
-import { root, signal, FATAL } from "anod";
+import { root, signal } from "anod";
 root((c) => {
 	const record = signal({ id: 1, name: "Ada" });
 	c.spawn(async (c) => {
@@ -599,7 +583,6 @@ root((c) => {
 		c.recover((err) => {
 			tx.abort();
 			console.warn("Write failed, rolled back:", err.error);
-			return true;
 		});
 		await c.suspend(store.put(c.val(record)));
 		tx.commit();
@@ -610,7 +593,7 @@ root((c) => {
 A few things to note:
 
 * Multiple `finalize` calls accumulate and run forward in registration order
-* Errors inside finalizers are swallowed, so a finalizer never replaces the run's result or error, unlike a throw inside a JS `finally`
+* A finalizer that throws fails the run with a `PANIC`, as a cleanup does (see [`c.cleanup()`](#ccleanup)), but it never replaces the run's own error, unlike a throw inside a JS `finally`
 * `finalize` does not bubble to parent effects, it's scoped to the activation it was registered in
 * When a re-run or dispose interrupts an activation still in flight, its finalizers run right after its controller is aborted, before its children are disposed and its cleanups run. A run that completes has run them already, so they always come before the teardown of the same activation
 * This differs from `cleanup`, which runs in reverse order (stack unwinding). Finalize is sequential post-completion work, not resource teardown
@@ -672,7 +655,13 @@ The nodes an effect or root created are disposed before its own cleanups run, bo
 
 Teardown always runs in the same order, on re-run and on dispose: the node's controller is aborted, the finalizers of a run still in flight run, the children are disposed, and then the node's own cleanups run. A cleanup always sees `c.controller().signal.aborted` as `true`. A compute has no finalizers or children, so it aborts and then runs its cleanups.
 
-A cleanup that throws doesn't stop the rest: every other cleanup still runs, and every child is still disposed. Its error never changes an outcome: the re-run goes ahead, no `recover` handler is asked, a run's own error is never replaced by it, and neither a write nor `dispose()` throws because of it.
+A cleanup that throws doesn't stop the rest: every other cleanup still runs, and every child is still disposed. Once the teardown has finished, the first error is a `PANIC`, handled like any other:
+
+* On a re-run, it goes to the `recover` handlers of the run the cleanup belonged to, which are dropped only after the cleanups. Handled there, the node re-runs. Otherwise it goes up the owners, and the node is disposed, as for any unhandled panic.
+* On dispose, it goes to the node's own handlers, then to the owners above it. Unhandled, `dispose()` or the write that caused it throws it, once the disposal has finished.
+* A compute has no handlers: its re-run fails with the error before its fn is called, and keeps its dependencies, so the next change runs it again.
+
+It never replaces an error: if the node is failing already, the cleanup's error is dropped and the first one kept, so a bug in a cleanup can't hide the failure that caused the teardown. A `c.fatal()` in a cleanup ends the tree, as it does anywhere else.
 
 ```ts
 import { root, signal } from "anod";
@@ -697,7 +686,7 @@ root((c) => {
 });
 ```
 
-### Contextual writes: `c.set()` / `c.post()`
+### Contextual writes: `c.set()`
 
 Inside a callback, `c.set(signal, value)` writes to a signal while preventing the current node from re-triggering itself. This enables the interceptor pattern: subscribe to a signal, observe writes from elsewhere in the app, persist or validate them asynchronously, and write back a correction if needed, without causing a circular dependency.
 
@@ -734,9 +723,7 @@ root((c) => {
 });
 ```
 
-`c.post(signal, value)` is the deferred variant — schedules the write for the next microtask flush, with the same self-notification guard.
-
-Both `c.set()` and `c.post()` also support writing to resources with an async callback: `c.set(resource, value, asyncFn)`. It writes as `resource.set(value, asyncFn)` would, optimistically and then async, and the node that writes is not run again by its own write, including the resource starting to load.
+`c.set()` also supports writing to resources with an async callback: `c.set(resource, value, asyncFn)`. It writes as `resource.set(value, asyncFn)` would, optimistically and then async, and the node that writes is not run again by its own write, including the resource starting to load.
 
 ### Async state checks: `c.pending()` / `c.rejected()`
 
@@ -936,54 +923,53 @@ batch(() => {
 
 ### Error recovery in depth
 
-anod provides a structured error model where every error is a `Defect`, with the value in `error` and the category in `type`:
+anod's error model is Go's, adapted to a graph. Errors that are data are plain values you return. Failures are a `Defect`, with the value in `error` and the category in `type`, and a tree that can't go on ends with `c.fatal(x)`:
 
-| Constant | Value | Meaning                      | How it's created       |
-| -------- | ----- | ---------------------------- | ---------------------- |
-| `REFUSE` | 1     | Expected error, non-throwing | `return c.refuse(val)`, or `throw refuse(val)` |
-| `PANIC` | 2     | Expected error, throwing     | `c.panic(val)`, or `throw panic(val)` |
-| `FATAL` | 3     | Unexpected crash             | Any uncaught `throw`, or `fatal(val)` |
+| Constant | Value | Meaning | How it's created |
+| -------- | ----- | ------- | ---------------- |
+| `REFUSE` | 1 | A compute can't produce a value | `return c.refuse(x)` |
+| `PANIC` | 2 | The run failed, a handler can stop it | `c.panic(x)`, or any other `throw` |
 
-**`c.refuse(val)`** is available on computes only. It sets the compute into an error state without throwing, the caller returns the error value. This is useful for validation: the compute can't produce a valid result, but it's not a crash.
+**`c.refuse(x)`** is available on computes and tasks. It sets the compute into an error state without throwing, and returns the `Defect` for the fn to return. A task keeps its previous value until the activation settles. Given a `Defect`, it keeps it rather than wrapping it again, so a compute can pass a failure it checked on: `return c.refuse(c.rejected(input))`.
 
-**`c.panic(val)`** is available on computes and effects. It throws, aborting the current run, but anod marks it as an expected error so recover handlers can distinguish it from crashes. anod uses it too: when a task is disposed while a node waits on it, the waiter is rejected with a `PANIC` (see [Stale activation safety](#stale-activation-safety)).
+**`c.panic(x)`** is available on computes, tasks, roots, effects and actions. It throws, failing the current run. Given a `REFUSE`, it throws a `PANIC` with the same error. Anything else thrown, an engine error such as `"Cycle detected"`, and a rejected promise are panics too. anod uses it as well: when a task is disposed while a node waits on it, the waiter is rejected with a `PANIC` (see [Stale activation safety](#stale-activation-safety)).
 
-**`FATAL`** is what you get when something throws unexpectedly, meaning, any thrown value that is not a `Defect`. anod wraps it once as a `Defect` with `type: FATAL`. A `Defect` keeps its type wherever it travels: through reads, awaits, owner chains, and your own `try/catch` that rethrows it.
+**`c.fatal(x)`** is available on roots, effects and spawns. See [Fatal errors](#fatal-errors).
 
-**`refuse(val)`, `panic(val)` and `fatal(val)`** are exported factories that create a `Defect` without a context, so helpers and library code can join anod's error model. Throw the result from anywhere inside a compute, effect or task:
+A `Defect` holds any value: a string when a message is enough, `c.refuse(new Error("…"))` when you want a stack, or an object with fields. It keeps its identity wherever it travels: through reads, awaits, owner chains, and your own `try`/`catch` that rethrows it. A reader of a failed compute either checks it, with `c.rejected(x)`, which returns the `Defect` or `null` without throwing, or passes it on, with `c.val(x)`, which throws the same `Defect`. A helper without a context fails by throwing, which is a `PANIC`, or by returning a value its compute passes to `c.refuse()`:
 
 ```ts
-import { c, signal, refuse, panic, Defect } from "anod";
+import { c, signal } from "anod";
 
-function parseAge(text: string): number {
+function parseAge(text: string): number | string {
 	const age = Number(text);
-	if (Number.isNaN(age)) throw refuse("not a number");
-	if (age < 0) throw panic("negative age");
+	if (Number.isNaN(age)) return "not a number";
+	if (age < 0) throw new RangeError("negative age"); // a bug upstream: a PANIC
 	return age;
 }
 
 const input = signal("42");
-const age = c.compute((c) => parseAge(c.val(input)));
+const age = c.compute((c) => {
+	const result = parseAge(c.val(input));
+	return typeof result === "string" ? c.refuse(result) : result;
+});
 // age.get() is 42, or a Defect with type REFUSE or PANIC
 ```
 
-Use `err instanceof Defect` to tell an anod error from any other value.
+`Defect` is exported as a type, so `c.rejected()` narrows; there is no public constructor.
 
 #### Recovery
 
-`c.recover()` intercepts errors before they dispose the node. The handler receives the `Defect` and returns `true` to swallow or `false` to propagate. If you register multiple recover hooks, they run forward, breaking at the first hook that returns true, or bubbles to next owner if none. A root's `recover()` is the last line of defense.
+`c.recover()` intercepts errors before they dispose the node. A handler that returns has handled the error, whatever it returns. If you register several, they run in registration order. A handler that throws passes what it throws on, to the next handler and then to the owner above: `throw err` the same error, `c.panic(x)` a new one, as a panic in a Go deferred call replaces the one being recovered. Handled by the node's own handler, the node survives; by an owner's, it is disposed and the error swallowed. A root's `recover()` is the last line of defense. What no handler takes is thrown to whoever started the flush: the write, the creation or the `dispose()`.
 
-This lets you build layered error handling: effects handle their own expected errors, and the root catches anything truly unexpected.
+This lets you build layered error handling: effects handle the errors they expect, and the root reports the rest.
 
 ```ts
-import { root, signal, REFUSE, PANIC, FATAL } from "anod";
+import { root, signal } from "anod";
 root((c) => {
-	// Root: catch unexpected crashes, report to error tracker
+	// Root: report anything nothing below handled
 	c.recover((err) => {
-		if (err.type === FATAL) {
-			reportToSentry(err.error);
-		}
-		return true;
+		reportToSentry(err.error);
 	});
 
 	// Compute uses refuse() for validation, just return error
@@ -995,15 +981,15 @@ root((c) => {
 		return val * 0.9;
 	});
 
-	// Spawn uses panic() when data is stale, throws expected error
+	// Spawn uses panic() when the token has expired
 	const token = signal("abc123");
 	c.spawn(async (c) => {
 		c.recover((err) => {
-			if (err.type === PANIC) {
-				console.warn("Auth issue, will retry:", err.error);
-				return true; // stay alive, retry on next token change
+			if (err.error !== "Token expired") {
+				throw err; // not ours: pass it on to the root
 			}
-			return false; // bubble FATAL to root
+			console.warn("Auth issue, will retry:", err.error);
+			// returned: handled, stays alive, retries on the next token change
 		});
 		let res = await c.suspend(
 			fetch("/api/me", {
@@ -1015,6 +1001,34 @@ root((c) => {
 		}
 	});
 });
+```
+
+#### Fatal errors
+
+`c.fatal(x)` means the tree can't go on. It's on roots, effects and spawns: only an owner has a tree to tear down. It is not an error the run fails with: it ends the tree the moment it's called, wherever it's called from, a compute that closed over an owner's `c` included.
+
+* **No handler is asked.** Nothing can handle it or stop it. It throws to stop the code that's running, but catching that changes nothing: the tree is ended already, and nothing in it runs again.
+* **Its tree is torn down**, once the code running in it has unwound: the outermost `root()` above it, or the effect made directly on the global `c`. As with `dispose(true)`, shields under it are ended rather than waited for, and the teardown runs in full, so listeners, timers, sockets and pending work are released. Errors the teardown throws are dropped.
+* **Other trees are left alone.** An app that wants all of it to go puts itself in one `root()`.
+* **The flush throws a `Fatal`** once it ends: an object whose `errors` holds what each `c.fatal(x)` of the flush was given, one or several, so you never branch on the count. It comes before any other error of the flush. It goes to whoever started the flush: the write, `root()`, the creation of the node, `dispose()`, or the caller of `c.fatal()` itself when nothing was running. After an `await`, it is thrown into the async function, and if that doesn't catch it, it is an unhandled rejection. A `Fatal` thrown again inside a node is an ordinary `PANIC`.
+
+anod has no policy for what happens next. Catch it where your app starts its work, or listen for the unhandled rejection, and decide: show an error page, reload, report.
+
+```ts
+import { root, Fatal } from "anod";
+try {
+	root((c) => {
+		c.effect((c) => {
+			if (!navigator.onLine) {
+				c.fatal(new Error("This app needs a connection"));
+			}
+		});
+	});
+} catch (err) {
+	if (err instanceof Fatal) {
+		showErrorPage(err.errors);
+	}
+}
 ```
 
 ## Async reactivity in depth
@@ -1254,7 +1268,7 @@ root((c) => {
 Every call within one activation returns the same controller, so several requests can share its signal. If you abort it yourself, the next call returns a fresh one.
 
 ```ts
-import { root, signal, FATAL } from "anod";
+import { root, signal } from "anod";
 root((c) => {
 	const url = signal("/api/data");
 	c.spawn(async (c) => {
@@ -1264,10 +1278,7 @@ root((c) => {
 		// and c.suspend() silently drops the stale activation.
 		// Use recover for errors in the current activation.
 		c.recover((err) => {
-			if (err.type === FATAL) {
-				console.error("Fetch failed:", err.error);
-			}
-			return true;
+			console.error("Fetch failed:", err.error);
 		});
 		const res = await c.suspend(fetch(endpoint, { signal: ctrl.signal }));
 		console.log(await c.suspend(res.json()));
@@ -1321,13 +1332,24 @@ app.dispose(); // Waits for the batch in flight, then tears down
 
 `dispose(true)` doesn't wait. It ends every shield under the node, aborts their controllers, runs the cleanups, and drops each shielded continuation at its next `c.suspend()`. It also works on a disposal that is already waiting. You need it when a shielded activation waits on something that only its own teardown would deliver, such as its controller's abort, or a cleanup of its owner or of one of its children. Those waits never end on their own.
 
+A shield waits for whatever the activation awaits, so a promise that never settles holds the node and every owner above it until `dispose(true)`. Put a timeout on the operation itself. The run then fails at the `await`, where it can roll back, and the shield ends with it:
+
+```ts
+c.spawn(async (c) => {
+	c.shield();
+	const signal = AbortSignal.any([c.controller().signal, AbortSignal.timeout(5000)]);
+	const res = await c.suspend(fetch(url, { signal }));
+	// ...
+});
+```
+
 ### Stale activation safety
 
 Every call to `c.suspend()` captures the current activation timestamp. When the promise resolves, anod checks whether the node has been re-run or disposed since the suspend was issued. If it has, the resolution is silently discarded. This guarantees that stale async results never pollute the current activation, even across complex chains of awaits.
 
 This applies to both resolve and reject: if a promise rejects after the node was invalidated, the error is also discarded. You are never notified about errors from stale activations.
 
-The same holds for awaiting a task, and for the callback form: a node that has been disposed never resumes, whatever it waits on. When a task is disposed, the nodes waiting on it are rejected once the disposal has finished, with a `Defect` of type `PANIC` ("Awaited task was disposed"). Signals and resources are not owned, so they are never disposed. It is `PANIC`, not `FATAL`, because nothing crashed: what you waited on was ended by its owner, like an `AbortError` from `fetch`. Every waiter gets the same value, through `await` and `onReject` alike. A waiter that the same disposal tore down (a spawn and the task it awaits, owned by the same root) is not told; a waiter elsewhere is. A shielded node (`c.shield()`) is not disposed until its activation finishes, so it is told, and is disposed once it completes.
+The same holds for awaiting a task, and for the callback form: a node that has been disposed never resumes, whatever it waits on. When a task is disposed, the nodes waiting on it are rejected once the disposal has finished, with a `Defect` of type `PANIC` ("Awaited task was disposed"). Signals and resources are not owned, so they are never disposed. It is a `PANIC`, which a handler can stop: what you waited on was ended by its owner, like an `AbortError` from `fetch`. Every waiter gets the same value, through `await` and `onReject` alike. A waiter that the same disposal tore down (a spawn and the task it awaits, owned by the same root) is not told; a waiter elsewhere is. A shielded node (`c.shield()`) is not disposed until its activation finishes, so it is told, and is disposed once it completes.
 
 A dropped continuation never runs, so it can't clean up after itself either. Register what a run acquires with `c.cleanup()`, which runs when the node runs again or is disposed, and call `c.shield()` when the run must finish.
 

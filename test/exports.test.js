@@ -1,7 +1,8 @@
 import { describe, test, expect } from "#test-runner";
 import * as anod from "#anod";
 import * as internal from "#anod-internal";
-import { signal, c, refuse } from "#anod";
+import { signal, c, REFUSE } from "#anod";
+import { Defect } from "#anod-internal";
 import path from "node:path";
 import ts from "typescript";
 
@@ -106,7 +107,8 @@ describe("declarations", () => {
 
     test("options, states and Defect types type-check where they belong", () => {
         const { diagnostics } = compile(`
-            import { c, signal, root, STABLE, WEAK, EAGER, DEFER, SETUP, DISPOSED, LOADING, ERROR, REFUSE, PANIC, Defect } from "./index.js";
+            import { c, signal, root, STABLE, WEAK, EAGER, DEFER, SETUP, DISPOSED, LOADING, ERROR, REFUSE, PANIC, Fatal } from "./index.js";
+            import type { Defect } from "./index.js";
             const s = signal(1);
             const n = c.compute((cx) => cx.val(s), void 0, STABLE);
             c.compute((cx) => cx.val(s), void 0, WEAK);
@@ -116,7 +118,7 @@ describe("declarations", () => {
             c.spawn(async (cx) => { cx.is(LOADING); }, STABLE);
             c.task(async (cx) => 1, void 0, EAGER);
             const a = c.action((cx) => { cx.set(s, cx.val(s) + 1); cx.pending(n); cx.rejected(n); cx.is(SETUP); }, STABLE);
-            c.action(s, (v: number, cx) => { cx.post(s, v); }, DEFER);
+            c.action(s, (v: number, cx) => { cx.set(s, v); }, DEFER);
             c.action(s, (v, cx, args: string) => {}, SETUP, "x");
             root((cx) => cx.action((cx) => {}));
             a.is(DISPOSED);
@@ -125,8 +127,25 @@ describe("declarations", () => {
             n.is(LOADING);
             s.is(ERROR);
             root((cx) => cx.is(DISPOSED));
-            const d = new Defect("x", PANIC);
-            if (d.type === REFUSE) {}
+            const d = c.compute((cx) => cx.rejected(n)).get();
+            if (d !== null && d.type === REFUSE) {}
+            c.compute((cx) => cx.refuse(new Error("x")));
+            c.compute((cx) => { cx.panic("x"); });
+            c.task(async (cx) => { cx.panic("x"); });
+            c.action((cx) => { cx.panic("x"); });
+            root((cx) => {
+                cx.recover((e: Defect) => {
+                    if (e.type === PANIC) {
+                        return;
+                    }
+                    cx.fatal(e);
+                });
+                cx.effect((cx) => { cx.panic("x"); });
+                cx.spawn(async (cx) => { cx.fatal("x"); });
+                cx.panic("x");
+            });
+            try { s.set(2); } catch (e) { if (e instanceof Fatal) { const errors: unknown[] = e.errors; } }
+            if (REFUSE === PANIC) {}
         `);
         expect(diagnostics).toEqual([]);
     });
@@ -142,7 +161,15 @@ describe("declarations", () => {
             "n.is(REFUSE);",
             "n.is(LOADING | ERROR);",
             "if (d.type === ERROR) {}",
-            "new Defect('x', STABLE);",
+            "new Defect('x', PANIC);",
+            "new Fatal();",
+            "c.panic('x');",
+            "c.recover(() => {});",
+            "c.compute((cx) => { cx.fatal('x'); });",
+            "c.compute((cx) => { cx.recover(() => {}); });",
+            "c.effect((cx) => { cx.refuse('x'); });",
+            "c.action((cx) => { cx.fatal('x'); });",
+            "c.action((cx) => { cx.refuse('x'); });",
             "n.stable();",
             "n.weak();",
             "n.eager();",
@@ -160,9 +187,9 @@ describe("declarations", () => {
             "c.action(() => {}).cleanup(() => {});"
         ];
         const header = [
-            `import { c, STABLE, WEAK, EAGER, LOADING, ERROR, REFUSE, PANIC, Defect } from "./index.js";`,
+            `import { c, STABLE, WEAK, EAGER, LOADING, ERROR, REFUSE, PANIC, Defect, Fatal } from "./index.js";`,
             "const n = c.compute(() => 1);",
-            `const d = new Defect("x", PANIC);`
+            `declare const d: import("./index.js").Defect;`
         ];
         /** One program for all the cases: each sits on its own line, in its own block. */
         const { lines } = compile(header.concat(cases.map((line) => `{ ${line} }`)).join("\n"));
@@ -186,6 +213,6 @@ describe("declarations", () => {
         expect(err).toBe(null);
         s1.set(20);
         c2.get();
-        expect(err).toEqual(refuse("too large"));
+        expect(err).toEqual(new Defect("too large", REFUSE));
     });
 });

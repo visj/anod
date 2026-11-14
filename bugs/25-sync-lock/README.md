@@ -22,9 +22,9 @@ A sync effect that locks and then throws is never disposed either. The owner's r
 
 ## Root cause
 
-FLAG_LOCKED is only cleared in `ComputeProto._settle` (`src/internal.js:2514`) and `EffectProto._settle` (`:3087`). A synchronous activation finishes in the sync tail of `_update` and never reaches `_settle`. After that:
+FLAG_SHIELD is only cleared in `ComputeProto._settle` (`src/internal.js:2514`) and `EffectProto._settle` (`:3087`). A synchronous activation finishes in the sync tail of `_update` and never reaches `_settle`. After that:
 
-- `_update` and `_receive` return early while FLAG_LOCKED is set (`:2642`, `:3195`).
+- `_update` and `_receive` return early while FLAG_SHIELD is set (`:2642`, `:3195`).
 - `_dispose` only sets FLAG_DISPOSED and waits for a settle that never comes (`:2604`, `:3147`).
 
 ## What anod should do
@@ -115,7 +115,7 @@ controller.abort();
 ```
 
 A real equivalent is a long-lived subscription that finishes only when aborted.
-`_dispose()` returns at `FLAG_LOCKED`, before aborting the controller. `_settle()` would
+`_dispose()` returns at `FLAG_SHIELD`, before aborting the controller. `_settle()` would
 clear the lock, but settlement requires that abort first. Resolving the wait from the
 same activation's cleanup/finalize would have the same causal problem (inferred, not
 separately probed).
@@ -240,7 +240,7 @@ On `fix/25-shield`, following [D10](../design/README.md#d10-clock-becomes-cshiel
 - A waiting disposal is recorded in `HOLDS`, not in FLAG_DISPOSED. The node isn't disposed yet, so reads and child creation work (D6 a), and the dispose drain's purge keeps it in its owner's children. `deferDispose` freezes the subtree with `pauseNode`, which moved to module level, and `resume()` does nothing in a frozen subtree.
 
 **Release:** `unshield` runs where the activation ends:
-- the sync tail of `EffectProto._update` (FLAG_LOCKED joins the mask it tests: this is bug 25);
+- the sync tail of `EffectProto._update` (FLAG_SHIELD joins the mask it tests: this is bug 25);
 - `EffectProto._settle`;
 - the throw paths in `flushEffects` and `failStart`, after the error handling (the throw case above).
 

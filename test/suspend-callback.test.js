@@ -1,5 +1,6 @@
 import { describe, test, expect } from "#test-runner";
-import { signal, root, c, REFUSE, PANIC, FATAL, refuse, LOADING, ERROR } from "#anod";
+import { signal, root, c, REFUSE, PANIC, LOADING, ERROR } from "#anod";
+import { Defect } from "#anod-internal";
 
 const tick = () => Promise.resolve();
 const settle = async (n = 10) => {
@@ -127,7 +128,7 @@ describe("c.suspend(task, onResolve, onReject)", () => {
 		});
 		g.reject("boom");
 		await settle();
-		expect(seen.type).toBe(FATAL);
+		expect(seen.type).toBe(PANIC);
 		expect(seen.error).toBe("boom");
 		expect(safe.is(ERROR)).toBe(false);
 		expect(safe.get()).toBe("fallback");
@@ -140,7 +141,7 @@ describe("c.suspend(task, onResolve, onReject)", () => {
 			let d = deferred();
 			src = r.task(async (cx) => {
 				await cx.suspend(d.promise);
-				throw refuse("bad");
+				throw new Defect("bad", REFUSE);
 			});
 			dst = r.task((cx) => {
 				cx.suspend(src, (v) => v);
@@ -173,7 +174,7 @@ describe("c.suspend(task, onResolve, onReject)", () => {
 		r.dispose();
 	});
 
-	test("a throwing onResolve fails the node as FATAL", async () => {
+	test("a throwing onResolve fails the node as PANIC", async () => {
 		let g, dst;
 		const r = root((r) => {
 			g = gate(r);
@@ -186,7 +187,7 @@ describe("c.suspend(task, onResolve, onReject)", () => {
 		g.resolve(1);
 		await settle();
 		expect(dst.is(ERROR)).toBe(true);
-		expect(dst.get().type).toBe(FATAL);
+		expect(dst.get().type).toBe(PANIC);
 		expect(dst.get().error).toBeInstanceOf(TypeError);
 		r.dispose();
 	});

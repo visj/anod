@@ -1,5 +1,9 @@
 import { describe, test, expect } from "#test-runner";
-import { signal, resource, root, batch, flush, c, REFUSE, PANIC, FATAL, refuse, panic, DEFER, STABLE, SETUP, WEAK, EAGER, DISPOSED, ERROR } from "#anod-src";
+import { signal, resource, root, batch, flush, c, REFUSE, PANIC, Fatal, DEFER, STABLE, SETUP, WEAK, EAGER, DISPOSED, ERROR } from "#anod-src";
+import { Defect } from "../../src/internal.js";
+
+const refuse = (error) => new Defect(error, REFUSE);
+const panic = (error) => new Defect(error, PANIC);
 
 /**
  * Exploratory tests: ownership, disposal, cleanup/finalize and error
@@ -360,11 +364,10 @@ describe("cleanup and finalize", () => {
     });
 
     /**
-     * A cleanup that throws runs once. Its error used to fail the effect;
-     * now it never changes an outcome, so the effect re-runs and the
-     * write does not throw.
+     * A cleanup that throws runs once. Its PANIC fails the re-run; with no
+     * handler to take it, the effect is disposed and the write throws.
      */
-    test("a cleanup that throws on re-run runs once and does not fail the effect", () => {
+    test("a cleanup that throws on re-run runs once and fails the effect", () => {
         const s = signal(0);
         let calls = 0;
         let e;
@@ -378,9 +381,9 @@ describe("cleanup and finalize", () => {
                 }
             });
         });
-        expect(() => s.set(1)).not.toThrow();
+        expect(() => s.set(1)).toThrow();
         expect(calls).toBe(1);
-        expect(e.is(DISPOSED)).toBe(false);
+        expect(e.is(DISPOSED)).toBe(true);
     });
 
     /**
@@ -424,7 +427,7 @@ describe("error propagation", () => {
      * `_recover` (src/internal.js:240-244). _checkRecover sees `undefined !==
      * null` and calls `.length` on undefined (src/internal.js:3149-3156).
      */
-    test("an unowned effect that throws on creation surfaces a FATAL error", () => {
+    test("an unowned effect that throws on creation surfaces a PANIC error", () => {
         let caught = null;
         try {
             c.effect(() => {
@@ -434,7 +437,7 @@ describe("error propagation", () => {
             caught = e;
         }
         expect(caught instanceof TypeError).toBe(false);
-        expect(caught.type).toBe(FATAL);
+        expect(caught.type).toBe(PANIC);
         expect(caught.error.message).toBe("boom");
     });
 
@@ -481,12 +484,12 @@ describe("error propagation", () => {
             root((r) => {
                 r.recover((e) => {
                     calls.push(["root", e.type, e.error instanceof Error]);
-                    return false;
+                    throw e;
                 });
                 r.effect((cx) => {
                     cx.recover((e) => {
                         calls.push(["outer", e.type, e.error instanceof Error]);
-                        return false;
+                        throw e;
                     });
                     cx.effect(() => {
                         throw new Error("inner");
@@ -496,8 +499,8 @@ describe("error propagation", () => {
         } catch (e) {
             caught = e;
         }
-        expect(calls).toEqual([["outer", FATAL, true], ["root", FATAL, true]]);
-        expect(caught.type).toBe(FATAL);
+        expect(calls).toEqual([["outer", PANIC, true], ["root", PANIC, true]]);
+        expect(caught.type).toBe(PANIC);
         expect(caught.error.message).toBe("inner");
     });
 
@@ -560,7 +563,9 @@ describe("error propagation", () => {
      * as FATAL because the effect itself never panicked
      * (src/internal.js:4191, 4248).
      */
-    test("an effect reading a refused compute hands recover the REFUSE error", () => {
+    /** An effect has no value to refuse: the REFUSE reaches recover as a
+     *  PANIC with the same error. */
+    test("an effect reading a refused compute hands recover a PANIC with the REFUSE's error", () => {
         const s = signal(-1);
         let unbound = null;
         let bound = null;
@@ -584,8 +589,8 @@ describe("error propagation", () => {
                 cx.effect(a, () => { });
             });
         });
-        expect(unbound).toEqual(refuse("neg"));
-        expect(bound).toEqual(refuse("neg"));
+        expect(unbound).toEqual(panic("neg"));
+        expect(bound).toEqual(panic("neg"));
     });
 
     /**
@@ -617,13 +622,13 @@ describe("error propagation", () => {
             await Promise.resolve();
         }
         await new Promise((resolve) => setTimeout(resolve, 5));
-        expect(seen.type).toBe(FATAL);
+        expect(seen.type).toBe(PANIC);
         expect(seen.error instanceof Error).toBe(true);
         expect(seen.error.message).toBe("task fail");
         r1.dispose();
     });
 
-    test("a disposed compute is not re-run by get() and c.val() reports ILLEGAL_READ as FATAL", () => {
+    test("a disposed compute is not re-run by get() and c.val() reports ILLEGAL_READ as PANIC", () => {
         let calls = 0;
         let got = "unset";
         let seen = null;
@@ -649,7 +654,7 @@ describe("error propagation", () => {
         });
         expect(calls).toBe(1);
         expect(got).toBe("Cannot read a disposed node or yourself");
-        expect(seen.type).toBe(FATAL);
+        expect(seen.type).toBe(PANIC);
         expect(seen.error.message).toBe("Cannot read a disposed node or yourself");
         r1.dispose();
     });
@@ -688,7 +693,7 @@ describe("error propagation", () => {
         s.set(1);
         expect(seen.length).toBe(1);
         expect(seen[0] instanceof Error).toBe(false);
-        expect(seen[0].type).toBe(FATAL);
+        expect(seen[0].type).toBe(PANIC);
         expect(seen[0].error.message).toBe("real");
     });
 

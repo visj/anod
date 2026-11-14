@@ -8,18 +8,18 @@ import {
     c,
     REFUSE,
     PANIC,
-    FATAL,
     DEFER,
     STABLE,
     SETUP,
     WEAK,
     EAGER,
-    refuse,
-    panic,
-    fatal,
     LOADING,
     ERROR,
 } from "#anod";
+import { Defect } from "#anod-internal";
+
+const refuse = (error) => new Defect(error, REFUSE);
+const panic = (error) => new Defect(error, PANIC);
 
 const tick = () => Promise.resolve();
 const settle = async (n = 10) => {
@@ -498,20 +498,6 @@ describe("resource", () => {
         expect(r.get()).toBe("new");
         expect(r.is(LOADING)).toBe(false);
     });
-
-    test("set() supersedes a queued post(value, asyncFn): asyncFn never runs", async () => {
-        const r = resource("a");
-        let ran = false;
-        r.post("x", async (c, v) => {
-            ran = true;
-            return v;
-        });
-        r.set("y");
-        await settle();
-        expect(ran).toBe(false);
-        expect(r.get()).toBe("y");
-        expect(r.is(LOADING)).toBe(false);
-    });
 });
 
 describe("callback suspend", () => {
@@ -548,7 +534,7 @@ describe("callback suspend", () => {
             });
         });
         expect(t.is(ERROR)).toBe(true);
-        expect(t.get()).toEqual(fatal("bad"));
+        expect(t.get()).toEqual(panic("bad"));
         r.dispose();
     });
 
@@ -918,7 +904,7 @@ describe("async iterators", () => {
         await settle();
         expect(t.is(ERROR)).toBe(true);
         expect(t.is(LOADING)).toBe(false);
-        expect(t.get().type).toBe(FATAL);
+        expect(t.get().type).toBe(PANIC);
         expect(t.get().error.message).toBe("late");
         r.dispose();
     });

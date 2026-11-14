@@ -60,8 +60,8 @@ describe("throw mid-drain: engine state afterwards", () => {
     });
 
     /**
-     * Expected: once the queue is gone, post(currentValue) returns false
-     * (nothing queued, value unchanged, see set-return.test.js).
+     * Expected: once the queue is gone, a batched set(currentValue) returns
+     * false (nothing queued, value unchanged, see set-return.test.js).
      * Actual: returns true. FLAG_SCHEDULED is still set although nothing is queued.
      * Root cause: the per-sender FLAG_SCHEDULED clear loop
      * (src/internal.js:4299-4302) is skipped when the drain throws, and on
@@ -77,7 +77,9 @@ describe("throw mid-drain: engine state afterwards", () => {
                 b.set(1);
             });
         }).toThrow();
-        expect(a.post(a.get())).toBe(false);
+        let ret;
+        batch(() => { ret = a.set(a.get()); });
+        expect(ret).toBe(false);
 
         const s = signal(0);
         const r = root((r) => {
@@ -85,7 +87,8 @@ describe("throw mid-drain: engine state afterwards", () => {
         });
         expect(() => s.set(1)).toThrow();
         r.dispose();
-        expect(s.post(s.get())).toBe(false);
+        batch(() => { ret = s.set(s.get()); });
+        expect(ret).toBe(false);
     });
 
     /**
@@ -198,7 +201,7 @@ describe("throw mid-drain: engine state afterwards", () => {
         } catch (e) {
             message = e.message;
         }
-        expect(message).toBe("Runaway cycle");
+        expect(message).toBe("Cycle detected");
         r.dispose();
 
         const r2 = root((r) => {
@@ -213,31 +216,6 @@ describe("throw mid-drain: engine state afterwards", () => {
         expect(s.get()).toBe(-1);
         expect(seen).toEqual([0, 1, 3]);
         r2.dispose();
-    });
-});
-
-describe("supersede edge cases", () => {
-    /**
-     * README: "If the updater throws, the posts stay queued." A set() that
-     * throws from its equality function has also written nothing.
-     * Expected: the earlier post(1) still applies (s === 1 after the microtask).
-     * Actual: s stays 0. The post was cancelled even though the set failed.
-     * Root cause: in set(), supersede(this) (src/internal.js:533-535) runs
-     * before the equality check (src/internal.js:536-540) instead of after
-     * it succeeds.
-     */
-    test("a set() whose equality function throws leaves earlier posts queued", async () => {
-        const s = signal(0, (p, n) => {
-            if (n === 99) {
-                throw new Error("bad");
-            }
-            return p === n;
-        });
-        s.post(1);
-        expect(() => s.set(99)).toThrow();
-        expect(s.get()).toBe(0);
-        await tick();
-        expect(s.get()).toBe(1);
     });
 });
 
@@ -387,28 +365,24 @@ describe("re-entrant flush", () => {
 
 describe("writes scheduled while the sender queue drains", () => {
     /**
-     * Expected: b.set(5) / b2.post(7), issued from an updater that runs at
-     * drain time, are applied.
-     * Actual: b and b2 stay 0. Both writes are lost.
+     * Expected: b.set(5), issued from an updater that runs at drain time,
+     * is applied.
+     * Actual: b stays 0. The write is lost.
      * Root cause: the drain iterates a snapshot `count` and then sets
      * SENDER_COUNT = 0 (src/internal.js:4291-4303). Entries appended past
      * `count` while draining are discarded (and their FLAG_SCHEDULED is left set).
      */
-    test("set() and post() from an updater running at drain time are applied", async () => {
+    test("set() from an updater running at drain time is applied", () => {
         const a = signal(0);
         const b = signal(0);
-        const b2 = signal(0);
         batch(() => {
             a.set((v) => {
                 b.set(5);
-                b2.post(7);
                 return v + 1;
             });
         });
         expect(a.get()).toBe(1);
         expect(b.get()).toBe(5);
-        await settle();
-        expect(b2.get()).toBe(7);
     });
 
     /**
@@ -419,12 +393,14 @@ describe("writes scheduled while the sender queue drains", () => {
      * Expected: saving === true, as on the idle r.set(value, fn) path.
      * Actual: saving stays false.
      */
-    test("a write made synchronously by a posted resource callback is applied", async () => {
+    test("a write made synchronously by a batched resource callback is applied", async () => {
         const r = resource("a");
         const saving = signal(false);
-        r.post("b", async (rc) => {
-            saving.set(true);
-            await rc.suspend(new Promise(() => {}));
+        batch(() => {
+            r.set("b", async (rc) => {
+                saving.set(true);
+                await rc.suspend(new Promise(() => {}));
+            });
         });
         await settle();
         expect(r.get()).toBe("b");
@@ -532,7 +508,7 @@ describe("resource writes in queued paths", () => {
      * Actual: r.get() is 0 and the callback sees 0. The single-arg resource
      * form snapshots `this._value` when queued, and asyncAssign writes that
      * snapshot back at drain time, reverting 5.
-     * Root cause: src/internal.js:516 (set) and :1878 (post) capture
+     * Root cause: src/internal.js:516 (set) captures
      * { _value: this._value } eagerly, and assign(node, payload._value)
      * (src/internal.js:665) re-applies it.
      */
@@ -550,22 +526,9 @@ describe("resource writes in queued paths", () => {
         expect(current).toBe(5);
     });
 
-    /** Same root cause through post(): src/internal.js:1878. */
-    test("resource post(asyncFn) after post(value) does not revert the posted value", async () => {
-        const r = resource(0);
-        let current = null;
-        r.post(5);
-        r.post((rr, cur) => {
-            current = cur;
-            return new Promise(() => {});
-        });
-        await tick();
-        expect(r.get()).toBe(5);
-        expect(current).toBe(5);
-    });
 });
 
-describe("contextual writes (c.set / c.post)", () => {
+describe("contextual writes (c.set)", () => {
     /**
      * Expected: after trigger.set(5), comp (which reads `a`) reflects a = 5.
      * Actual: comp.get() returns 0, a stale value, and never recomputes.
@@ -711,11 +674,11 @@ describe("contextual writes (c.set / c.post)", () => {
 
     /**
      * Expected: a paused spawn does not re-run when a dep changes.
-     * Actual: the spawn's own c.post (after an await) drains through
-     * guardedAssign, whose finally clears FLAG_PAUSED (src/internal.js:2016).
+     * Actual: the spawn's own c.set (after an await) clears FLAG_PAUSED
+     * when it releases the guard (src/internal.js:2016).
      * That silently resumes the spawn, and it re-runs on name.set("b").
      */
-    test("a paused spawn stays paused after its own contextual post drains", async () => {
+    test("a paused spawn stays paused after its own contextual set", async () => {
         const name = signal("a");
         const saved = signal(0);
         const seen = [];
@@ -725,7 +688,7 @@ describe("contextual writes (c.set / c.post)", () => {
             node = r.spawn(async (cx) => {
                 seen.push(cx.val(name));
                 await cx.suspend(new Promise((res) => { release = res; }));
-                cx.post(saved, 1);
+                cx.set(saved, 1);
             });
         });
         node.pause();
@@ -744,7 +707,7 @@ describe("contextual writes (c.set / c.post)", () => {
      * (src/internal.js:2016), so resume() is a no-op and the "b" update
      * is lost.
      */
-    test("resume() re-runs an effect that went stale while paused, even if its c.post drained meanwhile", async () => {
+    test("resume() re-runs an effect that went stale while paused, even if its c.set drained meanwhile", () => {
         const name = signal("a");
         const saved = signal(0);
         const seen = [];
@@ -756,10 +719,11 @@ describe("contextual writes (c.set / c.post)", () => {
                 seen.push(cx.val(name));
             });
         });
-        ctx.post(saved, 1);
         node.pause();
-        name.set("b");
-        await tick();
+        batch(() => {
+            ctx.set(saved, 1);
+            name.set("b");
+        });
         expect(saved.get()).toBe(1);
         node.resume();
         expect(seen).toEqual(["a", "b"]);
@@ -790,22 +754,6 @@ describe("contextual writes (c.set / c.post)", () => {
         r.dispose();
     });
 
-    test("an idle set supersedes a queued contextual post", async () => {
-        const s = signal(0);
-        let ctx;
-        const seen = [];
-        const r = root((r) => {
-            r.effect((cx) => { ctx = cx; });
-            r.effect(s, (v) => { seen.push(v); });
-        });
-        ctx.post(s, 1);
-        s.set(2);
-        await tick();
-        expect(s.get()).toBe(2);
-        expect(seen).toEqual([0, 2]);
-        r.dispose();
-    });
-
     test("self-guarded c.set inside a batch with other writes runs the writer once", () => {
         const a = signal(0);
         const b = signal(0);
@@ -824,88 +772,6 @@ describe("contextual writes (c.set / c.post)", () => {
         });
         expect(b.get()).toBe(6);
         expect(runs).toBe(1);
-        r.dispose();
-    });
-});
-
-describe("posts and microtasks", () => {
-    test("post, flush(), then post again in the same tick: both apply in order", async () => {
-        const s = signal(0);
-        const seen = [];
-        const r = root((r) => {
-            r.effect(s, (v) => { seen.push(v); });
-        });
-        s.post(1);
-        flush();
-        expect(s.get()).toBe(1);
-        s.post(2);
-        expect(s.get()).toBe(1);
-        await tick();
-        expect(s.get()).toBe(2);
-        expect(seen).toEqual([0, 1, 2]);
-        r.dispose();
-    });
-
-    test("post inside batch is applied when the batch ends, not deferred to the microtask", () => {
-        const s = signal(0);
-        batch(() => {
-            s.post(1);
-            expect(s.get()).toBe(0);
-        });
-        expect(s.get()).toBe(1);
-    });
-
-    test("post, await, post: each microtask flush notifies once", async () => {
-        const s = signal(0);
-        const seen = [];
-        const r = root((r) => {
-            r.effect(s, (v) => { seen.push(v); });
-        });
-        s.post(1);
-        s.post(2);
-        await tick();
-        s.post((v) => v + 1);
-        await tick();
-        expect(seen).toEqual([0, 2, 3]);
-        r.dispose();
-    });
-
-    test("a post from a microtask queued behind the pending microflush gets its own flush", async () => {
-        const s = signal(0);
-        const seen = [];
-        const r = root((r) => {
-            r.effect(s, (v) => { seen.push(v); });
-        });
-        s.post(1);
-        queueMicrotask(() => { s.post((v) => v + 1); });
-        await settle();
-        expect(s.get()).toBe(2);
-        expect(seen).toEqual([0, 1, 2]);
-        r.dispose();
-    });
-
-    test("an unchanged set does not flush pending posts on another signal early", async () => {
-        const a = signal(0);
-        const b = signal(0);
-        b.post(5);
-        expect(a.set(0)).toBe(false);
-        expect(b.get()).toBe(0);
-        await tick();
-        expect(b.get()).toBe(5);
-    });
-
-    test("a post written during a microflush by an effect is drained in the same flush", async () => {
-        const a = signal(0);
-        const b = signal(0);
-        const seen = [];
-        const r = root((r) => {
-            r.effect(a, (v) => { if (v) b.post(v * 10); });
-            r.effect(b, (v) => { seen.push(v); });
-        });
-        a.post(1);
-        await tick();
-        expect(b.get()).toBe(10);
-        expect(seen).toEqual([0, 10]);
         r.dispose();
     });
 });
@@ -976,9 +842,10 @@ describe("ordering and glitch-freedom", () => {
         expect(ret).toBe(false);
         expect(seen).toEqual([1]);
 
-        s.post({ id: 1 });
-        s.post({ id: 2 });
-        await tick();
+        batch(() => {
+            s.set({ id: 1 });
+            s.set({ id: 2 });
+        });
         expect(seen).toEqual([1, 2]);
         r.dispose();
     });

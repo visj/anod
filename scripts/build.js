@@ -72,8 +72,8 @@ async function build() {
                     reduce_funcs: false,
                 },
                 mangle: {
-                    /** Errors print as Defect { error, type }. */
-                    reserved: ["Defect"],
+                    /** Errors print as Defect { error, type } and Fatal { errors }. */
+                    reserved: ["Defect", "Fatal"],
                     properties: {
                         regex: /^_/
                     }

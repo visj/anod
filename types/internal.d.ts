@@ -40,13 +40,12 @@ export declare const FLAG_LOADING: number;
 export declare const FLAG_DEFER: number;
 export declare const FLAG_STABLE: number;
 export declare const FLAG_EQUAL: number;
-export declare const FLAG_NOTEQUAL: number;
 export declare const FLAG_ASYNC: number;
 export declare const FLAG_BOUND: number;
 export declare const FLAG_WAITER: number;
 export declare const FLAG_CHANNEL: number;
 export declare const FLAG_BLOCKED: number;
-export declare const FLAG_LOCKED: number;
+export declare const FLAG_SHIELD: number;
 export declare const FLAG_SUSPEND: number;
 export declare const FLAG_RELAY: number;
 export declare const FLAG_SINGLE: number;
@@ -78,26 +77,32 @@ export type Option = number & { readonly [OPTION]: true };
 export type EffectOption = Option & { readonly [EFFECT_OPTION]: true };
 /** A node state, read with `is()`: DISPOSED, LOADING or ERROR. */
 export type State = number & { readonly [STATE]: true };
-/** The type of a Defect: REFUSE, PANIC or FATAL. */
+/** The type of a Defect: REFUSE or PANIC. */
 export type DefectType = number & { readonly [DEFECT_TYPE]: true };
 
 export declare const REFUSE: DefectType;
 export declare const PANIC: DefectType;
-export declare const FATAL: DefectType;
 
-/** An error in the signal graph, tagged REFUSE, PANIC or FATAL. */
+/**
+ * An error in the signal graph, tagged REFUSE or PANIC. It holds
+ * any value: pass an `Error` when you want a stack. The public package
+ * exports it as a type only; fail a node through `c.refuse()`,
+ * `c.panic()` and `c.fatal()`.
+ */
 export declare class Defect<T = unknown> {
 	constructor(error: T, type: DefectType);
 	type: DefectType;
 	error: T;
 }
 
-/** Creates a REFUSE Defect. Throw it to settle a node as refused. */
-export declare function refuse<E>(error: E): Defect<E>;
-/** Creates a PANIC Defect. Throw it to abort a node. */
-export declare function panic<E>(error: E): Defect<E>;
-/** Creates a FATAL Defect. */
-export declare function fatal<E>(error: E): Defect<E>;
+/**
+ * What a flush throws once it ends after one or more `c.fatal()` calls,
+ * whose trees it has torn down: `errors` holds what each was given.
+ */
+export declare class Fatal {
+	private constructor();
+	readonly errors: unknown[];
+}
 
 /**
  * Skips the node's first run: a compute runs when it is first read, a
@@ -129,11 +134,6 @@ export declare const ERROR: State;
 /** Every bit `is()` answers for; the rest are internal. */
 export declare const PUBLIC: number;
 
-/* Recovery outcomes — who, if anyone, handled an error. */
-export declare const RECOVER_NONE: 0;
-export declare const RECOVER_SELF: 1;
-export declare const RECOVER_OWNER: 2;
-
 /** A thenable that never resolves, so an awaiting continuation never resumes. */
 export declare const REGRET: { then(): void };
 export declare const NOOP: () => void;
@@ -148,7 +148,6 @@ export interface ReadonlySignal<T = any> {
 
 export interface Signal<T = any> extends ReadonlySignal<T> {
 	set(value: T | ((prev: T) => T)): boolean;
-	post(value: T | ((prev: T) => T)): boolean;
 }
 
 export interface SignalConstructor {
@@ -165,19 +164,12 @@ export declare var Signal: SignalConstructor;
  */
 export interface MutableSignal<T = any> extends ReadonlySignal<T> {
 	set(value: T | ((prev: T) => T | void)): boolean;
-	post(value: T | ((prev: T) => T | void)): boolean;
 }
 
 export interface Resource<T = any> extends Signal<T> {
 	set(value: T): boolean;
 	set(fn: (c: ResourceContext, current: T) => T | Promise<T>): boolean;
 	set(
-		value: T | ((prev: T) => T),
-		fn: (c: ResourceContext, optimistic: T) => T | Promise<T>
-	): boolean;
-	post(value: T): boolean;
-	post(fn: (c: ResourceContext, current: T) => T | Promise<T>): boolean;
-	post(
 		value: T | ((prev: T) => T),
 		fn: (c: ResourceContext, optimistic: T) => T | Promise<T>
 	): boolean;
@@ -220,7 +212,7 @@ export interface ComputeConstructor {
 	new <T, U, W = undefined>(
 		fn: (val: T, c: ComputeContext, prev: U | undefined, args: W) => U,
 		opts: number,
-		dep1: Sender<T>,
+		dep1: ReadonlySignal<T>,
 		seed?: U,
 		args?: W
 	): Compute<U>;
@@ -236,7 +228,7 @@ export interface ComputeConstructor {
 		self: Compute<U>,
 		fn: (val: T, c: ComputeContext, prev: U | undefined, args: W) => U,
 		opts: number,
-		dep1: Sender<T>,
+		dep1: ReadonlySignal<T>,
 		seed?: U,
 		args?: W
 	): void;
@@ -250,7 +242,11 @@ export interface Task<T = any> extends Compute<T> {}
 export interface Root {
 	/** Whether the node has `flag` set: a creation option or a state. */
 	is(flag: Option | State): boolean;
-	recover(fn: (error: Defect) => boolean): void;
+	/**
+	 * A handler that returns has handled the error. One that throws passes
+	 * what it throws on, to the next handler and up the owners.
+	 */
+	recover(fn: (error: Defect) => void): void;
 	cleanup(fn: () => void): void;
 	/**
 	 * Disposes the root and everything it owns. A shielded effect under it
@@ -284,7 +280,7 @@ export interface EffectConstructor {
 	new <T, W = undefined>(
 		opts: number,
 		fn: (val: T, c: EffectContext, args: W) => void,
-		dep1: Sender<T>,
+		dep1: ReadonlySignal<T>,
 		owner: Owner | null,
 		args?: W
 	): Effect;
@@ -300,7 +296,7 @@ export interface EffectConstructor {
 		self: Effect,
 		opts: number,
 		fn: (val: T, c: EffectContext, args: W) => void,
-		dep1: Sender<T>,
+		dep1: ReadonlySignal<T>,
 		owner: Owner | null,
 		args?: W
 	): void;
@@ -334,7 +330,7 @@ export interface ActionConstructor {
 	new <T, W = undefined>(
 		opts: number,
 		fn: (val: T, c: ActionContext, args: W) => void,
-		dep1: Sender<T>,
+		dep1: ReadonlySignal<T>,
 		owner: Owner | null,
 		args?: W
 	): Action;
@@ -350,7 +346,7 @@ export interface ActionConstructor {
 		self: Action,
 		opts: number,
 		fn: (val: T, c: ActionContext, args: W) => void,
-		dep1: Sender<T>,
+		dep1: ReadonlySignal<T>,
 		owner: Owner | null,
 		args?: W
 	): void;
@@ -381,6 +377,8 @@ export interface ResourceContext {
 }
 
 export type Sender<T = any> = Signal<T> | MutableSignal<T> | Resource<T> | Compute<T> | Task<T>;
+/** What a contextual set() writes to: a signal or a resource. */
+export type Writable<T = any> = Signal<T> | MutableSignal<T> | Resource<T>;
 export type AsyncSender<T = any> = Resource<T> | Task<T>;
 /**
  * What suspend() gives for one of its inputs: a sender's or a promise's
@@ -411,24 +409,20 @@ export type Owner = Root | Effect;
 export type Disposer = Sender | Receiver | Root;
 
 /**
- * Bound action callback context: contextual set/post, pending/rejected
+ * Bound action callback context: contextual set, pending/rejected
  * checks and is(). The base of every other receiver context.
  */
 export interface ActionContext {
-	set<T>(sender: Sender<T>, value: T | ((prev: T) => T)): void;
+	set<T>(sender: Writable<T>, value: T | ((prev: T) => T)): void;
 	set<T>(
 		sender: Resource<T>,
 		value: T | ((prev: T) => T),
 		fn: (c: ResourceContext, optimistic: T) => T | Promise<T>
 	): void;
-	post<T>(sender: Sender<T>, value: T | ((prev: T) => T)): void;
-	post<T>(
-		sender: Resource<T>,
-		value: T | ((prev: T) => T),
-		fn: (c: ResourceContext, optimistic: T) => T | Promise<T>
-	): void;
-	pending(senders: Sender | Sender[]): boolean;
-	rejected(sender: Sender): Defect | null;
+	pending(senders: ReadonlySignal | ReadonlySignal[]): boolean;
+	rejected(sender: ReadonlySignal): Defect | null;
+	/** Fails the run with a PANIC. A REFUSE becomes a PANIC with its error. */
+	panic(val: unknown): never;
 	/** Whether this node has `flag` set: a creation option or a state. */
 	is(flag: Option | State): boolean;
 }
@@ -441,19 +435,22 @@ export interface Context extends ActionContext {
 	cleanup(fn: () => void): void;
 	version(): number;
 	controller(): AbortController;
-	defer<R>(sender: Sender<R>): R;
+	defer<R>(sender: ReadonlySignal<R>): R;
 }
 
 /** Dependency tracking — adds val() for reading and subscribing. */
 export interface Reader {
-	val<T>(sender: Sender<T>): T;
+	val<T>(sender: ReadonlySignal<T>): T;
 }
 
 /** Bound compute callback context. */
 export interface ComputeContext extends Context {
 	equal(equal?: boolean): void;
+	/**
+	 * Fails the compute with a REFUSE without throwing: return what it
+	 * returns. Given a Defect, it keeps it.
+	 */
 	refuse<E>(val: E): Defect<E>;
-	panic(val: unknown): never;
 	suspend(
 		fn: (resolve: (value?: any) => void, reject: (error?: any) => void) => void
 	): void;
@@ -465,14 +462,25 @@ export interface ComputeReader extends ComputeContext, Reader {}
 /** Root callback context — owned factories + lifecycle. */
 export interface RootContext extends Factory {
 	cleanup(fn: () => void): void;
-	recover(fn: (error: Defect) => boolean): void;
+	/**
+	 * A handler that returns has handled the error. One that throws passes
+	 * what it throws on, to the next handler and up the owners.
+	 */
+	recover(fn: (error: Defect) => void): void;
+	/** Fails the run with a PANIC. A REFUSE becomes a PANIC with its error. */
+	panic(val: unknown): never;
+	/**
+	 * Ends this owner's tree at once: no handler is asked, nothing in it
+	 * runs again, and the flush disposes it and throws a `Fatal`. Given
+	 * a Defect, it escalates its error.
+	 */
+	fatal(val: unknown): never;
 	/** Whether this node has `flag` set: a creation option or a state. */
 	is(flag: Option | State): boolean;
 }
 
 /** Bound effect callback context. */
 export interface EffectContext extends RootContext, Context {
-	panic(val: unknown): never;
 	finalize(fn: () => void): void;
 	/**
 	 * Lets the current activation run to completion: its re-run and
@@ -570,16 +578,16 @@ export interface Factory {
 	): Compute<U>;
 	// Bound compute
 	compute<T, U>(
-		dep: Sender<T>,
+		dep: ReadonlySignal<T>,
 		fn: (val: T, c: ComputeContext) => U
 	): Compute<U>;
 	compute<T, U>(
-		dep: Sender<T>,
+		dep: ReadonlySignal<T>,
 		fn: (val: T, c: ComputeContext, prev: U) => U,
 		seed: U
 	): Compute<U>;
 	compute<T, U, W>(
-		dep: Sender<T>,
+		dep: ReadonlySignal<T>,
 		fn: (val: T, c: ComputeContext, prev: U, args: W) => U,
 		seed: U,
 		opts?: Option,
@@ -612,13 +620,13 @@ export interface Factory {
 	): Task<U>;
 	// Bound task
 	task<T, U>(
-		dep: Sender<T>,
+		dep: ReadonlySignal<T>,
 		fn: (val: T, c: TaskContext, prev: Resolve<U>) => Promise<U> | Step<U>,
 		seed?: Resolve<U>,
 		opts?: Option
 	): Task<Resolve<U>>;
 	task<T, U>(
-		dep: Sender<T>,
+		dep: ReadonlySignal<T>,
 		fn: (val: T, c: TaskContext, prev: U) => void,
 		seed?: U,
 		opts?: Option
@@ -633,7 +641,7 @@ export interface Factory {
 	): Effect;
 	// Bound effect
 	effect<T>(
-		dep: Sender<T>,
+		dep: ReadonlySignal<T>,
 		fn: (val: T, c: EffectContext) => void,
 		opts?: EffectOption
 	): Effect;
@@ -650,7 +658,7 @@ export interface Factory {
 	): Spawn;
 	// Bound spawn
 	spawn<T>(
-		dep: Sender<T>,
+		dep: ReadonlySignal<T>,
 		fn: (val: T, c: SpawnContext) => Promise<void> | Step<unknown> | void,
 		opts?: EffectOption
 	): Spawn;
@@ -664,12 +672,12 @@ export interface Factory {
 	): Action;
 	// Bound action
 	action<T>(
-		dep: Sender<T>,
+		dep: ReadonlySignal<T>,
 		fn: (val: T, c: ActionContext) => void,
 		opts?: EffectOption
 	): Action;
 	action<T, W>(
-		dep: Sender<T>,
+		dep: ReadonlySignal<T>,
 		fn: (val: T, c: ActionContext, args: W) => void,
 		opts?: EffectOption,
 		args?: W

@@ -1,11 +1,7 @@
 export {
     REFUSE,
     PANIC,
-    FATAL,
-    Defect,
-    refuse,
-    panic,
-    fatal,
+    Fatal,
     DEFER,
     STABLE,
     SETUP,

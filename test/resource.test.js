@@ -141,7 +141,7 @@ describe("resource", () => {
                 return await c.suspend(Promise.reject(new Error("boom")));
             });
             await settle();
-            expect(r.get().type).toBe(3);
+            expect(r.get().type).toBe(2);
             expect(r.get().error.message).toBe("boom");
         });
 
@@ -305,84 +305,27 @@ describe("resource", () => {
             await new Promise((resolve) => setTimeout(resolve, 50));
             expect(r.get()).toBe("optimistic");
         });
-
-        test("post(asyncFn) defers everything to microtask", async () => {
-            const r = resource("old");
-            let asyncRan = false;
-            r.post(async (c, current) => {
-                asyncRan = true;
-                return await c.suspend(Promise.resolve("new"));
-            });
-            expect(r.get()).toBe("old");
-            expect(asyncRan).toBe(false);
-
-            await Promise.resolve();
-            expect(asyncRan).toBe(true);
-            expect(r.is(LOADING)).toBe(true);
-
-            await settle();
-            expect(r.get()).toBe("new");
-        });
     });
 
-    describe("post with async", () => {
-        test("post defers both optimistic write and asyncFn to drain", async () => {
-            const r = resource(0);
-            let asyncRan = false;
-            r.post(5, async (c, prev) => {
-                asyncRan = true;
-                return await c.suspend(Promise.resolve(prev));
-            });
-            /** Nothing has run yet — post defers everything. */
-            expect(r.get()).toBe(0);
-            expect(asyncRan).toBe(false);
-            expect(r.is(LOADING)).toBe(false);
-
-            /** After microtask flush: value written, asyncFn started. */
-            await Promise.resolve();
-            expect(r.get()).toBe(5);
-            expect(asyncRan).toBe(true);
-            expect(r.is(LOADING)).toBe(true);
-
-            await settle();
-            expect(r.is(LOADING)).toBe(false);
-        });
-
-        test("LWW works with post", async () => {
-            const r = resource(0);
-            r.post(1, async (c, prev) => {
-                return await c.suspend(
-                    new Promise((resolve) => setTimeout(() => resolve(prev), 20))
-                );
-            });
-            r.post(2, async (c, prev) => {
-                return await c.suspend(
-                    new Promise((resolve) => setTimeout(() => resolve(prev), 20))
-                );
-            });
-            await Promise.resolve();
-            expect(r.get()).toBe(2);
-            await new Promise((resolve) => setTimeout(resolve, 50));
-            expect(r.get()).toBe(2);
-        });
-
-        test("multiple posts resolve prev correctly through drain queue", async () => {
+    describe("async writes in a batch", () => {
+        test("queued updaters resolve prev correctly through the drain queue", async () => {
             let prevValues = [];
             const r = resource(0);
-            r.post((prev) => prev + 1, async (c, prev) => {
-                prevValues.push(prev);
-                return await c.suspend(Promise.resolve(prev));
+            batch(() => {
+                r.set((prev) => prev + 1, async (c, prev) => {
+                    prevValues.push(prev);
+                    return await c.suspend(Promise.resolve(prev));
+                });
+                r.set((prev) => prev + 10, async (c, prev) => {
+                    prevValues.push(prev);
+                    return await c.suspend(Promise.resolve(prev));
+                });
+                r.set((prev) => prev + 100, async (c, prev) => {
+                    prevValues.push(prev);
+                    return await c.suspend(Promise.resolve(prev));
+                });
+                expect(r.get()).toBe(0);
             });
-            r.post((prev) => prev + 10, async (c, prev) => {
-                prevValues.push(prev);
-                return await c.suspend(Promise.resolve(prev));
-            });
-            r.post((prev) => prev + 100, async (c, prev) => {
-                prevValues.push(prev);
-                return await c.suspend(Promise.resolve(prev));
-            });
-            expect(r.get()).toBe(0);
-            await Promise.resolve();
             /** Each updater sees the value AFTER previous updaters applied:
              *  0+1=1, 1+10=11, 11+100=111 */
             expect(r.get()).toBe(111);
@@ -429,7 +372,7 @@ describe("resource", () => {
             expect(data.get()).toEqual({ name: "bob" });
             await settle();
             expect(data.is(ERROR)).toBe(true);
-            expect(data.get().type).toBe(3);
+            expect(data.get().type).toBe(2);
         });
 
         test("effect sees optimistic then settled", async () => {

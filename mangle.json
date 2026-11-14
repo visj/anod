@@ -125,7 +125,7 @@
       "$FLAG_ASYNC": "di",
       "$FLAG_BOUND": "wi",
       "$FLAG_BLOCKED": "vi",
-      "$FLAG_LOCKED": "pi",
+      "$FLAG_SHIELD": "pi",
       "$FLAG_SUSPEND": "bi",
       "$ASYNC_PROMISE": "_i",
       "$ASYNC_ITERATOR": "ki",
@@ -232,7 +232,22 @@
       "$suspendWith": "En",
       "$startOwned": "mn",
       "$abortRun": "_n",
-      "$endRun": "jn"
+      "$endRun": "jn",
+      "$PENDING": "An",
+      "$callAll": "Cn",
+      "$throwIf": "Pn",
+      "$failure": "Mn",
+      "$bubble": "Sn",
+      "$raise": "qn",
+      "$killTree": "xn",
+      "$FATALS": "On",
+      "$settleIdle": "Rn",
+      "$endShields": "gn",
+      "$NESTED": "zn",
+      "$unwrap": "Bn",
+      "$FLAG_DISPOSING": "Dn",
+      "$SHIELDS": "Fn",
+      "$lockPath": "Gn"
     }
   },
   "props": {
@@ -277,7 +292,8 @@
       "$_changed": "$",
       "$_update": "tt",
       "$_receive": "it",
-      "$_dep1slot": "lt"
+      "$_dep1slot": "lt",
+      "$_wrap": "nt"
     }
   }
 }
