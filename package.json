@@ -27,7 +27,8 @@
   ],
   "scripts": {
     "make": "bun scripts/build.js",
-    "test": "bun test"
+    "test": "bun test",
+    "docs:check": "bun --preload ./docs/reference/_harness/svelte-plugin.js --conditions browser docs/reference/_harness/run.js"
   },
   "keywords": ["signals", "reactive", "async", "state", "compute", "effect"],
   "author": "Vilhelm Sjölund",
@@ -42,18 +43,24 @@
     "url": "https://github.com/visj/anod/issues"
   },
   "devDependencies": {
+    "@happy-dom/global-registrator": "^21.0.4",
     "@mitata/counters": "^0.0.8",
     "@preact/signals-core": "^1.14.1",
     "@reactively/core": "^0.0.8",
+    "@solidjs/signals": "^2.0.0-beta.8",
+    "@tanstack/react-query": "^5.107.1",
     "@zeix/cause-effect": "^1.2.1",
     "alien-signals": "^3.1.2",
+    "jotai": "^3.0.2",
     "mitata": "^1.0.34",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
     "rolldown": "^1.0.0-rc.9",
     "s-js": "^0.4.9",
+    "svelte": "^5.57.3",
     "terser": "^5.0.0",
     "typescript": "^6.0.3",
-    "usignal": "^0.10.0",
-    "@solidjs/signals": "^2.0.0-beta.8"
+    "usignal": "^0.10.0"
   },
   "imports": {
     "#anod": {
