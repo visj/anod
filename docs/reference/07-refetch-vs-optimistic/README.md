@@ -9,15 +9,13 @@ A refetch reads the server, and while it is in flight the user adds a todo, whic
 ## anod
 
 ```js
-const todos = resource(["a"]);
+const todos = resource(["a"], async (c) => await c.suspend(api.list(c.controller().signal)), DEFER);
 
-refetch: () => todos.set(async (c) => await c.suspend(api.list())),
-add: (text) => todos.set([...todos.get(), text], async (c) => await c.suspend(api.add(text))),
+refetch: () => todos.refresh(),
+add: (text) => todos.set((list) => [...list, text], () => api.add(text)),
 ```
 
-Any write to a resource ends the async write in flight: the refetch's continuation is dropped at its `c.suspend()`. The ordering is structural, so there's nothing to cancel by hand.
-
-- **Gap:** the refetch's request isn't aborted. It is only ignored, because a resource's async callback has no `c.controller()`. See [../README.md](../README.md#amendments).
+The loader is the refetch, and `refresh()` runs it. `DEFER` makes the seed the server's value until then, as `initialData` with `staleTime: Infinity` does in TanStack, and the `prev` check does in Solid; without it, the loader would load at mount, as a task runs at creation. A write supersedes the load in flight and aborts its controller, so the old snapshot is never shown. The add is a save, and what it returns is the server's list.
 
 ## React + TanStack Query
 
@@ -76,14 +74,14 @@ Async mode doesn't cover writes, so this is plain `$state`, with each write abor
 
 **anod and Solid solve it structurally.**
 
-- **anod:** a write supersedes the async write in flight on the same resource.
+- **anod:** a write supersedes the load in flight on the same resource, and aborts it.
 - **Solid:** optimistic layers are held through the action's transition.
 
 TanStack has a documented recipe. Jotai and Svelte leave it to you.
 
 | | Race handled by | Naive result |
 |---|---|---|
-| anod | a write ends the async write in flight | correct |
+| anod | a write supersedes and aborts the load in flight | correct |
 | React + TanStack Query | `cancelQueries` in `onMutate` | `a` comes back |
 | Solid 2.0 | `createOptimistic` + `action` + `refresh` | n/a (the optimistic API is the idiom) |
 | Jotai | hand-written abort | `a` comes back |

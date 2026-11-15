@@ -36,7 +36,3 @@ export const expected = {
 	shown: ["loading", "error: Server 500", "loading", "data: ok"],
 	events: ["reported: analytics down"]
 };
-
-export const gaps = {
-	anod: "a task that starts loading again doesn't tell its readers, so c.pending() never sees it (see ../README.md)"
-};

@@ -107,19 +107,18 @@ describe("declarations", () => {
 
     test("options, states and Defect types type-check where they belong", () => {
         const { diagnostics } = compile(`
-            import { c, signal, root, STABLE, WEAK, EAGER, DEFER, SETUP, DISPOSED, LOADING, ERROR, REFUSE, PANIC, Fatal } from "./index.js";
+            import { c, signal, root, STABLE, WEAK, EAGER, DEFER, DISPOSED, LOADING, ERROR, REFUSE, PANIC, Fatal } from "./index.js";
             import type { Defect } from "./index.js";
             const s = signal(1);
             const n = c.compute((cx) => cx.val(s), void 0, STABLE);
             c.compute((cx) => cx.val(s), void 0, WEAK);
             c.compute((cx) => cx.val(s), void 0, EAGER);
-            c.compute(s, (v) => v, void 0, SETUP);
             c.effect((cx) => { cx.is(STABLE); }, DEFER);
             c.spawn(async (cx) => { cx.is(LOADING); }, STABLE);
             c.task(async (cx) => 1, void 0, EAGER);
-            const a = c.action((cx) => { cx.set(s, cx.val(s) + 1); cx.pending(n); cx.rejected(n); cx.is(SETUP); }, STABLE);
+            const a = c.action((cx) => { cx.set(s, cx.val(s) + 1); cx.pending(n); cx.rejected(n); cx.is(STABLE); }, STABLE);
             c.action(s, (v: number, cx) => { cx.set(s, v); }, DEFER);
-            c.action(s, (v, cx, args: string) => {}, SETUP, "x");
+            c.action(s, (v, cx, args: string) => {}, DEFER, "x");
             root((cx) => cx.action((cx) => {}));
             a.is(DISPOSED);
             a.dispose();

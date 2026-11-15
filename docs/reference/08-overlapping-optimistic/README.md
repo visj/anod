@@ -12,19 +12,19 @@ A like button shows +1 at once and saves in the background. With one click at a 
 ## anod
 
 ```js
-likes.set(likes.get() + 1, async (c) => {
-	try {
-		return await c.suspend(api.like());
-	} catch {
-		return await c.suspend(api.count());
-	}
-});
+const likes = resource(0);
+
+like: () => likes.set((n) => n + 1, () => api.like()),
 ```
 
-Only the latest write's callback continues past `c.suspend()`: an older write's result or failure is dropped. So a rollback can never clobber a newer write. The latest write can't trust the value before it either, so on failure it resyncs with the server. `(saving)` is `c.pending(likes)`.
+A resource keeps the server's value next to its own. Each save that succeeds confirms what it returned, even one a newer click superseded, and only the newest save sets the value. When the newest save fails, the value falls back to the server's value. `(saving)` is `c.pending(likes)`, and `c.rejected(likes)` would give the error.
 
-- **Awkward:** the obvious rollback, `catch { return prev }`, is wrong in round 2, because `prev` is the first click's guess.
-- **Awkward:** "the last confirmed value" isn't available either. The first save's success arrives while it is already superseded, so its continuation never runs. It would have to be recorded in a `.then()` outside `c.suspend()`. Resyncing costs one request, but is simpler and always right.
+- **Round 1:** the first save returns 1 while the second is in flight, so the server's value is 1. The second fails, and the count falls back to 1.
+- **Round 2:** both fail, and the count falls back to 1, not to the first click's guess.
+
+There is no rollback code and no extra request.
+
+- **The caveat:** the server's value is only as good as what a save returns. Here `api.like()` returns the count. A save that returns nothing confirms its optimistic value, which is right for one writer but not when other users change the count too. For those, `refresh()` with a loader gets the real value, as Solid's `refresh(server)` does.
 
 ## React + TanStack Query
 
@@ -77,17 +77,16 @@ A `saving` counter and a `confirmed` value in `$state`. When the last save settl
 
 ## Verdict
 
-**Solid wins:** an optimistic layer reverts by itself, with no code.
+**anod and Solid:** a failed write reverts by itself, with no code.
 
-- **anod** is close: supersession makes the latest write the only one that settles. But the rollback target is up to you, and the natural `prev` is wrong.
+- **anod** keeps the server's value next to the value, and falls back to it. It needs no extra request.
+- **Solid** layers the optimistic writes over the server value, and drops them when the actions end; it refetches the server value with `refresh`.
 - **TanStack Query's** official recipe is wrong under overlap. The correct one is a non-obvious pattern from a blog post.
 - **Jotai and Svelte** need hand-written bookkeeping.
 
-This is the clearest case for an optimistic layer in anod: see [../README.md](../README.md#amendments).
-
 | | Rollback code | Naive recipe correct |
 |---|---|---|
-| anod | resync on failure | no (`return prev` is wrong) |
+| anod | none | yes |
 | React + TanStack Query | invalidate when last | no (official recipe is wrong) |
 | Solid 2.0 | none | yes |
 | Jotai | sequence number + confirmed | no |

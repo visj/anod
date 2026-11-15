@@ -34,7 +34,6 @@ export declare const FLAG_MUTABLE: number;
 export declare const FLAG_WEAK: number;
 
 /* Receiver flags (bits 7+) — only valid on Compute/Effect nodes. */
-export declare const FLAG_INIT: number;
 export declare const FLAG_SETUP: number;
 export declare const FLAG_LOADING: number;
 export declare const FLAG_DEFER: number;
@@ -64,17 +63,20 @@ export declare const FLAG_REFUSE: number;
 export {};
 declare const OPTION: unique symbol;
 declare const EFFECT_OPTION: unique symbol;
+declare const RESOURCE_OPTION: unique symbol;
 declare const STATE: unique symbol;
 declare const DEFECT_TYPE: unique symbol;
 
 /**
- * A creation option: STABLE, EAGER, WEAK, DEFER or SETUP. Pass one in a
+ * A creation option: STABLE, EAGER, WEAK or DEFER. Pass one in a
  * factory's `opts`; it is fixed once the node is created, and `is()`
  * reads it back.
  */
 export type Option = number & { readonly [OPTION]: true };
-/** The options an effect or spawn takes too: STABLE, DEFER and SETUP. */
+/** The options an effect or spawn takes too: STABLE and DEFER. */
 export type EffectOption = Option & { readonly [EFFECT_OPTION]: true };
+/** The option a resource takes too: DEFER. */
+export type ResourceOption = EffectOption & { readonly [RESOURCE_OPTION]: true };
 /** A node state, read with `is()`: DISPOSED, LOADING or ERROR. */
 export type State = number & { readonly [STATE]: true };
 /** The type of a Defect: REFUSE or PANIC. */
@@ -106,16 +108,15 @@ export declare class Fatal {
 
 /**
  * Skips the node's first run: a compute runs when it is first read, a
- * bound effect when its dep first changes.
+ * bound effect when its dep first changes, and a resource's loader on
+ * its first refresh().
  */
-export declare const DEFER: EffectOption;
+export declare const DEFER: ResourceOption;
 /**
  * Tracks dependencies on the first run only. Later runs read through
  * `c.val()` without subscribing. A bound node is always stable.
  */
 export declare const STABLE: EffectOption;
-/** A bound node also tracks the `c.val()` reads of its first run. */
-export declare const SETUP: EffectOption;
 /** A compute releases its value and runs its cleanups once it loses its last subscriber. */
 export declare const WEAK: Option;
 /** A compute re-runs as soon as a dependency changes, instead of when it is read. */
@@ -166,38 +167,47 @@ export interface MutableSignal<T = any> extends ReadonlySignal<T> {
 	set(value: T | ((prev: T) => T | void)): boolean;
 }
 
+/**
+ * An async signal. It keeps the server's value next to its own: a
+ * load, a save or a plain write confirms it, and the value falls back
+ * to it when the newest save fails.
+ */
 export interface Resource<T = any> extends Signal<T> {
+	/** A plain write: the value, and the server's value from now on. */
 	set(value: T): boolean;
-	set(fn: (c: ResourceContext, current: T) => T | Promise<T>): boolean;
+	/**
+	 * A save. It runs to completion, even when a newer write supersedes
+	 * it. What it returns is the server's value; returning nothing
+	 * confirms the current one. If it fails, the value is kept.
+	 */
+	set(fn: (c: ResourceContext, current: T) => T | void | Promise<T | void>): boolean;
+	/**
+	 * An optimistic write, then a save. What the save returns is the
+	 * server's value; returning nothing confirms the optimistic one. If
+	 * the newest save fails, the value falls back to the server's, and
+	 * is(ERROR) and c.rejected() report the error until the next write.
+	 */
 	set(
 		value: T | ((prev: T) => T),
-		fn: (c: ResourceContext, optimistic: T) => T | Promise<T>
+		fn: (c: ResourceContext, optimistic: T) => T | void | Promise<T | void>
 	): boolean;
+	/** Runs the loader again, to get the server's value. Without a loader, ignored. */
+	refresh(): void;
 }
 
-/** The signal behind resource() and signal(value, equal). */
-export interface Cell<T = any> extends Resource<T> {}
-
-export interface CellConstructor {
-	new <T>(
-		value: T,
-		flag: number,
-		equal: ((prev: T, next: T) => boolean) | null
-	): Cell<T>;
-	call<T>(
-		self: Cell<T>,
-		value: T,
-		flag: number,
-		equal: ((prev: T, next: T) => boolean) | null
-	): void;
-	readonly prototype: Cell;
+export interface ResourceConstructor {
+	new <T>(value: T, flag: number, loader: Loader<T> | null): Resource<T>;
+	call<T>(self: Resource<T>, value: T, flag: number, loader: Loader<T> | null): void;
+	readonly prototype: Resource;
 }
 
-export declare var Cell: CellConstructor;
+export declare var Resource: ResourceConstructor;
 
 export interface Compute<T = any> extends ReadonlySignal<T> {
 	dispose(): void;
 	cleanup(fn: () => void): void;
+	/** Runs the compute again, as if a dependency had changed. */
+	refresh(): void;
 }
 
 /** Pass `null` as `dep1` for an unbound compute, or a sender to bind it. */
@@ -266,7 +276,10 @@ export interface RootConstructor {
 
 export declare var Root: RootConstructor;
 
-export interface Effect extends Root {}
+export interface Effect extends Root {
+	/** Runs the effect again, as if a dependency had changed. */
+	refresh(): void;
+}
 
 /** Pass `null` as `dep1` for an unbound effect, or a sender to bind it. */
 export interface EffectConstructor {
@@ -315,6 +328,8 @@ export interface Spawn extends Effect {}
 export interface Action {
 	/** Whether the node has `flag` set: a creation option or a state. */
 	is(flag: Option | State): boolean;
+	/** Runs the action again, as if a dependency had changed. */
+	refresh(): void;
 	dispose(): void;
 }
 
@@ -366,7 +381,7 @@ export interface ChannelConstructor {
 
 export declare var Channel: ChannelConstructor;
 
-/** Context available inside resource asyncFn callbacks. */
+/** Context of a save, and the base of a loader's. */
 export interface ResourceContext {
 	suspend<T>(promise: Promise<T>): Promise<T>;
 	suspend(
@@ -375,6 +390,21 @@ export interface ResourceContext {
 	/** The current activation's sequence number; each async write bumps it. */
 	version(): number;
 }
+
+/**
+ * Context of a loader. Its controller is aborted when a newer load,
+ * save or write supersedes the load. A save has no controller: it runs
+ * to completion.
+ */
+export interface LoaderContext extends ResourceContext {
+	controller(): AbortController;
+}
+
+/** Loads a resource: at creation, and on each refresh(). */
+export type Loader<T = any> = (
+	c: LoaderContext,
+	current: T
+) => T | void | Promise<T | void> | AsyncIterable<T>;
 
 export type Sender<T = any> = Signal<T> | MutableSignal<T> | Resource<T> | Compute<T> | Task<T>;
 /** What a contextual set() writes to: a signal or a resource. */
@@ -417,14 +447,23 @@ export interface ActionContext {
 	set<T>(
 		sender: Resource<T>,
 		value: T | ((prev: T) => T),
-		fn: (c: ResourceContext, optimistic: T) => T | Promise<T>
+		fn: (c: ResourceContext, optimistic: T) => T | void | Promise<T | void>
 	): void;
+	/** Whether anything this node has read in its current run is loading. */
+	pending(): boolean;
+	/** Whether a sender, or any of several, is loading. Subscribes to them. */
 	pending(senders: ReadonlySignal | ReadonlySignal[]): boolean;
 	rejected(sender: ReadonlySignal): Defect | null;
 	/** Fails the run with a PANIC. A REFUSE becomes a PANIC with its error. */
 	panic(val: unknown): never;
 	/** Whether this node has `flag` set: a creation option or a state. */
 	is(flag: Option | State): boolean;
+	/**
+	 * Runs this node again, as if a dependency had changed: for a value
+	 * derived from outside the graph. Called during the run, it runs
+	 * again once the run is done.
+	 */
+	refresh(): void;
 }
 
 /**
@@ -710,18 +749,16 @@ export declare function startCompute(node: Compute): void;
 export declare function startEffect(node: Effect | Action): void;
 
 export declare function signal<T>(value: T): Signal<T>;
-export declare function signal<T>(
-	value: T,
-	equals: false
-): MutableSignal<T>;
-export declare function signal<T>(
-	value: T,
-	equals: (prev: T, next: T) => boolean
-): Signal<T>;
-export declare function resource<T>(value: T): Resource<T>;
+export declare function signal<T>(value: T, mutable: false): MutableSignal<T>;
+/**
+ * An async signal seeded with `value`. A loader loads it at once, and
+ * again on each refresh(); with DEFER, the seed is the server's value
+ * until the first refresh().
+ */
 export declare function resource<T>(
 	value: T,
-	equals?: false | ((prev: T, next: T) => boolean)
+	loader?: Loader<NoInfer<T>>,
+	opts?: ResourceOption
 ): Resource<T>;
 export declare function root(fn: (c: RootContext) => void): Root;
 export declare function batch(fn: () => void): void;

@@ -1,14 +1,13 @@
-import { root, signal } from "anod";
+import { root } from "anod";
 
 export function mount({ api, show }) {
-	/** There is no refetch(): a task re-runs when something it reads changes. */
-	const attempt = signal(0);
+	let data;
 
 	const app = root((c) => {
 		/** The app-level handler: whatever nothing below handles. */
 		c.recover((err) => api.report(err.error));
 
-		const data = c.task(attempt, async (_, c) => await c.suspend(api.load()));
+		data = c.task(async (c) => await c.suspend(api.load()));
 
 		c.effect((c) => {
 			const err = c.rejected(data);
@@ -28,7 +27,8 @@ export function mount({ api, show }) {
 	});
 
 	return {
-		retry: () => attempt.set((n) => n + 1),
+		/** Runs the task again, with nothing it reads changed. */
+		retry: () => data.refresh(),
 		unmount: () => app.dispose()
 	};
 }

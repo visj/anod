@@ -192,11 +192,17 @@ describe("c.equal()", () => {
     test("equal(false) after an await is cleared for the next run", async () => {
       const settle = () => Promise.resolve().then(() => {}).then(() => {});
       const s1 = signal(1);
-      const t = c.task(async (cx) => {
-        const val = cx.val(s1);
-        await cx.suspend(Promise.resolve());
-        if (val % 2 === 1) {
-          cx.equal(false);
+      /**
+       * Odd inputs settle async, after equal(false); even ones return
+       * at once. An async settle always notifies (it ends a loading its
+       * readers saw), so the leak would show on the sync run after it.
+       */
+      const t = c.task((cx) => {
+        if (cx.val(s1) % 2 === 1) {
+          return cx.suspend(Promise.resolve()).then(() => {
+            cx.equal(false);
+            return 42;
+          });
         }
         return 42;
       });
@@ -211,12 +217,14 @@ describe("c.equal()", () => {
       s1.set(3);
       t.get();
       await settle();
-      expect(runs).toBe(2);
+      /** Told when it started loading, and when it settled. */
+      expect(runs).toBe(3);
 
+      /** Sync, and 42 again: equal(false) from the last run is gone. */
       s1.set(4);
       t.get();
-      await settle();
-      expect(runs).toBe(2);
+      expect(runs).toBe(3);
     });
+
   });
 });

@@ -1,6 +1,7 @@
 import { root, resource } from "anod";
 
 export function mount({ api, show }) {
+	/** Seeded with the count the page was rendered with. */
 	const likes = resource(0);
 
 	const app = root((c) => {
@@ -11,19 +12,12 @@ export function mount({ api, show }) {
 	});
 
 	return {
-		like: () =>
-			likes.set(likes.get() + 1, async (c) => {
-				try {
-					return await c.suspend(api.like());
-				} catch {
-					/**
-					 * Only the latest write gets here: an older one's result
-					 * or failure is dropped. The value before this write may
-					 * be another unconfirmed guess, so resync with the server.
-					 */
-					return await c.suspend(api.count());
-				}
-			}),
+		/**
+		 * A save: what api.like() returns is the server's count. When the
+		 * newest save fails, the value falls back to the last count the
+		 * server confirmed, even one a superseded save returned.
+		 */
+		like: () => likes.set((n) => n + 1, () => api.like()),
 		unmount: () => app.dispose()
 	};
 }

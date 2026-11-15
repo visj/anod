@@ -1318,6 +1318,230 @@ describe("async", () => {
       expect(observed).toBe(30);
     });
 
+    test("a task that loads again tells its readers, then settles", async () => {
+      const page = signal(1);
+      const t = c.task(page, async (n, c) => {
+        await c.suspend(Promise.resolve());
+        return n;
+      });
+      await settle();
+      const seen = [];
+      c.effect((c) => {
+        const n = c.val(t);
+        seen.push(c.pending(t) ? `${n} loading` : `${n}`);
+      });
+      page.set(2);
+      await settle();
+      expect(seen).toEqual(["1", "1 loading", "2"]);
+    });
+
+    test("an unbound task read only through c.pending() is seen loading again", async () => {
+      const page = signal(1);
+      const t = c.task(async (c) => {
+        const n = c.val(page);
+        await c.suspend(Promise.resolve());
+        return n;
+      });
+      await settle();
+      const seen = [];
+      c.effect((c) => {
+        seen.push(c.pending(t));
+      });
+      page.set(2);
+      await settle();
+      expect(seen).toEqual([false, true, false]);
+    });
+
+    test("a callback suspend that loads again tells its readers", () => {
+      const name = signal("a");
+      let resolve;
+      const t = c.task(name, (n, c) => {
+        c.suspend((res) => { resolve = () => res(n); });
+      });
+      resolve();
+      const seen = [];
+      c.effect((c) => {
+        seen.push(c.pending(t) ? "loading" : c.val(t));
+      });
+      name.set("b");
+      resolve();
+      expect(seen).toEqual(["a", "loading", "b"]);
+    });
+
+    test("a settle to the same value still ends the loading", async () => {
+      const page = signal(1);
+      const t = c.task(page, async (_, c) => {
+        await c.suspend(Promise.resolve());
+        return "same";
+      });
+      await settle();
+      const seen = [];
+      c.effect((c) => {
+        seen.push(c.pending(t));
+      });
+      page.set(2);
+      await settle();
+      expect(seen).toEqual([false, true, false]);
+    });
+
+    test("a task that runs again while loading doesn't tell its readers twice", async () => {
+      const page = signal(1);
+      let resolve;
+      const t = c.task(page, (n, c) => c.suspend(new Promise((r) => { resolve = () => r(n); })));
+      resolve();
+      await settle();
+      let runs = 0;
+      c.effect((c) => {
+        c.pending(t);
+        runs++;
+      });
+      page.set(2);
+      expect(runs).toBe(2);
+      page.set(3);
+      expect(runs).toBe(2);
+      resolve();
+      await settle();
+      expect(runs).toBe(3);
+      expect(t.get()).toBe(3);
+    });
+
+    test("a spawn waiting on a task that loads again stays suspended", async () => {
+      const page = signal(1);
+      let resolve;
+      const t = c.task(page, (n, c) => c.suspend(new Promise((r) => { resolve = () => r(n); })));
+      const seen = [];
+      let runs = 0;
+      c.spawn(async (c) => {
+        runs++;
+        seen.push(await c.suspend(t));
+      });
+      page.set(2);
+      expect(runs).toBe(1);
+      resolve();
+      await settle();
+      expect(seen).toEqual([2]);
+      expect(runs).toBe(1);
+    });
+
+    test("c.pending() with no argument: is anything read so far loading", async () => {
+      const id = signal(1);
+      const user = c.task(id, async (n, c) => {
+        await c.suspend(Promise.resolve());
+        return "user" + n;
+      });
+      const posts = c.task(id, async (n, c) => {
+        await c.suspend(Promise.resolve());
+        await c.suspend(Promise.resolve());
+        return "posts" + n;
+      });
+      const seen = [];
+      c.effect((c) => {
+        const u = c.val(user);
+        const p = c.val(posts);
+        seen.push(c.pending() ? "loading" : `${u} ${p}`);
+      });
+      await settle();
+      await settle();
+      id.set(2);
+      await settle();
+      await settle();
+      /** user settles first: the effect runs again, posts still loading. */
+      expect(seen).toEqual([
+        "loading", "loading", "user1 posts1",
+        "loading", "loading", "user2 posts2"
+      ]);
+    });
+
+    test("c.pending() only counts what was read before it", async () => {
+      let resolve;
+      const t = c.task((c) => c.suspend(new Promise((r) => { resolve = r; })));
+      const seen = [];
+      c.effect((c) => {
+        const before = c.pending();
+        c.val(t);
+        seen.push([before, c.pending()]);
+      });
+      expect(seen).toEqual([[false, true]]);
+      resolve(1);
+      await settle();
+      expect(seen[seen.length - 1]).toEqual([false, false]);
+    });
+
+    test("c.pending() in a first run sees a loading dep that isn't the first read", async () => {
+      const ready = signal("ready");
+      let resolve;
+      const t = c.task((c) => c.suspend(new Promise((r) => { resolve = r; })));
+      let seen = null;
+      c.effect((c) => {
+        c.val(ready);
+        c.val(t);
+        seen = c.pending();
+      });
+      expect(seen).toBe(true);
+      resolve(1);
+      await settle();
+      expect(seen).toBe(false);
+    });
+
+    test("c.pending() ignores a dep of the last run that this run didn't read", async () => {
+      const id = signal(1);
+      const useTask = signal(true);
+      const t = c.task(id, async (n, c) => {
+        await c.suspend(Promise.resolve());
+        return n;
+      });
+      await settle();
+      const s = signal("plain");
+      const seen = [];
+      c.effect((c) => {
+        c.val(c.val(useTask) ? t : s);
+        seen.push(c.pending());
+      });
+      /** t loads again, and the effect sees it. */
+      id.set(2);
+      /** While t loads, the effect stops reading it. */
+      useTask.set(false);
+      expect(t.is(LOADING)).toBe(true);
+      expect(seen).toEqual([false, true, false]);
+    });
+
+
+    test("c.pending() in a stable node and in a bound one", async () => {
+      const id = signal(1);
+      const t = c.task(id, async (n, c) => {
+        await c.suspend(Promise.resolve());
+        return n;
+      });
+      await settle();
+      const stable = [];
+      const bound = [];
+      c.effect((c) => {
+        c.val(t);
+        stable.push(c.pending());
+      }, STABLE);
+      c.effect(t, (_, c) => {
+        bound.push(c.pending());
+      });
+      id.set(2);
+      await settle();
+      expect(stable).toEqual([false, true, false]);
+      expect(bound).toEqual([false, true, false]);
+    });
+
+    test("c.pending() after an await sees the deps read since", async () => {
+      let resolve;
+      const t = c.task((c) => c.suspend(new Promise((r) => { resolve = r; })));
+      let seen = null;
+      c.spawn(async (c) => {
+        await c.suspend(Promise.resolve());
+        c.val(t);
+        seen = c.pending();
+      });
+      await settle();
+      expect(seen).toBe(true);
+      resolve(1);
+    });
+
     test("task stays pull-based when no promise waiters", async () => {
       const s1 = signal(1);
       let taskRuns = 0;

@@ -14,7 +14,7 @@ export function mount({ api, show }) {
 
 		c.effect((c) => {
 			if (c.pending(result)) {
-				show(`looking up ${name.get()}`);
+				show(`looking up ${c.val(name)}`);
 			} else {
 				const { name, id } = c.val(result);
 				show(`${name} is #${id}`);

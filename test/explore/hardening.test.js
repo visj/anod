@@ -8,7 +8,6 @@ import {
     REFUSE,
     PANIC,
     WEAK,
-    SETUP,
     DEFER,
     EAGER,
     STABLE,
@@ -128,26 +127,6 @@ describe("23: a plain write leaves a resource errored", () => {
         });
         expect(r.get()).toBe(7);
         expect(r.is(ERROR)).toBe(false);
-    });
-
-    /**
-     * Ending the error is a change by itself, so the write never asks
-     * the equality function to compare a value with the Defect.
-     * Actual: equal(Defect, { id: 1 }) is called.
-     */
-    test("a plain write to an errored resource does not call equal with the Defect", () => {
-        const seen = [];
-        const r = resource({ id: 1 }, (a, b) => {
-            seen.push(a, b);
-            return a.id === b.id;
-        });
-        r.set(() => {
-            throw new Error("boom");
-        });
-        r.set({ id: 1 });
-        expect(seen.some((v) => v instanceof Defect)).toBe(false);
-        expect(r.is(ERROR)).toBe(false);
-        expect(r.get()).toEqual({ id: 1 });
     });
 });
 
@@ -814,14 +793,15 @@ describe("29: c.version() in a resource callback", () => {
     });
 });
 
-describe("30: c.equal() is ignored when a task settles asynchronously", () => {
+describe("30: an async settle notifies, whatever c.equal() says", () => {
     /**
-     * README: c.equal() controls "whether downstream subscribers are
-     * notified after a compute re-runs". ComputeProto._settle never reads
-     * FLAG_EQUAL / FLAG_MUTABLE; only the sync tail of _update does.
-     * Expected: 1 run. Actual: 2.
+     * Bug 30 asked c.equal() to control the notification of an async
+     * settle. A task that starts loading tells its readers, so that a
+     * reader of c.pending() sees it, and its settle ends that, so it
+     * tells them again even when the value is the same: the readers
+     * run when it starts loading and when it settles, as a resource's do.
      */
-    test("c.equal(true) after an await keeps subscribers idle", async () => {
+    test("c.equal(true) after an await still ends the loading its readers saw", async () => {
         const id = signal(1);
         const t = c.task(async (cx, prev) => {
             cx.val(id);
@@ -830,18 +810,16 @@ describe("30: c.equal() is ignored when a task settles asynchronously", () => {
             return data;
         });
         await settle();
-        let runs = 0;
+        const seen = [];
         c.effect((cx) => {
-            cx.val(t);
-            runs++;
+            seen.push(cx.pending(t));
         });
         id.set(2);
         t.get();
         await settle();
-        expect(runs).toBe(1);
+        expect(seen).toEqual([false, true, false]);
     });
 
-    /** Expected: 2 runs. Actual: 1, since the reference is unchanged. */
     test("c.equal(false) after an await notifies subscribers of the same reference", async () => {
         const shared = { n: 0 };
         const s = signal(0);
@@ -853,15 +831,14 @@ describe("30: c.equal() is ignored when a task settles asynchronously", () => {
             return shared;
         });
         await settle();
-        let runs = 0;
+        const seen = [];
         c.effect((cx) => {
-            cx.val(t);
-            runs++;
+            seen.push(cx.val(t).n);
         });
         s.set(1);
         t.get();
         await settle();
-        expect(runs).toBe(2);
+        expect(seen).toEqual([1, 1, 2]);
     });
 });
 
@@ -992,21 +969,20 @@ describe("D4: a bound node whose dep was disposed", () => {
         const other = root((r) => {
             dep = r.compute(() => 1);
         });
-        const k = signal(0);
         const errors = [];
         let calls = 0;
+        let e;
         root((r) => {
             r.recover((err) => {
                 errors.push(err.error.message);
                 return true;
             });
-            r.effect(dep, (v, cx) => {
+            e = r.effect(dep, () => {
                 calls++;
-                cx.val(k);
-            }, SETUP);
+            });
         });
         other.dispose();
-        k.set(1);
+        e.refresh();
         expect(calls).toBe(1);
         expect(errors.length).toBe(1);
         expect(errors[0]).toMatch(/disposed/);
@@ -1501,24 +1477,6 @@ describe("37: a cleanup error that is already a Defect is wrapped again", () => 
         expect(err.error).toBe("bye");
         s.set(2);
         expect(comp.get()).toBe(2);
-    });
-});
-
-describe("38: a bound effect with SETUP that reads its own dep is linked twice", () => {
-    /**
-     * The bound call in EffectProto._update never stamps the bound dep
-     * (ComputeProto._update does), so c.val(dep) inside the fn records it
-     * again and the setup run links it a second time.
-     * Expected: one link, as for a bound compute. Actual: two.
-     */
-    test("the bound dep is linked once", () => {
-        const d = signal(0);
-        const e = c.effect(d, (v, cx) => {
-            cx.val(d);
-        }, SETUP);
-        expect(subCount(d, e)).toBe(1);
-        d.set(1);
-        expect(subCount(d, e)).toBe(1);
     });
 });
 

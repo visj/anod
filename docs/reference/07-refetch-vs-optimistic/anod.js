@@ -1,21 +1,23 @@
-import { root, resource } from "anod";
+import { root, resource, DEFER } from "anod";
 
 export function mount({ api, show }) {
-	const todos = resource(["a"]);
+	/**
+	 * Seeded with the list the page was rendered with. DEFER: the loader
+	 * waits for refresh(), the refetch.
+	 */
+	const todos = resource(["a"], async (c) => await c.suspend(api.list(c.controller().signal)), DEFER);
 
 	const app = root((c) => {
 		c.effect(todos, (list) => show(list.join(", ")));
 	});
 
 	return {
-		/** An async write: keeps the list visible until the server answers. */
-		refetch: () => todos.set(async (c) => await c.suspend(api.list())),
+		refetch: () => todos.refresh(),
 		/**
-		 * An optimistic write. Any write to a resource ends the async
-		 * write in flight, so the refetch's snapshot is dropped.
+		 * An optimistic write, then a save. A write supersedes the load in
+		 * flight and aborts it, so its old snapshot is never shown.
 		 */
-		add: (text) =>
-			todos.set([...todos.get(), text], async (c) => await c.suspend(api.add(text))),
+		add: (text) => todos.set((list) => [...list, text], () => api.add(text)),
 		unmount: () => app.dispose()
 	};
 }

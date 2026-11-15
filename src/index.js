@@ -4,7 +4,6 @@ export {
     Fatal,
     DEFER,
     STABLE,
-    SETUP,
     WEAK,
     EAGER,
     DISPOSED,

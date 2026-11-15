@@ -10,7 +10,6 @@ import {
     PANIC,
     DEFER,
     STABLE,
-    SETUP,
     WEAK,
     EAGER,
     DISPOSED,
@@ -865,30 +864,6 @@ describe("options", () => {
      * their sweep stamp; patchDeps (src/internal.js:3224, 3252) then
      * treats them as unread and unsubscribes them.
      */
-    /**
-     * BUG (medium, SETUP is undocumented). Expected: a bound compute
-     * created with SETUP that also reads `xc` in its setup run reacts
-     * when `xc` changes, like it does when pulled with .get(). Actual:
-     * the effect reading it never sees 201 (`seen` stays [101]) though
-     * bound.get() is 201. Root cause: bound nodes start with FLAG_SINGLE
-     * (src/internal.js:2802-2803) and the setup branch that stores the
-     * extra deps (src/internal.js:2379-2385) never clears it, so
-     * _refresh -> checkSingle (src/internal.js:2129-2130, 3456) only
-     * checks dep1 and clears the PENDING flag.
-     */
-    test("bound compute with SETUP reacts to the extra deps it tracked", () => {
-        const a = signal(1);
-        const s = signal(1);
-        const xc = c.compute((cx) => cx.val(s) * 100);
-        const bound = c.compute(a, (v, cx) => v + cx.val(xc), void 0, SETUP);
-        const seen = [];
-        c.effect((cx) => {
-            seen.push(cx.val(bound));
-        });
-        s.set(2);
-        expect(seen).toEqual([101, 201]);
-    });
-
     /**
      * BUG. Expected (README "Callback (resolve, reject)" example:
      * `c.effect(outgoing, (msg) => ws.send(msg), DEFER)` "DEFER

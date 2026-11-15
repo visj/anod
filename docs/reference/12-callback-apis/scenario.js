@@ -25,7 +25,3 @@ export const expected = {
 	shown: ["looking up A", "looking up B", "B is #66"],
 	events: ["lookup A", "lookup B"]
 };
-
-export const gaps = {
-	anod: "a task that starts loading again doesn't tell its readers, so c.pending() never sees it (see ../README.md)"
-};

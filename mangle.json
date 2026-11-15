@@ -247,7 +247,28 @@
       "$unwrap": "Bn",
       "$FLAG_DISPOSING": "Dn",
       "$SHIELDS": "Fn",
-      "$lockPath": "Gn"
+      "$lockPath": "Gn",
+      "$startedLoading": "Hn",
+      "$depsLoading": "In",
+      "$markStale": "Jn",
+      "$Resource": "Kn",
+      "$FLAG_REJECTED": "Ln",
+      "$Save": "Nn",
+      "$abortLoad": "Qn",
+      "$load": "Tn",
+      "$runLoad": "Un",
+      "$runSave": "Vn",
+      "$startSave": "Wn",
+      "$deliverSave": "Xn",
+      "$saveLater": "Yn",
+      "$settleSave": "Zn",
+      "$revert": "$n",
+      "$adopt": "Dl",
+      "$beginWrite": "Fl",
+      "$current": "Gl",
+      "$linkSetup": "Hl",
+      "$startValue": "Il",
+      "$settleWrite": "Jl"
     }
   },
   "props": {
@@ -293,7 +314,19 @@
       "$_update": "tt",
       "$_receive": "it",
       "$_dep1slot": "lt",
-      "$_wrap": "nt"
+      "$_wrap": "nt",
+      "$_svalue": "ut",
+      "$_stime": "et",
+      "$_loader": "ft",
+      "$_fault": "rt",
+      "$_node": "st",
+      "$_running": "ht",
+      "$_callback": "ot",
+      "$_held": "ct",
+      "$_heldValue": "yt",
+      "$_heldFailed": "wt",
+      "$_save": "dt",
+      "$_failed": "vt"
     }
   }
 }

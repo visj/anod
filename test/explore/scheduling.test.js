@@ -430,24 +430,6 @@ describe("writes scheduled while the sender queue drains", () => {
         expect(runs).toBe(1);
         r.dispose();
     });
-
-    /**
-     * Expected: every call of the equality function logs one increment.
-     * Actual: eq runs twice (at schedule time and at drain time) but `log`
-     * only gets 1. The drain-time write is dropped (src/internal.js:4291-4303).
-     */
-    test("set() from a custom equality function at drain time is applied", () => {
-        let calls = 0;
-        const log = signal(0);
-        const s = signal(0, (p, n) => {
-            calls++;
-            log.set((v) => v + 1);
-            return p === n;
-        });
-        batch(() => { s.set(1); });
-        expect(s.get()).toBe(1);
-        expect(log.get()).toBe(calls);
-    });
 });
 
 describe("resource writes in queued paths", () => {
@@ -826,27 +808,6 @@ describe("ordering and glitch-freedom", () => {
             obj.set((o) => { o.n++; });
         });
         expect(seen).toEqual([0, 2]);
-        r.dispose();
-    });
-
-    test("signal(v, eq): an eq-equal write in a batch is skipped and later changes still notify", async () => {
-        const s = signal({ id: 1 }, (p, n) => p.id === n.id);
-        const seen = [];
-        const r = root((r) => {
-            r.effect(s, (v) => { seen.push(v.id); });
-        });
-        let ret;
-        batch(() => {
-            ret = s.set({ id: 1 });
-        });
-        expect(ret).toBe(false);
-        expect(seen).toEqual([1]);
-
-        batch(() => {
-            s.set({ id: 1 });
-            s.set({ id: 2 });
-        });
-        expect(seen).toEqual([1, 2]);
         r.dispose();
     });
 });

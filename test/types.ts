@@ -2,8 +2,10 @@
  * Type tests, checked by `tsc -p .`: each line fails to compile if a
  * type is wrong. Nothing here runs.
  */
-import { root } from "../types/index.js";
+import { root, resource, DEFER, STABLE } from "../types/index.js";
 import type {
+	Defect,
+	Signal,
 	Task,
 	Resource,
 	Spawn,
@@ -24,6 +26,7 @@ function expectType<A>() {
 type User = { name: string; orgId: number };
 declare const userId: Task<number>;
 declare const flag: Resource<boolean>;
+declare const plain: Signal<number>;
 declare function fetchUser(id: number): Promise<User>;
 declare function org(id: number): Task<{ title: string }>;
 
@@ -154,3 +157,59 @@ root((r) => {
 	expectType<Compute<boolean>>()(r.compute(flag, (b) => !b));
 	expectType<Compute<number>>()(r.compute(userId, (id) => id * 2));
 });
+
+// pending() with no argument, and refresh() on computes, effects and actions
+root((r) => {
+	r.effect((c) => {
+		expectType<boolean>()(c.pending());
+		c.refresh();
+	});
+	r.compute((c) => {
+		c.refresh();
+		return c.pending();
+	});
+	r.compute(count, (n) => n).refresh();
+	userId.refresh();
+	r.effect(() => {}).refresh();
+	r.spawn(async () => {}).refresh();
+	// A signal is written, not refreshed (a resource refreshes its loader)
+	// @ts-expect-error
+	plain.refresh();
+	flag.refresh();
+	// A root has nothing to run again
+	// @ts-expect-error
+	root(() => {}).refresh();
+	r.action(count, (_, c) => {
+		c.refresh();
+	}).refresh();
+});
+
+// A resource with a loader, saves and refresh()
+root((r) => {
+	const count = resource(0, async (c) => {
+		const signal = c.controller().signal;
+		return await c.suspend(fetch("/count", { signal }).then((res) => res.json() as Promise<number>));
+	});
+	expectType<Resource<number>>()(count);
+	count.refresh();
+	count.set((n) => n + 1, async (c) => {
+		await c.suspend(fetch("/like", { method: "POST" }));
+	});
+	count.set(1, (c, n) => n);
+	// A save has no controller: it runs to completion
+	count.set(2, async (c) => {
+		// @ts-expect-error
+		c.controller();
+	});
+	// A loader gives the resource's value type
+	// @ts-expect-error
+	resource(0, () => "x");
+	r.effect((c) => {
+		expectType<Defect | null>()(c.rejected(count));
+	});
+});
+
+// A resource takes DEFER, and no other option
+resource(0, () => 1, DEFER);
+// @ts-expect-error
+resource(0, () => 1, STABLE);

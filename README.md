@@ -67,8 +67,9 @@ root((c) => {
 	function add(text) {
 		/**
 		 * Shows the todo at once, then settles with what the server
-		 * confirms. If add() runs again before this save returns,
-		 * this save is dropped: only the latest write settles.
+		 * confirms. If add() runs again before this save returns, both
+		 * saves still finish, but only the latest sets the list. If it
+		 * fails, the list falls back to what the server last confirmed.
 		 */
 		todos.set([...todos.get(), { text, saved: false }], async (c, optimistic) => {
 			const saved = await c.suspend(save(optimistic));
@@ -117,6 +118,7 @@ root((c) => {
 	- [Contextual helpers](#contextual-helpers)
 		- [`c.equal()`](#cequal)
 		- [`c.cleanup()`](#ccleanup)
+		- [`c.refresh()`](#crefresh)
 	- [Contextual writes: `c.set()`](#contextual-writes-cset)
 	- [Async state checks: `c.pending()` / `c.rejected()`](#async-state-checks-cpending--crejected)
 	- [Evaluation helpers](#evaluation-helpers)
@@ -184,7 +186,9 @@ For simple use cases where you don't need ownership or disposal, anod exports a 
 
 A signal stores a value and notifies subscribers when changed. You can read it to get its current value, and write to it to update anyone who depends on it.
 
-Signals accept an optional equality function to customize when subscribers are notified: `signal(value, (prev, next) => boolean)` . When provided, the function is called on every write — return `true` to skip notification. Pass `false` instead, `signal(value, false)` , for objects that you want to change in place and notify about changes. Such a signal notifies always, without checking equality.
+A write notifies subscribers when the new value is not `===` the current one. Pass `false`, `signal(value, false)`, for objects that you want to change in place and notify about changes. Such a signal notifies on every write, without comparing.
+
+There is no custom equality function. To react only when part of an object changes, read that part through a compute: `c.compute(user, (u) => u.name)` re-runs its readers only when the name changes. Different readers can care about different parts, and `c.equal()` covers anything more custom.
 
 ```ts
 import { root, signal } from "anod";
@@ -215,7 +219,7 @@ root((c) => {
 	name.set("Leif");
 
 	/**
-	 * A signal without equality is convenient when you work with mutable
+	 * A mutable signal is convenient when you work with mutable
 	 * data structures. It takes a callback where you can mutate
 	 * the value in place. Returning void keeps the current value
 	 * and still notifies all subscribers.
@@ -326,7 +330,7 @@ root((c) => {
 
 #### Action
 
-An action is a slim effect for the common case of a function that runs when its dependencies change and does nothing else, like writing a value to the DOM. It takes the same arguments and options as `c.effect()`, and its context keeps `c.val()`, `c.pending()`, `c.rejected()`, `c.set()` and `c.is()`.
+An action is a slim effect for the common case of a function that runs when its dependencies change and does nothing else, like writing a value to the DOM. It takes the same arguments and options as `c.effect()`, and its context keeps `c.val()`, `c.pending()`, `c.rejected()`, `c.set()`, `c.refresh()` and `c.is()`.
 
 ```ts
 import { root, signal } from "anod";
@@ -342,7 +346,7 @@ root((c) => {
 });
 ```
 
-An action owns nothing, and has no `c.cleanup()`, `c.recover()`, `c.finalize()`, async variant or child nodes. That makes it about half the size of an effect: 8 fields instead of 14. It still tracks dynamic dependencies, as an effect does, and takes `STABLE`, `SETUP` and `DEFER`. The root or effect that creates it disposes it, pauses it with `pause()`, and recovers its errors: an error in an action, or in a compute it reads, goes to its owner's `c.recover()` handlers, and the action is disposed, as an effect would be. It can fail its run with `c.panic()`, but has no `c.fatal()`: it is not an owner, so it has no tree to tear down.
+An action owns nothing, and has no `c.cleanup()`, `c.recover()`, `c.finalize()`, async variant or child nodes. That makes it about half the size of an effect: 8 fields instead of 14. It still tracks dynamic dependencies, as an effect does, and takes `STABLE` and `DEFER`. The root or effect that creates it disposes it, pauses it with `pause()`, and recovers its errors: an error in an action, or in a compute it reads, goes to its owner's `c.recover()` handlers, and the action is disposed, as an effect would be. It can fail its run with `c.panic()`, but has no `c.fatal()`: it is not an owner, so it has no tree to tear down.
 
 Use an effect for anything that needs cleanups, children of its own or async work.
 
@@ -377,41 +381,64 @@ Each sync primitive has an async counterpart: a resource is a signal, a task is 
 
 #### Resource
 
-A resource is an async Signal. It supports writing changes through async functions, that later resolve to update it. There are three ways to write to a resource:
+A resource is an async Signal: a value that lives on a server. It keeps two values side by side:
+
+* **The value:** what readers see, optimistic or confirmed.
+* **The server's value:** the last value a load, a save or a plain write confirmed. The value falls back to it when a save fails.
 
 ```ts
-import { root, resource, LOADING } from "anod";
-
-const save = (val) => new Promise((r) => setTimeout(() => r(val), 50));
+import { root, resource, LOADING, ERROR } from "anod";
 
 root((c) => {
-	const name = resource("alice");
-
-	// Plain set - writes like a signal, and ends any async work in flight
-	name.set("bob");
-
-	// Optimistic set - write immediately, confirm in background
-	name.set("charlie", async (c, optimistic) => {
-		await c.suspend(save(optimistic));
-		return optimistic; // server confirmed
+	/**
+	 * Seeded with [], and loaded at once by the loader. refresh() runs
+	 * the loader again. A load's controller is aborted when a newer
+	 * load, save or write replaces it.
+	 */
+	const todos = resource([], async (c) => {
+		const res = await c.suspend(fetch("/api/todos", { signal: c.controller().signal }));
+		return res.json();
 	});
 
-	// Async set - keep current value visible, replace when done
-	name.set(async (c) => {
-		return await c.suspend(save("bosse"));
+	function add(text) {
+		/**
+		 * An optimistic write, then a save. What the save returns is the
+		 * server's value; returning nothing confirms the optimistic one.
+		 */
+		todos.set((list) => [...list, text], async (c) => {
+			await c.suspend(fetch("/api/todos", { method: "POST", body: text }));
+		});
+	}
+
+	c.effect((c) => {
+		const list = c.val(todos);
+		const failed = c.rejected(todos);
+		console.log(list.join(", "), c.pending(todos) ? "(saving)" : "", failed ? "(not saved)" : "");
 	});
 
-	c.effect(name, (val) => {
-		console.log(val, name.is(LOADING) ? "(loading)" : "");
-	});
+	document.querySelector("#reload").onclick = () => todos.refresh();
 });
 ```
 
-The async callback receives the resource as `c` (with `suspend` for staleness protection) and the current/optimistic value. If the callback returns a sync value, it settles immediately with no loading state. If it returns a promise or suspends, `is(LOADING)` is true until it settles, and its readers are told when it starts loading, so a reader of `c.pending(resource)` sees it. Readers of its value run again then too, and read the value it had.
+A loader runs at creation, as a task's fn does. With `DEFER`, `resource(seed, loader, DEFER)`, the seed is the server's value until the first `refresh()`: for a value the page was rendered or hydrated with.
 
-When a new `set()` fires while a previous async callback is still in flight, the old promise still resolves normally, but `suspend()` detects that the resource has moved on and simply doesn't yield back into the callback. The continuation after `await` never runs, so the stale result never reaches the `return` . Only the latest activation's callback gets to settle the resource.
+There are three ways to write to a resource:
 
-A plain write counts as a new `set()` too, however it is made: `.set()`, inside a batch, or `c.set()` from a node. It discards whatever the callback in flight produces later, including the next `yield` of a generator or a later `resolve`. A plain write to a resource that is loading or failed settles it with the written value, even an equal one, so `is(LOADING)` and `is(ERROR)` turn false and the nodes waiting on it resume. Since every plain write ends the work in flight, a batched one is queued even when the value is unchanged.
+* **`r.set(value)`, a plain write**, writes like a signal. It is also the server's value from then on, and it supersedes the work in flight.
+* **`r.set(value, fn)`, an optimistic write and a save**, shows `value` at once, then runs `fn(c, optimistic)`.
+* **`r.set(fn)`, a save**, runs `fn(c, current)` with no optimistic value: the current value stays visible until it settles.
+
+While a save or a load is in flight, `is(LOADING)` is true, and its readers are told when it starts, so `c.pending(resource)` sees it. A save or a load that returns a value synchronously settles at once.
+
+**Saves run to completion.** The server may already have applied a save that a newer write supersedes, so anod doesn't drop it, and a save has no controller to abort. Only the newest save sets the value. What an older one returns still counts as the server's value, if no later activation confirmed one. Inside a save, `c.suspend()` returns the promise as it is, and the callback form works as elsewhere.
+
+**When the newest save fails**, the value falls back to the server's value, with no rollback code. The resource then reports the failure without losing its value: `is(ERROR)` is true and `c.rejected(resource)` gives the error, while `get()` and `c.val()` return the value it fell back to, without throwing. Nodes waiting on it resume with that value. The next write or refresh clears the error. An older save that fails changes nothing.
+
+Two clicks on a like button, where the first save succeeds and the second fails, end on the count the first one returned. Two saves that both fail go back to what the server held before either, not to the first click's guess.
+
+**A load that fails** is an error, as a task's is: the value is the `Defect`, and reading it throws. The server's value is kept, and the next successful load, save or write replaces the error.
+
+A plain write counts as a new write however it is made: `.set()`, inside a batch, or `c.set()` from a node. It discards what a load in flight produces later, including the next `yield` of a generator or a later `resolve`. A plain write to a resource that is loading or failed settles it with the written value, even an equal one, so `is(LOADING)` and `is(ERROR)` turn false and the nodes waiting on it resume. Since every plain write ends the work in flight, a batched one is queued even when the value is unchanged.
 
 #### Task
 
@@ -451,6 +478,8 @@ root((c) => {
 	userId.set(2);
 });
 ```
+
+Readers of a task run when it starts loading again, while it keeps its old value, so `c.pending(task)` sees the reload. They run again when it settles, even to an equal value. A task that re-runs while it is still loading doesn't tell them twice.
 
 #### Spawn
 
@@ -633,6 +662,8 @@ Lets you control whether downstream subscribers are notified after a compute re-
 * `c.equal()` or `c.equal(true)` — "my result is equal to the previous one, don't notify subscribers"
 * `c.equal(false)` — "my result changed, always notify subscribers" (even if `===` would say otherwise)
 
+It applies to a result returned synchronously. A task that settles after an `await` always notifies, since its subscribers were told it started loading and must see it end.
+
 ```ts
 import { root, signal } from "anod";
 import { deepEqual } from "some-util";
@@ -686,6 +717,34 @@ root((c) => {
 });
 ```
 
+#### `c.refresh()`
+
+Runs a compute, task, effect, spawn or action again, as if one of its dependencies had changed. Call it on the node, `node.refresh()`, or as `c.refresh()` from inside its run. It is for a value the node derives from outside the graph, such as storage or a server, which the graph can't see change.
+
+* Only the node runs. Its readers run only if its value changes. `notify()` on a signal is different: everything that reads the signal runs.
+* A compute with no readers goes stale and runs on its next read.
+* While the engine is busy, the node's own run included, the refresh is queued like a write, and runs once the current work is done.
+* A task or spawn in flight is replaced, as on any re-run: its controller is aborted and its result dropped. A shielded one runs again once its run ends.
+
+```ts
+import { root } from "anod";
+root((c) => {
+	const theme = c.compute((c) => {
+		const onStorage = () => c.refresh();
+		window.addEventListener("storage", onStorage);
+		c.cleanup(() => window.removeEventListener("storage", onStorage));
+		return localStorage.getItem("theme") ?? "light";
+	});
+	c.effect(theme, (t) => document.body.dataset.theme = t);
+
+	const user = c.task(async (c) => {
+		return await c.suspend(fetch("/api/user").then((r) => r.json()));
+	});
+	// A retry: runs the task again, with nothing it reads changed.
+	document.querySelector("#retry").onclick = () => user.refresh();
+});
+```
+
 ### Contextual writes: `c.set()`
 
 Inside a callback, `c.set(signal, value)` writes to a signal while preventing the current node from re-triggering itself. This enables the interceptor pattern: subscribe to a signal, observe writes from elsewhere in the app, persist or validate them asynchronously, and write back a correction if needed, without causing a circular dependency.
@@ -729,6 +788,17 @@ root((c) => {
 
 `c.pending(sender)` subscribes to a sender and returns `true` if it is loading. It works with tasks, resources, or any sender, and accepts an array of senders, returning `true` if any of them is loading.
 
+`c.pending()` with no argument asks "am I pending?": whether anything the node has read so far in this run is loading. It doesn't subscribe to anything new. Read first, then ask:
+
+```ts
+c.effect((c) => {
+	const u = c.val(user);
+	const p = c.val(posts);
+	if (c.pending()) return console.log("Loading...");
+	console.log(u.name, p.length);
+});
+```
+
 `c.rejected(sender)` subscribes to a sender and returns its error if it has failed, or `null` otherwise. Unlike `c.val()` , it does not throw on error — this is the safe way to check error state reactively.
 
 ```ts
@@ -759,7 +829,7 @@ c.compute(dep, fn, seed, opts, args); // bound
 c.effect(dep, fn, opts); // bound
 ```
 
-The options are `STABLE`, `WEAK` and `EAGER` below, `DEFER`, which skips a node's first run (see [Compute](#compute)), and `SETUP`, which makes a bound node also track the `c.val()` reads of its first run. `WEAK` and `EAGER` only apply to computes and tasks. In TypeScript, `opts` takes one option, and an effect or spawn only takes `STABLE`, `DEFER` or `SETUP`. JavaScript can combine options with `|`.
+The options are `STABLE`, `WEAK` and `EAGER` below, and `DEFER`, which skips a node's first run (see [Compute](#compute)), or a resource's first load (see [Resource](#resource)). `WEAK` and `EAGER` only apply to computes and tasks. In TypeScript, `opts` takes one option, and an effect or spawn only takes `STABLE` or `DEFER`. JavaScript can combine options with `|`.
 
 #### `STABLE`
 

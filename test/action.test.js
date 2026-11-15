@@ -1,5 +1,5 @@
 import { describe, test, expect } from "#test-runner";
-import { signal, root, batch, c, STABLE, SETUP, DEFER, DISPOSED, LOADING } from "#anod";
+import { signal, root, batch, c, STABLE, DEFER, DISPOSED, LOADING } from "#anod";
 import { Action, Effect } from "#anod-internal";
 
 describe("action", () => {
@@ -49,15 +49,6 @@ describe("action", () => {
     expect(runs).toBe(2);
     b.set(20);
     expect(runs).toBe(2);
-  });
-
-  test("SETUP on a bound action also tracks the first run's reads", () => {
-    const s = signal(1);
-    const other = signal("x");
-    const seen = [];
-    c.action(s, (v, cx) => { seen.push([v, cx.val(other)]); }, SETUP);
-    other.set("y");
-    expect(seen).toEqual([[1, "x"], [1, "y"]]);
   });
 
   test("DEFER skips a bound action's first run", () => {

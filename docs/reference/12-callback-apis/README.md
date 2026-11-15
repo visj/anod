@@ -6,7 +6,7 @@ Not everything returns a promise. Geolocation, many SDKs and old libraries take 
 
 - **Expected:** `looking up A`, `looking up B`, `B is #66`.
 
-## anod: known gap
+## anod
 
 ```js
 const result = c.task(name, (n, c) => {
@@ -14,11 +14,17 @@ const result = c.task(name, (n, c) => {
 });
 ```
 
-**Shows:** `looking up A`, `B is #66`.
-
 The callback form of `c.suspend()` needs no promise. The task settles when `resolve` is called, and a `resolve` from a replaced run is ignored, so the result is right.
 
-What's missing is `looking up B`: this is the same gap as [05](../05-stale-while-revalidate/README.md). When the task re-runs for `"B"`, its readers aren't told that it is loading again. The proposed fix in [../README.md](../README.md#amendments) covers this path too: the callback form sets `FLAG_LOADING` in a different branch, and that branch needs the same stamp.
+```js
+c.effect((c) => {
+	if (c.pending(result)) {
+		show(`looking up ${c.val(name)}`);
+	} else { … }
+});
+```
+
+The effect reads `name` with `c.val()`, not `name.get()`. When the user looks up `"B"`, the task is still loading `"A"`, so it is loading already and its readers aren't told again. The effect shows `looking up B` because it depends on `name` itself.
 
 ## React + TanStack Query
 
@@ -56,11 +62,10 @@ Svelte ignores a resolve from a superseded run. `name` has to live in the parent
 **A tie on correctness:** wrapping a callback in a promise is trivial, and every framework then drops the late answer.
 
 - anod's promise-free form is a performance and ergonomics nicety, with no allocation and no microtask. It isn't a capability the others lack.
-- anod is the only one that fails the expected output, because of the pending gap.
 
 | | Late callback ignored | Shows "looking up B" |
 |---|---|---|
-| anod | ✓ (no promise needed) | ✗ (gap) |
+| anod | ✓ (no promise needed) | ✓ |
 | React + TanStack Query | ✓ | ✓ |
 | Solid 2.0 | ✓ | ✓ (fallback) |
 | Jotai | ✓ | ✓ |

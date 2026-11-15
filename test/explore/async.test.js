@@ -10,7 +10,6 @@ import {
     PANIC,
     DEFER,
     STABLE,
-    SETUP,
     WEAK,
     EAGER,
     LOADING,

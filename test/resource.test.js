@@ -1,5 +1,5 @@
 import { describe, test, expect } from "#test-runner";
-import { signal, resource, root, batch, LOADING, ERROR } from "#anod";
+import { signal, resource, root, batch, c, LOADING, ERROR } from "#anod";
 
 const tick = () => Promise.resolve();
 const settle = () => tick().then(tick).then(tick);
@@ -135,23 +135,29 @@ describe("resource", () => {
             expect(r.is(LOADING)).toBe(false);
         });
 
-        test("error POJO accessible via get()", async () => {
+        test("a failed save reverts the value; the error POJO is read with c.rejected()", async () => {
             const r = resource(0);
             r.set(1, async (c, prev) => {
                 return await c.suspend(Promise.reject(new Error("boom")));
             });
             await settle();
-            expect(r.get().type).toBe(2);
-            expect(r.get().error.message).toBe("boom");
+            expect(r.get()).toBe(0);
+            let err;
+            c.effect((c) => { err = c.rejected(r); });
+            expect(err.type).toBe(2);
+            expect(err.error.message).toBe("boom");
         });
 
-        test("sync throw in asyncFn sets error", () => {
+        test("sync throw in asyncFn reverts and sets error", () => {
             const r = resource(0);
             r.set(1, (c, prev) => {
                 throw new Error("sync fail");
             });
             expect(r.is(ERROR)).toBe(true);
-            expect(r.get().error.message).toBe("sync fail");
+            expect(r.get()).toBe(0);
+            let err;
+            c.effect((c) => { err = c.rejected(r); });
+            expect(err.error.message).toBe("sync fail");
         });
 
         test("error cleared on next successful set", async () => {
@@ -198,7 +204,8 @@ describe("resource", () => {
             });
             expect(r.get()).toBe(3);
             await new Promise((resolve) => setTimeout(resolve, 50));
-            expect(settled).toEqual([3]);
+            /** Every save runs to completion; only the last sets the value. */
+            expect(settled).toEqual([1, 2, 3]);
             expect(r.get()).toBe(3);
         });
 
@@ -334,7 +341,7 @@ describe("resource", () => {
     });
 
     describe("integration: optimistic update patterns", () => {
-        test("like button — hammer set, only last persists", async () => {
+        test("like button — hammer set, every save runs, the last sets the value", async () => {
             const likes = resource(0);
             let serverSaves = [];
 
@@ -349,7 +356,7 @@ describe("resource", () => {
             }
             expect(likes.get()).toBe(5);
             await new Promise((resolve) => setTimeout(resolve, 50));
-            expect(serverSaves).toEqual([5]);
+            expect(serverSaves).toEqual([1, 2, 3, 4, 5]);
             expect(likes.get()).toBe(5);
         });
 
@@ -364,7 +371,7 @@ describe("resource", () => {
             expect(price.get()).toBe(50);
         });
 
-        test("server rejection — error flag set", async () => {
+        test("server rejection — reverts to the server value, error flag set", async () => {
             const data = resource({ name: "alice" });
             data.set({ name: "bob" }, async (c, prev) => {
                 return await c.suspend(Promise.reject(new Error("unauthorized")));
@@ -372,7 +379,7 @@ describe("resource", () => {
             expect(data.get()).toEqual({ name: "bob" });
             await settle();
             expect(data.is(ERROR)).toBe(true);
-            expect(data.get().type).toBe(2);
+            expect(data.get()).toEqual({ name: "alice" });
         });
 
         test("effect sees optimistic then settled", async () => {
@@ -512,41 +519,19 @@ describe("resource", () => {
             });
         });
 
-        test("resource with equals=false notifies on same-value settle", async () => {
+        test("a settle to an equal value still notifies: loading ended", async () => {
             let notifyCount = 0;
-            const r = resource({ count: 0 }, false);
-            root((c) => {
-                c.effect(r, () => { notifyCount++; });
-                notifyCount = 0;
-                r.set({ count: 0 }, async (c, optimistic) => {
-                    return await c.suspend(Promise.resolve(optimistic));
-                });
-            });
-            expect(notifyCount).toBe(1);
-            await settle();
-            /** Relay: settles with same-shaped object, still notifies. */
-            expect(notifyCount).toBe(2);
-        });
-
-        test("resource with custom equality skips notification when equal", async () => {
-            let notifyCount = 0;
-            const r = resource(
-                { id: 1, name: "alice" },
-                (a, b) => a.id === b.id && a.name === b.name
-            );
+            const r = resource({ id: 1, name: "alice" });
             root((c) => {
                 c.effect(r, () => { notifyCount++; });
                 notifyCount = 0;
                 r.set({ id: 1, name: "alice" }, async (c, optimistic) => {
-                    /** Server returns identical object (different reference). */
-                    return await c.suspend(Promise.resolve({ id: 1, name: "alice" }));
+                    return await c.suspend(Promise.resolve(optimistic));
                 });
             });
-            /** Optimistic write: same value per custom equal, but the
-             *  async write makes it loading, which notifies once. */
+            /** The optimistic write is a new object, and starts loading. */
             expect(notifyCount).toBe(1);
             await settle();
-            /** Settle always notifies (loading state changed). */
             expect(notifyCount).toBe(2);
         });
 

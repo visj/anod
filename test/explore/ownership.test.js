@@ -1,5 +1,5 @@
 import { describe, test, expect } from "#test-runner";
-import { signal, resource, root, batch, flush, c, REFUSE, PANIC, Fatal, DEFER, STABLE, SETUP, WEAK, EAGER, DISPOSED, ERROR } from "#anod-src";
+import { signal, resource, root, batch, flush, c, REFUSE, PANIC, Fatal, DEFER, STABLE, WEAK, EAGER, DISPOSED, ERROR } from "#anod-src";
 import { Defect } from "../../src/internal.js";
 
 const refuse = (error) => new Defect(error, REFUSE);

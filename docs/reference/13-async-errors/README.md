@@ -12,26 +12,25 @@ Error boundaries in most UI libraries only see errors thrown during rendering.
 - **Expected:** `loading`, `error: Server 500`, `loading`, `data: ok`.
 - **Expected events:** `reported: analytics down`.
 
-## anod: known gap
+## anod
 
 ```js
 c.recover((err) => api.report(err.error));
 
-const data = c.task(attempt, async (_, c) => await c.suspend(api.load()));
+const data = c.task(async (c) => await c.suspend(api.load()));
 
 c.spawn(async (c) => {
 	await c.suspend(api.sendAnalytics());
 });
+
+retry: () => data.refresh()
 ```
 
-**Shows:** `loading`, `error: Server 500`, `data: ok`. The middle `loading` is missing.
+`data.refresh()` runs the task again with nothing it reads changed. Its readers are told it is loading, so the effect's `c.pending(data)` shows `loading`.
 
 The analytics failure is a `PANIC` that travels up the owners to the root's `c.recover()`, with no code at the call site.
 
-Two awkward parts:
-
-- **The pending gap again:** the retry re-runs the task, but its readers aren't told that it is loading. See [05](../05-stale-while-revalidate/README.md).
-- **There is no `refetch()`:** a task runs again only when something it reads changes, so the retry is an `attempt` counter signal that the task reads. It works, but every library here has a direct way. See [../README.md](../README.md#amendments).
+There is no boundary: the effect checks `c.pending()` and `c.rejected()` itself. A boundary belongs in a UI layer built on these.
 
 ## React + TanStack Query
 
@@ -87,14 +86,14 @@ The boundary's `failed` snippet and `reset` make a neat retry: it renders the co
 
 ## Verdict
 
-**Split.**
+**anod for background errors; a tie on retry.**
 
 - **Background errors: anod wins.** A rejection after an await in a spawn is a `PANIC` that reaches the root's `c.recover()`, as a thrown error would. Of the others, only TanStack Query has an app-level hook, and only for work routed through `useMutation`; the rest catch at each call site.
-- **Retry UI: anod loses.** The others have a `refetch` or `reset` and a pending state that works. anod has neither today.
+- **Retry:** everyone has one. Solid and Svelte retry through a boundary's `reset`, which anod leaves to a UI layer.
 
 | | Retry | "loading" on retry | Background error reaches app handler |
 |---|---|---|---|
-| anod | counter signal | ✗ (gap) | ✓ `c.recover()` |
+| anod | `refresh()` | ✓ | ✓ `c.recover()` |
 | React + TanStack Query | `refetch` | ✓ | via `MutationCache` only |
 | Solid 2.0 | boundary `reset` | with `isPending` | ✗ (per-effect handler) |
 | Jotai | `atomWithRefresh` | ✓ | ✗ |

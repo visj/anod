@@ -24,7 +24,3 @@ export async function drive(app, { wait }) {
 export const expected = {
 	shown: ["loading", "page 1: 1a, 1b", "page 1: 1a, 1b (updating)", "page 2: 2a, 2b"]
 };
-
-export const gaps = {
-	anod: "a task that starts loading again doesn't tell its readers, so c.pending() never sees it (see ../README.md)"
-};

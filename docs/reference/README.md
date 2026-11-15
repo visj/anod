@@ -51,22 +51,22 @@ React and Svelte run in happy-dom. Solid runs headless, through its reactive cor
 | [02](02-async-side-effects/README.md) | Async side effects | **anod**: the only guarded async effect; Solid by splitting into memos |
 | [03](03-tracking-after-await/README.md) | Tracking after `await` | **anod and Jotai**: an explicit reader; Svelte in expressions only |
 | [04](04-dependent-queries/README.md) | Dependent queries | anod, Solid, Jotai and Svelte chain by reading; TanStack needs `enabled` |
-| [05](05-stale-while-revalidate/README.md) | Stale-while-revalidate | **Everyone but anod** (known gap) |
+| [05](05-stale-while-revalidate/README.md) | Stale-while-revalidate | Tie: everyone keeps the old value and knows it is reloading |
 | [06](06-tearing/README.md) | Tearing | **Solid and Svelte**: consistent by default; anod and Jotai need a join |
 | [07](07-refetch-vs-optimistic/README.md) | Refetch vs. optimistic write | **anod and Solid**: handled structurally; TanStack by recipe |
-| [08](08-overlapping-optimistic/README.md) | Overlapping optimistic writes | **Solid**: rollback with no code; anod close; TanStack's official recipe is wrong |
+| [08](08-overlapping-optimistic/README.md) | Overlapping optimistic writes | **anod and Solid**: rollback with no code; TanStack's official recipe is wrong |
 | [09](09-run-to-completion/README.md) | Run to completion | **anod**: `c.shield()`; everyone else hand-writes a queue |
 | [10](10-read-without-cancelling/README.md) | Read without cancelling | **anod**: `c.defer()`; everyone else shadows the value |
 | [11](11-teardown/README.md) | Teardown | Tie |
-| [12](12-callback-apis/README.md) | Callback APIs | Tie on correctness; anod misses the pending state (same gap as 05) |
-| [13](13-async-errors/README.md) | Async errors | **anod** for background errors; **everyone else** for retry UI |
+| [12](12-callback-apis/README.md) | Callback APIs | Tie on correctness; anod needs no promise |
+| [13](13-async-errors/README.md) | Async errors | **anod** for background errors; a tie on retry |
 | [14](14-read-after-write/README.md) | Read-after-write | anod, Jotai and Svelte are fresh after a write; Solid needs `flush()`, React computes it again |
 
 Lines of code (each file in full, mount glue included; the React glue is about 16 lines):
 
 | | 01 | 02 | 03 | 04 | 05 | 06 | 07 | 08 | 09 | 10 | 11 | 12 | 13 | 14 | Total |
 |---|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|
-| anod | 26 | 23 | 20 | 30 | 27 | 30 | 21 | 29 | 27 | 23 | 21 | 29 | 34 | 21 | 361 |
+| anod | 26 | 23 | 20 | 30 | 27 | 30 | 23 | 23 | 27 | 23 | 21 | 29 | 34 | 21 | 357 |
 | React + TanStack Query | 38 | 37 | 39 | 46 | 41 | 50 | 47 | 58 | 47 | 53 | 30 | 37 | 41 | 31 | 595 |
 | Solid 2.0 | 26 | 24 | 26 | 36 | 30 | 29 | 28 | 33 | 42 | 37 | 21 | 18 | 37 | 23 | 410 |
 | React + Jotai | 29 | 40 | 32 | 32 | 33 | 35 | 41 | 53 | 52 | 36 | 36 | 29 | 48 | 26 | 522 |
@@ -134,15 +134,14 @@ Lines of code (each file in full, mount glue included; the React glue is about 1
   - Async side effects (02).
   - Run-to-completion with teardown that waits (09).
   - Deferred reads (10).
-  - Writes that supersede async writes (07).
+  - Writes that supersede and abort a load (07), and saves that fall back to the server's value when they fail (08).
   - Background errors that reach the root (13).
   - Tracking after `await` (03).
   - Read-after-write with effects already run (14).
+  - `refresh()` on any compute or effect, for a retry or a value from outside the graph (13).
   - The shortest code in most examples.
 - **Weak:**
-  - A task's reload isn't visible to `c.pending()` (05, 12, 13).
-  - No `refetch` (13).
-  - No optimistic layer (08).
+  - No boundaries: loading and error UI is checked by hand with `c.pending()` and `c.rejected()` (13).
   - Consistency across tasks needs an explicit join (06).
 
 The honest summary: **anod isn't better at async in general; it covers a different part of it.** The others are strongest where async produces a value to display: queries, reloads, transitions and boundaries. anod is strongest where async *does* something, in effects, writes, transactions and shutdown, where the others leave you to write it by hand.
@@ -151,39 +150,38 @@ The honest summary: **anod isn't better at async in general; it covers a differe
 
 Changes to anod suggested by these examples, roughly from smallest to largest.
 
-### 1. Tell readers when a task starts loading again (fixes 05, 12, 13)
+### 1. Tell readers when a task starts loading again (05, 12, 13): done
 
-When a task re-runs because a dependency changed, its readers aren't notified that it is loading, so `c.pending(task)` is never seen as `true` on a reload. Here is why:
+A task that re-ran because a dependency changed didn't tell its readers it was loading, so `c.pending(task)` was never seen as `true` on a reload. Now, as with a resource:
 
-1. The reader's check pulls the task.
-2. The task starts its async run.
-3. Its value hasn't changed, so the reader is skipped.
+- A task that starts loading, and wasn't loading already, tells its readers. Both the promise and the callback form of `c.suspend()` do.
+- Its settle always counts as a change, even to an equal value, so readers run again and see the loading end. `c.equal()` still applies to a sync result, but no longer hides an async settle.
 
-A resource doesn't have this problem, because its async write calls `startLoading()`. This is a gap rather than a design choice.
+Readers run twice per reload: once when loading starts and once when it settles.
 
-**The fix:** stamp the task's change time when it starts loading, in `ComputeProto._update`. There are two places:
+`c.pending()` with no argument also answers "is anything this node has read so far loading?".
 
-- the `startAsync()` branch;
-- the callback-suspend branch that sets `FLAG_LOADING`.
+Example 12 needed no engine change. Its task is still loading `"A"` when the user looks up `"B"`, so its readers aren't told again. The effect now reads the name it shows with `c.val()`, so it runs when the name changes.
 
-**What it costs:** a trial stamped the time unconditionally, in the first of these places only. With it, 05 and 13 pass, and the rest of the suite still passes, except 2 tests in `test/explore/hardening.test.js` ("c.equal() is ignored when a task settles asynchronously"), which count one more reader run. Readers then run once when loading starts and once when it settles, as a resource's do. A final version should skip the stamp when the task was already loading, as `startLoading()` does, and cover the callback branch for 12.
+### 2. `refresh()` (13): done
 
-### 2. `refresh()` on tasks (13)
+`node.refresh()`, or `c.refresh()` from inside a run, runs a compute, task, effect, spawn or action again as if a dependency had changed. Only that node runs; its readers run only if its value changes. This differs from `notify()` on a signal, which runs everything that reads the signal. A compute with no readers goes stale and runs on its next read. Called while the engine is busy, including during the node's own run, it is queued like a write.
 
-Every other library has a way to re-run a fetch without changing its inputs. In anod, it is a counter signal that the task reads. `task.refresh()`, plus `c.refresh(task)`, would re-run the task as if a dependency had changed. It is a cold path with a few lines of code, and the counter pattern could be documented in the meantime.
+It covers a retry (13) and any value derived from outside the graph, such as `localStorage`, sync or async. A resource's `refresh()` with a loader is still open: see 4.
 
-### 3. `c.controller()` in a resource's async callback (07)
+### 3. `c.controller()` in a resource's loader (07): done
 
-A resource's async write that is superseded is ignored, but its request can't be aborted, because `ResourceContext` has `suspend()` and `version()` but no `controller()`. Tasks and spawns have one. Adding it would make a superseded write abort, the same way a re-run aborts.
+A resource's loader has `c.controller()`, aborted when a newer load, save or plain write supersedes the load. A save has none: it runs to completion (see 4).
 
-### 4. An optimistic recipe, and maybe a loader (08)
+### 4. Loaders and the server's value (07, 08): done
 
-Supersession already does the hard part of overlapping optimistic writes: only the latest write settles. What's awkward is the rollback target. The natural `catch { return prev }` is wrong when `prev` was itself a guess, and a superseded write's success never reaches its continuation. So the last confirmed value isn't known.
+A resource keeps the server's value next to its own: `resource(seed, loader)`, where `refresh()` runs the loader again.
 
-Two options:
+- **Loads** (the loader) are dropped and aborted when superseded, as a task's run is.
+- **Saves** (`set(value, fn)` and `set(fn)`) run to completion, since the server may have applied them already. What a save returns, or the value it wrote if it returns nothing, is the server's value, unless a later activation confirmed one. Only the newest save sets the value.
+- **When the newest save fails**, the value falls back to the server's value. `is(ERROR)` and `c.rejected()` report the error, and reads don't throw.
 
-- **Document "resync on failure":** `catch { return await c.suspend(api.count()) }`. It is short and always right.
-- **A resource with a loader:** `resource(loader)`, where `refresh()` re-runs the loader. A failed optimistic write would refresh, which is what Solid's `createOptimistic` with `refresh(server)` amounts to. It would merge with amendment 2.
+08 needs no rollback code and no extra request. A loader runs at creation, as a task's fn does; with `DEFER`, as in 07, the seed is the server's value until the first `refresh()`.
 
 ### 5. Concurrency policies (09)
 
