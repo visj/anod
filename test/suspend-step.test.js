@@ -1,5 +1,5 @@
 import { describe, test, expect } from "#test-runner";
-import { signal, resource, root, batch, FATAL, LOADING, ERROR } from "#anod";
+import { signal, resource, root, batch, PANIC, LOADING, ERROR } from "#anod";
 
 const tick = () => Promise.resolve();
 const settle = async (n = 10) => {
@@ -529,7 +529,7 @@ describe("promises and plain values in suspend", () => {
 			});
 		});
 		await settle();
-		expect(seen.type).toBe(FATAL);
+		expect(seen.type).toBe(PANIC);
 		expect(seen.error).toBe("boom");
 		expect(t.get()).toBe("fallback");
 		r.dispose();

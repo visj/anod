@@ -14,7 +14,7 @@ A set of independent gaps in the async API:
 
 ## Root cause
 
-- `unlock` only clears `FLAG_LOCKED`; the STALE flag set while locked (without `_receive`) is never acted on, and `resolvePromise` drops the stale run.
+- `unlock` only clears `FLAG_SHIELD`; the STALE flag set while locked (without `_receive`) is never acted on, and `resolvePromise` drops the stale run.
 - `controller()` stores a single `channel._controller`.
 - `_stepArray` rejects without subscribing; the fast path throws before the subscribe loop; `FLAG_BLOCKED` is set and never cleared on re-run; `_stepArray` never checks `FLAG_DISPOSED`.
 - `suspend` returns the thenable's own `.then()` result; the task overload ignores its callbacks; `_suspendTask` has no self check (unlike `val()`).
@@ -110,7 +110,7 @@ A related gap that predates this change: when `c.suspend([...])` takes the fast 
 
 ### Hot paths touched
 
-- `EffectProto._update`: the `FLAG_LOCKED` test became `FLAG_LOCKED | FLAG_CHANNEL`. That is the same cost for effects without a channel (only the mask changed). Effects with a channel pay one inner test and one store per re-run.
+- `EffectProto._update`: the `FLAG_SHIELD` test became `FLAG_SHIELD | FLAG_CHANNEL`. That is the same cost for effects without a channel (only the mask changed). Effects with a channel pay one inner test and one store per re-run.
 - `subscribe()`: one flag clear, only on the branch that allocates `_deps`. `subscribe` serves async reads and settles, not the sync `val()` path.
 - `c.suspend(promise)`: one `Promise.resolve()` call per suspend, which returns a native promise unchanged.
 - `resetChannel`: one flag clear (channel nodes only, on re-run or a loading node's notification). It also calls `abortControllers` instead of `.abort()`. Note for merging: chain E also edits `resetChannel` and `_receive`.

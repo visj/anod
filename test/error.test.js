@@ -1,15 +1,14 @@
 import { describe, test, expect } from "#test-runner";
-import { signal, root, REFUSE, PANIC, FATAL, c, ERROR } from "#anod";
+import { signal, root, REFUSE, PANIC, c, ERROR } from "#anod";
 
 const tick = () => Promise.resolve();
 const settle = () => tick().then(tick).then(tick);
 
 describe("error types", () => {
   describe("constants", () => {
-    test("REFUSE is 1, PANIC is 2, FATAL is 3", () => {
+    test("REFUSE is 1, PANIC is 2", () => {
       expect(REFUSE).toBe(1);
       expect(PANIC).toBe(2);
-      expect(FATAL).toBe(3);
     });
   });
 
@@ -125,14 +124,13 @@ describe("error types", () => {
       expect(recovered.error).toBe("effect panic");
     });
 
-    test("panic is distinguishable from fatal in recover", () => {
+    test("a thrown error reaches recover as a PANIC too", () => {
       const s1 = signal(0);
       let types = [];
       root((r) => {
         r.effect((cx) => {
           cx.recover((err) => {
             types.push(err.type);
-            return true;
           });
           let v = cx.val(s1);
           if (v === 1) {
@@ -147,7 +145,7 @@ describe("error types", () => {
       s1.set(1);
       s1.set(0);
       s1.set(2);
-      expect(types).toEqual([PANIC, FATAL]);
+      expect(types).toEqual([PANIC, PANIC]);
     });
 
     test("panic in sync compute produces PANIC type", () => {
@@ -160,30 +158,29 @@ describe("error types", () => {
     });
   });
 
-  describe("FATAL (unexpected errors)", () => {
-    test("unexpected throw produces FATAL type", () => {
+  describe("unexpected errors are PANIC", () => {
+    test("an unexpected throw produces PANIC type", () => {
       const c1 = c.compute(() => {
         throw new Error("oops");
       });
-      expect(c1.get().type).toBe(FATAL);
+      expect(c1.get().type).toBe(PANIC);
       expect(c1.get().error.message).toBe("oops");
     });
 
-    test("throwing non-Error produces FATAL wrapping the value", () => {
+    test("throwing a non-Error produces PANIC wrapping the value", () => {
       const c1 = c.compute(() => {
         throw "string error";
       });
-      expect(c1.get().type).toBe(FATAL);
+      expect(c1.get().type).toBe(PANIC);
       expect(c1.get().error).toBe("string error");
     });
 
-    test("FATAL in effect goes to recover", () => {
+    test("an unexpected throw in an effect goes to recover", () => {
       const s1 = signal(0);
       let recovered = null;
       root((r) => {
         r.recover((err) => {
           recovered = err;
-          return true;
         });
         r.effect((cx) => {
           if (cx.val(s1) > 0) {
@@ -193,41 +190,8 @@ describe("error types", () => {
       });
 
       s1.set(1);
-      expect(recovered.type).toBe(FATAL);
+      expect(recovered.type).toBe(PANIC);
       expect(recovered.error.message).toBe("crash");
-    });
-  });
-
-  describe("recover can filter by type", () => {
-    test("recover ignores REFUSE/PANIC but handles FATAL", () => {
-      const s1 = signal(0);
-      let fatals = 0;
-      let others = 0;
-      root((r) => {
-        r.effect((cx) => {
-          cx.recover((err) => {
-            if (err.type === FATAL) {
-              fatals++;
-            } else {
-              others++;
-            }
-            return true;
-          });
-          let v = cx.val(s1);
-          if (v === 1) {
-            cx.panic("user error");
-          }
-          if (v === 2) {
-            throw new Error("system crash");
-          }
-        });
-      });
-
-      s1.set(1);
-      s1.set(0);
-      s1.set(2);
-      expect(fatals).toBe(1);
-      expect(others).toBe(1);
     });
   });
 });

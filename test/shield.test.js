@@ -285,6 +285,92 @@ describe("shield", () => {
       expect(r1.is(DISPOSED)).toBe(true);
     });
 
+    test("disposal waits for every shield under the owner", async () => {
+      const order = [];
+      const a = deferred();
+      const b = deferred();
+      const r1 = root((r) => {
+        r.cleanup(() => order.push("root cleanup"));
+        r.spawn(async (cx) => {
+          cx.shield();
+          await cx.suspend(a.promise);
+          order.push("a");
+        });
+        r.spawn(async (cx) => {
+          cx.shield();
+          await cx.suspend(b.promise);
+          order.push("b");
+        });
+      });
+      r1.dispose();
+      a.resolve();
+      await settle();
+      expect(order).toEqual(["a"]);
+      expect(r1.is(DISPOSED)).toBe(false);
+      b.resolve();
+      await settle();
+      expect(order).toEqual(["a", "b", "root cleanup"]);
+      expect(r1.is(DISPOSED)).toBe(true);
+    });
+
+    test("a shielded owner whose run ends first stays held by a shielded child", async () => {
+      const order = [];
+      const outer = deferred();
+      const inner = deferred();
+      const r1 = root((r) => {
+        r.cleanup(() => order.push("root cleanup"));
+        r.spawn(async (sc) => {
+          sc.cleanup(() => order.push("outer cleanup"));
+          sc.shield();
+          sc.spawn(async (cc) => {
+            cc.shield();
+            await cc.suspend(inner.promise);
+            order.push("inner");
+          });
+          await sc.suspend(outer.promise);
+          order.push("outer");
+        });
+      });
+      r1.dispose();
+      outer.resolve();
+      await settle();
+      expect(order).toEqual(["outer"]);
+      expect(r1.is(DISPOSED)).toBe(false);
+      inner.resolve();
+      await settle();
+      expect(order).toEqual(["outer", "inner", "outer cleanup", "root cleanup"]);
+      expect(r1.is(DISPOSED)).toBe(true);
+    });
+
+    test("a shielded child whose run ends first leaves its shielded owner held", async () => {
+      const order = [];
+      const outer = deferred();
+      const inner = deferred();
+      const r1 = root((r) => {
+        r.cleanup(() => order.push("root cleanup"));
+        r.spawn(async (sc) => {
+          sc.cleanup(() => order.push("outer cleanup"));
+          sc.shield();
+          sc.spawn(async (cc) => {
+            cc.shield();
+            await cc.suspend(inner.promise);
+            order.push("inner");
+          });
+          await sc.suspend(outer.promise);
+          order.push("outer");
+        });
+      });
+      r1.dispose();
+      inner.resolve();
+      await settle();
+      expect(order).toEqual(["inner"]);
+      expect(r1.is(DISPOSED)).toBe(false);
+      outer.resolve();
+      await settle();
+      expect(order).toEqual(["inner", "outer", "outer cleanup", "root cleanup"]);
+      expect(r1.is(DISPOSED)).toBe(true);
+    });
+
     test("the subtree is frozen while the disposal waits", async () => {
       const s = signal(0);
       const seen = [];

@@ -17,20 +17,20 @@ describe("recover", () => {
                 });
             });
 
-            expect(recovered.type).toBe(3);
+            expect(recovered.type).toBe(2);
             expect(recovered.error).toBeInstanceOf(Error);
             expect(recovered.error.message).toBe("boom");
             r1.dispose();
         });
 
-        test("propagates error when recover returns false", () => {
+        test("propagates error when recover throws it", () => {
             let recovered = null;
 
             try {
                 root(r => {
                     r.recover(err => {
                         recovered = err;
-                        return false;
+                        throw err;
                     });
 
                     r.effect(c => {
@@ -42,7 +42,7 @@ describe("recover", () => {
                 expect(e.error.message).toBe("boom");
             }
 
-            expect(recovered.type).toBe(3);
+            expect(recovered.type).toBe(2);
             expect(recovered.error).toBeInstanceOf(Error);
         });
 
@@ -55,7 +55,7 @@ describe("recover", () => {
                 });
                 expect(true).toBe(false);
             } catch (e) {
-                expect(e.type).toBe(3);
+                expect(e.type).toBe(2);
                 expect(e.error.message).toBe("unhandled");
             }
         });
@@ -84,13 +84,13 @@ describe("recover", () => {
             r1.dispose();
         });
 
-        test("tries second handler when first returns false", () => {
+        test("tries second handler when first throws", () => {
             let calls = [];
 
             const r1 = root(r => {
                 r.recover(err => {
                     calls.push("first");
-                    return false;
+                    throw err;
                 });
                 r.recover(err => {
                     calls.push("second");
@@ -127,7 +127,7 @@ describe("recover", () => {
 
             expect(recovered).toBeNull();
             s1.set(1);
-            expect(recovered.type).toBe(3);
+            expect(recovered.type).toBe(2);
             expect(recovered.error).toBeInstanceOf(Error);
             expect(recovered.error.message).toBe("compute error");
             r1.dispose();
@@ -162,7 +162,7 @@ describe("recover", () => {
             r1.dispose();
         });
 
-        test("bubbles to outer when inner returns false", () => {
+        test("bubbles to outer when inner throws", () => {
             let innerCalled = false;
             let outerCalled = false;
 
@@ -173,9 +173,9 @@ describe("recover", () => {
                 });
 
                 r.effect(c => {
-                    c.recover(() => {
+                    c.recover((err) => {
                         innerCalled = true;
-                        return false;
+                        throw err;
                     });
 
                     c.effect(c2 => {
@@ -245,7 +245,7 @@ describe("recover", () => {
                 s2.set(42);
             });
 
-            expect(recovered.type).toBe(3);
+            expect(recovered.type).toBe(2);
             expect(recovered.error).toBeInstanceOf(Error);
             expect(recovered.error.message).toBe("batch error");
             expect(s2val).toBe(42); // "Other effects in the batch should still run"
@@ -273,7 +273,7 @@ describe("recover", () => {
 
             expect(recovered).toBeNull();
             s1.set(true);
-            expect(recovered.type).toBe(3);
+            expect(recovered.type).toBe(2);
             expect(recovered.error).toBeInstanceOf(Error);
             expect(recovered.error.message).toBe("triggered");
             r1.dispose();
@@ -337,7 +337,7 @@ describe("recover", () => {
                 });
                 expect(true).toBe(false);
             } catch (e) {
-                expect(e.type).toBe(3);
+                expect(e.type).toBe(2);
                 expect(e.error.message).toBe("after dispose");
             }
 

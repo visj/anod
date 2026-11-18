@@ -298,7 +298,7 @@ describe("edge cases", () => {
             await tick();
 
             expect(t.is(ERROR)).toBe(true);
-            expect(t.get().type).toBe(3);
+            expect(t.get().type).toBe(2);
             expect(t.get().error).toBeInstanceOf(Error);
             expect(t.get().error.message).toBe("fail");
         });
@@ -824,7 +824,7 @@ describe("edge cases", () => {
 
             expect(caught).toBeNull();
             s1.set(1);
-            expect(caught.type).toBe(3);
+            expect(caught.type).toBe(2);
             expect(caught.error).toBeInstanceOf(Error);
             expect(caught.error.message).toBe("effect err");
             r.dispose();
@@ -838,7 +838,7 @@ describe("edge cases", () => {
         test("compute.get() returns error POJO", () => {
             const c1 = c.compute(() => { throw new Error("rethrow me"); });
             expect(c1.is(ERROR)).toBe(true);
-            expect(c1.get().type).toBe(3);
+            expect(c1.get().type).toBe(2);
             expect(c1.get().error.message).toBe("rethrow me");
         });
     });

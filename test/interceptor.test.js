@@ -1,5 +1,5 @@
 import { describe, test, expect } from "#test-runner";
-import { signal, resource, root, batch, panic, ERROR, LOADING } from "#anod";
+import { signal, resource, root, batch, ERROR, LOADING } from "#anod";
 
 const tick = () => Promise.resolve();
 const settle = () => tick().then(tick).then(tick);
@@ -163,46 +163,6 @@ describe("contextual set (interceptor pattern)", () => {
             s.set(50);
             expect(s.get()).toBe(100);
         });
-    });
-});
-
-describe("contextual post (deferred interceptor)", () => {
-    test("deferred write does not trigger self", async () => {
-        let runs = 0;
-        root((c) => {
-            const s = signal(0);
-            c.effect(s, (val, c) => {
-                runs++;
-                if (val === 0) {
-                    c.post(s, 1);
-                }
-            });
-        });
-        expect(runs).toBe(1);
-        await Promise.resolve();
-        /** The post flushed on microtask, but the effect is paused
-         *  during the drain so it doesn't re-run from its own write. */
-        expect(runs).toBe(1);
-    });
-
-    test("external write after deferred still triggers effect", async () => {
-        let seen = [];
-        let s;
-        root((c) => {
-            s = signal(0);
-            c.effect(s, (val, c) => {
-                seen.push(val);
-                if (val === 0) {
-                    c.post(s, 1);
-                }
-            });
-        });
-        expect(seen).toEqual([0]);
-        await Promise.resolve();
-        expect(seen).toEqual([0]);
-
-        s.set(5);
-        expect(seen).toEqual([0, 5]);
     });
 });
 
@@ -417,34 +377,6 @@ describe("contextual write to a resource with an async fn", () => {
         return settle();
     }
 
-    test("a void updater on a mutable resource passes the mutated value as prev", async () => {
-        const obj = { n: 1 };
-        const r = resource(obj, false);
-        let prev = null;
-        await whenIdle((c) => {
-            c.set(r, (v) => { v.n++; }, (c, p) => { prev = p; return p; });
-        });
-        expect(prev).toBe(obj);
-        expect(obj.n).toBe(2);
-    });
-
-    test("writing to a failed resource does not show the error to equal", async () => {
-        const seen = [];
-        const r = resource(1, (a, b) => { seen.push(a); return a === b; });
-        r.set(async (c) => {
-            await c.suspend(tick());
-            throw panic("x");
-        });
-        await settle();
-        expect(r.is(ERROR)).toBe(true);
-        await whenIdle((c) => {
-            c.set(r, 2, (c, v) => v);
-        });
-        expect(seen.some((a) => a !== null && typeof a === "object")).toBe(false);
-        expect(r.get()).toBe(2);
-        expect(r.is(ERROR)).toBe(false);
-    });
-
     test("readers see the optimistic value already loading, as with resource.set", async () => {
         const viaSet = resource(0);
         const viaCtx = resource(0);
@@ -485,13 +417,13 @@ describe("contextual write to a resource with an async fn", () => {
     });
 
     test("inside a flush, it matches resource.set too", async () => {
-        const r = resource({ n: 1 }, false);
+        const r = resource({ n: 1 });
         const trigger = signal(0);
         let prev = null;
         root((c) => {
             c.effect(trigger, (t, c) => {
                 if (t === 1) {
-                    c.set(r, (v) => { v.n++; }, (c, p) => { prev = p; return p; });
+                    c.set(r, (v) => ({ n: v.n + 1 }), (c, p) => { prev = p; return p; });
                 }
             });
         });

@@ -103,17 +103,6 @@ describe("signal(value, false)", () => {
     expect(s.get()).toBe(void 0);
   });
 
-  test("post() of the same value notifies", async () => {
-    const r = signal(1, false);
-    let runs = 0;
-    c.effect(r, () => { runs++; });
-    expect(runs).toBe(1);
-
-    r.post(1);
-    await Promise.resolve();
-    expect(runs).toBe(2);
-  });
-
   test("same value inside batch always schedules", () => {
     const r = signal(5, false);
     let observed = [];

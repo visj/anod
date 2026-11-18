@@ -1,5 +1,6 @@
 import { describe, test, expect } from "#test-runner";
-import { signal, resource, root, Defect, PANIC, DISPOSED, ERROR } from "#anod";
+import { signal, resource, root, PANIC, DISPOSED, ERROR } from "#anod";
+import { Defect } from "#anod-internal";
 
 /**
  * Disposal and the nodes waiting on a task.

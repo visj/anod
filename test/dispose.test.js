@@ -1,5 +1,5 @@
 import { describe, test, expect, expectCollected } from "#test-runner";
-import { signal, root, c, SETUP, LOADING, ERROR } from "#anod";
+import { signal, root, c, LOADING, ERROR } from "#anod";
 
 const tick = () => Promise.resolve();
 const settle = () => tick().then(tick).then(tick);
@@ -100,18 +100,16 @@ describe("dispose", () => {
 
         test("bound compute fails with ILLEGAL_READ when it re-runs after dep1 is disposed", () => {
             const s1 = signal(1);
-            const k = signal(1);
             const dep = c.compute((cx) => cx.val(s1));
             let calls = 0;
-            // SETUP: a bound compute only tracks dep1 unless it sets up more deps
-            const bound = c.compute(dep, (val, cx) => {
+            const bound = c.compute(dep, (val) => {
                 calls++;
-                return val * cx.val(k);
-            }, void 0, SETUP);
+                return val;
+            });
             expect(bound.get()).toBe(1);
 
             dep.dispose();
-            k.set(2);
+            bound.refresh();
             const v = bound.get();
             expect(bound.is(ERROR)).toBe(true);
             expect(v.error.message).toMatch(/disposed/);
